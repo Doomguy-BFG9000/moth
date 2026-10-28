@@ -74,6 +74,13 @@ const ERRORS = [
   ["\n\nsay totl", "line 3: 'totl' has no value yet (give it one with 'set totl to ...')"],
   ["to f\n    set secret to 1\nend\nf\nsay secret", "line 5: 'secret' has no value yet (give it one with 'set secret to ...')"],
   ["say x\nset x to 1", "line 1: 'x' has no value yet (give it one with 'set x to ...')"],
+  // misspellings get the closest name that exists, including Moth's own words at the start of a line
+  ["set total to 1\nsay totl", "line 2: 'totl' has no value yet. Did you mean 'total'?"],
+  ["set total to 1\nadd 2 to totla", "line 2: 'totla' has no value yet. Did you mean 'total'?"],
+  ["to greet with who\nend\ngreeet 1", "line 3: there is no function called 'greeet'. Did you mean 'greet'?"],
+  ['sya "hi"', "line 1: there is no function called 'sya'. Did you mean 'say'?"],
+  ["to fib with n\n    if n is less than 2\n        return n\n    end\n    return fib(n - 1) + fbi(n - 2)\nend\nsay fib(3)", "line 5: there is no function called 'fbi'. Did you mean 'fib'?"],
+  ["set cat to 1\nsay dog", "line 2: 'dog' has no value yet (give it one with 'set dog to ...')"],
   ["x is 5", "line 1: to give 'x' a value write 'set x to ...'"],
   ["x = 5", "line 1: I don't understand '=' (to store a value write 'set x to 5', to compare write 'x is 5')"],
   ["if x > 5\nend", "line 1: I don't understand '>' (write 'is greater than')"],

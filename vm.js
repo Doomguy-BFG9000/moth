@@ -41,7 +41,7 @@ export const OPCODES = [
   ["ADD", 0], ["SUB", 0], ["MUL", 0], ["DIV", 0], ["CALL", 2], ["GET_FN", 3], ["RETURN", 0], ["POP", 0],
   ["AND", 1], ["OR", 1], ["NEG", 0], ["NOT", 0], ["LIST", 1], ["LENGTH", 0], ["ITEM", 0], ["ITEM_REF", 0],
   ["SET_ITEM", 0], ["ADD_TO", 3], ["SAY", 1], ["CHECK_REPEAT", 0], ["REPEAT_NEXT", 1], ["CHECK_RANGE", 0],
-  ["RANGE_NEXT", 1], ["ITER", 0], ["ITER_NEXT", 1], ["MAKE_FN", 1], ["UNDEFINED", 2], ["HALT", 0],
+  ["RANGE_NEXT", 1], ["ITER", 0], ["ITER_NEXT", 1], ["MAKE_FN", 1], ["UNDEFINED", 1], ["HALT", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
@@ -62,7 +62,7 @@ const isList = Array.isArray;
 const truthy = (v) => v !== null && v !== false;
 const equal = (a, b) => (isList(a) && isList(b) ? a.length === b.length && a.every((x, i) => equal(x, b[i])) : a === b);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const noValue = (name) => `'${name}' has no value yet (give it one with 'set ${name} to ...')`;
+export const noValue = (name) => `'${name}' has no value yet (give it one with 'set ${name} to ...')`;
 
 function kindOf(v) {
   if (v === null) return "nothing";
@@ -355,11 +355,9 @@ export function execute(main, print = console.log, maxSteps = Infinity, env = ne
         case MAKE_FN:
           stack.push(new Closure(consts[code[ip++]], env));
           break;
-        case UNDEFINED: { // a name nothing ever sets
-          const name = consts[code[ip]];
-          error(code[ip + 1] ? `there is no function called '${name}'` : noValue(name));
+        case UNDEFINED: // a name nothing ever sets; the compiler wrote the message, with any "did you mean"
+          error(consts[code[ip]]);
           break;
-        }
         case HALT:
           return;
       }

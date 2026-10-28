@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { fail, COMPARISONS, COMPARE_OPS, OP, UNSET, execute } from "./vm.js";
+import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, UNSET, execute } from "./vm.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -286,6 +286,30 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
+const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return"];
+
+// Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
+function distance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+// The candidate a misspelled name most likely meant, or null if none is close: 1 edit for short names, 2 otherwise.
+function closest(name, candidates) {
+  let best = null;
+  let bestDistance = (name.length <= 3 ? 1 : 2) + 1;
+  for (const c of candidates) {
+    const d = distance(name, c);
+    if (d < bestDistance) [best, bestDistance] = [c, d];
+  }
+  return best;
+}
 
 // Names each function sets. Inputs and functions made with `to` always belong to the function itself;
 // a name it `set`s (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -345,10 +369,20 @@ class Compiler {
     this.fn.code[i] = this.here();
   }
 
+  // A name nothing ever sets: fail when this line runs, suggesting the closest name that does exist.
+  // A line that starts with an unknown name may be a misspelled Moth word instead, like `sya "hi"`.
+  undefinedName(name, at, { call = false, statement = false } = {}) {
+    const known = [];
+    for (let c = this; c; c = c.parent) known.push(...c.slots.keys());
+    const guess = closest(name, statement ? [...known, ...STATEMENT_WORDS] : known);
+    const message = call ? `there is no function called '${name}'` : guess ? `'${name}' has no value yet` : noValue(name);
+    this.emit(at, UNDEFINED, this.constant(guess ? `${message}. Did you mean '${guess}'?` : message));
+  }
+
   load(name, at) {
     const found = this.resolve(name);
     if (found) this.emit(at, GET, ...found, this.constant(name));
-    else this.emit(at, UNDEFINED, this.constant(name), 0);
+    else this.undefinedName(name, at);
   }
 
   store(name, at) {
@@ -364,10 +398,10 @@ class Compiler {
     this.patch(exit);
   }
 
-  call(e) {
+  call(e, statement = false) {
     const found = this.resolve(e.name);
     if (found) this.emit(e.at, GET_FN, ...found, this.constant(e.name));
-    else this.emit(e.at, UNDEFINED, this.constant(e.name), 1);
+    else this.undefinedName(e.name, e.at, { call: true, statement });
     for (const arg of e.args) this.expr(arg);
     this.emit(e.at, CALL, e.args.length, this.constant(e.name));
   }
@@ -389,7 +423,7 @@ class Compiler {
         this.expr(s.value);
         const found = this.resolve(s.name);
         if (found) this.emit(s.at, ADD_TO, ...found, this.constant(s.name));
-        else this.emit(s.at, UNDEFINED, this.constant(s.name), 0);
+        else this.undefinedName(s.name, s.at);
         return;
       }
       case "say":
@@ -443,7 +477,7 @@ class Compiler {
         this.emit(s.at, RETURN);
         return;
       case "call":
-        this.call(s);
+        this.call(s, true);
         this.emit(s.at, POP);
         return;
     }
