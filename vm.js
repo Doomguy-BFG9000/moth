@@ -406,18 +406,15 @@ export class Machine {
     return why;
   }
 
-  // For a debugger: the functions being run (outermost first), and the variables with values that the
-  // current function and the top level can see. shortcut: an enclosing function's own variables aren't listed.
+  // For a debugger: the functions being run (outermost first), and every variable with a value that the
+  // running function can see, innermost scope first: its own, then those of the functions it was made
+  // inside, then the top level's. Scopes and functions nest the same way, so the two chains walk together.
   inspect() {
-    const named = (fn, env) => fn.names.flatMap((name, slot) => (env[slot] === UNSET ? [] : [[name, show(env[slot], true)]]));
-    let top = this.env;
-    while (top[0]) top = top[0];
-    return {
-      line: this.line,
-      calls: [...this.frames.map((f) => f.fn.name), this.fn.name],
-      local: this.fn === this.main ? [] : named(this.fn, this.env),
-      global: named(this.main, top),
-    };
+    const scopes = [];
+    for (let fn = this.fn, env = this.env; fn; fn = fn.parent, env = env[0]) {
+      scopes.push({ name: fn.name, vars: fn.names.flatMap((name, slot) => (env[slot] === UNSET ? [] : [[name, show(env[slot], true)]])) });
+    }
+    return { line: this.line, calls: [...this.frames.map((f) => f.fn.name), this.fn.name], scopes };
   }
 }
 

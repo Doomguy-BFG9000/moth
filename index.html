@@ -14,15 +14,22 @@
     pre { min-height: 5rem; margin: 0; white-space: pre-wrap; }
     pre.error { border-color: #d33; }
     button, select { font: inherit; padding: 0.3rem 0.8rem; }
+    #lines { box-sizing: border-box; height: 20rem; overflow: auto; margin: 0; padding: 0.75rem 0.75rem 0.75rem 3.5rem; border: 1px solid #8888; border-radius: 6px; font: 0.95rem/1.5 ui-monospace, Consolas, monospace; }
+    #lines li { white-space: pre; min-height: 1.5em; }
+    #lines li::marker { color: #888; }
+    #lines li.current { background: #fc03; outline: 1px solid #fc0; }
   </style>
 </head>
 <body>
   <h1>Moth</h1>
-  <p>A small programming language that reads like plain English. Pick an example or write your own, then press <strong>Run</strong> or Ctrl+Enter.</p>
+  <p>A small programming language that reads like plain English. Pick an example or write your own, then press <strong>Run</strong> or Ctrl+Enter. <strong>Debug</strong> goes through it one line at a time.</p>
 
   <div class="bar">
     <label>Example <select id="example"></select></label>
     <button id="run" type="button">Run</button>
+    <button id="debug" type="button">Debug</button>
+    <button id="step" type="button" hidden>Step</button>
+    <button id="continue" type="button" hidden>Continue</button>
     <button id="stop" type="button" disabled>Stop</button>
     <button id="share" type="button">Share</button>
     <label><input id="show-bytecode" type="checkbox"> Show bytecode</label>
@@ -30,6 +37,12 @@
   </div>
   <label for="code">Code</label>
   <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+  <ol id="lines" hidden aria-label="The code being debugged; the highlighted line runs next"></ol>
+
+  <section id="debug-panel" hidden>
+    <h2>Debugger</h2>
+    <pre id="variables"></pre>
+  </section>
 
   <h2>Output</h2>
   <pre id="output" aria-live="polite"></pre>
@@ -42,11 +55,13 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, disassemble, MothError } from "./moth.js";
+    import { compile, disassemble, debug, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
     let worker = null;
+    let machine = null; // the program being debugged
+    let timer = null; // the next slice of a debugger Continue
 
     function finish(message) {
       worker?.terminate();
@@ -74,6 +89,7 @@
 
     // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is.
     function runCode() {
+      stopDebugging("");
       showBytecode();
       finish("Running…");
       output.textContent = "";
@@ -93,9 +109,94 @@
       current.postMessage(code.value);
     }
 
+    // The debugger runs on the page itself (a worker can't be paused), a statement at a time with Step,
+    // or in slices with Continue so the page keeps responding.
+    function startDebugging() {
+      finish("");
+      stopDebugging("");
+      showBytecode();
+      output.textContent = "";
+      output.classList.remove("error");
+      try {
+        machine = debug(code.value, (line) => output.append(line + "\n"));
+      } catch (err) {
+        return showError(err);
+      }
+      $("lines").replaceChildren(...code.value.split("\n").map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+      setDebugging(true);
+      step();
+    }
+
+    function setDebugging(on) {
+      code.hidden = on;
+      for (const id of ["lines", "debug-panel"]) $(id).hidden = !on;
+      for (const id of ["step", "continue"]) Object.assign($(id), { hidden: !on, disabled: false });
+      stopButton.disabled = !on;
+      if (on) $("step").focus();
+    }
+
+    function stopDebugging(message) {
+      if (!machine) return;
+      clearTimeout(timer);
+      machine = null;
+      setDebugging(false);
+      status.textContent = message;
+    }
+
+    function showError(err) {
+      if (!(err instanceof MothError)) throw err;
+      output.classList.add("error");
+      output.append(`Error: ${err.message}\n${excerpt(code.value, err)}`);
+      stopDebugging("");
+    }
+
+    // Runs the program until it pauses; returns false once it has ended.
+    function advance(options) {
+      try {
+        const why = machine.run(options);
+        if (why !== "done") return why;
+        if (!output.textContent) output.append("(no output)");
+        stopDebugging("Finished.");
+      } catch (err) {
+        showError(err);
+      }
+      return false;
+    }
+
+    function step() {
+      if (advance({ pauseAtLines: true }) !== "line") return;
+      const { line, calls, scopes } = machine.inspect();
+      for (const li of $("lines").children) li.classList.toggle("current", li === $("lines").children[line - 1]);
+      $("lines").children[line - 1]?.scrollIntoView({ block: "nearest" });
+      status.textContent = `Paused before line ${line}.`;
+      const list = (vars) => (vars.length ? vars.map(([name, value]) => `  ${name} = ${value}`).join("\n") : "  (nothing yet)");
+      $("variables").textContent = [
+        `Running: ${["top level", ...calls.slice(1)].join(" → ")}`,
+        // innermost first: the running function, the functions it was made inside, then the top level
+        ...scopes.flatMap(({ name, vars }, i) => [
+          i === scopes.length - 1 ? "Top level:" : i === 0 ? `Inside ${name}:` : `Remembered from ${name}:`,
+          list(vars),
+        ]),
+      ].join("\n");
+    }
+
+    function keepGoing() {
+      for (const id of ["step", "continue"]) $(id).disabled = true;
+      status.textContent = "Running…";
+      const slice = () => {
+        if (advance({ slice: 100_000 }) === "slice") timer = setTimeout(slice);
+      };
+      slice();
+    }
+
+    $("debug").onclick = startDebugging;
+    $("step").onclick = step;
+    $("continue").onclick = keepGoing;
+
     stopButton.onclick = () => {
       output.append("(stopped)");
-      finish("Stopped.");
+      if (machine) stopDebugging("Stopped.");
+      else finish("Stopped.");
     };
 
     // The code travels in the link's #fragment, which browsers never send to a server.

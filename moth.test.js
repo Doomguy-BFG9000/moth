@@ -151,9 +151,21 @@ test("the debugger shows the calls in progress and the variables they can see", 
   assert.deepEqual(machine.inspect(), {
     line: 4,
     calls: ["main", "double"],
-    local: [["n", "10"], ["y", "20"]],
-    global: [["double", "<function double>"], ["x", "10"]],
+    scopes: [
+      { name: "double", vars: [["n", "10"], ["y", "20"]] },
+      { name: "main", vars: [["double", "<function double>"], ["x", "10"]] },
+    ],
   });
+});
+
+test("the debugger shows the variables a closure remembers", () => {
+  const machine = debug(examples["Counter"], () => {});
+  while (machine.run({ pauseAtLines: true }) === "line" && machine.line !== 6);
+  assert.deepEqual(machine.inspect().scopes.map(({ name, vars }) => [name, vars]), [
+    ["next", []],
+    ["counter", [["next", "<function next>"], ["count", "1"]]],
+    ["main", [["counter", "<function counter>"], ["tick", "<function next>"]]],
+  ]);
 });
 
 test("a debug build prints exactly what a normal run prints", () => {
@@ -170,7 +182,7 @@ test("run() can stop after a slice of loop rounds and carry on", () => {
   const machine = debug("set n to 0\nrepeat while yes\n    add 1 to n\nend", () => {});
   assert.equal(machine.run({ slice: 1000 }), "slice");
   assert.equal(machine.run({ slice: 1000 }), "slice");
-  assert.deepEqual(machine.inspect().global, [["n", "2000"]]);
+  assert.deepEqual(machine.inspect().scopes, [{ name: "main", vars: [["n", "2000"]] }]);
 });
 
 // Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points
