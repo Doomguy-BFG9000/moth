@@ -693,7 +693,7 @@ test("use ... as keeps a file's names apart, on all three engines and in the com
   const mistakes = [
     ['use "shapes.moth" as shapes\nsay shapes\'s sids', "line 2: 'shapes' has nothing called 'sids'. Did you mean 'shapes's sides'?"],
     ['use "shapes.moth" as shapes\nshapes\'s nope(1)', "line 2: 'shapes' has nothing called 'nope'"],
-    ["say x's y", "line 1: 'x' has nothing called 'y'"],
+    ["say x's y", "line 1: 'x' has no value yet (give it one with 'set x to ...')"],
     ['use "shapes.moth" as list', "line 1: 'list' is a Moth word, so it can't be used as a name for the file"],
     ['use "shapes.moth" as shapes\nsay shapes\'s 5', "line 2: expected a name but found '5'"],
     ['set who to "Sam"\nuse "leak.moth" as leak\nsay leak\'s greet()', "leak.moth, line 2: 'leak' has nothing called 'who'"],

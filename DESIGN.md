@@ -2530,3 +2530,30 @@ hold them to agreeing.
   events), held for 17 frames and let go, moving what it held and then not,
   the mouse moved, pressed and let go, at least 30 frames a second, and a
   frame painted. And `tools/catch.moth`, a game of falling stars, played.
+
+## 57. A value's own functions and fields
+
+- **Why.** A record keeps a thing's values together, but the functions that
+  work on it are written `bark(rex)` and `name of rex`, inside out from how
+  it's said: rex's name, rex barks. Moth already had `'s`, for a file used `as`
+  a name, and it reads the way people talk.
+- **What it means.** Any `x's` that isn't a name the file used `as` is the
+  value's own: `rex's bark()` is `bark(rex)`, the value given first and any
+  other inputs after it, and `rex's name` is `name of rex`. They chain, `rex's
+  owner's name`, and a bracketed value works too, `(item 2 of dogs)'s name`. On
+  its own line a call needs no brackets, as any call: `rex's bark`, `rex's
+  rename "Max"`. `set rex's age to 4` sets a field, and `set rex's bark() to 1`
+  is a mistake that says so.
+- **Only a way of writing.** The parser turns `'s` into the call or the field
+  it stands for, so the VM, the JIT, WebAssembly and machine code have nothing
+  new to do, and the function is found by its name as any other: two kinds of
+  record can't each have their own `bark`, as in D's and Nim's uniform calls.
+  No program that ran before changes: `'s` after any other name was a mistake.
+  Only the mistake for `say x's y` with no `x` changes: x has no value yet.
+- **A file's name wins.** Which `'s` it is is decided as the file is read:
+  `use ... as` and `use the library ... as` note the name, and from then on
+  `math's sqrt` is the file's, as before; compiler.moth keeps the same list.
+- **Tested.** Two programs on the three engines and in machine code (calls
+  with and without brackets, fields read, set and chained, a list's items, a
+  number's own function); three mistakes; and compiler.moth held to moth.js,
+  byte for byte, on every case.

@@ -424,6 +424,11 @@ greet "Sam"                         # or call it on its own line
 set sam to record with name "Sam", age 20   # a record keeps named values together
 set age of sam to 21
 say name of sam " is " age of sam
+say sam's name                              # or with 's: sam's name is name of sam
+to birthday with person
+    set person's age to person's age + 1
+end
+sam's birthday()                            # a function given the value first: birthday(sam)
 
 to check_age with age
     if age is less than 0
@@ -467,7 +472,7 @@ for each person in ages                     # a dictionary's keys, in the order 
 end
 
 use "math.moth" as math                     # another file, its names kept apart as math's ...
-say math's sqrt(2)
+say math's sqrt(2)                          # a name used as a file is the file's; any other x's is x's own
 
 set notes to read "notes.txt"               # files: read, read bytes, write ... to
 write uppercase of notes to "loud.txt"

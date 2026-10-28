@@ -122,6 +122,7 @@ const CARRY_ON = ["at", "of", "bit", "is", "and", "or", "in", "as", "bytes"];
 // once), and `open` the files being read right now, to catch two that use each other.
 function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   let pos = 0;
+  const aliases = new Set(); // the names this file used files and libraries `as`: `x's` is theirs, and any other `x's` a value's
   let atTop = false; // directly in the program, not in a block or a function
   let fnDepth = 0;
   let loopDepth = 0; // loops around this spot, in this function: `stop` needs one
@@ -251,6 +252,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     const names = [libraryName()];
     while (!peek().nl && word("or")) names.push(libraryName());
     const alias = !peek().nl && word("as") ? name("a name for the library") : null;
+    if (alias) aliases.add(alias);
     if (!peek().nl) expected("a new line");
     nesting++;
     const body = [];
@@ -363,7 +365,19 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   // `math's sine`: a name the file used `as math` makes
-  const member = (first) => (match("'s") ? `${first}'s ${name("a name")}` : first);
+  const member = (first) => (aliases.has(first) && match("'s") ? `${first}'s ${name("a name")}` : first);
+
+  // Any other `x's` is the value's own: `rex's bark()` is bark(rex), a function given the value first, and
+  // `rex's name` is name of rex, its field; one after another, `rex's owner's name`.
+  function possessive(node) {
+    while (check("'s")) {
+      pos++;
+      const t = peek();
+      const named = name("a function's or a field's name");
+      node = tight(match("(")) ? { kind: "call", name: named, args: [node, ...argList()], at: t } : { kind: "field", name: named, of: node, at: t };
+    }
+    return node;
+  }
 
   function block(opener) {
     if (!peek().nl) expected("a new line");
@@ -398,6 +412,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         return { kind: "turtle", action: "set slider", value: { kind: "list", items: [label, expression()], at: t }, at: t };
       }
       const variable = name("a variable name");
+      if (check("'s") && !aliases.has(variable)) { // `set rex's name to ...` changes a field
+        const field = possessive({ kind: "name", name: variable, at: t });
+        if (field.kind !== "field") fail(field.at, `a call can't be given a value: set a field, as in 'set ${variable}'s name to ...'`);
+        expectWord("to");
+        return { kind: "setField", name: field.name, target: field.of, value: expression(), at: t };
+      }
       if (word("of")) { // `set name of person to ...` changes a field
         const target = unary();
         expectWord("to");
@@ -533,6 +553,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "library")) return library(t);
       const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
       const alias = word("as") ? name("a name for the file") : null; // `use "math.moth" as math`
+      if (alias) aliases.add(alias);
       if (!atTop) fail(t, "'use' only works at the top level of a program");
       return { kind: "use", body: useFile(nameToken, alias), at: t };
     }
@@ -692,6 +713,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
       pos++;
       const called = member(t.value);
+      if (called === t.value && check("'s")) { // `rex's bark()`, or `rex's rename "Max"`
+        const made = possessive({ kind: "name", name: t.value, at: t });
+        if (made.kind === "call") return made;
+        const args = [made.of];
+        if (!peek().nl) do args.push(expression()); while (match(","));
+        return { kind: "call", name: made.name, args, at: made.at };
+      }
       if (isWord("is")) fail(t, `to give '${called}' a value write 'set ${called} to ...'`);
       let args = [];
       if (tight(match("("))) args = argList();
@@ -986,14 +1014,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const inner = expression();
       [indexing, converting] = [outside, wasConverting];
       if (!match(")")) expected("')'");
-      return inner;
+      return possessive(inner); // `(item 2 of dogs)'s name`
     }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       pos++;
       const full = member(t.value);
-      if (tight(match("("))) return { kind: "call", name: full, args: argList(), at: t };
+      if (tight(match("("))) return possessive({ kind: "call", name: full, args: argList(), at: t });
       if (full === t.value && !indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
-      return { kind: "name", name: full, at: t };
+      return possessive({ kind: "name", name: full, at: t });
     }
     expected("a value");
   }

@@ -4,6 +4,9 @@
 import examples from "./examples.js";
 
 export const PROGRAMS = [
+  // a value's own functions and fields: `rex's bark()` is bark(rex), and `rex's name` is name of rex
+  ["to bark with dog\n    say name of dog + \" says woof\"\nend\nto rename with dog, new_name\n    set name of dog to new_name\nend\nto older with dog, years\n    return age of dog + years\nend\nset rex to record with name \"Rex\", age 3, owner (record with name \"Sam\")\nrex's bark()\nrex's rename(\"Max\")\nrex's bark\nrex's rename \"Rex\"\nsay rex's name + \" is \" + rex's age + \", owned by \" + rex's owner's name\nsay rex's older(2) + 1\nset rex's age to 4\nset rex's owner's name to \"Ana\"\nsay rex\nset dogs to list of rex, (record with name \"Bo\", age 1, owner nothing)\nfor each d in dogs\n    d's bark()\nend\nsay (item 2 of dogs)'s name", "Rex says woof\nMax says woof\nRex is 3, owned by Sam\n6\n(record with name \"Rex\", age 4, owner (record with name \"Ana\"))\nRex says woof\nBo says woof\nBo"],
+  ["to twice with n\n    return n * 2\nend\nset value to 21\nsay value's twice()\nsay (value + 1)'s twice() + 0", "42\n44"],
   // inputs that say what they are: each call checks them
   ["to area with width as a number, height as a number\n    return width * height\nend\nsay area(3, 4)", "12"],
   ["to describe with name as text, age as a number and kind\n    say name \" is \" age \" (\" kind \")\"\nend\ndescribe(\"Rex\", 3, nothing)\ndescribe(\"Tom\", 9, 1)", "Rex is 3 (nothing)\nTom is 9 (1)"],
@@ -225,6 +228,9 @@ export const SAVING = [
 ];
 
 export const ERRORS = [
+  ["set rex to record with name \"Rex\"\nset rex's bark() to 1", "line 2: a call can't be given a value: set a field, as in 'set rex's name to ...'"],
+  ["set rex to record with name \"Rex\"\nrex's fly()", "line 2: there is no function called 'fly'"],
+  ["set rex to record with name \"Rex\"\nsay rex's age", "line 2: this record has no 'age'"],
   ["to area with width as a number, height as a number\n    return width * height\nend\nsay area(3, \"4\")", "line 4: 'area' needs height to be a number, not text"],
   ["to shout with words as text\n    say uppercase of words\nend\nshout(nothing)", "line 4: 'shout' needs words to be text, not nothing"],
   ["to f with ok as yes or no\n    say ok\nend\nf(1)", "line 4: 'f' needs ok to be yes or no, not a number"],

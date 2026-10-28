@@ -342,6 +342,7 @@ set functions_made to 0
 # `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
 to parse with tokens, reading
     set pos to 1
+    set aliases to empty list # the names this file used files and libraries `as`: `x's` is theirs, any other a value's
     set at_top to no # directly in the program, not in a block or a function
     set fn_depth to 0
     set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
@@ -695,6 +696,7 @@ to parse with tokens, reading
         set alias to nothing
         if not nl of peek() and word("as")
             set alias to take_name("a name for the library")
+            add alias to aliases
         end
         if not nl of peek()
             expected("a new line")
@@ -940,10 +942,31 @@ to parse with tokens, reading
 
     # `math's sine`: a name the file used `as math` makes
     to member with first
-        if match("'s")
+        if contains(aliases, first) and match("'s")
             return first + "'s " + take_name("a name")
         end
         return first
+    end
+
+    # Any other `x's` is the value's own: `rex's bark()` is bark(rex), a function given the value first, and
+    # `rex's name` is name of rex, its field; one after another, `rex's owner's name`.
+    to possessive with node
+        set own_made to node
+        repeat while check("'s")
+            set pos to pos + 1
+            set own_at to peek()
+            set own_named to take_name("a function's or a field's name")
+            if tight(match("("))
+                set own_given to list of own_made
+                for each own_one in arg_list()
+                    add own_one to own_given
+                end
+                set own_made to record with kind "call", name own_named, args own_given, at own_at
+            else
+                set own_made to record with kind "field", name own_named, subject own_made, at own_at
+            end
+        end
+        return own_made
     end
 
     to block with opener
@@ -1020,6 +1043,14 @@ to parse with tokens, reading
                 return record with kind "turtle", action "set slider", value (record with kind "list", items slider_items, at t), at t
             end
             set variable to take_name("a variable name")
+            if check("'s") and not contains(aliases, variable) # `set rex's name to ...` changes a field
+                set own_field to possessive(record with kind "name", name variable, at t)
+                if kind of own_field is not "field"
+                    fail with problem(at of own_field, "a call can't be given a value: set a field, as in 'set " + variable + "'s name to ...'")
+                end
+                expect_word("to")
+                return record with kind "setField", name name of own_field, target subject of own_field, value expression(), at t
+            end
             if word("of") # `set name of person to ...` changes a field
                 set target to unary()
                 expect_word("to")
@@ -1247,6 +1278,7 @@ to parse with tokens, reading
             set alias to nothing
             if word("as") # `use "math.moth" as math`
                 set alias to take_name("a name for the file")
+                add alias to aliases
             end
             if not at_top
                 fail with problem(t, "'use' only works at the top level of a program")
@@ -1519,6 +1551,20 @@ to parse with tokens, reading
             # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
             set pos to pos + 1
             set called to member(value of t)
+            if called is value of t and check("'s") # `rex's bark()`, or `rex's rename "Max"`
+                set own_made to possessive(record with kind "name", name value of t, at t)
+                if kind of own_made is "call"
+                    return own_made
+                end
+                set own_given to list of subject of own_made
+                if not nl of peek()
+                    add expression() to own_given
+                    repeat while match(",")
+                        add expression() to own_given
+                    end
+                end
+                return record with kind "call", name name of own_made, args own_given, at at of own_made
+            end
             if is_word("is")
                 fail with problem(t, "to give '" + called + "' a value write 'set " + called + " to ...'")
             end
@@ -1997,18 +2043,18 @@ to parse with tokens, reading
             if not match(")")
                 expected("')'")
             end
-            return inner
+            return possessive(inner) # `(item 2 of dogs)'s name`
         end
         if type of t is "word" and not contains(reserved, value of t)
             set pos to pos + 1
             set full to member(value of t)
             if tight(match("("))
-                return record with kind "call", name full, args arg_list(), at t
+                return possessive(record with kind "call", name full, args arg_list(), at t)
             end
             if full is value of t and not indexing and word("of") # `name of person`
                 return record with kind "field", name value of t, subject unary(), at t
             end
-            return record with kind "name", name full, at t
+            return possessive(record with kind "name", name full, at t)
         end
         expected("a value")
     end
