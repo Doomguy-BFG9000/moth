@@ -1,0 +1,118 @@
+# A notepad for Windows, made with windows.moth: write, open and save text files.
+#
+#   moth build tools/notes.moth --allow-libraries --allow-read --allow-write
+#   tools\notes.exe
+use "windows.moth" as ui
+
+set file to nothing # the file's name, or nothing while it has none
+set changed to no
+set w to ui's window("Notes", 640, 440)
+set notes to ui's text_area(w, 0, 0, 640, 440)
+
+to show_title
+    set name to "Untitled"
+    if file is not nothing
+        set parts to split file by "\\"
+        set name to item (length of parts) of parts
+    end
+    if changed
+        set name to "*" + name
+    end
+    ui's set_text(w, name + " - Notes")
+end
+
+# what's written now is what the file has: after opening, saving or starting again
+to unchanged
+    set changed to no
+    show_title()
+end
+
+to typed with text
+    if not changed
+        set changed to yes
+        show_title()
+    end
+end
+
+# whether what's written may go: yes if it's saved, or the one writing says so
+to may_lose
+    if not changed
+        return yes
+    end
+    return ui's ask_yes_no(w, "Lose the changes to this note?")
+end
+
+to new_note
+    if may_lose()
+        set file to nothing
+        ui's set_text(notes, "")
+        unchanged()
+    end
+end
+
+to open_note
+    if not may_lose()
+        return nothing
+    end
+    set name to ui's choose_file_to_open(w)
+    if name is nothing
+        return nothing
+    end
+    try
+        ui's set_text(notes, read name)
+        set file to name
+        unchanged()
+    if it fails with why
+        ui's message(w, "Couldn't open it: " + why)
+    end
+end
+
+to save_to with name
+    try
+        write ui's text_of(notes) to name
+        set file to name
+        unchanged()
+    if it fails with why
+        ui's message(w, "Couldn't save it: " + why)
+    end
+end
+
+to save_note
+    if file is nothing
+        save_note_as()
+    else
+        save_to(file)
+    end
+end
+
+to save_note_as
+    set name to ui's choose_file_to_save(w)
+    if name is not nothing
+        save_to(name)
+    end
+end
+
+to leave
+    ui's close(w)
+end
+
+to closing
+    return may_lose()
+end
+
+to resized with width, height
+    ui's place(notes, 0, 0, width, height)
+end
+
+ui's on_change(notes, typed)
+ui's on_resize(w, resized)
+ui's on_close(w, closing)
+ui's menu_item(w, "File", "New\tCtrl+N", new_note)
+ui's menu_item(w, "File", "Open...\tCtrl+O", open_note)
+ui's menu_item(w, "File", "Save\tCtrl+S", save_note)
+ui's menu_item(w, "File", "Save as...\tCtrl+Shift+S", save_note_as)
+ui's menu_item(w, "File", "-", nothing)
+ui's menu_item(w, "File", "Exit", leave)
+show_title()
+ui's focus(notes)
+ui's run()

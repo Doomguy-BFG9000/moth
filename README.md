@@ -323,6 +323,19 @@ bytes and dictionaries:
 - [`sqlite.moth`](tools/sqlite.moth) keeps a database in a file through SQLite
   itself, the library Windows and most Linux systems come with: `open`, `run`
   and `query`, each row a dictionary, with `?`s for values.
+- [`windows.moth`](tools/windows.moth) makes Windows' own windows and controls,
+  written in Moth on user32.dll: buttons, labels, text boxes and areas,
+  checkboxes, lists, dropdowns, menus with their keys (`"Save\tCtrl+S"`),
+  timers, message boxes and the Open and Save boxes, in Windows' modern look,
+  sharp on a screen set larger than 100%. Each calls a function of the
+  program's when something happens to it.
+- [`notes.moth`](tools/notes.moth) is a notepad made with it, in under 120 lines:
+  New, Open, Save and Save as, with their keys, a `*` in the title while a
+  note isn't saved, and a question before one is lost.
+
+  ```text
+  $ moth build tools/notes.moth --allow-libraries --allow-read --allow-write
+  ```
 
 ## The language
 
@@ -814,7 +827,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`versus/`](versus) | The same four programs in Moth, C, Rust and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
-| [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
+| [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests, SQLite, Windows' own controls, and a notepad made with them |
 | [`bootstrap.mjs`](bootstrap.mjs) | Makes the first moth.exe from the source, with Node.js |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
@@ -876,6 +889,11 @@ calls that led there.
   what Linux draws in memory instead of GDI+; and a real window on an X server,
   sent clicks, keys, drags and the wheel, which said and showed, pixel for
   pixel, what the same events from `MOTH_EVENTS` did
+- libraries: C's own functions called with every type, structures C fills in,
+  `qsort` calling a Moth function, floats and each mistake, on Windows and
+  Linux; SQLite through `tools/sqlite.moth`; and on Windows a window whose
+  procedure is a Moth function, and `tools/windows.moth` driving its own
+  controls, menus and keys
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

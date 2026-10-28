@@ -903,9 +903,10 @@ test("a program reads sites: their text and bytes, moves to another address, and
 function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
-    for (const name of ["sqlite.moth"]) writeFileSync(join(dir, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+    const files = {};
+    for (const name of ["sqlite.moth", "windows.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     const exe = executable(dir, "p");
-    const bytes = machine(source, { target, name: "p.moth", allow, files: { "sqlite.moth": readFileSync(new URL("./tools/sqlite.moth", import.meta.url), "utf8") } });
+    const bytes = machine(source, { target, name: "p.moth", allow, files });
     writeFileSync(exe, bytes);
     if (target === "linux") chmodSync(exe, 0o755);
     const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", env: { ...process.env, ...env } });
@@ -1092,6 +1093,129 @@ sqlite's close(people)
 set again to sqlite's open("people.db")
 say length of sqlite's query(again, "select * from people")`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ['1\n1\nSam is 20, 1.8 m, nothing\nAna Lee 😀 is 31, 1.65 m, hé\n[(dictionary where "n" is 1)]\nSQLite: no such table: nowhere\n2\n', "", 0]);
+});
+
+// tools/windows.moth, Windows' own controls for a program of Moth's: a window, hidden here, that drives itself
+// from a timer, sending its controls what a click or typing sends them, and pressing its menu's keys with Ctrl
+// held as this thread sees it
+test("tools/windows.moth makes Windows' own controls, menus and keys call a program's functions", { skip: target === "windows" ? skip : "Windows only" }, () => {
+  const ran = libraryRun(`use "windows.moth" as ui
+use the library "user32"
+    SetKeyboardState(bytes) gives yes or no
+end
+set log to empty list
+set step to 0
+to greet
+    add "greet " + ui's text_of(name) to log
+end
+to ticked_it with on
+    add "ticked " + on to log
+end
+to chose_it with fruit
+    add "chose " + fruit to log
+end
+to changed with t
+    add "changed " + t to log
+end
+to opened
+    add "open" to log
+end
+to saved
+    add "saved" to log
+end
+to reloaded
+    add "reloaded" to log
+end
+to resized with width, height
+    add "resized " + width + " " + height to log
+end
+to closing
+    add "closing" to log
+    return yes
+end
+to hold with ctrl, shifted
+    set state to 256 bytes
+    if ctrl
+        set byte 18 of state to 128
+    end
+    if shifted
+        set byte 17 of state to 128
+    end
+    SetKeyboardState(state)
+end
+to drive
+    add 1 to step
+    if step is 1
+        ui's set_text(name, "set, not typed")
+        ui's sendmessagew(handle of name, 177, 0, -1)
+        ui's send_text(handle of name, 194, 1, "Sam")
+        ui's sendmessagew(handle of go, 245, 0, 0)
+        ui's sendmessagew(handle of tick, 245, 0, 0)
+        add "is ticked " + ui's ticked(tick) to log
+    else if step is 2
+        ui's choose(fruits, 2)
+        add ui's chosen(fruits) + " at " + ui's chosen_place(fruits) + " of " + ui's count_of(fruits) to log
+        ui's choose(sizes, 3)
+        add "size " + ui's chosen(sizes) to log
+        ui's remove_item(fruits, 1)
+        add "now " + ui's count_of(fruits) + ", " + ui's chosen_place(fruits) to log
+        ui's postmessagew(handle of w, 273, 106, 0)
+    else if step is 3
+        ui's set_text(notes, "one\\ntwo")
+        add (split ui's text_of(notes) by "\\n") to log
+        ui's movewindow(handle of w, 0, 0, 500, 400, no)
+    else if step is 4
+        hold(yes, no)
+        ui's postmessagew(handle of name, 256, 83, 0)
+    else if step is 5
+        hold(yes, yes)
+        ui's postmessagew(handle of name, 256, 116, 0)
+    else if step is 6
+        hold(no, no)
+        ui's postmessagew(handle of name, 256, 83, 0)
+    else
+        ui's close(w)
+    end
+end
+set w to ui's window("Driven", 400, 300)
+ui's showwindow(handle of w, 0)
+set name to ui's text_box(w, 10, 10, 200, 26)
+ui's on_change(name, changed)
+set go to ui's button(w, "Go", 220, 10, 80, 28, greet)
+set tick to ui's checkbox(w, "Dark", 10, 50, 100, 24, ticked_it)
+set fruits to ui's list_box(w, 10, 80, 150, 100, chose_it)
+for each fruit in list of "apple", "banana", "cherry"
+    ui's add_item(fruits, fruit)
+end
+set sizes to ui's dropdown(w, 170, 80, 120, 200, nothing)
+for each s in list of "small", "medium", "large"
+    ui's add_item(sizes, s)
+end
+set notes to ui's text_area(w, 10, 190, 380, 100)
+ui's menu_item(w, "File", "Open", opened)
+ui's menu_item(w, "File", "-", nothing)
+ui's menu_item(w, "File", "Save\\tCtrl+S", saved)
+ui's menu_item(w, "File", "Reload\\tCtrl+Shift+F5", reloaded)
+for each bad in list of "Ctrl+Bogus", "Ctrl+Shift"
+    try
+        ui's menu_item(w, "File", "Bad\\t" + bad, nothing)
+    if it fails with why
+        add why to log
+    end
+end
+ui's on_resize(w, resized)
+ui's on_close(w, closing)
+ui's timer(w, 50, drive)
+ui's run()
+for each line in log
+    say line
+end`);
+  const [, width, height] = /resized (\d+) (\d+)/.exec(ran.stdout) ?? [];
+  assert.deepEqual([ran.stdout.replace(/resized \d+ \d+/, "resized"), ran.stderr, ran.status], [
+    "windows.moth doesn't know the key 'Bogus' in 'Ctrl+Bogus'\n'Ctrl+Shift' has no key to press, only ones to hold\n"
+    + "changed Sam\ngreet Sam\nticked yes\nis ticked yes\nbanana at 2 of 3\nsize large\nnow 2, 1\nopen\n"
+    + '["one", "two"]\nresized\nsaved\nreloaded\nchanged Sams\nclosing\n', "", 0]);
+  assert.ok(width > 400 && height > 250, `${width} by ${height}`);
 });
 
 test("only a program that reads can go online, and only it imports WinHTTP", () => {

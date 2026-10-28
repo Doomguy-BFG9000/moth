@@ -2103,3 +2103,65 @@ hold them to agreeing.
   messages, and `EnumWindows` calling one for every window.
 - **Not yet.** A struct passed or given by its value, whole numbers of 8 or 16
   bits, a callback called from another thread, and a Mac.
+
+## 47. Windows' own controls, in Moth
+
+- **Why.** An app's window draws its own buttons and boxes, the same on every
+  system and in the playground, but they're Moth's and not Windows': no
+  menus, no Tab between them, nothing a screen reader knows. With libraries,
+  structures and callbacks, a program can use Windows' own, so
+  [`tools/windows.moth`](tools/windows.moth) does, in Moth and nothing else:
+  a module on user32.dll, kernel32.dll, gdi32.dll and comdlg32.dll, about 540
+  lines, and a program that uses it is built with `--allow-libraries`.
+- **What it makes.** `window`, then `button`, `label`, `text_box`,
+  `text_area`, `checkbox`, `list_box` and `dropdown` in it, at places and
+  sizes in pixels as at 100%; `menu_item`, `timer`, `message`, `ask_yes_no`,
+  `choose_file_to_open` and `choose_file_to_save`; and `run`, which handles
+  what happens until the first window closes. Each control is a record with
+  its handle, so the module's own declarations, `ui's sendmessagew` among
+  them, can be given it for anything it doesn't wrap.
+- **What happens.** One window class, whose procedure is a Moth function:
+  Windows' WM_COMMAND, from a control or a menu item, finds the control by
+  its number and calls its handler, a button's with nothing, a checkbox's with
+  whether it's ticked, a list's with what's chosen, a box's with its text;
+  WM_TIMER a timer's; WM_SIZE the window's, with its size as at 100%; and
+  WM_CLOSE asks the window's, which can say no. `IsDialogMessageW` in `run`
+  gives Tab and Shift+Tab between the controls.
+- **The look.** Windows draws controls as Windows 95 did unless a program asks
+  for version 6 of its common controls, by a manifest. Moth's programs have
+  none, so the module makes an activation context from the one shell32.dll
+  has, resource 124, and keeps it active: buttons, checkboxes, boxes and
+  lists are drawn as Windows 11 draws them. It says it knows about screens set
+  larger than 100% (`SetProcessDPIAware`), makes every place and size bigger
+  by the screen's dots per inch, and uses Segoe UI at 9 points, as Windows'
+  own programs do.
+- **Text.** A box's text goes in and out as UTF-16 (`wide text`); its line
+  ends are Windows' CR LF, so `text_of` gives `\n` and `set_text` takes either.
+  `lstrcatW` onto an empty string reads a UTF-16 buffer back as text, which
+  Moth's types have no other way to. A box holds as much as Windows will, not
+  the 32,767 characters it starts with. `on_change` is for what's typed: a
+  one-line box tells its window when `set_text` changes it and a text area
+  doesn't, so the module ignores the first while it's setting the text, and
+  neither calls the handler.
+- **Keys.** A menu item's text can end with a tab and its keys,
+  `"Save\tCtrl+S"`, as Windows shows them. Windows' own way, an accelerator
+  table, needs a handle made from a struct per key; instead `run` looks at
+  each key pressed before it's handled, as `GetKeyState` says Ctrl, Shift and
+  Alt are, and gives a menu item's handler the keys that are its. Keys it
+  doesn't know are a mistake when the item is made, not when they're pressed.
+- **A demo.** [`tools/notes.moth`](tools/notes.moth), a notepad in under 120
+  lines: New, Open, Save and Save as with their keys, the file's name in the
+  title with a `*` while it isn't saved, and a question before what's written
+  is lost.
+- **Tested.** A program of the test's, in a hidden window, driven by its own
+  timer: typing, a click on a button and a checkbox, choosing in a list and a
+  dropdown and removing from one, a menu item, a text area's lines, a resize,
+  Ctrl+S and Ctrl+Shift+F5 pressed with the thread's keys set to show them
+  held, a key without them typed as a key, keys that aren't keys, and closing.
+  And notes.exe, driven by another program's window messages: typed into,
+  saved through the Save box, saved again without it, closed with changes
+  (No kept it, Yes closed it), a file opened through the Open box, one with CR
+  LF opened as it was, and New.
+- **Not yet.** Linux's own controls, which would mean GTK; pictures and
+  drawing in a window of its own; more than one window's Tab order; and
+  windows.moth on the JavaScript engines, which can't call a library.
