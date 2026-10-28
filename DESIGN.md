@@ -119,3 +119,28 @@ fuzzing need to run untrusted programs without a Stop button.
   (a wrong scope rule, a dropped `not`, missing type checks) and looked for a
   failing test each time. One got through: `-"a"` quietly gave `NaN`. That's how
   the `'-' needs a number` test got added.
+
+## 7. The command line and the compiler
+
+- **`vm.js` imports nothing.** The compiler (`moth.js`) and the machine
+  (`vm.js`) only share the bytecode format. That's what makes `moth build`
+  simple: it writes `vm.js`, the program's bytecode as JSON, and the source text
+  into one `.mjs` file. The compiled program never tokenizes or parses
+  anything, and it runs on any Node with no Moth installed. Tokens are reduced
+  to their line and column, so a compiled program's errors still point at the
+  right spot. The Counter example compiles to 16 KB.
+- **The shell is a compiler session.** It keeps two things between entries: the
+  compiler's map of top-level names to slots, and the machine's array of
+  top-level values. Each entry is compiled as a continuation of the ones before
+  it, and functions from earlier entries keep working because they hold that
+  same array. An entry only changes the name map after it parses, so a typo
+  leaves the session as it was.
+- **"Is this block finished?"** If an error lands on the end-of-code token (a
+  missing `end`, or `say 1 +` with nothing after it), the code stopped too
+  early rather than being wrong. The shell then shows `....>` and waits for more
+  lines, so the parser decides without a separate bracket counter.
+- **Trade-off: Ctrl+C.** A Moth program runs on Node's main thread, so the shell
+  can't catch Ctrl+C while a program runs. It puts the terminal back in normal
+  mode during each run, so Ctrl+C ends a stuck program by ending the shell.
+  Running each entry in a worker thread, like the playground does, would stop
+  just the program. That isn't built yet.

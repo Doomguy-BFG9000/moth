@@ -3,8 +3,9 @@
 [![tests](https://github.com/samyyy2423/moth/actions/workflows/test.yml/badge.svg)](https://github.com/samyyy2423/moth/actions/workflows/test.yml)
 
 A programming language that reads like plain English. It's written from scratch
-in JavaScript with no libraries: a parser, a bytecode compiler, and a virtual
-machine. **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
+in JavaScript with no libraries: a parser, a bytecode compiler, a virtual
+machine, and a `moth` command with its own shell.
+**[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 ```
 for each n from 1 to 15
@@ -90,9 +91,66 @@ if x > 5
      ^
 ```
 
+## Command line
+
+```bash
+npm install -g github:samyyy2423/moth
+```
+
+| Command | What it does |
+|---|---|
+| `moth` | Starts the Moth shell |
+| `moth run hello.moth` | Runs a program |
+| `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
+| `moth bytecode hello.moth` | Shows the instructions the compiler made |
+
+The shell remembers what you made in earlier entries and waits for a block's
+`end` before running it:
+
+```text
+moth> set name to "Sam"
+moth> to greet with who
+....>     say "Hello, " who
+....> end
+moth> greet name
+Hello, Sam
+```
+
+`moth bytecode` shows the compiler's output, for example the start of FizzBuzz:
+
+```text
+main:
+     0  CONST         0        ; 1
+     2  CONST         1        ; 15
+     4  CHECK_RANGE
+     5  RANGE_NEXT    66
+     7  SET           0 1
+    10  GET           0 1 2    ; n
+    14  CONST         3        ; 15
+    16  COMPARE       5        ; is divisible by
+    18  JUMP_IF_FALSE 26
+    20  CONST         4        ; "FizzBuzz"
+    22  SAY           1
+```
+
+Errors give the file, line, and column, so editors can jump straight to them:
+
+```text
+errors.moth:3:5: there is no item 5, the list only has 2 items
+say item 5 of fruits
+    ^
+```
+
 ## How it works
 
-[`moth.js`](moth.js) runs the source through four stages:
+| File | What it is |
+|---|---|
+| [`moth.js`](moth.js) | Tokenizer, parser, and bytecode compiler |
+| [`vm.js`](vm.js) | The virtual machine. It imports nothing, so `moth build` copies it into compiled programs |
+| [`cli.js`](cli.js) | The `moth` command and shell |
+| [`index.html`](index.html), [`worker.js`](worker.js) | The playground. Each run gets its own Web Worker, so **Stop** works even on a loop that never ends |
+
+The source goes through four stages:
 
 1. **Tokenizer**: one regular expression cuts the source into words, numbers,
    text, and symbols, each with its line and column.
@@ -102,9 +160,6 @@ if x > 5
    is resolved here, once, to a fixed slot.
 4. **Virtual machine**: one loop with its own value stack and call stack, so
    recursion isn't limited by JavaScript's stack.
-
-The playground runs each program in a Web Worker, so the **Stop** button works
-even on a loop that never ends.
 
 | Benchmark (`npm run bench`) | v1 tree-walker | v2 bytecode VM |
 |---|---|---|
@@ -125,6 +180,8 @@ Why calls got slower, what I tried, and the other design decisions are in
   exact error messages and positions
 - a fuzzer that randomly breaks 5,000 programs and checks that each one fails
   with a proper Moth error, never a JavaScript crash
+- every `moth` command, run as a real process, including running a compiled
+  program and checking it prints the same as `moth run`
 
 During the rewrite to bytecode, 19,001 fuzzed programs gave identical results
 on the old and new engines.
@@ -137,14 +194,18 @@ on the old and new engines.
   nothing list empty length item`.
 - Recursion goes up to 100,000 calls deep.
 - The playground shows the first 10,000 lines of output.
+- In the shell, Ctrl+C stops a program that never ends by quitting the shell.
 
-## Run it yourself
+## Run it from the source
 
 ```bash
 npm test
 ```
 ```bash
 npm run bench
+```
+```bash
+node cli.js run hello.moth
 ```
 
 To open the playground on your own computer, serve the folder (browsers won't
