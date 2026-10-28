@@ -270,6 +270,16 @@ can't inject anything into the page.
   prototype, so a field can be called anything, even `constructor`, and a
   misspelled field gets "did you mean". Both engines share the checks, and `is`
   compares records field by field, as it does lists.
+- **Records with shapes.** At first a record was `Object.create(null)`, which
+  V8 keeps as a slow dictionary. Profiling the neural network below showed
+  records taking 40% of its time. Now a record is made by `new Record()`, whose
+  prototype is an empty object with no prototype of its own: any field name
+  still works, and records with the same fields share a shape, so V8 reads them
+  fast. Reading a field skips the "is it really there" check, since no Moth value
+  is `undefined` and nothing is inherited. Records got 2× faster on the JIT and
+  the network went from 1.18 s to 0.62 s. Only the runtime changed, so the
+  generated JavaScript, and the compiler written in Moth that matches it,
+  stayed the same.
 - **`fail with value`** stops the program with the value as its message and
   keeps the value on the error. The compiler written in Moth uses it to report
   a mistake in the code it compiles: `fail with record with at token, reason
@@ -327,3 +337,34 @@ messages and positions.
   an emoji (a lone surrogate, which no file can hold) from a whole one. Its
   parser is 8 Moth calls deep per bracket and the JIT stops at 2,000 calls, so
   it gives up at about 245 levels of brackets, where the JIT goes past 1,000.
+
+## 14. A neural network, written in Moth
+
+[`neural.moth`](neural.moth) is a test of the language as much as a demo: a
+real program, with recursion, records that point at each other, and thousands
+of numbers, written the way a beginner would read it.
+
+- **Autograd with records.** As in Karpathy's micrograd, every number the
+  network works out is a record holding its value, how it was made (`op`,
+  `a`, `b`) and its gradient. Backpropagation sorts the records so each comes
+  after the ones it was made from (a recursive walk that marks what it has
+  seen), then goes through them backwards, applying the chain rule for `+`,
+  `*` and ReLU. The loss is micrograd's max-margin loss plus a little weight
+  decay, so it needs no `exp`.
+- **Its own maths.** Moth has no random numbers, no sine and no rounding. The
+  program makes them: Park and Miller's random numbers (16807 × seed, mod
+  2³¹−1, exact in a float because the product stays under 2⁵³), a whole-number
+  part found one power of two at a time, and sine from 12 terms of its Taylor
+  series. Because the random numbers come from a fixed seed, every run is the
+  same, so both engines can be required to say and draw exactly the same things.
+- **Two forward passes.** Training builds records so it can learn. Drawing what
+  the network believes takes 1,440 guesses per picture, so a second forward pass
+  works on plain numbers and makes nothing to learn from.
+- **Pictures with a turtle.** The turtle only moves and turns, so the program
+  keeps track of where it is and steers to each point. Each row of a picture is
+  a few thick lines, one per run of cells with the same colour, which keeps four
+  pictures to about 1,200 lines. The playground draws them as training goes.
+- **Tested like the rest.** The test trains it on both engines and requires the
+  same output and drawing, line for line, every dot on the right side at the
+  end, and nothing for the checker to complain about. A bug planted in the
+  chain rule for `*` left the network stuck at 50% and failed the test.

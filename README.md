@@ -11,7 +11,8 @@ its own shell.
 
 Moth's compiler is also written in Moth: [`compiler.moth`](compiler.moth),
 1,100 lines that compile any Moth program, itself included, to exactly the
-JavaScript the JIT writes, byte for byte.
+JavaScript the JIT writes, byte for byte. And a neural network written in Moth
+learns to sort dots, with backpropagation and every bit of maths done in Moth.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 <p>
@@ -40,6 +41,44 @@ end
 
 branch 105
 ```
+
+## A neural network, written in Moth
+
+[`neural.moth`](neural.moth) is a small neural network that learns, written
+from scratch in Moth, after Andrej Karpathy's
+[micrograd](https://github.com/karpathy/micrograd). Every number it works out is
+a record that remembers how it was made, so after each guess, backpropagation
+can trace how much every weight was to blame. Moth has no random numbers and no
+sine, so the program makes its own. It learns to tell apart two moons of dots,
+from 50% right to 100% in 60 steps, and draws what it believes as it goes:
+
+<p><img src="docs/neural.svg" alt="Four pictures of what the network believes: before training it calls almost everything blue; at step 8 and step 20 the boundary bends between the moons; at the end it wraps around both moons exactly. Below, the loss falls from 1.17 to 0.006." width="600"></p>
+
+Top left: before training. Top right: step 8. Bottom left: step 20. Bottom
+right: after 60 steps. Below: the loss, step by step. Backpropagation reads
+like this:
+
+```
+for each i from 1 to count
+    set v to item (count - i + 1) of order
+    set g to grad of v
+    set left to a of v
+    if op of v is "+"
+        set right to b of v
+        set grad of left to grad of left + g
+        set grad of right to grad of right + g
+    else if op of v is "*"
+        set right to b of v
+        set grad of left to grad of left + data of right * g
+        set grad of right to grad of right + data of left * g
+    else if op of v is "relu" and data of v is greater than 0
+        set grad of left to grad of left + g
+    end
+end
+```
+
+It trains in about 0.6 seconds on the JIT. Open **Neural network** in the
+playground to watch it learn.
 
 ## The language
 
@@ -165,6 +204,7 @@ nothing to install.
 - **Compiled** shows what the code turned into: the VM's bytecode, the
   JavaScript the JIT made, or the JavaScript from the compiler written in Moth,
   checked against the JIT's.
+- **Neural network** trains the network and draws it learning.
 - The last example, **Moth's own compiler**, is `compiler.moth` itself, with
   a line at the end that uses it to compile some Moth.
 
@@ -261,6 +301,7 @@ say item 5 of fruits
 | [`jit.js`](jit.js) | The JIT: Moth to JavaScript, which V8 compiles to machine code |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler written in Moth: tokenizer, parser, scope rules and JavaScript writer |
+| [`neural.moth`](neural.moth) | A neural network written in Moth, with its own random numbers, sine, and backpropagation |
 | [`cli.js`](cli.js) | The `moth` command and shell |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground. Each run gets its own Web Worker, so **Stop** works even on a loop that never ends |
 
@@ -289,6 +330,7 @@ recursion (more than 2,000 calls) to the VM, without showing any output twice.
 | fib(25), function calls | 60 ms | 67 ms | **7.2 ms** |
 | sum 1 to 1,000,000, a loop | 163 ms | 56 ms | **7.5 ms** |
 | primes up to 5,000, lists | 320 ms | 106 ms | **17 ms** |
+| 200,000 records, made and read | | 87 ms | **15 ms** |
 | recursion 10,000 deep | fails | 4 ms | 5 ms (handed to the VM) |
 
 How each engine was made fast, what didn't work, and the other design decisions
@@ -313,11 +355,14 @@ are in **[DESIGN.md](DESIGN.md)**.
   positions, and the same mistakes
 - bootstrapping: `compiler.moth` compiles itself, and the compiler that makes
   does too, three stages deep, each writing the same JavaScript
+- the neural network, trained on both engines: the same output and the same
+  drawing, line for line, and every dot on the right side at the end
 - every `moth` command, run as a real process
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT and the
 checker were caught, one of them only by the JIT-versus-VM fuzzer. Two bugs
-planted in `compiler.moth` were caught too, one of them only by its fuzzer.
+planted in `compiler.moth` were caught too, one of them only by its fuzzer, and
+a backpropagation bug planted in `neural.moth` left it stuck at 50%.
 
 ## Limits
 
