@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith } from "./vm.js";
+  failWith, BUILTINS } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv" };
@@ -151,6 +151,8 @@ class JsCompiler extends Scope {
         return `record(${q(e.fields)}, [${e.values.map((v) => this.expr(v)).join(", ")}])`;
       case "field":
         return `field(${this.expr(e.of)}, ${q(e.name)}, ${this.pos(e.at)})`;
+      case "builtin":
+        return `builtin(${BUILTINS.findIndex((b) => b.name === e.name)}, [${e.args.map((a) => this.expr(a)).join(", ")}], ${this.pos(e.at)})`;
     }
   }
 }
@@ -229,6 +231,7 @@ function helpers(ats, print, draw, maxSteps) {
     },
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
+    builtin: (i, args, k) => BUILTINS[i].run(args, errors[k]),
   };
 }
 export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));

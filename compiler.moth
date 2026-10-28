@@ -26,7 +26,7 @@ to contains with things, wanted
     return no
 end
 
-to join with things, separator
+to joined with things, separator
     set out to ""
     set first to yes
     for each thing in things
@@ -83,7 +83,7 @@ to in_word with c
     return starts_word(c) or is_digit(c)
 end
 
-to lowercase with c
+to small with c
     if c is at least "A" and c is at most "Z"
         return look_up(c, capitals, smalls)
     end
@@ -151,7 +151,7 @@ to tokenize with source
         else if starts_word(c)
             set text to ""
             repeat while in_word(item k of chars)
-                add lowercase(item k of chars) to text
+                add small(item k of chars) to text
                 add 1 to k
             end
             add record with type "word", value text, line line, col start, nl nl to tokens
@@ -206,7 +206,9 @@ end
 
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
-    "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop"
+    "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
+    "uppercase", "lowercase", "split", "join", "number", "position"
+set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position" # in the order of BUILTINS in vm.js
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
@@ -320,6 +322,27 @@ to parse with tokens
     end
 
     # drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
+    # built-in operations, by the word that starts them: the word after it ("" if none), then one input, or
+    # two with a word between them
+    to builtin_syntax with t
+        if type of t is not "word"
+            return nothing
+        end
+        if value of t is "uppercase" or value of t is "lowercase" or value of t is "number"
+            return list of "of"
+        end
+        if value of t is "split"
+            return list of "", "by"
+        end
+        if value of t is "join"
+            return list of "", "with"
+        end
+        if value of t is "position"
+            return list of "of", "in"
+        end
+        return nothing
+    end
+
     to turtle_words with t
         if type of t is not "word"
             return nothing
@@ -440,7 +463,7 @@ to parse with tokens
                 for each a in actions
                     add "'" + a + "'" to choices
                 end
-                expected(join(choices, " or "))
+                expected(joined(choices, " or "))
             end
             set pos to pos + 1
             if action is "up" or action is "down"
@@ -606,6 +629,22 @@ to parse with tokens
         if word("length")
             expect_word("of")
             return record with kind "length", subject unary(), at t
+        end
+        set syntax to builtin_syntax(t)
+        if syntax is not nothing
+            set pos to pos + 1
+            if item 1 of syntax is not ""
+                expect_word(item 1 of syntax)
+            end
+            set inputs to empty list
+            if length of syntax is 1
+                add unary() to inputs
+                return record with kind "builtin", name value of t, args inputs, at t
+            end
+            add additive() to inputs
+            expect_word(item 2 of syntax)
+            add additive() to inputs
+            return record with kind "builtin", name value of t, args inputs, at t
         end
         if word("item")
             set outside to indexing
@@ -841,7 +880,7 @@ set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by"
 set compare_helpers to list of "eq", "lt", "gt", "ge", "le", "dv"
 
-to position with at
+to remember with at
     add at to ats
     return length of ats - 1
 end
@@ -870,7 +909,7 @@ to quote_list with things
     for each thing in things
         add quote(thing) to quoted
     end
-    return "[" + join(quoted, ",") + "]"
+    return "[" + joined(quoted, ",") + "]"
 end
 
 # a number as written, less leading zeros (JavaScript reads 07 as octal)
@@ -903,7 +942,7 @@ end
 
 to undefined_name with scope, wanted, at, call, statement
     set message to undefined_message(scope, wanted, call, statement)
-    return "fail(" + quote(message) + ", " + position(at) + ")"
+    return "fail(" + quote(message) + ", " + remember(at) + ")"
 end
 
 to js_block with scope, body
@@ -911,7 +950,7 @@ to js_block with scope, body
     for each s in body
         add js_statement(scope, s) to lines
     end
-    return join(lines, "\n")
+    return joined(lines, "\n")
 end
 
 to js_list with scope, nodes
@@ -919,7 +958,7 @@ to js_list with scope, nodes
     for each node in nodes
         add js_expr(scope, node) to parts
     end
-    return join(parts, ", ")
+    return joined(parts, ", ")
 end
 
 # Loops count a step at the end of each round, so `maxSteps` stops both engines at the same place.
@@ -930,7 +969,7 @@ to js_statement with scope, s
     end
     if what is "setItem"
         set target to target of s
-        set head to "{ const $r = itemRef(" + js_expr(scope, subject of target) + ", " + js_expr(scope, index of target) + ", " + position(at of target)
+        set head to "{ const $r = itemRef(" + js_expr(scope, subject of target) + ", " + js_expr(scope, index of target) + ", " + remember(at of target)
         return head + "); $r[0][$r[1]] = " + js_expr(scope, value of s) + "; }"
     end
     if what is "add"
@@ -939,7 +978,7 @@ to js_statement with scope, s
             return value + ";\n" + undefined_name(scope, name of s, at of s, no, no) + ";"
         end
         set variable to ref(scope, name of s)
-        return "{ const $v = " + value + "; " + variable + " = addInto(" + variable + ", $v, " + quote(name of s) + ", " + position(at of s) + "); }"
+        return "{ const $v = " + value + "; " + variable + " = addInto(" + variable + ", $v, " + quote(name of s) + ", " + remember(at of s) + "); }"
     end
     if what is "say"
         return "say([" + js_list(scope, parts of s) + "]);"
@@ -948,19 +987,19 @@ to js_statement with scope, s
         return "if (truthy(" + js_expr(scope, cond of s) + ")) {\n" + js_block(scope, then of s) + "\n} else {\n" + js_block(scope, otherwise of s) + "\n}"
     end
     if what is "while"
-        return "for (;;) {\nif (!truthy(" + js_expr(scope, cond of s) + ")) break;\n" + js_block(scope, body of s) + "\ntick(" + position(at of s) + ");\n}"
+        return "for (;;) {\nif (!truthy(" + js_expr(scope, cond of s) + ")) break;\n" + js_block(scope, body of s) + "\ntick(" + remember(at of s) + ");\n}"
     end
     if what is "repeat"
-        set k to position(at of s)
+        set k to remember(at of s)
         return "for (let $n = checkRepeat(" + js_expr(scope, count of s) + ", " + k + "); $n > 0; $n--) {\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "count"
-        set k to position(at of s)
+        set k to remember(at of s)
         set range to "checkRange(" + js_expr(scope, start of s) + ", " + js_expr(scope, limit of s) + ", " + k + ")"
         return "for (let [$i, $last] = " + range + "; $i <= $last; $i++) {\n" + ref(scope, name of s) + " = $i;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "each"
-        set k to position(at of s)
+        set k to remember(at of s)
         return "for (const $x of itemsOf(" + js_expr(scope, over of s) + ", " + k + ")) {\n" + ref(scope, name of s) + " = $x;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "define"
@@ -969,7 +1008,7 @@ to js_statement with scope, s
         for each n from 1 to length of params of s
             add v(n, level of scope of inner) to inputs
         end
-        set head to ref(scope, name of s) + " = fn(" + quote(name of s) + ", " + quote_list(params of s) + ", function (" + join(inputs, ", ") + ") {\n"
+        set head to ref(scope, name of s) + " = fn(" + quote(name of s) + ", " + quote_list(params of s) + ", function (" + joined(inputs, ", ") + ") {\n"
         return head + code of inner + "\nreturn null;\n});"
     end
     if what is "return"
@@ -986,14 +1025,14 @@ to js_statement with scope, s
         if value of s is not nothing
             set value to js_expr(scope, value of s)
         end
-        return "turtle(" + (slot_of(turtle_actions, action of s) - 1) + ", " + value + ", " + position(at of s) + ");"
+        return "turtle(" + (slot_of(turtle_actions, action of s) - 1) + ", " + value + ", " + remember(at of s) + ");"
     end
     if what is "setField"
-        set head to "{ const $o = recordFor(" + js_expr(scope, target of s) + ", " + quote(name of s) + ", " + position(at of s) + "); $o["
+        set head to "{ const $o = recordFor(" + js_expr(scope, target of s) + ", " + quote(name of s) + ", " + remember(at of s) + "); $o["
         return head + quote(name of s) + "] = " + js_expr(scope, value of s) + "; }"
     end
     if what is "fail"
-        return "failWith(" + js_expr(scope, value of s) + ", " + position(at of s) + ");"
+        return "failWith(" + js_expr(scope, value of s) + ", " + remember(at of s) + ");"
     end
     if what is "stop"
         return "break;"
@@ -1005,7 +1044,7 @@ to js_call with scope, e, statement
     if resolve(scope, name of e) is nothing
         return undefined_name(scope, name of e, at of e, yes, statement)
     end
-    set k to position(at of e)
+    set k to remember(at of e)
     set f to "callable(" + ref(scope, name of e) + ", " + quote(name of e) + ", " + k + ")"
     set args to js_list(scope, args of e)
     if length of args of e is greater than 3
@@ -1039,18 +1078,18 @@ to js_expr with scope, e
             return undefined_name(scope, name of e, at of e, no, no)
         end
         set variable to ref(scope, name of e)
-        return "(" + variable + " === UNSET ? unset(" + quote(name of e) + ", " + position(at of e) + ") : " + variable + ")"
+        return "(" + variable + " === UNSET ? unset(" + quote(name of e) + ", " + remember(at of e) + ") : " + variable + ")"
     end
     if what is "call"
         return js_call(scope, e, no)
     end
     if what is "math"
         set helper to look_up(op of e, math_signs, math_helpers)
-        return helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + position(at of e) + ")"
+        return helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + remember(at of e) + ")"
     end
     if what is "compare"
         set helper to look_up(op of e, comparisons, compare_helpers)
-        set test to helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + position(at of e) + ")"
+        set test to helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + remember(at of e) + ")"
         if negate of e
             return "!" + test
         end
@@ -1068,22 +1107,25 @@ to js_expr with scope, e
         return "!truthy(" + js_expr(scope, operand of e) + ")"
     end
     if what is "negate"
-        return "neg(" + js_expr(scope, operand of e) + ", " + position(at of e) + ")"
+        return "neg(" + js_expr(scope, operand of e) + ", " + remember(at of e) + ")"
     end
     if what is "list"
         return "[" + js_list(scope, items of e) + "]"
     end
     if what is "length"
-        return "lengthOf(" + js_expr(scope, subject of e) + ", " + position(at of e) + ")"
+        return "lengthOf(" + js_expr(scope, subject of e) + ", " + remember(at of e) + ")"
     end
     if what is "item"
-        return "item(" + js_expr(scope, subject of e) + ", " + js_expr(scope, index of e) + ", " + position(at of e) + ")"
+        return "item(" + js_expr(scope, subject of e) + ", " + js_expr(scope, index of e) + ", " + remember(at of e) + ")"
     end
     if what is "record"
         return "record(" + quote_list(fields of e) + ", [" + js_list(scope, values of e) + "])"
     end
     if what is "field"
-        return "field(" + js_expr(scope, subject of e) + ", " + quote(name of e) + ", " + position(at of e) + ")"
+        return "field(" + js_expr(scope, subject of e) + ", " + quote(name of e) + ", " + remember(at of e) + ")"
+    end
+    if what is "builtin"
+        return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"
     end
 end
 
@@ -1102,7 +1144,7 @@ to function_code with parent, params, body
     if length of locals is 0
         return record with scope scope, code statements
     end
-    return record with scope scope, code "let " + join(locals, ", ") + ";\n" + statements
+    return record with scope scope, code "let " + joined(locals, ", ") + ";\n" + statements
 end
 
 # Moth source in; out come the JavaScript (for fromJs() in jit.js), the tokens its positions point at,
@@ -1114,5 +1156,5 @@ to compile with source
     for each slot from 1 to length of names of scope of main
         add v(slot, 0) to slots
     end
-    return record with js code of main + "\nreturn [" + join(slots, ", ") + "];", ats ats, names names of scope of main
+    return record with js code of main + "\nreturn [" + joined(slots, ", ") + "];", ats ats, names names of scope of main
 end

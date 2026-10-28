@@ -72,11 +72,12 @@ export const OPCODES = [
   ["RECORD", 1], // its field names are a constant; their values are on the stack
   ["FIELD", 1], ["RECORD_REF", 1], ["SET_FIELD", 1], // the operand is the field's name, a constant
   ["FAIL", 0],
+  ["BUILTIN", 1], // one of BUILTINS, which takes its inputs off the stack
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -244,6 +245,51 @@ export function recordFor(record, field, error) {
   if (!isRecord(record)) error(`can only change '${field}' of a record, not ${kindOf(record)}`);
   return record;
 }
+
+// Moth's built-in operations: what `uppercase of x`, `split x by y` and the rest do. `run` checks what each
+// input is before it does anything that depends on the values, and `needs` says the same for the checker.
+const needText = (what, v, error) => {
+  if (typeof v !== "string") error(`${what} needs text, not ${kindOf(v)}`);
+  return v;
+};
+export const BUILTINS = [
+  { name: "uppercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'uppercase of'", t, error).toUpperCase() },
+  { name: "lowercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'lowercase of'", t, error).toLowerCase() },
+  {
+    name: "split", needs: [["text"], ["text"]], gives: "list",
+    run: ([text, by], error) => {
+      needText("'split'", text, error);
+      needText("'split ... by'", by, error);
+      return by === "" ? [...text] : text.split(by); // by "" gives the letters, an emoji counted as one
+    },
+  },
+  {
+    name: "join", needs: [["list"], ["text"]], gives: "text",
+    run: ([list, by], error) => {
+      if (!isList(list)) error(`'join' needs a list, not ${kindOf(list)}`);
+      needText("'join ... with'", by, error);
+      return list.map((x) => show(x)).join(by);
+    },
+  },
+  {
+    name: "number", needs: [["text", "number"]], gives: "number",
+    run: ([text], error) => {
+      if (typeof text === "number") return text;
+      needText("'number of'", text, error);
+      if (!/^\s*-?\d+(\.\d+)?\s*$/.test(text)) error(`${show(text, true)} isn't a number`); // a number as Moth writes them
+      return Number(text);
+    },
+  },
+  {
+    name: "position", needs: [["text"], ["text"]], gives: "number",
+    run: ([part, whole], error) => {
+      needText("'position of'", part, error);
+      needText("'position of ... in'", whole, error);
+      const at = whole.indexOf(part);
+      return at < 0 ? 0 : [...whole.slice(0, at)].length + 1; // counted in letters, from 1; 0 if it isn't there
+    },
+  },
+];
 
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
 export function failWith(value, error) {
@@ -542,6 +588,11 @@ export class Machine {
           case SET_FIELD: {
             const value = stack.pop();
             stack.pop()[consts[code[ip++]]] = value;
+            break;
+          }
+          case BUILTIN: {
+            const builtin = BUILTINS[code[ip++]];
+            stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops));
             break;
           }
           case FAIL:

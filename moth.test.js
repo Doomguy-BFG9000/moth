@@ -95,6 +95,11 @@ const PROGRAMS = [
   ["repeat 3 times\n    for each c in \"abc\"\n        if c is \"b\"\n            stop\n        end\n        say c\n    end\nend", "a\na\na"],
   ["set i to 0\nrepeat while yes\n    add 1 to i\n    if i is 5\n        stop\n    end\nend\nsay i", "5"],
   ["to first_big with xs\n    set found to nothing\n    for each x in xs\n        if x is greater than 10\n            set found to x\n            stop\n        end\n    end\n    return found\nend\nsay first_big(list of 3, 12, 40)", "12"],
+  // text helpers: upper and lower case, split, join, number, position
+  ["set line to \"the quick brown fox\"\nset words to split line by \" \"\nsay words \" \" length of words\nsay uppercase of item 2 of words \" \" lowercase of \"LOUD\"\nsay join words with \"-\"", "[\"the\", \"quick\", \"brown\", \"fox\"] 4\nQUICK loud\nthe-quick-brown-fox"],
+  ["say number of \" 42 \" + 1 \" \" number of \"-2.5\" * 2 \" \" number of 7", "43 -5 7"],
+  ["set line to \"the quick brown fox\"\nsay position of \"brown\" in line \" \" position of \"cat\" in line \" \" position of \"x\" in \"😀x\"", "11 0 2"],
+  ["say split \"héllo\" by \"\" \" \" join list of 1, yes, nothing with \", \"", "[\"h\", \"é\", \"l\", \"l\", \"o\"] 1, yes, nothing"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -164,6 +169,14 @@ const ERRORS = [
   ["stop", "line 1: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
   ["repeat 2 times\n    to f\n        stop\n    end\nend", "line 3: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
   ["set stop to 1", "line 1: 'stop' is a Moth word, so it can't be used as a variable name"],
+  // text helpers: upper and lower case, split, join, number, position
+  ["say uppercase of 5", "line 1: 'uppercase of' needs text, not a number"],
+  ["say split \"a,b\" by 1", "line 1: 'split ... by' needs text, not a number"],
+  ["say join \"abc\" with \",\"", "line 1: 'join' needs a list, not text"],
+  ["say number of \"12abc\"", "line 1: \"12abc\" isn't a number"],
+  ["say position of 1 in \"abc\"", "line 1: 'position of' needs text, not a number"],
+  ["set number to 5", "line 1: 'number' is a Moth word, so it can't be used as a variable name"],
+  ["say split \"a b\" \" \"", "line 1: expected 'by' but found \" \""],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {

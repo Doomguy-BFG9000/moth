@@ -2,7 +2,7 @@
 // what running would say: each "will fail" warning comes from the VM's own checks (vm.js), run on sample
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
-import { Turtle, TURTLE_ACTIONS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
+import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, makeRecord, fieldOf, recordFor } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
@@ -92,6 +92,10 @@ class Checker extends Scope {
       case "negate":
       case "length":
         return () => "number";
+      case "builtin": {
+        const { gives } = BUILTINS.find((b) => b.name === e.name);
+        return () => gives;
+      }
       case "list":
         return () => "list";
       case "record":
@@ -302,6 +306,14 @@ class Checker extends Scope {
         this.expr(e.of);
         const type = this.type(e.of);
         this.willFail(e.at, () => this.known(type()) && lengthOf(this.sample(e.of), found));
+        return;
+      }
+      case "builtin": { // fails when an input is known to be the wrong kind; what the values are is left to run time
+        for (const arg of e.args) this.expr(arg);
+        const builtin = BUILTINS.find((b) => b.name === e.name);
+        const types = e.args.map((arg) => this.type(arg));
+        this.willFail(e.at, () => this.known(...types.map((t) => t())) && types.some((t, i) => !builtin.needs[i].includes(t()))
+          && builtin.run(e.args.map((arg) => this.sample(arg)), found));
         return;
       }
       case "item": {

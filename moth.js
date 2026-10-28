@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -76,7 +76,12 @@ function tokenize(src) {
 // words that start a statement or a value, so they can't name a variable
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
-  "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop"]);
+  "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
+  "uppercase", "lowercase", "split", "join", "number", "position"]);
+// built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
+// either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
+const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
+  ["join", [null, "with"]], ["position", ["of", "in"]]]);
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -306,6 +311,15 @@ function parse(tokens) {
       expectWord("of");
       return { kind: "length", of: unary(), at: t };
     }
+    const syntax = t.type === "word" && BUILTIN_SYNTAX.get(t.value);
+    if (syntax) {
+      pos++;
+      if (syntax[0]) expectWord(syntax[0]);
+      if (syntax.length === 1) return { kind: "builtin", name: t.value, args: [unary()], at: t };
+      const first = additive();
+      expectWord(syntax[1]);
+      return { kind: "builtin", name: t.value, args: [first, additive()], at: t };
+    }
     if (word("item")) {
       const outside = indexing;
       indexing = true;
@@ -351,7 +365,7 @@ function parse(tokens) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -597,6 +611,10 @@ class Compiler extends Scope {
         this.expr(e.of);
         this.emit(e.at, FIELD, this.constant(e.name));
         return;
+      case "builtin":
+        for (const arg of e.args) this.expr(arg);
+        this.emit(e.at, BUILTIN, BUILTINS.findIndex((b) => b.name === e.name));
+        return;
     }
   }
 }
@@ -618,6 +636,7 @@ function note(fn, op, args, scopes) {
     case "COMPARE": return args[0] ? `is ${COMPARE_OPS[args[0]]}` : "is";
     case "RECORD": return fn.consts[args[0]].join(", ");
     case "FIELD": case "RECORD_REF": case "SET_FIELD": return fn.consts[args[0]];
+    case "BUILTIN": return BUILTINS[args[0]].name;
     default: return "";
   }
 }
