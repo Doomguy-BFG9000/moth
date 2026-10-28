@@ -70,6 +70,22 @@ test("the shell remembers earlier entries, waits for 'end', and survives mistake
   assert.match(result.stdout, /still here: 21/);
 });
 
+test("moth check lists problems without running, and fails only on real mistakes", (t) => {
+  const bad = moth(["check", tempFile(t, "bad.moth", 'set name to "Moth"\nsay name * 2\nset spare to 1')]);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /bad\.moth:2:10: will fail: can't use '\*' on text and a number\nsay name \* 2\n {9}\^/);
+  assert.match(bad.stdout, /bad\.moth:3:1: unused: 'spare' is set but never used/);
+  const fine = moth(["check", tempFile(t, "fine.moth", examples["Counter"])]);
+  assert.equal(fine.status, 0);
+  assert.match(fine.stdout, /no problems found/);
+});
+
+test("moth js shows the JavaScript the JIT makes", (t) => {
+  const result = moth(["js", tempFile(t, "hello.moth", 'say "hi"')]);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /"use strict";[\s\S]*say\(\["hi"\]\);/);
+});
+
 test("bad usage and missing files get a clear message", () => {
   const usage = moth(["frobnicate"]);
   assert.equal(usage.status, 2);

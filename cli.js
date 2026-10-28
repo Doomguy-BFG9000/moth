@@ -1,15 +1,28 @@
 #!/usr/bin/env node
-// The `moth` command: run a program, compile it, show its bytecode, or start the Moth shell.
+// The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
-import { run, compile, disassemble, session, excerpt, MothError } from "./moth.js";
+import { run, compile, compileToJs, check, disassemble, session, excerpt, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
   moth run <file.moth>        run a program; if it draws, the drawing goes to <file>.svg
+  moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
-  moth bytecode <file.moth>   show the bytecode the compiler makes`;
+  moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
+  moth js <file.moth>         show the JavaScript the JIT makes`;
+
+// file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
+function checkFile(file, source) {
+  const problems = check(source);
+  for (const p of problems) {
+    const kind = p.kind === "fails" ? "will fail" : p.kind;
+    console.log(`${file}:${p.line}:${p.col}: ${kind}: ${p.message}\n${excerpt(source, p)}`);
+  }
+  if (!problems.length) console.log(`${file}: no problems found`);
+  return problems.some((p) => p.kind === "fails" || p.kind === "error");
+}
 
 // The turtle's lines as an SVG picture, framed to fit them. Moth's y goes up and SVG's goes down, so y is flipped.
 function svg(lines) {
@@ -94,7 +107,7 @@ function shell() {
 function main([command, file, ...extra]) {
   if (!command) return shell();
   if (["help", "--help", "-h"].includes(command)) return console.log(USAGE);
-  if (!["run", "build", "bytecode"].includes(command) || !file || extra.length) {
+  if (!["run", "check", "build", "bytecode", "js"].includes(command) || !file || extra.length) {
     console.error(USAGE);
     return 2;
   }
@@ -115,7 +128,9 @@ function main([command, file, ...extra]) {
         console.error(`drew ${drawn.length} lines -> ${out}`); // stderr, so the program's own output stays clean
       }
     }
+    else if (command === "check") return checkFile(file, source) ? 1 : 0;
     else if (command === "build") build(file, source);
+    else if (command === "js") console.log(compileToJs(source).source);
     else console.log(disassemble(compile(source)));
   } catch (err) {
     report(err, source, file);

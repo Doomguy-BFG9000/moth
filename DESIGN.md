@@ -203,3 +203,61 @@ can't inject anything into the page.
 - **Colors are the program's own text.** The canvas ignores a name it doesn't
   know and keeps the previous color. The SVG writer escapes the text before
   putting it in an attribute, so a "color" can't break the file.
+
+## 10. The JIT: compiling Moth to JavaScript
+
+- **Why it's fast.** The VM decodes every instruction and keeps every value on
+  an array stack. The JIT turns each Moth function into a JavaScript function
+  and each variable into a JavaScript variable named after its slot (`v1_2`), so
+  V8 compiles the program to machine code and keeps its numbers in registers.
+  Functions made inside functions become JavaScript closures, which behave the
+  same way as the VM's chained scope arrays. Best of 5 on the same machine:
+  fib(25) 67 → 7.2 ms, a million-round loop 56 → 7.5 ms, primes 106 → 17 ms.
+- **One set of rules, two engines.** Every check and error message lives in
+  `vm.js` as a small function that takes an `error` callback. The VM passes one
+  that marks the instruction it was running; the JIT passes one per spot in the
+  source. Both back ends build on `scope.js`, so they agree on what every name
+  means. The JIT's helpers handle the two-numbers case inline and hand
+  everything else to the shared checks.
+- **Deep recursion.** The JIT's Moth calls are JavaScript calls, and JavaScript's
+  stack runs out a few thousand calls deep. Moth programs can't read input or
+  the clock, so running one twice says and draws exactly the same things. When
+  calls go past 2,000 deep, the JIT stops and `run()` runs the program again on
+  the VM (100,000 calls deep), passing on only the output the first run hadn't
+  shown yet.
+- **Why stop at 2,000, not when JavaScript runs out.** The fuzzer found that when
+  JavaScript's stack ran out *inside* the callback that passes on a drawn line,
+  the line had been counted but not shown, and the hand-over skipped it. A fixed
+  depth of our own means the hand-over always happens at a known point. Output
+  is also counted only after it has been passed on.
+- **How it's kept honest.** Every table test runs on both engines, and 5,000
+  fuzzed programs must give identical output, drawings and errors on both. Of
+  three bugs planted in the JIT, one (a `repeat` loop not counting its steps)
+  was caught only by that comparison.
+
+## 11. The checker: mistakes found without running
+
+- **Types for the whole program.** Each variable gets one type (number, text,
+  yes/no, nothing, list or function) from every place that sets it. The
+  types depend on each other, so the checker repeats until none change. If
+  places disagree, the variable becomes "could be several" and the checker stays
+  quiet about it. A type only ever moves from unknown, to one type, to
+  "several", so this always settles. An `add` that is going to fail doesn't
+  count towards the type, because the program stops there.
+- **The real error, before it happens.** For each operation whose operand
+  types are known, the checker calls the same shared check the engines use, on
+  a sample value of each type, so a warning is word for word the error that
+  line would stop with. Checks that depend on a value (dividing by zero, an item
+  number below 1) only run when that value is written in the code.
+- **Only what's certain.** Nothing inside the right side of `and` or `or` is
+  treated as certain, since it might never run. Other warnings: names nothing
+  sets (with "did you mean"), a function given the wrong number of inputs (only
+  when the name is one function, made once), lines after a `return`, and
+  variables and functions made but never used.
+- **Tested against reality.** On 3,000 randomly broken programs, the test
+  records which lines really run. A line the checker says will fail must never
+  run in a program that finishes, a "never runs" line must never run, and when
+  a program does fail where the checker said, the messages must match. The
+  checker predicts 44% of runtime errors with no false alarms. The one known
+  gap: it doesn't follow the order code runs in, so a name used before its line
+  of `set` fails with "has no value yet" instead of what the checker said.

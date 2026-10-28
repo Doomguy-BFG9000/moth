@@ -2,10 +2,12 @@
 
 [![tests](https://github.com/samyyy2423/moth/actions/workflows/test.yml/badge.svg)](https://github.com/samyyy2423/moth/actions/workflows/test.yml)
 
-A programming language that reads like plain English. It's written from scratch
-in JavaScript with no libraries: a parser, a bytecode compiler, a virtual
-machine, turtle drawing, a debugger that can go backwards in time, and a `moth`
-command with its own shell.
+A programming language that reads like plain English, written from scratch in
+JavaScript with no libraries. It has two engines that must agree: a bytecode
+virtual machine, and a JIT that compiles Moth to JavaScript and runs 6–9×
+faster. It also has a checker that finds mistakes before the code runs, turtle
+drawing, a debugger that can go backwards in time, and a `moth` command with
+its own shell.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 <p>
@@ -139,8 +141,14 @@ nothing to install.
   every variable in view (including the ones a closure remembers from the
   function it was made in), and the output and drawing as they were at that
   moment. Drag the slider and watch the tree grow and shrink.
+- **Problems** appear as you type, without running anything: red wavy lines
+  under code that will fail when it runs, yellow under code that never runs or
+  is never used. Click one to jump to it.
 - **Share** puts the code into the link, so opening the link opens the program.
-- **Show bytecode** shows what the compiler turned the code into.
+- **Compiled** shows what the code turned into: the VM's bytecode, or the
+  JavaScript the JIT made.
+
+![The checker in the playground: wavy lines under five mistakes, listed under Problems, found without running the code](docs/checker.png)
 
 ## Command line
 
@@ -152,8 +160,28 @@ npm install -g github:samyyy2423/moth
 |---|---|
 | `moth` | Starts the Moth shell |
 | `moth run hello.moth` | Runs a program. If it draws, the drawing is saved as `hello.svg` |
+| `moth check hello.moth` | Finds mistakes without running it |
 | `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
-| `moth bytecode hello.moth` | Shows the instructions the compiler made |
+| `moth bytecode hello.moth` | Shows the bytecode the compiler made for the VM |
+| `moth js hello.moth` | Shows the JavaScript the JIT made |
+
+`moth check` gives each problem the same words the error would have when the
+line runs:
+
+```text
+bad.moth:2:10: will fail: can't use '*' on text and a number
+say name * 2
+         ^
+bad.moth:5:5: never runs: this line can never run, because 'return' comes first
+    say "never"
+    ^
+bad.moth:7:5: will fail: 'double' needs 1 input but got 2
+say double(1, 2)
+    ^
+bad.moth:8:1: unused: 'spare' is set but never used
+set spare to 5
+^
+```
 
 The shell remembers what you made in earlier entries and waits for a block's
 `end` before running it:
@@ -196,31 +224,39 @@ say item 5 of fruits
 
 | File | What it is |
 |---|---|
-| [`moth.js`](moth.js) | Tokenizer, parser, and bytecode compiler |
-| [`vm.js`](vm.js) | The virtual machine. It imports nothing, so `moth build` copies it into compiled programs |
+| [`moth.js`](moth.js) | Tokenizer, parser, bytecode compiler, and the public API (`run`, `check`, `compile`, `timeline`...) |
+| [`scope.js`](scope.js) | Which variable each name means, shared by every back end so they can't disagree |
+| [`vm.js`](vm.js) | The virtual machine, plus every check and error message both engines use. It imports nothing, so `moth build` copies it into compiled programs |
+| [`jit.js`](jit.js) | The JIT: Moth to JavaScript, which V8 compiles to machine code |
+| [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`cli.js`](cli.js) | The `moth` command and shell |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground. Each run gets its own Web Worker, so **Stop** works even on a loop that never ends |
-
-The source goes through four stages:
 
 1. **Tokenizer**: one regular expression cuts the source into words, numbers,
    text, and symbols, each with its line and column.
 2. **Parser**: recursive descent builds a syntax tree. Every node keeps the token
    it came from, so errors can point at it.
-3. **Compiler**: turns each function into bytecode (36 opcodes). Each variable
-   is resolved here, once, to a fixed slot.
-4. **Virtual machine**: one loop with its own value stack and call stack, so
-   recursion isn't limited by JavaScript's stack.
+3. **Scope**: gives every variable a numbered slot, once.
+4. Then one of three back ends:
+   - **Bytecode compiler and VM**: 36 opcodes, run by one loop with its own
+     stack, so recursion goes 100,000 calls deep and the debugger can pause it.
+   - **JIT**: each Moth function becomes a JavaScript function and each
+     variable a JavaScript variable, so V8 can keep them in machine registers.
+   - **Checker**: works out every variable's type and tests each operation
+     without running it.
 
-| Benchmark (`npm run bench`) | v1 tree-walker | v2 bytecode VM |
-|---|---|---|
-| sum 1 to 1,000,000 | 163 ms | 61 ms (2.7× faster) |
-| primes up to 5,000 | 320 ms | 113 ms (2.8× faster) |
-| fib(25) | 60 ms | 72 ms (1.2× slower) |
-| recursion 10,000 deep | fails | 6 ms |
+**Run** uses the JIT. The debugger and the shell use the VM. The JIT hands deep
+recursion (more than 2,000 calls) to the VM, without showing any output twice.
 
-Why calls got slower, what I tried, and the other design decisions are in
-**[DESIGN.md](DESIGN.md)**.
+| Benchmark (`npm run bench`) | v1 tree-walker | v2 bytecode VM | v3 JIT |
+|---|---|---|---|
+| fib(25), function calls | 60 ms | 67 ms | **7.2 ms** |
+| sum 1 to 1,000,000, a loop | 163 ms | 56 ms | **7.5 ms** |
+| primes up to 5,000, lists | 320 ms | 106 ms | **17 ms** |
+| recursion 10,000 deep | fails | 4 ms | 5 ms (handed to the VM) |
+
+How each engine was made fast, what didn't work, and the other design decisions
+are in **[DESIGN.md](DESIGN.md)**.
 
 ## Testing
 
@@ -228,14 +264,18 @@ Why calls got slower, what I tried, and the other design decisions are in
 
 - every playground example's output
 - tables of programs with their exact output, and broken programs with their
-  exact error messages and positions
-- a fuzzer that randomly breaks 5,000 programs and checks that each one fails
-  with a proper Moth error, never a JavaScript crash
-- every `moth` command, run as a real process, including running a compiled
-  program and checking it prints the same as `moth run`
+  exact error messages and positions, all run on **both** engines
+- a fuzzer that randomly breaks 5,000 programs. Each one must fail with a proper
+  Moth error, never a JavaScript crash, and the JIT must match the VM exactly:
+  the same output, the same drawing, the same error at the same spot
+- the checker against reality, on 3,000 more broken programs: no line it says
+  will fail ever runs in a program that finishes, and its message matches the
+  real error when the program does fail there. It predicts 44% of runtime
+  errors before running, with no false alarms
+- every `moth` command, run as a real process
 
-During the rewrite to bytecode, 19,001 fuzzed programs gave identical results
-on the old and new engines.
+The tests are tested too: bugs planted on purpose in the VM, the JIT and the
+checker were caught, one of them only by the JIT-versus-VM fuzzer.
 
 ## Limits
 
@@ -244,6 +284,8 @@ on the old and new engines.
   `set add say if else end repeat while for to return and or not is yes no
   nothing list empty length item move turn pen`.
 - Recursion goes up to 100,000 calls deep.
+- The checker only warns when it is sure, so it misses some mistakes: the length
+  of a list, and a name used before the line that sets it.
 - The playground shows the first 10,000 lines of output, and the debugger
   records the first 10,000 steps.
 - In the shell, Ctrl+C stops a program that never ends by quitting the shell.

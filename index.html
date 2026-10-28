@@ -50,6 +50,12 @@
     .code pre { pointer-events: none; }
     .gutter, .code textarea, .code pre, #lines { font: 14px/1.6 var(--mono); }
     .k { color: #569cd6; } .s { color: #ce9178; } .n { color: #b5cea8; } .c { color: #6a9955; font-style: italic; }
+    .squiggle { text-decoration: underline wavy; text-decoration-skip-ink: none; text-underline-offset: 4px; }
+    .squiggle.bad { text-decoration-color: #f14c4c; } .squiggle.meh { text-decoration-color: #cca700; }
+    #problems { margin: 0; padding: 6px 0; list-style: none; }
+    #problems button { display: block; width: 100%; padding: 3px 12px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
+    #problems button:hover { background: var(--raised); }
+    #problems .bad { color: #f48771; } #problems .meh { color: #e2c08d; }
 
     /* the code while debugging: numbered lines, the next one highlighted */
     #lines { position: relative; flex: 1; margin: 0; padding: 12px 12px 12px 48px; overflow: auto; }
@@ -91,7 +97,13 @@
     <button id="debug" type="button" title="Go through the program a step at a time, backwards too">⏯ Debug</button>
     <button id="stop" type="button" disabled>■ Stop</button>
     <button id="share" type="button">⤴ Share</button>
-    <label class="toggle"><input id="show-bytecode" type="checkbox"> Bytecode</label>
+    <label class="toggle">Compiled
+      <select id="compiled">
+        <option value="">hidden</option>
+        <option value="bytecode">bytecode (VM)</option>
+        <option value="js">JavaScript (JIT)</option>
+      </select>
+    </label>
     <span class="spacer"></span>
     <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
   </header>
@@ -118,12 +130,16 @@
         <div class="title">Variables</div>
         <pre id="variables"></pre>
       </div>
+      <div id="problems-view" hidden>
+        <div class="title">Problems · found without running</div>
+        <ul id="problems"></ul>
+      </div>
       <div>
         <div class="title">Output</div>
         <pre id="output" aria-live="polite"></pre>
       </div>
       <div id="bytecode-view" hidden>
-        <div class="title">Bytecode · what the compiler made, which the virtual machine runs</div>
+        <div class="title" id="compiled-title"></div>
         <pre id="bytecode"></pre>
       </div>
     </section>
@@ -143,7 +159,7 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, disassemble, timeline, excerpt, MothError } from "./moth.js";
+    import { compile, compileToJs, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -157,20 +173,54 @@
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
       + "move turn pen times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-    function highlight(source) {
-      return source.replace(/(#.*)|("(?:\\.|[^"\\\n])*"?)|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)|([^#"\w]+)/g, (all, comment, text, number, word, other) => {
-        if (comment) return `<span class="c">${escape(comment)}</span>`;
-        if (text) return `<span class="s">${escape(text)}</span>`;
-        if (number) return `<span class="n">${number}</span>`;
-        if (word) return WORDS.has(word.toLowerCase()) ? `<span class="k">${word}</span>` : word;
-        return escape(other);
-      });
+    const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
+    // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
+    function highlight(source, marks = new Map()) {
+      return source.split("\n").map((text, i) => {
+        const flagged = marks.get(i + 1);
+        return text.replace(/(#.*)|("(?:\\.|[^"\\])*"?)|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)|([^#"\w])/g, (all, comment, str, number, word, other, offset) => {
+          const html = comment ? `<span class="c">${escape(comment)}</span>`
+            : str ? `<span class="s">${escape(str)}</span>`
+            : number ? `<span class="n">${number}</span>`
+            : word ? (WORDS.has(word.toLowerCase()) ? `<span class="k">${word}</span>` : word)
+            : escape(other);
+          const kind = flagged?.get(offset + 1);
+          return kind ? `<span class="squiggle ${BAD.has(kind) ? "bad" : "meh"}">${html}</span>` : html;
+        });
+      }).join("\n");
     }
 
+    // The checker runs on every change, which takes well under a millisecond for programs this size.
     function refreshEditor() {
-      $("highlight").innerHTML = highlight(code.value) + "\n"; // the extra line keeps its height in step with the textarea
+      const problems = check(code.value);
+      const marks = new Map();
+      for (const p of problems) marks.set(p.line, (marks.get(p.line) ?? new Map()).set(p.col, p.kind));
+      $("highlight").innerHTML = highlight(code.value, marks) + "\n"; // the extra line keeps its height in step with the textarea
       $("gutter").textContent = code.value.split("\n").map((_, n) => n + 1).join("\n");
+      showProblems(problems);
       syncScroll();
+    }
+
+    function showProblems(problems) {
+      $("problems-view").hidden = !problems.length;
+      $("problems").replaceChildren(...problems.map((p) => {
+        const button = document.createElement("button");
+        button.className = BAD.has(p.kind) ? "bad" : "meh";
+        button.textContent = `${BAD.has(p.kind) ? "⛔" : "⚠"} line ${p.line}: ${p.kind === "fails" ? "will fail: " : ""}${p.message}`;
+        button.onclick = () => jumpTo(p);
+        const li = document.createElement("li");
+        li.append(button);
+        return li;
+      }));
+      $("hint").textContent = problems.length
+        ? `${problems.length} problem${problems.length === 1 ? "" : "s"} found without running`
+        : "Ctrl+Enter runs · Debug goes backwards too";
+    }
+
+    function jumpTo({ line, col }) {
+      const offset = code.value.split("\n").slice(0, line - 1).reduce((n, text) => n + text.length + 1, 0) + col - 1;
+      code.focus();
+      code.setSelectionRange(offset, offset);
     }
     function syncScroll() {
       $("highlight").scrollTop = $("gutter").scrollTop = code.scrollTop;
@@ -215,21 +265,26 @@
       finish("");
     }
 
-    function showBytecode() {
-      $("bytecode-view").hidden = !$("show-bytecode").checked;
-      if ($("bytecode-view").hidden) return;
+    // What the compilers made of the code: the VM's bytecode, or the JavaScript from the JIT.
+    function showCompiled() {
+      const which = $("compiled").value;
+      $("bytecode-view").hidden = !which;
+      if (!which) return;
+      $("compiled-title").textContent = which === "js"
+        ? "JavaScript · what the JIT made, which V8 then compiles to machine code"
+        : "Bytecode · what the compiler made, which the virtual machine runs";
       try {
-        $("bytecode").textContent = disassemble(compile(code.value));
+        $("bytecode").textContent = which === "js" ? compileToJs(code.value).source : disassemble(compile(code.value));
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
-        $("bytecode").textContent = "(fix the mistake in the code to see the bytecode)";
+        $("bytecode").textContent = "(fix the mistake in the code to see it compiled)";
       }
     }
 
     // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is.
     function runCode() {
       stopDebugging("");
-      showBytecode();
+      showCompiled();
       finish("Running…");
       output.textContent = "";
       output.classList.remove("error");
@@ -256,7 +311,7 @@
     function startDebugging() {
       finish("");
       stopDebugging("");
-      showBytecode();
+      showCompiled();
       output.textContent = "";
       output.classList.remove("error");
       render((drawing = []));
@@ -349,7 +404,7 @@
         status.textContent = "Copy the link from the address bar";
       }
     };
-    $("show-bytecode").onchange = showBytecode;
+    $("compiled").onchange = showCompiled;
 
     picker.append(...Object.keys(examples).map((name) => new Option(name)));
     picker.onchange = () => {
