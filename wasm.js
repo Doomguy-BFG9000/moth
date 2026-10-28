@@ -144,24 +144,27 @@ function declareRuntime(m, T, im) {
     });
   });
 
-  // `is divisible by`: for whole numbers below 2^52, a is divisible by b exactly when a = trunc(a / b) * b,
-  // since a whole quotient divides exactly and every product here is a whole number a float holds exactly.
-  // Anything else (fractions, huge numbers, zero, text) goes to JavaScript's %.
-  fn("dv", [EQ, EQ, I32], [I32], (c, f) => {
-    const [a, b] = [f.local(F64), f.local(F64)];
+  // `is divisible by` on two numbers. For whole numbers below 2^52, a is divisible by b exactly when
+  // a = trunc(a / b) * b: a whole quotient divides exactly, and every product here is a whole number a
+  // float holds exactly. Fractions and huge numbers go to JavaScript's %, and 0 to the shared check's error.
+  fn("dvf", [F64, F64, I32], [I32], (c) => {
     const whole = (x) => c.emit("local.get", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq").emit("local.get", x).emit("f64.abs").emit("f64.const", 2 ** 52).emit("f64.lt").emit("i32.and");
-    bothNums(c, T, 0, 1).emit("if");
-    numOf(c, T, 0).emit("local.set", a);
-    numOf(c, T, 1).emit("local.set", b);
-    whole(a);
-    whole(b);
-    c.emit("i32.and").emit("local.get", b).emit("f64.const", 0).emit("f64.ne").emit("i32.and").emit("if");
-    c.emit("local.get", a).emit("local.get", a).emit("local.get", b).emit("f64.div").emit("f64.trunc").emit("local.get", b).emit("f64.mul").emit("f64.eq").emit("return");
-    c.emit("end");
-    c.emit("local.get", b).emit("f64.const", 0).emit("f64.ne").emit("if");
-    c.emit("local.get", a).emit("local.get", b).emit("call", im.remainder).emit("f64.const", 0).emit("f64.eq").emit("return").emit("end");
-    c.emit("end");
-    c.emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.compare);
+    c.emit("local.get", 1).emit("f64.const", 0).emit("f64.eq").emit("if");
+    c.emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("struct.new", T.num).emit("local.get", 1).emit("struct.new", T.num);
+    c.emit("local.get", 2).emit("call", im.compare).emit("return").emit("end");
+    whole(0);
+    whole(1);
+    c.emit("i32.and").emit("if", I32);
+    c.emit("local.get", 0).emit("local.get", 0).emit("local.get", 1).emit("f64.div").emit("f64.trunc").emit("local.get", 1).emit("f64.mul").emit("f64.eq");
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.remainder).emit("f64.const", 0).emit("f64.eq").emit("end");
+  });
+
+  fn("dv", [EQ, EQ, I32], [I32], (c) => {
+    bothNums(c, T, 0, 1).emit("if", I32);
+    numOf(c, T, 0);
+    numOf(c, T, 1);
+    c.emit("local.get", 2).emit("call", R.dvf);
+    c.emit("else").emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.compare).emit("end");
   });
 
   fn("lengthOf", [EQ, I32], [EQ], (c) => {
@@ -365,9 +368,16 @@ class WasmCompiler extends Scope {
     const c = this.c;
     if (!parent) c.emit("local.get", 0).emit("global.set", ctx.maxSteps).emit("call", ctx.init.index);
     const captured = ctx.captured.get(body);
-    this.locals = []; // slot -> local, for the variables that stay here
+    this.numberSet = this.numericSlots(body, captured, parent ? params.length : 0);
+    this.numbers = []; // slot -> { value, box } for the variables that only ever hold numbers
+    this.locals = []; // slot -> local, for the other variables that stay here
     for (let slot = 1; slot <= this.fn.nslots; slot++) {
       if (captured.has(slot)) continue;
+      if (this.numberSet.has(slot)) {
+        this.numbers[slot] = { value: this.f.local(F64), box: this.f.local(EQ) };
+        c.emit("global.get", ctx.unset).emit("local.set", this.numbers[slot].box).note(`${this.fn.names[slot]} has no value yet`);
+        continue;
+      }
       if (parent && slot <= params.length) this.locals[slot] = slot; // an input, already a parameter
       else c.emit("global.get", ctx.unset).emit("local.set", (this.locals[slot] = this.f.local(EQ))).note(`${this.fn.names[slot]} has no value yet`);
     }
@@ -384,6 +394,101 @@ class WasmCompiler extends Scope {
     }
     for (const s of body) this.statement(s);
     if (parent) c.emit("ref.null", "eq");
+  }
+
+  // Type-directed unboxing: the variables of this function (not captured, not inputs) that can only ever
+  // hold a number, because every `set` gives them one, or they count in `for each ... from`, or `add` adds
+  // to them (which gives a number or fails). Each lives in an f64 local, so arithmetic on it allocates
+  // nothing, with a box made only when the number is used as a value, and kept until the number changes.
+  // The box local starts as UNSET, so "has no value yet" still works.
+  numericSlots(body, captured, inputs) {
+    const writes = new Map();
+    const note = (name, value) => {
+      const found = this.resolve(name);
+      if (!found || found[0] !== 0 || found[1] <= inputs || captured.has(found[1])) return;
+      if (!writes.has(found[1])) writes.set(found[1], []);
+      writes.get(found[1]).push(value);
+    };
+    const walk = (statements) => {
+      for (const s of statements) {
+        if (s.kind === "set") note(s.name, s.value);
+        else if (s.kind === "add") note(s.name, "adds");
+        else if (s.kind === "count") note(s.name, "counts");
+        else if (s.kind === "each" || s.kind === "define") note(s.name, null);
+        if (s.kind !== "define") for (const block of [s.then, s.otherwise, s.body]) if (block) walk(block);
+      }
+    };
+    walk(body);
+    const slots = new Set(writes.keys());
+    for (let changed = true; changed; ) { // the most variables that stay numbers if all the others do
+      changed = false;
+      for (const slot of slots) {
+        if (writes.get(slot).every((w) => w === "adds" || w === "counts" || (w !== null && this.isNumber(w, slots)))) continue;
+        slots.delete(slot);
+        changed = true;
+      }
+    }
+    return slots;
+  }
+
+  // whether an expression can only give a number (or fail), when the variables in `slots` hold numbers
+  isNumber(e, slots = this.numberSet) {
+    switch (e.kind) {
+      case "value":
+        return typeof e.value === "number";
+      case "name": {
+        const found = this.resolve(e.name);
+        return Boolean(found) && found[0] === 0 && slots.has(found[1]);
+      }
+      case "math":
+        return e.op !== "+" || (this.isNumber(e.left, slots) && this.isNumber(e.right, slots));
+      case "negate":
+      case "length":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // worth working out as an f64 and boxing once: its parts are numbers already
+  unboxed(e) {
+    if (e.kind === "math") return this.isNumber(e.left) && this.isNumber(e.right);
+    return e.kind === "negate" && this.isNumber(e.operand);
+  }
+
+  numberSlot(name) {
+    const found = this.resolve(name);
+    return found && found[0] === 0 ? this.numbers[found[1]] : undefined;
+  }
+
+  // An expression isNumber() says gives a number, as an f64 on the stack.
+  exprNum(e) {
+    const { T, im } = this.ctx;
+    if (e.kind === "value") return void this.e("f64.const", e.value);
+    if (e.kind === "name") {
+      const { value, box } = this.numberSlot(e.name);
+      this.e("local.get", box).e("global.get", this.ctx.unset).e("ref.eq");
+      this.e("if").e("i32.const", this.id(e.name)).e("i32.const", this.pos(e.at)).e("call", im.unset).e("unreachable").e("end");
+      return void this.e("local.get", value).note(e.name);
+    }
+    if (e.kind === "math" && this.unboxed(e)) {
+      this.exprNum(e.left);
+      this.exprNum(e.right);
+      if (e.op !== "/") return void this.e({ "+": "f64.add", "-": "f64.sub", "*": "f64.mul" }[e.op]);
+      const [a, b] = [this.temp(F64), this.temp(F64)];
+      this.e("local.set", b).e("local.set", a).e("local.get", b).e("f64.const", 0).e("f64.eq").e("if");
+      this.e("i32.const", MATH.indexOf("/")).e("local.get", a).e("struct.new", T.num).e("local.get", b).e("struct.new", T.num);
+      this.e("i32.const", this.pos(e.at)).e("call", im.arithmetic).e("unreachable").e("end");
+      return void this.e("local.get", a).e("local.get", b).e("f64.div");
+    }
+    if (e.kind === "negate" && this.unboxed(e)) return void (this.exprNum(e.operand), this.e("f64.neg"));
+    this.expr(e); // gives a number or fails
+    this.e("ref.cast", T.num).e("struct.get", T.num, 0);
+  }
+
+  // stores the f64 on the stack in a number variable, forgetting its old box
+  setNumber(slot) {
+    this.e("local.set", slot.value).e("ref.null", "eq").e("local.set", slot.box);
   }
 
   e(op, ...args) {
@@ -423,6 +528,11 @@ class WasmCompiler extends Scope {
   }
 
   load(name) {
+    const number = this.numberSlot(name);
+    if (number) { // its box, made now if the number changed since the last one
+      this.e("local.get", number.box).e("ref.is_null").e("if").e("local.get", number.value).e("struct.new", this.ctx.T.num).e("local.set", number.box).e("end");
+      return this.e("local.get", number.box).note(name);
+    }
     const [depth, slot] = this.resolve(name);
     if (depth === 0 && this.locals[slot] !== undefined) return this.e("local.get", this.locals[slot]).note(name);
     this.slotOf(name);
@@ -431,6 +541,7 @@ class WasmCompiler extends Scope {
 
   // `write` emits the value
   store(name, write) {
+    if (this.numberSlot(name)) throw new Error(`'${name}' holds an f64, so it can't be stored boxed`);
     const [depth, slot] = this.resolve(name);
     if (depth === 0 && this.locals[slot] !== undefined) {
       write();
@@ -474,8 +585,12 @@ class WasmCompiler extends Scope {
   statement(s) {
     const { T, R, im } = this.ctx;
     switch (s.kind) {
-      case "set":
-        return this.store(s.name, () => this.expr(s.value));
+      case "set": {
+        const number = this.numberSlot(s.name);
+        if (!number) return this.store(s.name, () => this.expr(s.value));
+        this.exprNum(s.value);
+        return this.setNumber(number);
+      }
       case "setItem": {
         const k = this.pos(s.target.at);
         const [list, at, value] = [this.temp(), this.temp(I32), this.temp()];
@@ -490,6 +605,8 @@ class WasmCompiler extends Scope {
         return;
       }
       case "add": {
+        const number = this.resolve(s.name) && this.numberSlot(s.name);
+        if (number) return this.addToNumber(s, number);
         const value = this.temp();
         this.expr(s.value);
         this.e("local.set", value);
@@ -538,7 +655,9 @@ class WasmCompiler extends Scope {
         numOf(this.c, T, to);
         this.e("local.set", last);
         return this.loop(k, () => this.e("local.get", i).e("local.get", last).e("f64.le").e("i32.eqz"), () => {
-          this.store(s.name, () => this.e("local.get", i).e("struct.new", T.num));
+          const number = this.numberSlot(s.name);
+          if (number) this.e("local.get", i), this.setNumber(number);
+          else this.store(s.name, () => this.e("local.get", i).e("struct.new", T.num));
           this.block(s.body);
           this.e("local.get", i).e("f64.const", 1).e("f64.add").e("local.set", i);
         });
@@ -594,6 +713,25 @@ class WasmCompiler extends Scope {
     }
   }
 
+  // `add value to name` where name only holds numbers: the value first, then the check that name has one
+  addToNumber(s, number) {
+    const { R, im, T } = this.ctx;
+    const k = this.pos(s.at);
+    const fast = this.isNumber(s.value);
+    const value = this.temp(fast ? F64 : EQ);
+    if (fast) this.exprNum(s.value);
+    else this.expr(s.value);
+    this.e("local.set", value);
+    this.e("local.get", number.box).e("global.get", this.ctx.unset).e("ref.eq");
+    this.e("if").e("i32.const", this.id(s.name)).e("i32.const", k).e("call", im.unset).e("unreachable").e("end");
+    if (fast) this.e("local.get", number.value).e("local.get", value).e("f64.add");
+    else { // any other value gives a number (if it is one) or fails, in the shared check
+      this.load(s.name);
+      this.e("local.get", value).e("i32.const", this.id(s.name)).e("i32.const", k).e("call", R.addInto).e("ref.cast", T.num).e("struct.get", T.num, 0);
+    }
+    this.setNumber(number);
+  }
+
   // The function is looked up before its inputs are worked out, and checked after, as in the other engines.
   call(e, statement = false) {
     if (!this.resolve(e.name)) return this.undefinedName(e.name, e.at, { call: true, statement });
@@ -621,6 +759,7 @@ class WasmCompiler extends Scope {
 
   expr(e) {
     const { T, R, im } = this.ctx;
+    if (this.unboxed(e)) return void (this.exprNum(e), this.e("struct.new", T.num));
     switch (e.kind) {
       case "value":
         if (e.value === null) this.e("ref.null", "eq");
@@ -645,6 +784,15 @@ class WasmCompiler extends Scope {
         this.e("i32.const", this.pos(e.at)).e("call", R[["add", "sub", "mul", "div"][MATH.indexOf(e.op)]]);
         return;
       case "compare":
+        if (this.isNumber(e.left) && this.isNumber(e.right)) { // two numbers: no boxes, no checks
+          this.exprNum(e.left);
+          this.exprNum(e.right);
+          if (e.op === "divisible by") this.e("i32.const", this.pos(e.at)).e("call", R.dvf);
+          else this.e({ "is": "f64.eq", "less than": "f64.lt", "greater than": "f64.gt", "at least": "f64.ge", "at most": "f64.le" }[e.op]);
+          if (e.negate) this.e("i32.eqz");
+          this.e("ref.i31");
+          return;
+        }
         this.expr(e.left);
         this.expr(e.right);
         if (e.op === "is") this.e("call", R.eq);

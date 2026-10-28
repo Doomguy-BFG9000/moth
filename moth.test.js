@@ -83,6 +83,11 @@ const PROGRAMS = [
   [`say 1${"0".repeat(400)}`, "Infinity"],
   // divisible by: fractions, negatives, and numbers past 2^52, where the WebAssembly engine leaves it to JavaScript
   ["say (7.5 is divisible by 2.5) \" \" (0 - 4 is divisible by 2) \" \" (9007199254740992 is divisible by 3) \" \" (10 is divisible by 4)", "yes yes no no"],
+  // variables that only ever hold numbers (unboxed by the WebAssembly engine)
+  ['set n to 1\nsay n\nadd 2 to n\nsay n " " (n * 2) " " (n is 3) " " (n / 4)', "1\n3 6 yes 0.75"],
+  ['set total to 0\nfor each i from 1 to 5\n    add i to total\nend\nsay total " " i', "15 5"],
+  ['set x to 10\nset y to x - 3\nset x to y * 2\nsay x " " y " " (x is divisible by 7) " " (0 - x)', "14 7 yes -14"],
+  ["set a to 0 / 1\nset b to 1\nrepeat 3 times\n    set b to b * 2 + a\nend\nsay b", "8"],
   // every control character is a space, and a comment runs to the end of the line
   ["say 1\v+\f2\r\n# a comment say 3\nsay 4", "3\n4"],
 ];
@@ -142,6 +147,12 @@ const ERRORS = [
   ["say person.name", "line 1: I don't understand '.' (to get a field write 'name of person')"],
   ['say "before"\nfail with "your own message"', "line 2: your own message"],
   ["set x to 5 007", "line 1: expected a new line but found '007'"], // numbers are shown as written
+  // variables that only ever hold numbers keep every mistake
+  ['set n to 1\nadd "x" to n', "line 2: can't add text to a number"],
+  ["say n + 1\nset n to 5", "line 1: 'n' has no value yet (give it one with 'set n to ...')"],
+  ["add 1 to n\nset n to 0", "line 1: 'n' has no value yet (give it one with 'set n to ...')"],
+  ["set n to 4\nset m to 0\nsay n / m", "line 3: can't divide by zero"],
+  ["set n to 3\nsay n is divisible by 0", "line 2: can't divide by zero"],
   ['say "a\u0001b"', "line 1: this text is missing its closing quote"], // text can't hold control characters but tab
   ["say 1 😀", "line 1: I don't understand '😀'"],
 ];
