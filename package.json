@@ -1,0 +1,10 @@
+{
+  "name": "moth",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test",
+    "bench": "node bench.js"
+  }
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moth playground</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+    body { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { margin-bottom: 0; }
+    .bar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 1rem 0 0.5rem; }
+    textarea, pre { box-sizing: border-box; width: 100%; padding: 0.75rem; border: 1px solid #8888; border-radius: 6px; font: 0.95rem/1.5 ui-monospace, Consolas, monospace; tab-size: 2; }
+    textarea { height: 20rem; resize: vertical; }
+    pre { min-height: 5rem; margin: 0; white-space: pre-wrap; }
+    pre.error { border-color: #d33; }
+    button, select { font: inherit; padding: 0.3rem 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>Moth</h1>
+  <p>A small programming language that reads like plain English. Pick an example or write your own, then press <strong>Run</strong> or Ctrl+Enter.</p>
+
+  <div class="bar">
+    <label>Example <select id="example"></select></label>
+    <button id="run" type="button">Run</button>
+    <button id="stop" type="button" disabled>Stop</button>
+    <span id="status" role="status"></span>
+  </div>
+  <label for="code">Code</label>
+  <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+
+  <h2>Output</h2>
+  <pre id="output" aria-live="polite"></pre>
+
+  <script type="module">
+    import examples from "./examples.js";
+
+    const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map((id) => document.getElementById(id));
+    let worker = null;
+
+    function finish(message) {
+      worker?.terminate();
+      worker = null;
+      stopButton.disabled = true;
+      status.textContent = message;
+    }
+
+    function fail(text) {
+      output.classList.add("error");
+      output.append(text);
+      finish("");
+    }
+
+    // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is.
+    function runCode() {
+      finish("Running…");
+      output.textContent = "";
+      output.classList.remove("error");
+      stopButton.disabled = false;
+      const current = (worker = new Worker("./worker.js", { type: "module" }));
+      current.onmessage = ({ data }) => {
+        if (worker !== current) return; // a message from a run that was already replaced
+        if (data.lines) output.append(data.lines.join("\n") + "\n");
+        if (data.error) fail(data.error);
+        if (data.done) {
+          if (data.empty) output.append("(no output)");
+          finish("");
+        }
+      };
+      current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
+      current.postMessage(code.value);
+    }
+
+    stopButton.onclick = () => {
+      output.append("(stopped)");
+      finish("Stopped.");
+    };
+
+    picker.append(...Object.keys(examples).map((name) => new Option(name)));
+    picker.onchange = () => {
+      code.value = examples[picker.value];
+      runCode();
+    };
+    document.getElementById("run").onclick = runCode;
+    code.onkeydown = (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runCode();
+      }
+    };
+    picker.onchange();
+  </script>
+</body>
+</html>
