@@ -411,3 +411,68 @@ to set_icon with parent, file
     end
     return gtk's set_icon(parent, file)
 end
+
+# games: keys, the mouse, pictures and sounds
+
+to key_down with control, name
+    if on_windows
+        return win's key_down(control, name)
+    end
+    return gtk's key_down(control, name)
+end
+
+to mouse_x with control
+    if on_windows
+        return win's mouse_x(control)
+    end
+    return gtk's mouse_x(control)
+end
+
+to mouse_y with control
+    if on_windows
+        return win's mouse_y(control)
+    end
+    return gtk's mouse_y(control)
+end
+
+to mouse_down with control
+    if on_windows
+        return win's mouse_down(control)
+    end
+    return gtk's mouse_down(control)
+end
+
+to on_key with control, handler
+    if on_windows
+        return win's on_key(control, handler)
+    end
+    return gtk's on_key(control, handler)
+end
+
+to load_image with file
+    if on_windows
+        return win's load_image(file)
+    end
+    return gtk's load_image(file)
+end
+
+to draw_image with canvas, image, x, y
+    if on_windows
+        return win's draw_image(canvas, image, x, y)
+    end
+    return gtk's draw_image(canvas, image, x, y)
+end
+
+to draw_image_sized with canvas, image, x, y, width, height
+    if on_windows
+        return win's draw_image_sized(canvas, image, x, y, width, height)
+    end
+    return gtk's draw_image_sized(canvas, image, x, y, width, height)
+end
+
+to play_sound with file
+    if on_windows
+        return win's play_sound(file)
+    end
+    return gtk's play_sound(file)
+end

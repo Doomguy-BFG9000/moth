@@ -1,0 +1,79 @@
+# Catch the falling stars: a game made with game.moth, for Windows and Linux. Move with the arrow keys or the
+# mouse; three stars missed and it's over; Space starts again.
+#
+#   moth build tools/catch.moth --allow-libraries
+
+use "game.moth" as game
+
+set width to 480
+set height to 360
+set paddle to 200 # where the basket is, from the left
+set stars to empty list # each a record with x, y and how fast it falls
+set score to 0
+set lives to 3
+set until_next to 0 # seconds before the next star
+
+to restart with key
+    if key is "Space" and lives is 0
+        set stars to empty list
+        set score to 0
+        set lives to 3
+    end
+end
+
+to update with seconds
+    if lives is 0
+        return nothing
+    end
+    if game's key_down("Left")
+        set paddle to paddle - 300 * seconds
+    end
+    if game's key_down("Right")
+        set paddle to paddle + 300 * seconds
+    end
+    if game's mouse_down()
+        set paddle to game's mouse_x() - 40
+    end
+    if paddle is less than 0
+        set paddle to 0
+    else if paddle is greater than width - 80
+        set paddle to width - 80
+    end
+    set until_next to until_next - seconds
+    if until_next is at most 0
+        add record with x random number from 20 to width - 20, y 0, speed 80 + random number from 0 to 60 + score * 4 to stars
+        set until_next to 0.9
+    end
+    set falling to empty list
+    for each star in stars
+        set y of star to y of star + speed of star * seconds
+        if y of star is at least height - 40 and x of star is at least paddle and x of star is at most paddle + 80
+            add 1 to score
+        else if y of star is greater than height
+            set lives to lives - 1
+        else
+            add star to falling
+        end
+    end
+    set stars to falling
+end
+
+to show with canvas
+    game's colour(canvas, 12, 14, 40)
+    game's rectangle(canvas, 0, 0, width, height)
+    game's colour(canvas, 255, 220, 80)
+    for each star in stars
+        game's circle(canvas, x of star, y of star, 8)
+    end
+    game's colour(canvas, 120, 200, 255)
+    game's rectangle(canvas, paddle, height - 30, 80, 12)
+    game's colour(canvas, 255, 255, 255)
+    game's words(canvas, "Score " + score + "    Lives " + lives, 10, 8)
+    if lives is 0
+        game's words(canvas, "Game over: press Space to play again", 110, height / 2)
+    end
+end
+
+game's window("Catch the stars", width, height)
+game's on_key(restart)
+game's run_game(update, show)

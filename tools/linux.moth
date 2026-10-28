@@ -120,9 +120,17 @@ use the library "gtk-3"
     gtk_drawing_area_new() gives a pointer
     gtk_widget_queue_draw(a pointer)
     gtk_widget_add_events(a pointer, a whole number)
+    gdk_cairo_set_source_pixbuf(a pointer, a pointer, a number, a number)
+    gtk_test_widget_send_key(a pointer, a whole number, a whole number) gives yes or no
 end
 use the library "gdk_pixbuf-2.0"
     gdk_pixbuf_new_from_file_at_scale(text, a whole number, a whole number, yes or no, a pointer) gives a pointer
+    gdk_pixbuf_loader_new() gives a pointer
+    gdk_pixbuf_loader_write(a pointer, bytes, a long whole number, a pointer) gives yes or no
+    gdk_pixbuf_loader_close(a pointer, a pointer) gives yes or no
+    gdk_pixbuf_loader_get_pixbuf(a pointer) gives a pointer
+    gdk_pixbuf_get_width(a pointer) gives a whole number
+    gdk_pixbuf_get_height(a pointer) gives a whole number
 end
 use the library "cairo"
     cairo_set_source_rgb(a pointer, a number, a number, a number)
@@ -137,6 +145,10 @@ use the library "cairo"
     cairo_select_font_face(a pointer, text, a whole number, a whole number)
     cairo_set_font_size(a pointer, a number)
     cairo_show_text(a pointer, text)
+    cairo_save(a pointer)
+    cairo_restore(a pointer)
+    cairo_translate(a pointer, a number, a number)
+    cairo_scale(a pointer, a number, a number)
 end
 use the library "gobject-2.0"
     callback gsignal(a pointer, a pointer)
@@ -159,6 +171,17 @@ use the library "c"
     structure button_event with kind as a whole number, surface as a pointer, sent as a whole number,
         time as a whole number, x as a number, y as a number
     "memcpy" as read_event(a button_event, a pointer, a long whole number) gives a pointer
+    structure key_event with kind as a whole number, surface as a pointer, sent as a whole number,
+        time as a whole number, state as a whole number, keyval as a whole number
+    "memcpy" as read_key(a key_event, a pointer, a long whole number) gives a pointer
+    "fork" as unix_fork() gives a whole number
+    "execvp" as unix_exec(text, bytes) gives a whole number
+    "_exit" as unix_exit(a whole number)
+    "strdup" as unix_copy(text) gives a pointer
+    "getpid" as unix_pid() gives a whole number
+    "open" as unix_open(text, a whole number, a whole number) gives a whole number
+    "write" as unix_write(a whole number, bytes, a long whole number) gives a long whole number
+    "close" as unix_close(a whole number) gives a whole number
 end
 
 set ui_ready to no
@@ -284,11 +307,14 @@ to ui_pressed with widget, event, data
         return yes
     end
     set drawn to item id of ui_controls
+    set where to record with kind 0, surface nothing, sent 0, time 0, x 0, y 0
+    read_event(where, event, 40)
+    set mouse_x of drawn to x of where
+    set mouse_y of drawn to y of where
+    set pressed of drawn to yes
     if clicked of drawn is not nothing
-        set pressed to record with kind 0, surface nothing, sent 0, time 0, x 0, y 0
-        read_event(pressed, event, 40)
         set handler to clicked of drawn
-        handler(x of pressed, y of pressed)
+        handler(x of where, y of where)
     end
     return yes
 end
@@ -887,12 +913,21 @@ end
 # colour, rectangle, circle, line and words, in pixels as at 100% from the drawing's top left
 to drawing with parent, x, y, width, height, painter
     set area to gtk_drawing_area_new()
-    gtk_widget_add_events(area, 256) # GDK_BUTTON_PRESS_MASK
+    gtk_widget_add_events(area, 256 + 512 + 4) # GDK_BUTTON_PRESS_MASK, GDK_BUTTON_RELEASE_MASK, GDK_POINTER_MOTION_MASK
     set made to ui_control(parent, area, nothing, x, y, width, height, "drawing", nothing)
     set painter of made to painter
     set clicked of made to nothing
+    set held of made to empty dictionary
+    set mouse_x of made to 0
+    set mouse_y of made to 0
+    set pressed of made to no
+    set typed of made to nothing
     connect_decide(area, "draw", ui_decide, id of made, nothing, 0)
     connect_decide(area, "button-press-event", ui_pressed, id of made, nothing, 0)
+    connect_decide(area, "button-release-event", ui_let_go, id of made, nothing, 0)
+    connect_decide(area, "motion-notify-event", ui_moved, id of made, nothing, 0)
+    connect_decide(handle of window of made, "key-press-event", ui_key_pressed, id of made, nothing, 0)
+    connect_decide(handle of window of made, "key-release-event", ui_key_released, id of made, nothing, 0)
     return made
 end
 
@@ -940,4 +975,160 @@ to set_icon with parent, file
     if not gtk_window_set_icon_from_file(handle of parent, file, nothing)
         fail with "can't show '" + file + "': it isn't there, or isn't a picture"
     end
+end
+
+# ---------- games: keys held, the mouse, pictures and sounds ----------
+
+# each key's name, from GTK's number for it; a letter's and a digit's is itself, and F1 to F12 theirs
+set ui_keyval_names to dictionary where 65361 is "Left", 65362 is "Up", 65363 is "Right", 65364 is "Down", 32 is "Space",
+    65293 is "Enter", 65421 is "Enter", 65307 is "Escape", 65505 is "Shift", 65506 is "Shift", 65507 is "Ctrl",
+    65508 is "Ctrl", 65513 is "Alt", 65514 is "Alt", 65289 is "Tab", 65288 is "Backspace", 65535 is "Delete"
+set ui_sound_count to 0
+
+to ui_keyval_name with code
+    if code is in ui_keyval_names
+        return item code of ui_keyval_names
+    end
+    if (code is at least 97 and code is at most 122) or (code is at least 65 and code is at most 90) or (code is at least 48 and code is at most 57)
+        return uppercase of ((list of code) as bytes as text)
+    end
+    if code is at least 65470 and code is at most 65481
+        return "F" + (code - 65469)
+    end
+    return "key " + code
+end
+
+to ui_key_pressed with widget, event, data
+    ui_key_changed(event, data, yes)
+    return no # on to the window's own: its menus' keys
+end
+
+to ui_key_released with widget, event, data
+    ui_key_changed(event, data, no)
+    return no
+end
+
+to ui_key_changed with event, data, down
+    set id to ui_number(data)
+    if not (id is in ui_controls)
+        return nothing
+    end
+    set drawn to item id of ui_controls
+    set pressed_key to record with kind 0, surface nothing, sent 0, time 0, state 0, keyval 0
+    read_key(pressed_key, event, 32)
+    set named to lowercase of ui_keyval_name(keyval of pressed_key)
+    set held to held of drawn
+    if down
+        set item named of held to yes
+        if typed of drawn is not nothing
+            set handler to typed of drawn
+            handler(ui_keyval_name(keyval of pressed_key))
+        end
+    else if named is in held
+        remove named from held
+    end
+end
+
+to ui_moved with widget, event, data
+    set id to ui_number(data)
+    if id is in ui_controls
+        set drawn to item id of ui_controls
+        set where to record with kind 0, surface nothing, sent 0, time 0, x 0, y 0
+        read_event(where, event, 40)
+        set mouse_x of drawn to x of where
+        set mouse_y of drawn to y of where
+    end
+    return yes
+end
+
+to ui_let_go with widget, event, data
+    set id to ui_number(data)
+    if id is in ui_controls
+        set pressed of item id of ui_controls to no
+    end
+    return yes
+end
+
+# whether a key is held down in the drawing's window: "Left", "Right", "Up", "Down", "Space", "Enter",
+# "Escape", "Shift", "Ctrl", "Alt", "Tab", "Backspace", "Delete", a letter, a digit, or F1 to F12, small
+# letters or capitals
+to key_down with control, name
+    return lowercase of name is in held of control
+end
+
+# where the mouse was last on the drawing, and whether its button is down
+to mouse_x with control
+    return mouse_x of control
+end
+
+to mouse_y with control
+    return mouse_y of control
+end
+
+to mouse_down with control
+    return pressed of control
+end
+
+# a picture from a file, or one built into the program (a PNG, JPEG, GIF or BMP), to draw with draw_image
+to load_image with file
+    set data to read bytes file
+    set loader to gdk_pixbuf_loader_new()
+    set read_it to gdk_pixbuf_loader_write(loader, data, length of data, nothing)
+    set closed to gdk_pixbuf_loader_close(loader, nothing)
+    set picture to nothing
+    if read_it and closed
+        set picture to gdk_pixbuf_loader_get_pixbuf(loader)
+    end
+    if picture is nothing
+        fail with "can't show '" + file + "': it isn't a picture"
+    end
+    return record with kind "image", image picture, loader loader, width gdk_pixbuf_get_width(picture),
+        height gdk_pixbuf_get_height(picture)
+end
+
+# a picture drawn with its top left at x, y, at its own size (draw_image) or made `width` by `height`
+to draw_image with canvas, image, x, y
+    draw_image_sized(canvas, image, x, y, width of image, height of image)
+end
+
+to draw_image_sized with canvas, image, x, y, width, height
+    cairo_save(cr of canvas)
+    cairo_translate(cr of canvas, x, y)
+    cairo_scale(cr of canvas, width / width of image, height / height of image)
+    gdk_cairo_set_source_pixbuf(cr of canvas, image of image, 0, 0)
+    cairo_paint(cr of canvas)
+    cairo_restore(cr of canvas)
+end
+
+# a WAV file, or one built into the program, played while the program goes on: by paplay, PulseAudio's and
+# PipeWire's, or ALSA's aplay, whichever is there
+to play_sound with file
+    set data to read bytes file
+    set ui_sound_count to ui_sound_count + 1
+    set sound_file to "/tmp/moth-sound-" + unix_pid() + "-" + ui_sound_count + ".wav"
+    set made to unix_open(sound_file, 577, 384) # O_WRONLY, O_CREAT, O_TRUNC; for this user alone
+    if made is less than 0
+        fail with "can't play '" + file + "': there's no room for it in /tmp"
+    end
+    unix_write(made, data, length of data)
+    unix_close(made)
+    set all to list of "sh", "-c", "paplay \"$1\" 2>/dev/null || aplay -q \"$1\" 2>/dev/null; rm -f \"$1\"", "sh", sound_file
+    set pointers to (8 * length of all + 8) bytes # argv: each as C has it, then NULL
+    set at to 0
+    for each one in all
+        set copied to unix_copy(one)
+        for each k from 1 to 6
+            set byte (at + k) of pointers to (shift copied right by (8 * (k - 1))) bit and 255
+        end
+        set at to at + 8
+    end
+    if unix_fork() is 0 # the player, until it becomes sh
+        unix_exec("sh", pointers)
+        unix_exit(127)
+    end
+end
+
+# a drawing's handler for each key pressed in its window, given the key's name, as key_down knows them
+to on_key with control, handler
+    set typed of control to handler
 end

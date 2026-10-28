@@ -357,6 +357,11 @@ bytes and dictionaries:
   program, or this one again with other arguments (`start_self`), left to run
   while the program, or its window, goes on; `done` says whether it has ended
   without waiting, and `output_of` and `code_of` what it said and ended with.
+- [`game.moth`](tools/game.moth) is for games, on Windows and Linux: a window
+  drawn again about 60 times a second, `update(seconds)` then `show(canvas)`
+  each frame, the keys held (`key_down("Left")`), the mouse, pictures from
+  PNG files drawn at any size, and WAV sounds; [`catch.moth`](tools/catch.moth)
+  is a game made with it.
 - [`notes.moth`](tools/notes.moth) is a notepad made with ui.moth, in under 120
   lines, on Windows and Linux: New, Open, Save and Save as, with their keys, a
   `*` in the title while a note isn't saved, and a question before one is lost.
@@ -933,7 +938,9 @@ calls that led there.
   and `tools/text.test.moth` and `tools/dates.test.moth` on all three engines
   and in machine code, 400 years of the calendar among them; `tools/hash.test.moth`
   against FIPS 180-4's hashes and Node's crypto, the same way; and
-  `tools/system.moth` saying the same, word for word, on Windows and Linux
+  `tools/system.moth` saying the same, word for word, on Windows and Linux; and
+  `tools/game.moth` playing itself, a key held and let go and the mouse clicked
+  by the system's own messages, at 30 frames a second or more, on both
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

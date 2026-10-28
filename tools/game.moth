@@ -1,0 +1,147 @@
+# Games, on Windows and Linux: a window drawn again about 60 times a second, what's held on the keyboard, where
+# the mouse is, pictures and sounds. On ui.moth, so it needs windows.moth, linux.moth and ui.moth beside it,
+# and is built with --allow-libraries (and --allow-read for pictures and sounds that aren't built in).
+#
+#   use "game.moth" as game
+#   set x to 100
+#   to update with seconds                  # how long since the last frame, about a 60th of a second
+#       if game's key_down("Right")
+#           set x to x + 200 * seconds
+#       end
+#   end
+#   to show with canvas
+#       game's colour(canvas, 20, 20, 40)
+#       game's rectangle(canvas, 0, 0, 640, 480)
+#       game's draw_image(canvas, ship, x, 200)
+#   end
+#   game's window("Space", 640, 480)
+#   set ship to game's image("ship.png")
+#   game's run_game(update, show)
+#
+# update is called first, then show, each frame. on_key's handler is given each key as it's pressed, and
+# on_click's where the mouse was clicked; stop_game closes the window, which ends run_game.
+
+use "ui.moth" as ui
+
+set game_window to nothing
+set game_board to nothing # the drawing that is the whole window
+set game_update to nothing
+set game_draw to nothing
+set game_last to 0
+set game_frames to 0
+
+# the game's window, `width` by `height`, and the drawing in it
+to window with title, width, height
+    set game_window to ui's window(title, width, height)
+    set game_board to ui's drawing(game_window, 0, 0, width, height, game_paint)
+    ui's focus(game_board)
+    return game_window
+end
+
+# the drawing, for what ui.moth does with one
+to board
+    return game_board
+end
+
+to game_paint with canvas
+    if game_draw is not nothing
+        set drawer to game_draw
+        drawer(canvas)
+    end
+end
+
+to game_tick
+    set now_seconds to the clock
+    set step to now_seconds - game_last
+    set game_last to now_seconds
+    if step is greater than 0.25 # after the program was held up: a frame, not a leap
+        set step to 0.25
+    end
+    set game_frames to game_frames + 1
+    if game_update is not nothing
+        set updater to game_update
+        updater(step)
+    end
+    ui's redraw(game_board)
+end
+
+# the frames, until the window is closed
+to run_game with update, show
+    set game_update to update
+    set game_draw to show
+    set game_last to the clock
+    ui's timer(game_window, 16, game_tick)
+    ui's redraw(game_board)
+    ui's run()
+end
+
+to stop_game
+    ui's close(game_window)
+end
+
+# how many frames there have been
+to frames
+    return game_frames
+end
+
+to key_down with name
+    return ui's key_down(game_board, name)
+end
+
+to on_key with handler
+    ui's on_key(game_board, handler)
+end
+
+to on_click with handler
+    ui's on_click(game_board, handler)
+end
+
+to mouse_x
+    return ui's mouse_x(game_board)
+end
+
+to mouse_y
+    return ui's mouse_y(game_board)
+end
+
+to mouse_down
+    return ui's mouse_down(game_board)
+end
+
+# a picture from a file, or one built in, and its width and height
+to image with file
+    return ui's load_image(file)
+end
+
+to draw_image with canvas, picture, x, y
+    ui's draw_image(canvas, picture, x, y)
+end
+
+to draw_image_sized with canvas, picture, x, y, width, height
+    ui's draw_image_sized(canvas, picture, x, y, width, height)
+end
+
+# a WAV file played while the game goes on
+to sound with file
+    ui's play_sound(file)
+end
+
+to colour with canvas, red, green, blue
+    ui's colour(canvas, red, green, blue)
+end
+
+to rectangle with canvas, x, y, width, height
+    ui's rectangle(canvas, x, y, width, height)
+end
+
+to circle with canvas, x, y, radius
+    ui's circle(canvas, x, y, radius)
+end
+
+to line with canvas, x1, y1, x2, y2
+    ui's line(canvas, x1, y1, x2, y2)
+end
+
+to words with canvas, text, x, y
+    ui's words(canvas, text, x, y)
+end

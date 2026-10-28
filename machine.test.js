@@ -952,8 +952,9 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
+    if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
     const bytes = machine(source, { target, name: "p.moth", allow, files });
     writeFileSync(exe, bytes);
@@ -1704,6 +1705,95 @@ test("tools/linux.moth makes progress bars, pictures, tabs, tables and drawings"
     hide: "",
   }), ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
   assert.deepEqual([ran.stdout, ran.status], [moreSaid(""), 0], ran.stderr);
+});
+
+// tools/game.moth: a game that plays itself, its frames driven by its own timer, a key pressed and let go and
+// the mouse moved and clicked as the system's own messages would (on Linux, GTK's own call for a key), a
+// picture drawn, a sound played, and how many frames a second
+const gameSource = (system, press, release, mouse) => `use "game.moth" as game
+use "${system}" as direct
+set log to empty list
+set x to 0
+set x_after to 0
+set frame to 0
+set start_clock to 0
+set painted to 0
+to pressed with key
+    add "pressed " + key to log
+end
+to clicked with px, py
+    add "clicked " + px + " " + py to log
+end
+to update with seconds
+    add 1 to frame
+    if game's key_down("Right")
+        set x to x + 100 * seconds
+    end
+    set b to handle of game's board()
+    if frame is 2
+        set start_clock to the clock
+        game's sound("beep.wav")
+    else if frame is 3
+        ${press}
+    else if frame is 20
+        ${release}
+    else if frame is 21
+        add "held " + game's key_down("right") to log
+        set x_after to x
+    else if frame is 25
+        add "stopped " + (x is x_after) to log
+        ${mouse}
+    else if frame is 62
+        add "frames a second at least 30: " + (60 / (the clock - start_clock) is at least 30) to log
+        ${system === "windows.moth" ? "direct's sendmessagew(b, 15, 0, 0)" : "add 0 to painted"}
+    else if frame is 64
+        game's stop_game()
+    end
+end
+to show with canvas
+    add 1 to painted
+    game's colour(canvas, 10, 10, 30)
+    game's rectangle(canvas, 0, 0, 320, 240)
+    game's draw_image(canvas, picture, x, 40)
+    game's draw_image_sized(canvas, picture, 10, 160, 60, 40)
+    game's words(canvas, "frame " + frame, 10, 10)
+end
+set w to game's window("Game", 320, 240)
+${system === "windows.moth" ? "direct's showwindow(handle of w, 0)" : ""}
+set picture to game's image("mandelbrot.png")
+add "picture " + width of picture + " by " + height of picture to log
+game's on_key(pressed)
+game's on_click(clicked)
+try
+    game's run_game(update, show)
+if it fails with why
+    add why to log
+end
+for each line in log
+    say line
+end
+say "painted " + (painted is greater than 0) + ", " + (game's frames() is at least 62) + " frames"`;
+// a WAV file of a 20th of a second of silence: 8 bits, one channel, 8000 a second
+function silentWav() {
+  const data = Buffer.alloc(400, 128);
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0); head.writeUInt32LE(36 + data.length, 4); head.write("WAVEfmt ", 8); head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(8000, 24); head.writeUInt32LE(8000, 28);
+  head.writeUInt16LE(1, 32); head.writeUInt16LE(8, 34); head.write("data", 36); head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+test("tools/game.moth plays a game: frames, keys held, the mouse, pictures and sounds, on Windows", { skip: target === "windows" ? skip : "Windows only" }, () => {
+  const ran = libraryRun(gameSource("windows.moth", "direct's postmessagew(b, 256, 39, 0)", "direct's postmessagew(b, 257, 39, 0)",
+    "direct's postmessagew(b, 512, 0, 30 + 40 * 65536)\n        direct's postmessagew(b, 513, 1, 30 + 40 * 65536)\n        direct's postmessagew(b, 514, 0, 30 + 40 * 65536)"),
+    ["--allow-libraries", "--allow-read"]);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["picture 720 by 480\npressed Right\nheld no\nstopped yes\nclicked 30 40\n"
+    + "frames a second at least 30: yes\npainted yes, yes frames\n", "", 0]);
+});
+test("tools/game.moth plays a game: frames, keys held, pictures and sounds, on Linux", { skip: onGtk }, () => {
+  const ran = libraryRun(gameSource("linux.moth", "direct's gtk_test_widget_send_key(b, 65363, 0)", "add 0 to x_after", "add 0 to x_after"),
+    ["--allow-libraries", "--allow-read"], { NO_AT_BRIDGE: "1", GDK_BACKEND: "x11", GDK_CORE_DEVICE_EVENTS: "1" }); // GTK's test keys: X11's core events
+  assert.deepEqual([ran.stdout, ran.status], ["picture 720 by 480\npressed Right\nheld no\nstopped yes\n"
+    + "frames a second at least 30: yes\npainted yes, yes frames\n", 0], ran.stderr);
 });
 
 test("only a program that reads can go online, and only it imports WinHTTP", () => {

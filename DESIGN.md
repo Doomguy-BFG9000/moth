@@ -2482,8 +2482,8 @@ hold them to agreeing.
   CreateDirectoryW, GetEnvironmentVariableW and the rest), libc's on Linux
   (`stat`, its mode at byte 24, its size at 48 and its time at 88 on x86-64;
   `rename`, `mkdir`, `getenv`, `getcwd` and the rest). `make_folder` makes the
-  folders a folder is in too, as `mkdir -p`. `move` and `copy` are Moth's own
-  words, so they're `move_file` and `copy_file`.
+  folders a folder is in too, as `mkdir -p`. `move` is a Moth word (the
+  turtle's), so it's `move_file`, and `copy_file` to match.
 - **Tested.** hash.test.moth: the empty text, `abc`, the fox, FIPS 180-4's
   448-bit one, 55, 56 and 64 bytes of `a` (where the padding takes another
   block), text and its bytes alike, and 1000 bytes against Node's crypto, on
@@ -2492,3 +2492,41 @@ hold them to agreeing.
   and time, folders made in folders and removed, a folder that isn't empty
   refused, a file copied, moved and removed, a variable set, read and
   removed, the current folder changed and back, and the mistakes.
+
+## 56. Games
+
+- **Why.** A game is the program people most want to make first, and it needs
+  what a window with buttons doesn't: drawing again many times a second, the
+  keys being held, not just typed, where the mouse is, pictures and sounds.
+- **[`tools/game.moth`](tools/game.moth)** is a window that is all one drawing,
+  on ui.moth, so on Windows and Linux: `run_game(update, show)` calls
+  `update(seconds)` and then `show(canvas)` about 60 times a second, by a 16 ms
+  timer, with how long it's been since the frame before (a quarter of a second
+  at most, so a program held up takes a step, not a leap). `the clock` times
+  it. `key_down`, `mouse_x`, `mouse_y` and `mouse_down` say what's held and
+  where; `on_key` and `on_click` are told as it happens.
+- **In windows.moth and linux.moth.** A drawing keeps the keys held, by name,
+  from WM_KEYDOWN and WM_KEYUP (and says it wants all of them, WM_GETDLGCODE,
+  so `run`'s dialog manager leaves the arrows to it; and forgets them when it
+  loses the keys), or from GTK's key-press-event and key-release-event on its
+  window; and the mouse, from WM_MOUSEMOVE and the button's messages, or
+  motion-notify-event. Its keys' names are the same on both: Left, Space, A,
+  F1 and the rest, whatever case they're asked for in.
+- **No flicker on Windows.** A drawing is drawn into a bitmap of the window's
+  size, then onto the window in one BitBlt, and WM_ERASEBKGND does nothing:
+  each frame a whole new picture, as GTK's double buffering gives already.
+- **Pictures** are read as bytes, so one built into the program by
+  `--include` works as one on the disk does: on Windows into an IStream
+  (SHCreateMemStream) that GDI+ makes a bitmap of, drawn with
+  GdipDrawImageRectI, nearest-pixel so it's sharp and quick; on Linux into a
+  GdkPixbufLoader, drawn with cairo, scaled to the size asked for.
+- **Sounds** are WAV files: on Windows PlaySoundW plays their bytes from
+  memory, kept while they play; on Linux a copy in /tmp, played by `paplay`
+  (PulseAudio's and PipeWire's) or `aplay` (ALSA's), started by fork and
+  execvp and not waited for. A new one stops the one before on Windows.
+- **Tested.** A game that plays itself, the same on both but for how a person
+  is made: a picture's size read, a sound played, a key pressed (by its
+  message on Windows; on Linux by GTK's own test call, which needs X11's core
+  events), held for 17 frames and let go, moving what it held and then not,
+  the mouse moved, pressed and let go, at least 30 frames a second, and a
+  frame painted. And `tools/catch.moth`, a game of falling stars, played.
