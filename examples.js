@@ -1,5 +1,44 @@
 // Shown in the playground's example menu, and run by the tests.
 export default {
+  "Spiral": `# the turtle starts in the middle, facing up, and draws wherever it moves
+set colors to list of "tomato", "gold", "mediumseagreen", "dodgerblue", "orchid"
+set size to 1
+repeat 30 times
+    for each color in colors
+        pen color color
+        move forward size
+        turn right 73
+        add 2.6 to size
+    end
+end`,
+
+  "Tree": `# a function that calls itself draws every branch
+to branch with size
+    if size is less than 6
+        return
+    end
+    if size is less than 20
+        pen color "mediumseagreen"
+    else
+        pen color "sienna"
+    end
+    pen width size / 8
+    move forward size
+    turn left 25
+    branch size * 0.72
+    turn right 50
+    branch size * 0.72
+    turn left 25
+    pen up
+    move back size
+    pen down
+end
+
+pen up
+move back 220
+pen down
+branch 105`,
+
   "Hello": `say "Hello, world!"
 set name to "Moth"
 say "My name is " name " and it has " length of name " letters."`,

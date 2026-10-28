@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, UNSET, Machine, execute } from "./vm.js";
+import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -64,7 +64,7 @@ function tokenize(src) {
 // ---------- syntax tree ----------
 
 // words that start a statement or a value, so they can't name a variable
-const RESERVED = new Set(["set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item"]);
+const RESERVED = new Set(["set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen"]);
 
 // Every node keeps the token it came from (`at`), so errors can point at it.
 function parse(tokens) {
@@ -160,6 +160,15 @@ function parse(tokens) {
     if (word("return")) {
       if (!fnDepth) fail(t, "'return' only works inside a function (one made with 'to')");
       return { kind: "return", value: peek().nl ? null : expression(), at: t };
+    }
+    // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
+    const turtle = { move: ["forward", "back"], turn: ["left", "right"], pen: ["up", "down", "color", "width"] }[t.value];
+    if (t.type === "word" && turtle) {
+      pos++;
+      const action = turtle.find(isWord);
+      if (!action) expected(turtle.map((w) => `'${w}'`).join(" or "));
+      pos++;
+      return { kind: "turtle", action, value: action === "up" || action === "down" ? null : expression(), at: t };
     }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
@@ -284,10 +293,10 @@ function parse(tokens) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
-const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return"];
+const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen"];
 
 // Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
 function distance(a, b) {
@@ -494,6 +503,10 @@ class Compiler {
         this.call(s, true);
         this.emit(s.at, POP);
         return;
+      case "turtle":
+        if (s.value) this.expr(s.value);
+        this.emit(s.at, TURTLE, TURTLE_ACTIONS.indexOf(s.action));
+        return;
     }
   }
 
@@ -599,16 +612,17 @@ export function compile(source, options) {
   }
 }
 
-// Runs a Moth program. Each `say` line goes to `print`; mistakes in the program throw MothError.
-// `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
-export function run(source, print = console.log, { maxSteps = Infinity } = {}) {
-  execute(compile(source), print, maxSteps);
+// Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`; mistakes in
+// the program throw MothError. `maxSteps` stops loops and calls after that many rounds, for running
+// untrusted code without a Stop button.
+export function run(source, print = console.log, { maxSteps = Infinity, draw } = {}) {
+  new Machine(compile(source), print, { maxSteps, draw }).run();
 }
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log) {
-  return new Machine(compile(source, { debug: true }), print);
+export function debug(source, print = console.log, draw = undefined) {
+  return new Machine(compile(source, { debug: true }), print, { draw });
 }
 
 // A shell session: each entry runs with the variables and functions made by the entries before it.

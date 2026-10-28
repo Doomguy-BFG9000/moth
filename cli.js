@@ -7,9 +7,24 @@ import { run, compile, disassemble, session, excerpt, MothError } from "./moth.j
 
 const USAGE = `usage:
   moth                        start the Moth shell
-  moth run <file.moth>        run a program
+  moth run <file.moth>        run a program; if it draws, the drawing goes to <file>.svg
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes`;
+
+// The turtle's lines as an SVG picture, framed to fit them. Moth's y goes up and SVG's goes down, so y is flipped.
+function svg(lines) {
+  let [left, right, bottom, top] = [Infinity, -Infinity, Infinity, -Infinity];
+  for (const l of lines) {
+    const pad = l.width / 2 + 10;
+    left = Math.min(left, l.x1 - pad, l.x2 - pad);
+    right = Math.max(right, l.x1 + pad, l.x2 + pad);
+    bottom = Math.min(bottom, l.y1 - pad, l.y2 - pad);
+    top = Math.max(top, l.y1 + pad, l.y2 + pad);
+  }
+  const attr = (text) => String(text).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`); // colors are the program's own text
+  const body = lines.map((l) => `  <line x1="${l.x1}" y1="${-l.y1}" x2="${l.x2}" y2="${-l.y2}" stroke="${attr(l.color)}" stroke-width="${l.width}"/>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${left} ${-top} ${right - left} ${top - bottom}" stroke-linecap="round">\n${body.join("\n")}\n</svg>\n`;
+}
 
 // With a file name: file:line:col: reason, the way editors and terminals can jump to. Then the line, with a ^ under the spot.
 function report(err, source, file) {
@@ -90,7 +105,15 @@ function main([command, file, ...extra]) {
     return 1;
   }
   try {
-    if (command === "run") run(source);
+    if (command === "run") {
+      const drawn = [];
+      run(source, console.log, { draw: (line) => drawn.push(line) });
+      if (drawn.length) {
+        const out = file.replace(/\.moth$/i, "") + ".svg";
+        writeFileSync(out, svg(drawn));
+        console.error(`drew ${drawn.length} lines -> ${out}`); // stderr, so the program's own output stays clean
+      }
+    }
     else if (command === "build") build(file, source);
     else console.log(disassemble(compile(source)));
   } catch (err) {

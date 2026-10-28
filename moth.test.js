@@ -20,6 +20,8 @@ function error(source, options) {
 }
 
 const EXAMPLES = {
+  "Spiral": "", // the drawing examples only draw; see the next test
+  "Tree": "",
   "Hello": "Hello, world!\nMy name is Moth and it has 4 letters.",
   "Repeat": "*\n**\n***\n****\n*****",
   "FizzBuzz": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz",
@@ -107,6 +109,12 @@ const ERRORS = [
   ["return 1", "line 1: 'return' only works inside a function (one made with 'to')"],
   ["to down with n\n    return down(n + 1)\nend\nsay down(0)", "line 2: too much recursion: a function kept calling itself"],
   ['set s to "ab"\nrepeat while yes\n    add s to s\nend', "line 3: a value got too big to fit in memory"],
+  ['move forward "a"', "line 1: 'move forward' needs a number, not text"],
+  ["turn left yes", "line 1: 'turn left' needs a number, not yes/no"],
+  ["pen color 5", "line 1: 'pen color' needs text like \"red\", not a number"],
+  ["pen width 0", "line 1: 'pen width' needs a number above 0, not 0"],
+  ["move sideways 5", "line 1: expected 'forward' or 'back' but found 'sideways'"],
+  ["set pen to 1", "line 1: 'pen' is a Moth word, so it can't be used as a variable name"],
 ];
 
 test("mistakes give a clear message", () => {
@@ -122,6 +130,29 @@ test("errors point at the exact spot", () => {
 
 test("maxSteps stops a loop that never ends", () => {
   assert.equal(error("repeat while yes\nend", { maxSteps: 1000 }).message, "line 1: stopped after 1,000 steps (is there a loop that never ends?)");
+});
+
+test("the drawing examples draw", () => {
+  for (const [name, count] of [["Spiral", 150], ["Tree", 511]]) {
+    let drawn = 0;
+    run(examples[name], () => {}, { draw: () => drawn++ });
+    assert.equal(drawn, count, name);
+  }
+});
+
+test("the turtle draws where it moves with its pen down", () => {
+  const lines = [];
+  run('repeat 4 times\n    move forward 10\n    turn right 90\nend\npen up\nmove back 5\npen down\npen color "red"\npen width 3\nmove forward 1', () => {}, {
+    draw: (line) => lines.push(line),
+  });
+  const blue = { color: "#4f8ff7", width: 2 };
+  assert.deepEqual(lines, [
+    { x1: 0, y1: 0, x2: 0, y2: 10, ...blue }, // starts in the middle, facing up
+    { x1: 0, y1: 10, x2: 10, y2: 10, ...blue },
+    { x1: 10, y1: 10, x2: 10, y2: 0, ...blue },
+    { x1: 10, y1: 0, x2: 0, y2: 0, ...blue },
+    { x1: 0, y1: -5, x2: 0, y2: -4, color: "red", width: 3 }, // pen up moved it without drawing
+  ]);
 });
 
 test("output said before a mistake is kept", () => {

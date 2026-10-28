@@ -43,11 +43,14 @@ export const OPCODES = [
   ["SET_ITEM", 0], ["ADD_TO", 3], ["SAY", 1], ["CHECK_REPEAT", 0], ["REPEAT_NEXT", 1], ["CHECK_RANGE", 0],
   ["RANGE_NEXT", 1], ["ITER", 0], ["ITER_NEXT", 1], ["MAKE_FN", 1], ["UNDEFINED", 1], ["HALT", 0],
   ["LINE", 1], // only in debug builds: a new statement starts on this line
+  ["TURTLE", 1], // a drawing command, one of TURTLE_ACTIONS
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE } = OP;
+// `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
+export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
 // ---------- values ----------
 
@@ -126,8 +129,36 @@ export function newEnv(fn, parent) {
 
 // Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
 export class Machine {
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null) } = {}) {
-    Object.assign(this, { main, print, maxSteps, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // `draw` gets each line the turtle draws: { x1, y1, x2, y2, color, width }, with y going up.
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw = () => {} } = {}) {
+    Object.assign(this, { main, print, maxSteps, draw, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+    // the turtle starts in the middle, facing up, with its pen down
+    this.turtle = { x: 0, y: 0, heading: 90, pen: true, color: "#4f8ff7", width: 2 };
+  }
+
+  move(action, value) {
+    const t = this.turtle;
+    const name = TURTLE_ACTIONS[action];
+    if (action < 4 && typeof value !== "number") oops(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
+    if (name === "forward" || name === "back") {
+      const steps = name === "forward" ? value : -value;
+      const angle = (t.heading * Math.PI) / 180;
+      const x = t.x + steps * Math.cos(angle);
+      const y = t.y + steps * Math.sin(angle);
+      const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
+      if (t.pen) this.draw({ x1: round(t.x), y1: round(t.y), x2: round(x), y2: round(y), color: t.color, width: t.width });
+      Object.assign(t, { x, y });
+    } else if (name === "left" || name === "right") {
+      t.heading += name === "left" ? value : -value;
+    } else if (name === "color") {
+      if (typeof value !== "string") oops(`'pen color' needs text like "red", not ${kindOf(value)}`);
+      t.color = value;
+    } else if (name === "width") {
+      if (typeof value !== "number" || value <= 0) oops(`'pen width' needs a number above 0, not ${show(value, true)}`);
+      t.width = value;
+    } else {
+      t.pen = name === "down";
+    }
   }
 
   // Runs until the program ends ("done"), reaches a LINE marker while `pauseAtLines` is on ("line"), or has
@@ -383,6 +414,11 @@ export class Machine {
           case UNDEFINED: // a name nothing ever sets; the compiler wrote the message, with any "did you mean"
             oops(consts[code[ip]]);
             break;
+          case TURTLE: {
+            const action = code[ip++];
+            this.move(action, action < 4 || action > 5 ? stack.pop() : null); // pen up and pen down take no value
+            break;
+          }
           case LINE:
             this.line = code[ip++];
             if (pauseAtLines) {

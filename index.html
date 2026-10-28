@@ -18,6 +18,7 @@
     #lines li { white-space: pre; min-height: 1.5em; }
     #lines li::marker { color: #888; }
     #lines li.current { background: #fc03; outline: 1px solid #fc0; }
+    #canvas { display: block; width: min(100%, 500px); aspect-ratio: 1; border: 1px solid #8888; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -44,6 +45,11 @@
     <pre id="variables"></pre>
   </section>
 
+  <section id="drawing-view" hidden>
+    <h2>Drawing</h2>
+    <canvas id="canvas" width="500" height="500" role="img" aria-label="What the program drew"></canvas>
+  </section>
+
   <h2>Output</h2>
   <pre id="output" aria-live="polite"></pre>
 
@@ -62,6 +68,30 @@
     let worker = null;
     let machine = null; // the program being debugged
     let timer = null; // the next slice of a debugger Continue
+    let drawing = []; // every line the program has drawn
+
+    // Draws `lines` with Moth's (0, 0) in the middle and y going up, zoomed out if `fitTo` reaches past the edge.
+    function render(lines = drawing, fitTo = lines) {
+      const canvas = $("canvas");
+      const pen = canvas.getContext("2d");
+      const half = canvas.width / 2;
+      let reach = 0;
+      for (const l of fitTo) reach = Math.max(reach, Math.abs(l.x1), Math.abs(l.y1), Math.abs(l.x2), Math.abs(l.y2));
+      const scale = Math.min(1, (half - 10) / reach);
+      $("drawing-view").hidden = !fitTo.length;
+      pen.setTransform(1, 0, 0, 1, 0, 0);
+      pen.clearRect(0, 0, canvas.width, canvas.height);
+      pen.setTransform(scale, 0, 0, -scale, half, half);
+      pen.lineCap = "round";
+      for (const l of lines) {
+        pen.beginPath();
+        pen.strokeStyle = l.color; // a color name the browser doesn't know keeps the previous one
+        pen.lineWidth = l.width;
+        pen.moveTo(l.x1, l.y1);
+        pen.lineTo(l.x2, l.y2);
+        pen.stroke();
+      }
+    }
 
     function finish(message) {
       worker?.terminate();
@@ -94,11 +124,14 @@
       finish("Running…");
       output.textContent = "";
       output.classList.remove("error");
+      drawing = [];
+      render();
       stopButton.disabled = false;
       const current = (worker = new Worker("./worker.js", { type: "module" }));
       current.onmessage = ({ data }) => {
         if (worker !== current) return; // a message from a run that was already replaced
-        if (data.lines) output.append(data.lines.join("\n") + "\n");
+        if (data.lines?.length) output.append(data.lines.join("\n") + "\n");
+        if (data.drawn?.length) render((drawing = drawing.concat(data.drawn)));
         if (data.error) fail(data.error);
         if (data.done) {
           if (data.empty) output.append("(no output)");
@@ -117,8 +150,10 @@
       showBytecode();
       output.textContent = "";
       output.classList.remove("error");
+      drawing = [];
+      render();
       try {
-        machine = debug(code.value, (line) => output.append(line + "\n"));
+        machine = debug(code.value, (line) => output.append(line + "\n"), (line) => drawing.push(line));
       } catch (err) {
         return showError(err);
       }
@@ -154,8 +189,9 @@
     function advance(options) {
       try {
         const why = machine.run(options);
+        render();
         if (why !== "done") return why;
-        if (!output.textContent) output.append("(no output)");
+        if (!output.textContent && !drawing.length) output.append("(no output)");
         stopDebugging("Finished.");
       } catch (err) {
         showError(err);
