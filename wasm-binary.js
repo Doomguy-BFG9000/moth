@@ -102,27 +102,32 @@ function immediates(op, args) {
 }
 
 // One function's instructions, as bytes and as text.
+// Which immediates of an instruction name a type, a function or a global, for the listing.
+const TYPED = new Set(["struct.new", "struct.get", "struct.set", "array.new", "array.new_default", "array.new_fixed", "array.new_data",
+  "array.get", "array.get_u", "array.set", "call_ref", "ref.test", "ref.cast", "ref.null"]);
+
+// One function's instructions, as bytes, plus what the listing needs to show them as text.
 export class Code {
   constructor() {
     this.bytes = [];
-    this.lines = [];
+    this.entries = [];
     this.depth = 1;
   }
 
-  // emit("i32.const", 5), emit("struct.get", type, field)...; the text listing shows each one indented by nesting
+  // emit("i32.const", 5), emit("struct.get", type, field)...; the listing indents each one by nesting
   emit(op, ...args) {
     if (!OPS[op]) throw new Error(`no such instruction: ${op}`);
     append(this.bytes, OPS[op]);
     append(this.bytes, immediates(op, args));
     if (op === "end" || op === "else") this.depth--;
-    this.lines.push(`${"  ".repeat(this.depth)}${op}${args.map((a) => ` ${typeof a === "object" ? (a.func ?? typeText(a)) : a}`).join("")}`);
+    this.entries.push({ depth: this.depth, op, args, note: "" });
     if (op === "block" || op === "loop" || op === "if" || op === "else") this.depth++;
     return this;
   }
 
   // a comment on the instruction just emitted, for the listing
   note(text) {
-    this.lines[this.lines.length - 1] += `  ;; ${text}`;
+    this.entries[this.entries.length - 1].note = text;
     return this;
   }
 }
@@ -139,6 +144,8 @@ export class Module {
     this.exports = [];
     this.datas = [];
     this.declared = new Set(); // functions named by ref.func, which the format wants declared
+    this.typeNames = []; // for the listing
+    this.globalNames = [];
   }
 
   // the index of a type, adding it once; all of them go in one recursive group, so they can refer to each other
@@ -213,14 +220,31 @@ export class Module {
   }
 
   // the module as text, roughly in the style of WebAssembly's text format
-  listing() {
+  // `first` is the index of the first function to show; the ones before it follow, after a line saying so
+  listing(first = 0) {
+    const funcName = (i) => (i < this.imports.length ? `$${this.imports[i].module}.${this.imports[i].field}` : `$${this.funcs[i - this.imports.length].label}`);
+    const typeName = (i) => (this.typeNames[i] ? `$${this.typeNames[i]}` : String(i));
+    const typed = (t) => (typeof t === "string" ? t : `(ref ${t.nullable ? "null " : ""}${typeof t.heap === "number" ? typeName(t.heap) : t.heap})`);
+    const arg = (op, a, i) => {
+      if (typeof a === "object") return a.func !== undefined ? typeName(a.func) : typed(a);
+      if (op === "call" || op === "ref.func") return funcName(a);
+      if (op.startsWith("global.")) return this.globalNames[a] ? `$${this.globalNames[a]}` : String(a);
+      if (TYPED.has(op) && (i === 0 || op === "array.copy") && typeof a === "number") return typeName(a);
+      if (op === "array.copy") return typeName(a);
+      return String(a);
+    };
     const out = [];
-    for (const f of this.funcs) {
+    const later = this.funcs.filter((f) => f.index < first);
+    for (const f of [...this.funcs.filter((f) => f.index >= first), ...later]) {
+      if (f === later[0]) out.push("", ";; ---------- the runtime every module has ----------", "");
       const t = this.types[f.type];
-      const sig = [...t.params.map((p) => `(param ${typeText(p)})`), ...t.results.map((r) => `(result ${typeText(r)})`)].join(" ");
-      out.push(`(func ${f.index} $${f.label} ${sig}`.trimEnd());
-      if (f.locals.length) out.push(`  (local ${f.locals.map(typeText).join(" ")})`);
-      out.push(...f.code.lines, ")");
+      const sig = [...t.params.map((p) => `(param ${typed(p)})`), ...t.results.map((r) => `(result ${typed(r)})`)].join(" ");
+      out.push(`(func $${f.label} ${sig}`.trimEnd());
+      if (f.locals.length) out.push(`  (local ${f.locals.map(typed).join(" ")})`);
+      for (const { depth, op, args, note } of f.code.entries) {
+        out.push(`${"  ".repeat(depth)}${op}${args.map((a, i) => ` ${arg(op, a, i)}`).join("")}${note ? `  ;; ${note}` : ""}`);
+      }
+      out.push(")");
     }
     return out.join("\n");
   }

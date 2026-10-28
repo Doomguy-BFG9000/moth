@@ -65,7 +65,12 @@ function declareTypes(m) {
   m.type({ kind: "struct", fields: [{ type: refNull(T.env) }, { type: ref(T.items) }] });
   T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }] });
   T.unset = m.type({ kind: "struct", fields: [] });
-  T.fn = (n) => m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]); // a Moth function with n inputs
+  T.fn = (n) => { // a Moth function with n inputs
+    const index = m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]);
+    m.typeNames[index] = `fn${n}`;
+    return index;
+  };
+  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset"]) m.typeNames[T[name]] = name;
   return T;
 }
 
@@ -878,12 +883,13 @@ export function compileToWasmModule(program) {
   const messages = [];
   const numbers = new Map();
   const texts = new Map();
+  const named = (name, global) => ((m.globalNames[global] = name), global);
   const ctx = {
     m, T, R, im, ats: [], names, messages, captured: findCaptured(program),
-    unset: m.global(ref(T.unset), false, new Code().emit("struct.new", T.unset)),
-    steps: m.global(F64, true, new Code().emit("f64.const", 0)),
-    maxSteps: m.global(F64, true, new Code().emit("f64.const", Infinity)),
-    depth: m.global(I32, true, new Code().emit("i32.const", 0)),
+    unset: named("unset", m.global(ref(T.unset), false, new Code().emit("struct.new", T.unset))),
+    steps: named("steps", m.global(F64, true, new Code().emit("f64.const", 0))),
+    maxSteps: named("maxSteps", m.global(F64, true, new Code().emit("f64.const", Infinity))),
+    depth: named("depth", m.global(I32, true, new Code().emit("i32.const", 0))),
     init: m.func("init", [], []), // makes the text the program holds
     texts: [],
     id(name) {
@@ -893,12 +899,12 @@ export function compileToWasmModule(program) {
     message: (text) => messages.push(text) - 1,
     number(value) {
       const key = String(value);
-      if (!numbers.has(key)) numbers.set(key, m.global(ref(T.num), false, new Code().emit("f64.const", value).emit("struct.new", T.num)));
+      if (!numbers.has(key)) numbers.set(key, named(`number${numbers.size}`, m.global(ref(T.num), false, new Code().emit("f64.const", value).emit("struct.new", T.num))));
       return numbers.get(key);
     },
     text(value) {
       if (!texts.has(value)) {
-        const global = m.global(refNull(T.text), true, new Code().emit("ref.null", T.text));
+        const global = named(`text${texts.size}`, m.global(refNull(T.text), true, new Code().emit("ref.null", T.text)));
         texts.set(value, global);
         ctx.init.code.emit("i32.const", ctx.texts.push(value) - 1).emit("call", im.text).emit("struct.new", T.text).emit("global.set", global);
       }
@@ -907,7 +913,7 @@ export function compileToWasmModule(program) {
   };
   const main = new WasmCompiler(null, "main", [], program, ctx);
   m.export("main", main.f.index);
-  return { bytes: m.encode(), listing: m.listing(), ats: ctx.ats, names, messages, texts: ctx.texts };
+  return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts };
 }
 
 // Compiles a parsed program: { bytes, listing, run(print, draw, maxSteps) }, like jit() in jit.js.

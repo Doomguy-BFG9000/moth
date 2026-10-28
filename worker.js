@@ -6,7 +6,7 @@ import { run, excerpt, MothError } from "./moth.js";
 const MAX_LINES = 10_000;
 const MAX_DRAWN = 100_000;
 
-onmessage = ({ data: source }) => {
+onmessage = ({ data: { source, engine } }) => {
   let lines = [];
   let drawn = [];
   let said = 0;
@@ -19,6 +19,7 @@ onmessage = ({ data: source }) => {
     sent = performance.now();
   };
   const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
+  const start = performance.now();
   try {
     run(source, (line) => {
       if (++said <= MAX_LINES) lines.push(line);
@@ -29,9 +30,10 @@ onmessage = ({ data: source }) => {
         if (++total <= MAX_DRAWN) drawn.push(line);
         due();
       },
+      engine,
     });
     flush();
-    postMessage({ done: true, empty: said === 0 && total === 0 });
+    postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });
   } catch (err) {
     flush();
     postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(source, err)}` : `Moth itself crashed: ${err.message}` });

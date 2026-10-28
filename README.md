@@ -3,11 +3,12 @@
 [![tests](https://github.com/samyyy2423/moth/actions/workflows/test.yml/badge.svg)](https://github.com/samyyy2423/moth/actions/workflows/test.yml)
 
 A programming language that reads like plain English, written from scratch in
-JavaScript with no libraries. It has two engines that must agree: a bytecode
-virtual machine, and a JIT that compiles Moth to JavaScript and runs 6–9×
-faster. It also has a checker that finds mistakes before the code runs, turtle
-drawing, a debugger that can go backwards in time, and a `moth` command with
-its own shell.
+JavaScript with no libraries. It has three engines that must agree on
+everything a program says, draws, or gets wrong: a bytecode virtual machine, a
+JIT that compiles Moth to JavaScript, and a compiler that writes WebAssembly
+byte by byte, the fastest of the three. It also has a checker that finds
+mistakes before the code runs, turtle drawing, a debugger that can go backwards
+in time, and a `moth` command with its own shell.
 
 Moth's compiler is also written in Moth: [`compiler.moth`](compiler.moth),
 1,100 lines that compile any Moth program, itself included, to exactly the
@@ -191,6 +192,8 @@ nothing to install.
 
 - **Run** runs the code in a background thread, so **Stop** works even on a
   loop that never ends. Drawings appear on a canvas as they're drawn.
+- **Engine** picks the JIT, WebAssembly or the VM, and the status bar says how
+  long the run took, so you can race them on the same program.
 - **Debug** is a time-travel debugger. It records the whole run, then **Back**,
   **Step**, **End** and a slider move through it in either direction. At every
   step it highlights the line about to run and shows the calls in progress,
@@ -202,8 +205,8 @@ nothing to install.
   is never used. Click one to jump to it.
 - **Share** puts the code into the link, so opening the link opens the program.
 - **Compiled** shows what the code turned into: the VM's bytecode, the
-  JavaScript the JIT made, or the JavaScript from the compiler written in Moth,
-  checked against the JIT's.
+  JavaScript the JIT made, the JavaScript from the compiler written in Moth
+  (checked against the JIT's), or the WebAssembly module, as text.
 - **Neural network** trains the network and draws it learning.
 - The last example, **Moth's own compiler**, is `compiler.moth` itself, with
   a line at the end that uses it to compile some Moth.
@@ -224,6 +227,7 @@ npm install -g github:samyyy2423/moth
 | `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
 | `moth bytecode hello.moth` | Shows the bytecode the compiler made for the VM |
 | `moth js hello.moth` | Shows the JavaScript the JIT made |
+| `moth wasm hello.moth` | Shows the WebAssembly module, as text |
 | `moth bootstrap` | Compiles the compiler written in Moth with itself, three times over |
 
 `moth check` gives each problem the same words the error would have when the
@@ -299,6 +303,8 @@ say item 5 of fruits
 | [`scope.js`](scope.js) | Which variable each name means, shared by every back end so they can't disagree |
 | [`vm.js`](vm.js) | The virtual machine, plus every check and error message both engines use. It imports nothing, so `moth build` copies it into compiled programs |
 | [`jit.js`](jit.js) | The JIT: Moth to JavaScript, which V8 compiles to machine code |
+| [`wasm-binary.js`](wasm-binary.js) | WebAssembly's binary format, written byte by byte, with the GC types |
+| [`wasm.js`](wasm.js) | The third engine: Moth to WebAssembly, with escape analysis and unboxed numbers |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler written in Moth: tokenizer, parser, scope rules and JavaScript writer |
 | [`neural.moth`](neural.moth) | A neural network written in Moth, with its own random numbers, sine, and backpropagation |
@@ -310,11 +316,14 @@ say item 5 of fruits
 2. **Parser**: recursive descent builds a syntax tree. Every node keeps the token
    it came from, so errors can point at it.
 3. **Scope**: gives every variable a numbered slot, once.
-4. Then one of three back ends:
+4. Then one of four back ends:
    - **Bytecode compiler and VM**: 36 opcodes, run by one loop with its own
      stack, so recursion goes 100,000 calls deep and the debugger can pause it.
    - **JIT**: each Moth function becomes a JavaScript function and each
      variable a JavaScript variable, so V8 can keep them in machine registers.
+   - **WebAssembly**: each Moth function becomes a WebAssembly function, and
+     Moth's values become WebAssembly GC structs. A variable no inner function
+     uses is a local, and one that only ever holds numbers is a raw f64.
    - **Checker**: works out every variable's type and tests each operation
      without running it.
 
@@ -322,16 +331,20 @@ The compiler written in Moth repeats steps 1–3 and the JIT in Moth, with
 records for the syntax tree. `load()` runs a Moth program and hands its
 functions to JavaScript, which is how `mothCompiler()` runs it.
 
-**Run** uses the JIT. The debugger and the shell use the VM. The JIT hands deep
-recursion (more than 2,000 calls) to the VM, without showing any output twice.
+**Run** uses the JIT unless you pick another engine. The debugger and the shell
+use the VM. The JIT and WebAssembly hand deep recursion (more than 2,000 calls)
+to the VM, without showing any output twice.
 
-| Benchmark (`npm run bench`) | v1 tree-walker | v2 bytecode VM | v3 JIT |
-|---|---|---|---|
-| fib(25), function calls | 60 ms | 67 ms | **7.2 ms** |
-| sum 1 to 1,000,000, a loop | 163 ms | 56 ms | **7.5 ms** |
-| primes up to 5,000, lists | 320 ms | 106 ms | **17 ms** |
-| 200,000 records, made and read | | 87 ms | **15 ms** |
-| recursion 10,000 deep | fails | 4 ms | 5 ms (handed to the VM) |
+| Benchmark (`npm run bench`) | v1 tree-walker | v2 bytecode VM | v3 JIT | v4 WebAssembly |
+|---|---|---|---|---|
+| fib(25), function calls | 60 ms | 67 ms | 6.8 ms | **4.7 ms** |
+| sum 1 to 1,000,000, a loop | 163 ms | 55 ms | 7.1 ms | **2.6 ms** |
+| primes up to 5,000, lists | 320 ms | 104 ms | 17 ms | **13 ms** |
+| 200,000 records, made and read | | 86 ms | 14 ms | **7.7 ms** |
+| recursion 10,000 deep | fails | 3.4 ms | 4.6 ms | 5.0 ms |
+| the neural network | | 3.1 s | 0.58 s | **0.33 s** |
+
+Deep recursion is handed to the VM by the JIT and WebAssembly.
 
 How each engine was made fast, what didn't work, and the other design decisions
 are in **[DESIGN.md](DESIGN.md)**.
@@ -340,12 +353,13 @@ are in **[DESIGN.md](DESIGN.md)**.
 
 `npm test` runs on every push. It checks:
 
-- every playground example's output
+- every playground example's output, on all three engines
 - tables of programs with their exact output, and broken programs with their
-  exact error messages and positions, all run on **both** engines
+  exact error messages and positions, all run on **all three** engines
 - a fuzzer that randomly breaks 5,000 programs. Each one must fail with a proper
-  Moth error, never a JavaScript crash, and the JIT must match the VM exactly:
-  the same output, the same drawing, the same error at the same spot
+  Moth error, never a JavaScript crash, and the JIT and WebAssembly must match
+  the VM exactly: the same output, the same drawing, the same error at the same
+  spot
 - the checker against reality, on 3,000 more broken programs: no line it says
   will fail ever runs in a program that finishes, and its message matches the
   real error when the program does fail there. It predicts 44% of runtime
@@ -355,14 +369,16 @@ are in **[DESIGN.md](DESIGN.md)**.
   positions, and the same mistakes
 - bootstrapping: `compiler.moth` compiles itself, and the compiler that makes
   does too, three stages deep, each writing the same JavaScript
-- the neural network, trained on both engines: the same output and the same
-  drawing, line for line, and every dot on the right side at the end
+- the neural network, trained on all three engines: the same output and the
+  same drawing, line for line, and every dot on the right side at the end
+- the WebAssembly encoder against the spec's examples
 - every `moth` command, run as a real process
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT and the
 checker were caught, one of them only by the JIT-versus-VM fuzzer. Two bugs
 planted in `compiler.moth` were caught too, one of them only by its fuzzer, and
-a backpropagation bug planted in `neural.moth` left it stuck at 50%.
+a backpropagation bug planted in `neural.moth` left it stuck at 50%. A bug
+planted in WebAssembly's unboxed numbers failed five tests.
 
 ## Limits
 
@@ -376,6 +392,8 @@ a backpropagation bug planted in `neural.moth` left it stuck at 50%.
 - The playground shows the first 10,000 lines of output, and the debugger
   records the first 10,000 steps.
 - In the shell, Ctrl+C stops a program that never ends by quitting the shell.
+- The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
+  Safari 18.2, or later.
 - The compiler written in Moth gives up on code nested more than about 245
   brackets deep (the JIT goes to about 1,000). Moth sees text as whole
   characters, so text holding half an emoji (which no file can hold) can come

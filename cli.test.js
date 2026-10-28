@@ -86,6 +86,12 @@ test("moth js shows the JavaScript the JIT makes", (t) => {
   assert.match(result.stdout, /"use strict";[\s\S]*say\(\["hi"\]\);/);
 });
 
+test("moth wasm shows the WebAssembly module the third engine makes", (t) => {
+  const result = moth(["wasm", tempFile(t, "hello.moth", 'say "hi"')]);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /^;; \d+ bytes\n\(func \$init[\s\S]*\(func \$main[\s\S]*call \$moth\.say/);
+});
+
 test("moth bootstrap compiles the compiler written in Moth with itself", () => {
   const result = moth(["bootstrap"]);
   assert.equal(result.status, 0, result.stderr);

@@ -97,12 +97,20 @@
     <button id="debug" type="button" title="Go through the program a step at a time, backwards too">⏯ Debug</button>
     <button id="stop" type="button" disabled>■ Stop</button>
     <button id="share" type="button">⤴ Share</button>
+    <label class="toggle">Engine
+      <select id="engine" title="All three run the same program the same way, at different speeds">
+        <option value="jit">JIT (JavaScript)</option>
+        <option value="wasm">WebAssembly</option>
+        <option value="vm">VM (bytecode)</option>
+      </select>
+    </label>
     <label class="toggle">Compiled
       <select id="compiled">
         <option value="">hidden</option>
         <option value="bytecode">bytecode (VM)</option>
         <option value="js">JavaScript (JIT)</option>
         <option value="moth">JavaScript (compiler written in Moth)</option>
+        <option value="wasm">WebAssembly</option>
       </select>
     </label>
     <span class="spacer"></span>
@@ -160,7 +168,7 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, compileToJs, mothCompiler, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
+    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -298,6 +306,12 @@
           $("bytecode").textContent = js;
           return;
         }
+        if (which === "wasm") {
+          const { bytes, listing } = compileToWasmBytes(source);
+          $("compiled-title").textContent = `WebAssembly · ${bytes.length.toLocaleString("en")} bytes, which the browser compiles to machine code`;
+          $("bytecode").textContent = listing;
+          return;
+        }
         $("compiled-title").textContent = which === "js"
           ? "JavaScript · what the JIT made, which V8 then compiles to machine code"
           : "Bytecode · what the compiler made, which the virtual machine runs";
@@ -330,11 +344,12 @@
         if (data.error) fail(data.error);
         if (data.done) {
           if (data.empty) output.append("(no output)");
-          finish("");
+          const engine = { jit: "the JIT", wasm: "WebAssembly", vm: "the VM" }[$("engine").value];
+          finish(`Ran in ${data.ms < 10 ? data.ms.toFixed(1) : Math.round(data.ms)} ms on ${engine}`);
         }
       };
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
-      current.postMessage(code.value);
+      current.postMessage({ source: code.value, engine: $("engine").value });
     }
 
     // The time-travel debugger: Debug records the whole run first (timeline() in moth.js), then Back, Step,
@@ -436,6 +451,7 @@
       }
     };
     $("compiled").onchange = showCompiled;
+    $("engine").onchange = runCode;
 
     // Two examples are files: a neural network that learns, and the compiler written in Moth, with a line
     // at the end that uses it.

@@ -4,7 +4,7 @@
 import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
-import { wasm } from "./wasm.js";
+import { wasm, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt } from "./vm.js";
@@ -629,6 +629,12 @@ export function compileToJs(source) {
 // Compiles Moth source to a WebAssembly module (wasm.js): { bytes, listing, run(print, draw, maxSteps) }.
 export function compileToWasm(source) {
   return build(source, wasm);
+}
+
+// The same module's bytes and a readable listing, without compiling it (which a browser page may only do
+// for small modules unless it waits): { bytes, listing }.
+export function compileToWasmBytes(source) {
+  return build(source, compileToWasmModule);
 }
 
 // Problems found without running the program (checker.js): [{ line, col, kind, message }]. Code that

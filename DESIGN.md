@@ -368,3 +368,59 @@ of numbers, written the way a beginner would read it.
   same output and drawing, line for line, every dot on the right side at the
   end, and nothing for the checker to complain about. A bug planted in the
   chain rule for `*` left the network stuck at 50% and failed the test.
+
+## 15. The WebAssembly engine
+
+[`wasm.js`](wasm.js) compiles Moth to WebAssembly, the third engine. Nothing in
+between: [`wasm-binary.js`](wasm-binary.js) writes the binary format itself
+(LEB128 numbers, sections, the GC proposal's struct and array types), and keeps
+a readable listing as it goes, which `moth wasm` and the playground show.
+
+- **Moth's values, inside the module.** A number is a struct holding an f64,
+  yes and no are `i31` values, nothing is null, and lists, records and
+  functions are GC structs, so V8's garbage collector looks after them. A
+  variable's slot starts as a shared `unset` struct, so "has no value yet"
+  works as in the other engines.
+- **One set of rules, three engines.** The common cases run in WebAssembly:
+  arithmetic on numbers, comparisons, list items, fields, calls, loops. The
+  rare ones and every mistake call out to the same checks in `vm.js` the VM
+  and the JIT use, with the values copied out to JavaScript. So the error
+  messages match by construction, and the fuzzer checks everything else.
+- **Text stays a JavaScript string.** At first, text was an array of UTF-16
+  units, and each trip to JavaScript copied it one letter at a time. The
+  fuzzer found a program that doubles its text every round: JavaScript joins
+  long text without copying, so the other engines reach its length limit in
+  milliseconds, while this one slowed down exponentially. Now text is a struct
+  holding the JavaScript string itself. Joining it costs what it costs in
+  JavaScript, and it fails at exactly the same length.
+- **Escape analysis.** A variable no inner function uses can't outlive its
+  call, so it becomes a WebAssembly local, which the machine keeps in a
+  register. Only captured variables go in a heap scope struct, and a function
+  that captures nothing and makes no functions allocates no scope at all.
+- **Unboxed numbers.** A variable that can only ever hold a number (every
+  `set` gives it one, it counts in `for each ... from`, or `add` adds to it)
+  lives in an f64 local, so `add i to total` allocates nothing. The set of
+  such variables is a fixed point, as in the checker: assume all candidates are
+  numbers, drop any that something else could reach, repeat. A box is made only
+  when the number is used as a general value, and kept until the number
+  changes. The box local starts as `unset`, which doubles as "has no value yet".
+- **Divisibility, exactly.** WebAssembly has no floating-point remainder. For
+  whole numbers below 2^52, a is divisible by b exactly when a equals
+  trunc(a / b) × b: a quotient that is a whole number comes out of the division
+  exactly, and every product here is a whole number that a float holds exactly.
+  Fractions and bigger numbers call JavaScript's `%`. That took primes from 33 ms
+  to 13 ms.
+- **The validator as a second checker.** V8 rejects a module that breaks
+  WebAssembly's type rules and names the function and the offset. It found a
+  missing `ref.as_non_null` on the first run. The fuzzer found the rest: a
+  loop counter in a local kept its value into the next run of the loop, since
+  locals are zeroed only once per call.
+- **Speed.** Best of 5 (VM / JIT / WebAssembly): fib(25) 67 / 6.8 / 4.7 ms, a
+  million-round loop 55 / 7.1 / 2.6 ms, primes 104 / 17 / 13 ms, 200,000 records
+  86 / 14 / 7.7 ms, the neural network 3.1 / 0.58 / 0.33 s. It is the fastest
+  engine on everything that doesn't recurse past 2,000 calls, which it hands to
+  the VM, as the JIT does.
+- **Limits.** Browsers won't compile a module over 4 KB on the page's main
+  thread without waiting, so runs compile it in the Web Worker, and the
+  Compiled view only builds the bytes and the listing. It needs WebAssembly GC
+  (Node 22, Chrome 119, Firefox 120, Safari 18.2).

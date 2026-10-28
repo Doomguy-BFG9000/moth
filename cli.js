@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
-import { run, compile, compileToJs, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
+import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -12,6 +12,7 @@ const USAGE = `usage:
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
   moth js <file.moth>         show the JavaScript the JIT makes
+  moth wasm <file.moth>       show the WebAssembly module the third engine makes
   moth bootstrap              compile Moth's compiler written in Moth with itself, three times over`;
 
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
@@ -128,7 +129,7 @@ function main([command, file, ...extra]) {
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
   if (["help", "--help", "-h"].includes(command)) return console.log(USAGE);
-  if (!["run", "check", "build", "bytecode", "js"].includes(command) || !file || extra.length) {
+  if (!["run", "check", "build", "bytecode", "js", "wasm"].includes(command) || !file || extra.length) {
     console.error(USAGE);
     return 2;
   }
@@ -152,6 +153,10 @@ function main([command, file, ...extra]) {
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
     else if (command === "build") build(file, source);
     else if (command === "js") console.log(compileToJs(source).source);
+    else if (command === "wasm") {
+      const { bytes, listing } = compileToWasmBytes(source);
+      console.log(`;; ${bytes.length} bytes\n${listing}`);
+    }
     else console.log(disassemble(compile(source)));
   } catch (err) {
     report(err, source, file);
