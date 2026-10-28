@@ -1,31 +1,8 @@
 // Which variable each name means. Both back ends build on this: the bytecode compiler (moth.js) and
 // the JavaScript compiler (jit.js), so the two can't disagree about what a name refers to.
-import { noValue } from "./vm.js";
+import { noValue, closest } from "./vm.js";
 
-const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen"];
-
-// Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
-function distance(a, b) {
-  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-    }
-  }
-  return d[a.length][b.length];
-}
-
-// The candidate a misspelled name most likely meant, or null if none is close: 1 edit for short names, 2 otherwise.
-function closest(name, candidates) {
-  let best = null;
-  let bestDistance = (name.length <= 3 ? 1 : 2) + 1;
-  for (const c of candidates) {
-    const d = distance(name, c);
-    if (d < bestDistance) [best, bestDistance] = [c, d];
-  }
-  return best;
-}
+const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail"];
 
 // Names each function sets. Inputs and functions made with `to` always belong to the function itself;
 // a name it `set`s (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.

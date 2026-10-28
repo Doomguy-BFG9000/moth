@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
+import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, TooDeep } from "./jit.js";
 import { check as checkProgram } from "./checker.js";
@@ -24,6 +24,7 @@ const HINTS = {
   "{": "blocks finish with 'end', not braces",
   "}": "blocks finish with 'end', not braces",
   "'": "put text in double quotes",
+  ".": "to get a field write 'name of person'",
 };
 
 function tokenize(src) {
@@ -67,12 +68,13 @@ function tokenize(src) {
 // ---------- syntax tree ----------
 
 // words that start a statement or a value, so they can't name a variable
-const RESERVED = new Set(["set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen"]);
+const RESERVED = new Set(["set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"]);
 
 // Every node keeps the token it came from (`at`), so errors can point at it.
 function parse(tokens) {
   let pos = 0;
   let fnDepth = 0;
+  let indexing = false; // inside `item ... of`, where a name followed by `of` is the item number, not a field
   const peek = () => tokens[pos];
   const check = (type) => tokens[pos].type === type;
   const match = (type) => check(type) && tokens[pos++];
@@ -120,6 +122,11 @@ function parse(tokens) {
         return { kind: "setItem", target, value: expression(), at: t };
       }
       const variable = name("a variable name");
+      if (word("of")) { // `set name of person to ...` changes a field
+        const target = unary();
+        expectWord("to");
+        return { kind: "setField", name: variable, target, value: expression(), at: t };
+      }
       expectWord("to");
       return { kind: "set", name: variable, value: expression(), at: t };
     }
@@ -163,6 +170,10 @@ function parse(tokens) {
     if (word("return")) {
       if (!fnDepth) fail(t, "'return' only works inside a function (one made with 'to')");
       return { kind: "return", value: peek().nl ? null : expression(), at: t };
+    }
+    if (word("fail")) {
+      expectWord("with");
+      return { kind: "fail", value: expression(), at: t };
     }
     // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
     const turtle = { move: ["forward", "back"], turn: ["left", "right"], pen: ["up", "down", "color", "width"] }[t.value];
@@ -253,8 +264,18 @@ function parse(tokens) {
       do items.push(expression()); while (match(","));
       return { kind: "list", items, at: t };
     }
+    if (word("record")) {
+      expectWord("with");
+      const [fields, values] = [[], []];
+      do {
+        fields.push(name("a field name"));
+        values.push(expression());
+      } while (match(","));
+      return { kind: "record", fields, values, at: t };
+    }
     if (word("empty")) {
-      expectWord("list");
+      if (word("record")) return { kind: "record", fields: [], values: [], at: t };
+      if (!word("list")) expected("'list' or 'record'");
       return { kind: "list", items: [], at: t };
     }
     if (word("length")) {
@@ -262,30 +283,40 @@ function parse(tokens) {
       return { kind: "length", of: unary(), at: t };
     }
     if (word("item")) {
+      const outside = indexing;
+      indexing = true;
       const index = additive();
+      indexing = outside;
       expectWord("of");
       return { kind: "item", index, of: unary(), at: t };
     }
     if (match("(")) {
+      const outside = indexing;
+      indexing = false;
       const inner = expression();
+      indexing = outside;
       if (!match(")")) expected("')'");
       return inner;
     }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       pos++;
       if (match("(")) return { kind: "call", name: t.value, args: argList(), at: t };
+      if (!indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
       return { kind: "name", name: t.value, at: t };
     }
     expected("a value");
   }
 
   function argList() {
+    const outside = indexing;
+    indexing = false;
     const args = [];
     while (!check(")")) {
       args.push(expression());
       if (!match(",")) break;
     }
     if (!match(")")) expected("')'");
+    indexing = outside;
     return args;
   }
 
@@ -296,7 +327,7 @@ function parse(tokens) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -451,6 +482,16 @@ class Compiler extends Scope {
         if (s.value) this.expr(s.value);
         this.emit(s.at, TURTLE, TURTLE_ACTIONS.indexOf(s.action));
         return;
+      case "setField": // the record is checked before the value is worked out, as `set item` does
+        this.expr(s.target);
+        this.emit(s.at, RECORD_REF, this.constant(s.name));
+        this.expr(s.value);
+        this.emit(s.at, SET_FIELD, this.constant(s.name));
+        return;
+      case "fail":
+        this.expr(s.value);
+        this.emit(s.at, FAIL);
+        return;
     }
   }
 
@@ -505,6 +546,14 @@ class Compiler extends Scope {
         this.expr(e.index);
         this.emit(e.at, ITEM);
         return;
+      case "record":
+        for (const value of e.values) this.expr(value);
+        this.emit(e.at, RECORD, this.constant(e.fields));
+        return;
+      case "field":
+        this.expr(e.of);
+        this.emit(e.at, FIELD, this.constant(e.name));
+        return;
     }
   }
 }
@@ -524,6 +573,8 @@ function note(fn, op, args, scopes) {
     case "CALL": return fn.consts[args[1]];
     case "UNDEFINED": return fn.consts[args[0]];
     case "COMPARE": return args[0] ? `is ${COMPARE_OPS[args[0]]}` : "is";
+    case "RECORD": return fn.consts[args[0]].join(", ");
+    case "FIELD": case "RECORD_REF": case "SET_FIELD": return fn.consts[args[0]];
     default: return "";
   }
 }
@@ -603,6 +654,19 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     // right line, and pass on only what the first run hadn't already.
     new Machine(compile(source), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line) }).run();
   }
+}
+
+// Runs a program and hands back what it made at the top level, by name; a Moth function comes back as a
+// JavaScript function. This is how JavaScript drives code written in Moth, like Moth's own compiler.
+export function load(source, print = console.log) {
+  const program = compileToJs(source);
+  const values = program.run(print, undefined, Infinity);
+  const made = {};
+  program.names.forEach((name, slot) => {
+    const value = values[slot - 1];
+    if (value !== UNSET) made[name] = value instanceof Closure ? (...args) => value.fn.run(...args) : value;
+  });
+  return made;
 }
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and

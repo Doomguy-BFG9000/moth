@@ -1,19 +1,44 @@
 // The Moth virtual machine: runs the bytecode that moth.js compiles. It imports nothing, so `moth build`
 // can copy this file into a compiled program as its runtime.
 
+// `value` is set by `fail with value`, so a program that called Moth code (see load()) can read it.
 export class MothError extends Error {
-  constructor(at, message) {
+  constructor(at, message, value) {
     super(`line ${at.line}: ${message}`);
     this.line = at.line;
     this.col = at.col;
     this.reason = message;
+    this.value = value;
     this.incomplete = at.type === "eof"; // the code ended too early, so the shell asks for more lines
   }
 }
 
-export const fail = (at, message) => {
-  throw new MothError(at, message);
+export const fail = (at, message, value) => {
+  throw new MothError(at, message, value);
 };
+
+// Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
+function distance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+// The candidate a misspelled name most likely meant, or null if none is close: 1 edit for short names, 2 otherwise.
+export function closest(name, candidates) {
+  let best = null;
+  let bestDistance = (name.length <= 3 ? 1 : 2) + 1;
+  for (const c of candidates) {
+    const d = distance(name, c);
+    if (d < bestDistance) [best, bestDistance] = [c, d];
+  }
+  return best;
+}
 
 // The line a MothError points at, with a ^ under the exact spot.
 export function excerpt(source, { line, col }) {
@@ -44,11 +69,14 @@ export const OPCODES = [
   ["RANGE_NEXT", 1], ["ITER", 0], ["ITER_NEXT", 1], ["MAKE_FN", 1], ["UNDEFINED", 1], ["HALT", 0],
   ["LINE", 1], // only in debug builds: a new statement starts on this line
   ["TURTLE", 1], // a drawing command, one of TURTLE_ACTIONS
+  ["RECORD", 1], // its field names are a constant; their values are on the stack
+  ["FIELD", 1], ["RECORD_REF", 1], ["SET_FIELD", 1], // the operand is the field's name, a constant
+  ["FAIL", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -65,8 +93,17 @@ export class Closure {
 
 export const UNSET = Symbol("unset"); // a variable that is declared but hasn't been given a value yet
 const isList = Array.isArray;
+// A record is an object with no prototype, so a field can be called anything, even "constructor".
+export const isRecord = (v) => v !== null && typeof v === "object" && !isList(v) && !(v instanceof Closure);
 export const truthy = (v) => v !== null && v !== false;
-export const equal = (a, b) => (isList(a) && isList(b) ? a.length === b.length && a.every((x, i) => equal(x, b[i])) : a === b);
+export function equal(a, b) {
+  if (isList(a) && isList(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
+  if (isRecord(a) && isRecord(b)) {
+    const fields = Object.keys(a);
+    return fields.length === Object.keys(b).length && fields.every((f) => Object.hasOwn(b, f) && equal(a[f], b[f]));
+  }
+  return a === b;
+}
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const noValue = (name) => `'${name}' has no value yet (give it one with 'set ${name} to ...')`;
 export const stoppedMessage = (steps) => `stopped after ${steps.toLocaleString("en")} steps (is there a loop that never ends?)`;
@@ -77,6 +114,7 @@ export function kindOf(v) {
   if (typeof v === "string") return "text";
   if (isList(v)) return "a list";
   if (v instanceof Closure) return "a function";
+  if (isRecord(v)) return "a record";
   return "a number";
 }
 
@@ -86,6 +124,10 @@ export function show(v, nested = false) {
   if (typeof v === "string") return nested ? JSON.stringify(v) : v;
   if (isList(v)) return `[${v.map((x) => show(x, true)).join(", ")}]`;
   if (v instanceof Closure) return `<function ${v.fn.name}>`;
+  if (isRecord(v)) {
+    const fields = Object.keys(v);
+    return fields.length ? `(record with ${fields.map((f) => `${f} ${show(v[f], true)}`).join(", ")})` : "(empty record)";
+  }
   return String(v);
 }
 
@@ -175,6 +217,34 @@ export function checkInputs(f, argc, name, error) {
   if (argc !== n) error(`'${name}' needs ${plural(n, "input")} but got ${argc}`);
 }
 
+// `record with name "Sam", age 20`
+export function makeRecord(fields, values) {
+  const record = Object.create(null);
+  fields.forEach((field, i) => (record[field] = values[i]));
+  return record;
+}
+
+// `name of person`
+export function fieldOf(record, field, error) {
+  if (!isRecord(record)) error(`can't take '${field}' of ${kindOf(record)}`);
+  if (!Object.hasOwn(record, field)) {
+    const guess = closest(field, Object.keys(record));
+    error(`this record has no '${field}'${guess ? `. Did you mean '${guess}'?` : ""}`);
+  }
+  return record[field];
+}
+
+// the record in `set name of person to ...`; setting a field it doesn't have yet adds it
+export function recordFor(record, field, error) {
+  if (!isRecord(record)) error(`can only change '${field}' of a record, not ${kindOf(record)}`);
+  return record;
+}
+
+// `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
+export function failWith(value, error) {
+  error(show(value), value);
+}
+
 // The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`
 // as { x1, y1, x2, y2, color, width }, with y going up.
 export class Turtle {
@@ -211,12 +281,13 @@ export class Turtle {
 
 // Thrown inside the run loop; the loop's catch block turns it into a MothError at the instruction that was running.
 class Failure {
-  constructor(message) {
+  constructor(message, value) {
     this.message = message;
+    this.value = value;
   }
 }
-const oops = (message) => {
-  throw new Failure(message);
+const oops = (message, value) => {
+  throw new Failure(message, value);
 };
 const stopped = (steps) => oops(stoppedMessage(steps));
 
@@ -452,6 +523,25 @@ export class Machine {
           case UNDEFINED: // a name nothing ever sets; the compiler wrote the message, with any "did you mean"
             oops(consts[code[ip]]);
             break;
+          case RECORD: {
+            const fields = consts[code[ip++]];
+            stack.push(makeRecord(fields, stack.splice(stack.length - fields.length, fields.length)));
+            break;
+          }
+          case FIELD:
+            stack.push(fieldOf(stack.pop(), consts[code[ip++]], oops));
+            break;
+          case RECORD_REF: // checks the record in `set name of r to ...` before the value is worked out
+            recordFor(stack[stack.length - 1], consts[code[ip++]], oops);
+            break;
+          case SET_FIELD: {
+            const value = stack.pop();
+            stack.pop()[consts[code[ip++]]] = value;
+            break;
+          }
+          case FAIL:
+            failWith(stack.pop(), oops);
+            break;
           case TURTLE: {
             const action = code[ip++];
             this.turtle.act(action, action < 4 || action > 5 ? stack.pop() : null); // pen up and pen down take no value
@@ -471,7 +561,7 @@ export class Machine {
         }
       }
     } catch (err) {
-      if (err instanceof Failure) fail(fn.at[pc], err.message);
+      if (err instanceof Failure) fail(fn.at[pc], err.message, err.value);
       // with no recursion in the VM, a RangeError here means a string or list grew past what JavaScript allows
       if (err instanceof RangeError) fail(fn.at[pc], "a value got too big to fit in memory");
       throw err;

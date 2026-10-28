@@ -3,11 +3,11 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs } from "./vm.js";
+  callable, checkInputs, makeRecord, fieldOf, recordFor } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
-const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [] };
+const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []) };
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
 
 class Found {
@@ -94,7 +94,9 @@ class Checker extends Scope {
         return () => "number";
       case "list":
         return () => "list";
-      default: // calls, items, and/or: could be anything
+      case "record":
+        return () => "record";
+      default: // calls, items, fields, and/or: could be anything
         return () => null;
     }
   }
@@ -110,8 +112,8 @@ class Checker extends Scope {
   block(body) {
     for (const [i, s] of body.entries()) {
       this.statement(s);
-      if (s.kind === "return" && body[i + 1]) {
-        this.warn(body[i + 1].at, "never runs", "this line can never run, because 'return' comes first");
+      if ((s.kind === "return" || s.kind === "fail") && body[i + 1]) {
+        this.warn(body[i + 1].at, "never runs", `this line can never run, because '${s.kind}' comes first`);
         break;
       }
     }
@@ -198,6 +200,16 @@ class Checker extends Scope {
       case "return":
         if (s.value) this.expr(s.value);
         return;
+      case "fail": // stopping on purpose is not a mistake
+        this.expr(s.value);
+        return;
+      case "setField": {
+        this.expr(s.target);
+        this.expr(s.value);
+        const type = this.type(s.target);
+        this.willFail(s.at, () => this.known(type()) && type() !== "record" && recordFor(SAMPLES[type()], s.name, found));
+        return;
+      }
       case "call":
         this.call(s, true);
         return;
@@ -275,6 +287,15 @@ class Checker extends Scope {
       case "list":
         for (const x of e.items) this.expr(x);
         return;
+      case "record":
+        for (const value of e.values) this.expr(value);
+        return;
+      case "field": { // which fields a record has isn't known, so only taking a field of something else is certain to fail
+        this.expr(e.of);
+        const type = this.type(e.of);
+        this.willFail(e.at, () => this.known(type()) && type() !== "record" && fieldOf(SAMPLES[type()], e.name, found));
+        return;
+      }
       case "length": {
         this.expr(e.of);
         const type = this.type(e.of);

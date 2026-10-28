@@ -3,7 +3,8 @@
 // run thousands of random programs through both and require the same output, drawings and errors.
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
-  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage } from "./vm.js";
+  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, isRecord, makeRecord, fieldOf, recordFor,
+  failWith } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv" };
@@ -94,6 +95,10 @@ class JsCompiler extends Scope {
         return `${this.call(s, true)};`;
       case "turtle":
         return `turtle(${TURTLE_ACTIONS.indexOf(s.action)}, ${s.value ? this.expr(s.value) : "null"}, ${this.pos(s.at)});`;
+      case "setField":
+        return `{ const $o = recordFor(${this.expr(s.target)}, ${q(s.name)}, ${this.pos(s.at)}); $o[${q(s.name)}] = ${this.expr(s.value)}; }`;
+      case "fail":
+        return `failWith(${this.expr(s.value)}, ${this.pos(s.at)});`;
     }
   }
 
@@ -140,6 +145,10 @@ class JsCompiler extends Scope {
         return `lengthOf(${this.expr(e.of)}, ${this.pos(e.at)})`;
       case "item":
         return `item(${this.expr(e.of)}, ${this.expr(e.index)}, ${this.pos(e.at)})`;
+      case "record":
+        return `record(${q(e.fields)}, [${e.values.map((v) => this.expr(v)).join(", ")}])`;
+      case "field":
+        return `field(${this.expr(e.of)}, ${q(e.name)}, ${this.pos(e.at)})`;
     }
   }
 }
@@ -153,7 +162,7 @@ const MAX_DEPTH = 2000;
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
 function helpers(ats, print, draw, maxSteps) {
-  const errors = ats.map((at) => (message) => fail(at, message));
+  const errors = ats.map((at) => (message, value) => fail(at, message, value));
   const turtle = new Turtle(draw);
   let steps = 0;
   let depth = 0; // a failed call needs no undoing: any error ends the run
@@ -204,15 +213,26 @@ function helpers(ats, print, draw, maxSteps) {
     checkRange: (from, to, k) => (checkRange(from, to, errors[k]), [from, to]),
     itemsOf: (v, k) => itemsOf(v, errors[k]),
     turtle: (action, value, k) => turtle.act(action, value, errors[k]),
+    record: makeRecord,
+    field: (r, name, k) => (isRecord(r) && Object.hasOwn(r, name) ? r[name] : fieldOf(r, name, errors[k])),
+    recordFor: (r, name, k) => recordFor(r, name, errors[k]),
+    failWith: (value, k) => failWith(value, errors[k]),
   };
 }
-const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));
+export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));
 
-// Compiles a parsed program to JavaScript. Returns the source (to look at) and a function that runs it.
+// Compiles a parsed program to JavaScript: its source (to look at), the names of its top-level variables,
+// and a function that runs it and returns those variables' values (see load() in moth.js).
 export function jit(program) {
   const ats = [];
   const main = new JsCompiler(null, "main", [], program, ats);
-  const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${main.code}`;
+  const slots = main.fn.names.map((_, slot) => main.v(slot)).filter((_, slot) => slot > 0);
+  return fromJs(`${main.code}\nreturn [${slots.join(", ")}];`, ats, main.fn.names);
+}
+
+// Runs JavaScript made for these helpers, whoever made it: jit() above, or the compiler written in Moth.
+export function fromJs(code, ats, names) {
+  const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, run: (print, draw, maxSteps) => compiled(helpers(ats, print, draw, maxSteps)) };
+  return { source, names, run: (print, draw, maxSteps) => compiled(helpers(ats, print, draw, maxSteps)) };
 }

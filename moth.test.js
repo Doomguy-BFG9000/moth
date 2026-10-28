@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, debug, timeline, check, compile, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, check, compile, load, excerpt, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -29,6 +29,7 @@ const EXAMPLES = {
   "Lists": "I like apple\nI like banana\nI like cherry\nI like mango\nThat's 4 fruits, and the first is apple",
   "Functions": "Hello, Sam!\nfib(20) is 6765",
   "Counter": "Ticked 3 times",
+  "Records": 'Sam is 20\nAna is 31\n(record with name "Sam", age 21)',
   "Primes": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]",
 };
 
@@ -67,6 +68,11 @@ const PROGRAMS = [
   ['repeat 0 times\n    say "never"\nend\nfor each n from 3 to 1\n    say "never"\nend\nsay "done"', "done"],
   ['say 2 + 3 * 4 " " (-(2 + 3)) " " (not 1 is 2)', "14 -5 yes"],
   ["set n to 0\nrepeat while n is less than 3\n    add 1 to n\nend\nsay n", "3"],
+  // records
+  ['set p to record with name "Sam", age 20\nset age of p to 21\nsay name of p " " age of p', "Sam 21"],
+  ['set a to record with x 1, inner record with y 2\nsay y of inner of a " " (a is record with x 1, inner record with y 2)', "2 yes"],
+  ['set r to empty record\nset colour of r to "red"\nsay r " " (r is empty record)', '(record with colour "red") no'],
+  ["set r to record with n 2\nset xs to list of 10, 20\nsay item (n of r) of xs \" \" item 1 of xs", "20 10"], // `n of r` needs brackets inside `item ... of`
 ];
 
 test("programs print what they should, on both engines", () => {
@@ -116,6 +122,12 @@ const ERRORS = [
   ["pen width 0", "line 1: 'pen width' needs a number above 0, not 0"],
   ["move sideways 5", "line 1: expected 'forward' or 'back' but found 'sideways'"],
   ["set pen to 1", "line 1: 'pen' is a Moth word, so it can't be used as a variable name"],
+  ['set p to record with name "Sam"\nsay nmae of p', "line 2: this record has no 'nmae'. Did you mean 'name'?"],
+  ["say name of 5", "line 1: can't take 'name' of a number"],
+  ['set s to "x"\nset name of s to 1', "line 2: can only change 'name' of a record, not text"],
+  ["set x to empty thing", "line 1: expected 'list' or 'record' but found 'thing'"],
+  ["say person.name", "line 1: I don't understand '.' (to get a field write 'name of person')"],
+  ['say "before"\nfail with "your own message"', "line 2: your own message"],
 ];
 
 test("mistakes give a clear message, on both engines", () => {
@@ -287,6 +299,17 @@ test("the checker finds mistakes without running the program", () => {
     "22:7 fails: can't divide by zero",
   ]);
   assert.deepEqual(problems("say (1"), ["1:7 error: expected ')' but found the end of the code"]);
+  assert.deepEqual(problems('set n to 5\nsay name of n\nfail with "stop"\nsay "after"'), [
+    "2:5 fails: can't take 'name' of a number",
+    "4:1 never runs: this line can never run, because 'fail' comes first",
+  ]);
+});
+
+test("load() hands JavaScript what a program made, and fail with's value", () => {
+  const made = load('to greet with who\n    return "Hello, " + who\nend\nset version to 3\nto check with n\n    fail with record with problem "bad", value n\nend');
+  assert.equal(made.greet("JavaScript"), "Hello, JavaScript");
+  assert.equal(made.version, 3);
+  assert.throws(() => made.check(7), (err) => err instanceof MothError && err.value.problem === "bad" && err.value.value === 7);
 });
 
 // A "fails" warning on a line that never runs is still true (like `return 1 / 0` in a function nobody

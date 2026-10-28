@@ -99,6 +99,15 @@ tick
 tick
 say "Ticked " tick() " times"`,
 
+  "Records": `# a record keeps named values together
+set sam to record with name "Sam", age 20
+set ana to record with name "Ana", age 31
+for each person in list of sam, ana
+    say name of person " is " age of person
+end
+set age of sam to 21
+say sam`,
+
   "Primes": `set primes to empty list
 for each n from 2 to 50
     set prime to yes
