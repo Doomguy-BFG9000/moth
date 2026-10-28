@@ -3,7 +3,8 @@
 
 import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
 import { Scope } from "./scope.js";
-import { jit } from "./jit.js";
+import { jit, TooDeep } from "./jit.js";
+import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -565,6 +566,17 @@ export function compileToJs(source) {
   return build(source, jit);
 }
 
+// Problems found without running the program (checker.js): [{ line, col, kind, message }]. Code that
+// can't even be read comes back as a single problem of kind "error".
+export function check(source) {
+  try {
+    return build(source, checkProgram);
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    return [{ line: err.line, col: err.col, kind: "error", message: err.reason }];
+  }
+}
+
 // Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`; mistakes in
 // the program throw MothError. `maxSteps` stops loops and calls after that many rounds, for running
 // untrusted code without a Stop button. `engine` is "jit" (compile to JavaScript) or "vm" (bytecode).
@@ -581,10 +593,11 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   let said = 0;
   let drawn = 0;
   try {
-    program.run((line) => (said++, print(line)), (line) => (drawn++, draw?.(line)), maxSteps);
+    // counted once passed on, so a hand-over in the middle of passing one on can't lose it
+    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps);
   } catch (err) {
-    if (!(err instanceof RangeError || err?.name === "InternalError")) throw err;
-    // JavaScript's own stack ran out (the JIT's Moth calls are JavaScript calls), or a value outgrew what
+    if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
+    // Calls went deeper than the JIT goes (or JavaScript's stack ran out anyway), or a value outgrew what
     // JavaScript allows. Moth programs can't read input or the clock, so a second run says and draws exactly
     // the same things: run it again on the VM, which keeps its own stack and reports a too-big value at the
     // right line, and pass on only what the first run hadn't already.

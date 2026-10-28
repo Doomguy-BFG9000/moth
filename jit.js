@@ -144,19 +144,28 @@ class JsCompiler extends Scope {
   }
 }
 
+// Thrown when Moth calls go deeper than MAX_DEPTH, so run() can hand the program to the VM. The JIT's Moth
+// calls are JavaScript calls, and stopping at a depth of our own, well before JavaScript's stack runs out,
+// means the hand-over never happens halfway through something else, like the code that prints a line.
+export class TooDeep {}
+const MAX_DEPTH = 2000;
+
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
 function helpers(ats, print, draw, maxSteps) {
   const errors = ats.map((at) => (message) => fail(at, message));
   const turtle = new Turtle(draw);
   let steps = 0;
+  let depth = 0; // a failed call needs no undoing: any error ends the run
   const tick = (k) => {
     if (++steps > maxSteps) errors[k](stoppedMessage(maxSteps));
   };
   const enter = (f, argc, name, k) => {
     checkInputs(f, argc, name, errors[k]);
     tick(k);
+    if (++depth > MAX_DEPTH) throw new TooDeep();
   };
+  const leave = (result) => (depth--, result);
   const ordered = (op, test) => (a, b, k) => (typeof a === "number" && typeof b === "number" ? test(a, b) : compare(op, a, b, errors[k]));
   return {
     UNSET,
@@ -166,11 +175,11 @@ function helpers(ats, print, draw, maxSteps) {
     unset: (name, k) => errors[k](noValue(name)),
     fn: (name, params, run) => new Closure({ name, params, run }, null),
     callable: (f, name, k) => callable(f, name, errors[k]),
-    call0: (f, name, k) => (enter(f, 0, name, k), f.fn.run()),
-    call1: (f, a, name, k) => (enter(f, 1, name, k), f.fn.run(a)),
-    call2: (f, a, b, name, k) => (enter(f, 2, name, k), f.fn.run(a, b)),
-    call3: (f, a, b, c, name, k) => (enter(f, 3, name, k), f.fn.run(a, b, c)),
-    callN: (f, args, name, k) => (enter(f, args.length, name, k), f.fn.run(...args)),
+    call0: (f, name, k) => (enter(f, 0, name, k), leave(f.fn.run())),
+    call1: (f, a, name, k) => (enter(f, 1, name, k), leave(f.fn.run(a))),
+    call2: (f, a, b, name, k) => (enter(f, 2, name, k), leave(f.fn.run(a, b))),
+    call3: (f, a, b, c, name, k) => (enter(f, 3, name, k), leave(f.fn.run(a, b, c))),
+    callN: (f, args, name, k) => (enter(f, args.length, name, k), leave(f.fn.run(...args))),
     add: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a + b : plus(a, b, errors[k])),
     sub: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a - b : arithmetic("-", a, b, errors[k])),
     mul: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a * b : arithmetic("*", a, b, errors[k])),

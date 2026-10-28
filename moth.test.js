@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, debug, timeline, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, check, compile, excerpt, MothError } from "./moth.js";
+import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
 function output(source, options) {
@@ -238,6 +239,113 @@ test("when JavaScript's stack runs out, the JIT hands over to the VM without rep
   run(source, (line) => said.push(line), { draw: () => drawn++ }); // 20,000 calls deep is past JavaScript's stack
   assert.deepEqual(said, ["start", "200010000"]);
   assert.equal(drawn, 1);
+});
+
+// The checker: problems found without running.
+const problems = (source) => check(source).map(({ line, col, kind, message }) => `${line}:${col} ${kind}: ${message}`);
+
+test("the checker finds mistakes without running the program", () => {
+  const source = [
+    'set name to "Moth"',
+    "say name * 2", // 2
+    "to double with n",
+    "    return n * 2",
+    '    say "never"', // 5
+    "end",
+    "say double(1, 2)", // 7
+    "set spare to 5", // 8
+    "say totl", // 9
+    "set total to 0",
+    "sya total", // 11
+    'add "x" to total', // 12
+    "set count to 5",
+    "count", // 14
+    'repeat "x" times', // 15
+    "end",
+    "say item 0 of list of 1", // 17
+    "say length of 5", // 18
+    "for each c in 7", // 19
+    "end",
+    'move forward "far"', // 21
+    "say 1 / 0", // 22
+    'say no and ("a" * 2)', // the right side of `and` might not run, so nothing is certain there
+  ].join("\n");
+  assert.deepEqual(problems(source), [
+    "2:10 fails: can't use '*' on text and a number",
+    "5:5 never runs: this line can never run, because 'return' comes first",
+    "7:5 fails: 'double' needs 1 input but got 2",
+    "8:1 unused: 'spare' is set but never used",
+    "9:5 fails: 'totl' has no value yet. Did you mean 'total'?",
+    "11:1 fails: there is no function called 'sya'. Did you mean 'say'?",
+    "12:1 fails: can't add text to a number",
+    "14:1 fails: 'count' is a number, not a function",
+    '15:1 fails: repeat needs a whole number of times, not "x"',
+    "17:5 fails: there is no item 0, items are counted from 1",
+    "18:5 fails: 'length of' needs a list or text, not a number",
+    "19:1 fails: can only go through a list or text, not a number",
+    "21:1 fails: 'move forward' needs a number, not text",
+    "22:7 fails: can't divide by zero",
+  ]);
+  assert.deepEqual(problems("say (1"), ["1:7 error: expected ')' but found the end of the code"]);
+});
+
+// A "fails" warning on a line that never runs is still true (like `return 1 / 0` in a function nobody
+// calls), so the rule for working programs is: no warned line actually runs.
+test("the checker raises no false alarms on working programs", () => {
+  for (const source of [...Object.values(examples), ...PROGRAMS.map(([source]) => source)]) {
+    const { lines } = trace(source);
+    for (const p of check(source)) if (p.kind !== "unused") assert.ok(!lines.has(p.line), `${p.line}: ${p.message} in:\n${source}`);
+  }
+});
+
+// The lines a program really runs (its LINE markers), and the mistake it stops at, if any.
+function trace(source) {
+  const lines = new Set();
+  const machine = new Machine(compile(source, { debug: true }), () => {}, { maxSteps: 10_000 });
+  try {
+    while (machine.run({ pauseAtLines: true }) === "line") lines.add(machine.line);
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    return { lines, error: err };
+  }
+  return { lines };
+}
+
+// Checking the checker against what really happens, on thousands of randomly broken programs: a line
+// it says will fail never runs in a program that finishes; when a program does fail where it said, it
+// said the same words; and a line it says never runs, never does. One known gap: the checker doesn't
+// follow the order code runs in, so a name used before it's set fails with "no value yet" instead.
+test("the checker's claims hold on randomly broken programs", () => {
+  let seed = 7;
+  const random = (n) => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return Math.floor((seed / 2 ** 31) * n);
+  };
+  const pick = (list) => list[random(list.length)];
+  const sources = [...Object.values(examples), ...PROGRAMS.map(([source]) => source), ...ERRORS.map(([source]) => source)];
+  const mutations = [
+    (s) => { const i = random(s.length); return s.slice(0, i) + s.slice(i + 1); },
+    (s) => { const lines = s.split("\n"); lines.splice(random(lines.length), 0, pick(lines)); return lines.join("\n"); },
+    (s) => { const words = s.match(/\w+|\S/g); return s.replace(pick(words), pick(words)); },
+  ];
+  let predicted = 0;
+  for (let i = 0; i < 3000; i++) {
+    let source = pick(sources);
+    for (let n = random(4); n > 0; n--) source = pick(mutations)(source);
+    const found = check(source);
+    if (found.some((p) => p.kind === "error")) continue; // doesn't compile, so nothing ran
+    const { lines, error } = trace(source);
+    for (const p of found) {
+      if (p.kind === "never runs") assert.ok(!lines.has(p.line), `line ${p.line} ran:\n${source}`);
+      if (p.kind !== "fails") continue;
+      if (error && error.line === p.line && error.col === p.col) {
+        if (error.reason !== p.message) assert.match(error.reason, /has no value yet|there is no function called/, source);
+        predicted++;
+      }
+      if (!error) assert.ok(!lines.has(p.line), `said line ${p.line} fails, but it ran fine:\n${source}`);
+    }
+  }
+  assert.ok(predicted > 100, `only ${predicted} runtime errors were predicted`); // the checker isn't silent either
 });
 
 // Everything one engine does with a program: what it said and drew, and the mistake it stopped at.
