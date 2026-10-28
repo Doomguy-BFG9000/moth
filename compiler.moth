@@ -176,11 +176,13 @@ to tokenize with source, file
             set nl to no
         else if starts_word(c)
             set text to ""
+            set as_written to ""
             repeat while in_word(item k of chars)
                 add small(item k of chars) to text
+                add item k of chars to as_written
                 add 1 to k
             end
-            add record with type "word", value text, line line, col start, nl nl, file file to tokens
+            add record with type "word", value text, line line, col start, nl nl, file file, raw as_written to tokens
             set col to start + length of text
             set nl to no
         else if c is "\""
@@ -248,7 +250,8 @@ set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
-    "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file"
+    "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
+    "library call"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -305,6 +308,10 @@ set now_words to list of "time", "date", "year", "month", "day", "hour", "minute
 set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
     (list of "a", "record"), (list of "a", "dictionary"), (list of "bytes"), (list of "a", "function")
 set as_words to list of "bytes", "text", "hex", "binary", "json" # `block as text`
+# what a library's function can take and give, in the order of LIBRARY_TYPES in moth.js, and what Moth
+# checks each input is, as kind_phrases numbers them (-1 for anything)
+set library_types to list of "a number", "a whole number", "a long whole number", "a pointer", "text", "wide text", "bytes", "yes or no"
+set library_kinds to list of 0, 0, 0, -1, 1, 1, 6, 2
 # buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
 # "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
@@ -673,6 +680,130 @@ to parse with tokens, reading
         return inner
     end
 
+    # `use the library "sqlite3" or "winsqlite3" as sqlite`, then a line for each of its functions the program
+    # calls, and `end`, as moth.js's library reads it
+    to library_use with t
+        set pos to pos + 2
+        if not at_top
+            fail with problem(t, "'use the library' only works at the top level of a program")
+        end
+        set library_names to list of library_name()
+        repeat while not nl of peek() and word("or")
+            add library_name() to library_names
+        end
+        set alias to nothing
+        if not nl of peek() and word("as")
+            set alias to take_name("a name for the library")
+        end
+        if not nl of peek()
+            expected("a new line")
+        end
+        set nesting to nesting + 1
+        set made to empty list
+        repeat while not is_word("end")
+            if check("eof")
+                fail with problem(peek(), "'use' from line " + line of t + " is missing its 'end'")
+            end
+            lay(peek())
+            add library_function(item 1 of library_names) to made
+            if not nl of peek()
+                expected("a new line")
+            end
+        end
+        set nesting to nesting - 1
+        lay(peek())
+        set pos to pos + 1
+        for each d in made
+            set libraries of (native of d) to library_names
+        end
+        if alias is not nothing
+            set made to prefixed(made, alias)
+        end
+        return record with kind "use", body made, at t
+    end
+
+    to library_name
+        set name_token to match("string")
+        if not name_token
+            expected("a library's name in quotes, like \"sqlite3\"")
+        end
+        return value of name_token
+    end
+
+    # `MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number`, or with the name the
+    # library has for it in quotes: `"remove" as remove_file(text) gives a whole number`
+    to library_function with first
+        set t to peek()
+        set symbol to nothing
+        if check("string")
+            set symbol to value of match("string")
+            expect_word("as")
+        else
+            set symbol to raw of t
+        end
+        set fn_name to take_name("the name of one of the library's functions")
+        if not tight(match("("))
+            expected("'(' and what the function takes")
+        end
+        set types to empty list
+        if not match(")")
+            add library_type() to types
+            repeat while match(",")
+                add library_type() to types
+            end
+            if not match(")")
+                expected("')'")
+            end
+        end
+        if length of types is greater than 16
+            fail with problem(t, "a library's function can take at most 16 inputs")
+        end
+        set gives to nothing
+        if not nl of peek() and word("gives")
+            set gives_at to peek()
+            set gives to library_type()
+            if gives is "bytes"
+                fail with problem(gives_at, "a library's function can't give bytes: it can give a pointer to them")
+            end
+        end
+        set params to empty list
+        set kinds to empty list
+        for each type_name in types
+            add "input " + (length of params + 1) to params
+            set n to 1
+            repeat while item n of library_types is not type_name
+                add 1 to n
+            end
+            add item n of library_kinds to kinds
+        end
+        add 1 to functions_made
+        set first_node to record with kind "value", type "string", value first, at t
+        set call to record with kind "builtin", name "library call", args (list of first_node), at t
+        set body to list of (record with kind "return", value call, at t)
+        set native to record with symbol symbol, types types, gives gives, libraries (list of first)
+        return record with kind "define", name fn_name, params params, kinds kinds, body body, at t, order functions_made, native native
+    end
+
+    # what a library's function takes or gives, as C has it
+    to library_type
+        for each type_name in library_types
+            set type_words to split type_name by " "
+            set fits to yes
+            set i to 0
+            for each w in type_words
+                if fits and not word_at(pos + i, w)
+                    set fits to no
+                end
+                add 1 to i
+            end
+            if fits
+                set pos to pos + length of type_words
+                return type_name
+            end
+        end
+        expected("what it takes or gives ('a number', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no')")
+    end
+
     # `math's sine`: a name the file used `as math` makes
     to member with first
         if match("'s")
@@ -972,6 +1103,9 @@ to parse with tokens, reading
             return record with kind "try", body body, name caught_name, handler block_end(t), at t
         end
         if word("use")
+            if is_word("the") and not nl of peek() and word_at(pos + 1, "library")
+                return library_use(t)
+            end
             set name_token to match("string")
             if not name_token
                 expected("a file name in quotes, like \"shapes.moth\"")
@@ -1304,7 +1438,7 @@ to parse with tokens, reading
         set body to block_end(t)
         set fn_depth to fn_depth - 1
         set loop_depth to outside_loops
-        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t, order order
+        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t, order order, native nothing
     end
 
     to if_rest with t

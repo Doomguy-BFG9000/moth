@@ -64,6 +64,7 @@ function tokenize(src, file) {
           ? ["string", string.slice(1, -1).replace(/\\(.)/gs, (_, c) => ESCAPES[c] ?? c)]
           : [text, text];
     const token = { type, value, ...where, nl };
+    if (word) token.raw = word; // as written: a library's function is named in its own case (see library)
     if (number) token.text = number; // as written, for messages and the JIT
     tokens.push(token);
     nl = false;
@@ -239,6 +240,71 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return alias ? prefixed(body, alias) : body;
   }
 
+  // `use the library "sqlite3" or "winsqlite3" as sqlite`, then a line for each of its functions the program
+  // calls, and `end`: each a function of the program's, whose inputs say what they are as Moth has it (see
+  // LIBRARY_TYPES). Only a program moth build makes can call them (see "library call" in vm.js); used `as` a
+  // name, they're that name's, as a file's are.
+  function library(t) {
+    pos += 2;
+    if (!atTop) fail(t, "'use the library' only works at the top level of a program");
+    const libraryName = () => match("string")?.value ?? expected("a library's name in quotes, like \"sqlite3\"");
+    const names = [libraryName()];
+    while (!peek().nl && word("or")) names.push(libraryName());
+    const alias = !peek().nl && word("as") ? name("a name for the library") : null;
+    if (!peek().nl) expected("a new line");
+    nesting++;
+    const body = [];
+    while (!isWord("end")) {
+      if (check("eof")) fail(peek(), `'use' from line ${t.line} is missing its 'end'`);
+      lay(peek());
+      body.push(libraryFunction(names[0]));
+      if (!peek().nl) expected("a new line");
+    }
+    nesting--;
+    lay(peek());
+    pos++;
+    for (const d of body) d.native.libraries = names;
+    return { kind: "use", body: alias ? prefixed(body, alias) : body, at: t };
+  }
+
+  // `MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number`, or with the name the
+  // library has for it in quotes, for one Moth can't use: `"remove" as remove_file(text) gives a whole number`
+  function libraryFunction(first) {
+    const t = peek();
+    let symbol;
+    if (check("string")) {
+      symbol = match("string").value;
+      expectWord("as");
+    } else symbol = t.raw;
+    const fnName = name("the name of one of the library's functions");
+    tight(match("(")) || expected("'(' and what the function takes");
+    const types = [];
+    if (!match(")")) {
+      do types.push(libraryType()); while (match(","));
+      match(")") || expected("')'");
+    }
+    if (types.length > 16) fail(t, "a library's function can take at most 16 inputs");
+    let gives = null;
+    if (!peek().nl && word("gives")) {
+      const at = peek();
+      gives = libraryType();
+      if (gives === "bytes") fail(at, "a library's function can't give bytes: it can give a pointer to them");
+    }
+    const call = { kind: "builtin", name: "library call", args: [{ kind: "value", value: first, at: t }], at: t };
+    return {
+      kind: "define", name: fnName, params: types.map((_, i) => `input ${i + 1}`), body: [{ kind: "return", value: call, at: t }], at: t,
+      kinds: types.map((type) => LIBRARY_TYPES[type]), native: { symbol, types, gives, libraries: [first] },
+    };
+  }
+
+  // what a library's function takes or gives, as C has it: `a whole number` is an int, `wide text` wchar_t*
+  function libraryType() {
+    const at = Object.keys(LIBRARY_TYPES).find((type) => type.split(" ").every((w, i) => wordAt(pos + i, w)));
+    if (at === undefined) expected(`what it takes or gives (${Object.keys(LIBRARY_TYPES).map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")})`);
+    pos += at.split(" ").length;
+    return at;
+  }
+
   // `math's sine`: a name the file used `as math` makes
   const member = (first) => (match("'s") ? `${first}'s ${name("a name")}` : first);
 
@@ -407,6 +473,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "try", body, name: caught, handler: blockEnd(t), at: t };
     }
     if (word("use")) {
+      if (isWord("the") && !peek().nl && wordAt(pos + 1, "library")) return library(t);
       const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
       const alias = word("as") ? name("a name for the file") : null; // `use "math.moth" as math`
       if (!atTop) fail(t, "'use' only works at the top level of a program");
@@ -914,6 +981,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 // program's, as with any `use`. A function's inputs, and the functions a function makes, are left alone,
 // since nothing outside the function can reach them; every other name is renamed, so a variable only a
 // function in the file sets stays that function's own, and a name the file never makes isn't the program's.
+// What a library's function can take and give, and what Moth checks each input is (see KINDS in vm.js, and -1
+// for anything): a number is a double, a whole number an int, a long whole number 64 bits, and a pointer a
+// whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows)
+const LIBRARY_TYPES = { "a number": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2 };
+
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {
   const walk = (node, hidden, handler) => {

@@ -1,0 +1,157 @@
+# A database in a file, through SQLite itself: the library that comes with Windows (winsqlite3.dll) and with
+# most Linux systems (libsqlite3.so.0). Each row a query gives is a dictionary of its columns.
+#
+#   use "sqlite.moth" as sqlite
+#   set people to sqlite's open("people.db")
+#   sqlite's run(people, "create table if not exists people (name text, age integer)")
+#   sqlite's run_with(people, "insert into people values (?, ?)", list of "Sam", 20)
+#   for each row in sqlite's query(people, "select name, age from people")
+#       say item "name" of row + " is " + item "age" of row
+#   end
+#   sqlite's close(people)
+#
+# A program that uses it is built with --allow-libraries. A mistake SQLite finds is a `fail with`, which
+# says what SQLite said: catch it with `try`.
+
+use the library "winsqlite3" or "sqlite3"
+    sqlite3_open(text, bytes) gives a whole number
+    sqlite3_close(a pointer) gives a whole number
+    sqlite3_errmsg(a pointer) gives text
+    sqlite3_prepare_v2(a pointer, text, a whole number, bytes, a pointer) gives a whole number
+    sqlite3_step(a pointer) gives a whole number
+    sqlite3_finalize(a pointer) gives a whole number
+    sqlite3_changes(a pointer) gives a whole number
+    sqlite3_column_count(a pointer) gives a whole number
+    sqlite3_column_name(a pointer, a whole number) gives text
+    sqlite3_column_type(a pointer, a whole number) gives a whole number
+    sqlite3_column_int64(a pointer, a whole number) gives a long whole number
+    sqlite3_column_double(a pointer, a whole number) gives a number
+    sqlite3_column_text(a pointer, a whole number) gives text
+    sqlite3_bind_int64(a pointer, a whole number, a long whole number) gives a whole number
+    sqlite3_bind_double(a pointer, a whole number, a number) gives a whole number
+    sqlite3_bind_text(a pointer, a whole number, text, a whole number, a pointer) gives a whole number
+    sqlite3_bind_null(a pointer, a whole number) gives a whole number
+end
+
+# the database in that file, made if it isn't there
+to open with path
+    set slot to 8 bytes
+    set code to sqlite3_open(path, slot)
+    set database to pointer_in(slot)
+    if code is not 0
+        set why to "out of memory"
+        if database is not nothing
+            set why to sqlite3_errmsg(database)
+            sqlite3_close(database)
+        end
+        fail with "SQLite can't open '" + path + "': " + why
+    end
+    return database
+end
+
+to close with database
+    sqlite3_close(database)
+end
+
+# SQL that gives no rows, like `create table` or `insert`: how many rows it changed
+to run with database, sql
+    return run_with(database, sql, empty list)
+end
+
+# the same, with values for its ?s: numbers, text, yes or no, or nothing
+to run_with with database, sql, values
+    set statement to prepared(database, sql, values)
+    set code to sqlite3_step(statement)
+    repeat while code is 100 # a row, which isn't wanted
+        set code to sqlite3_step(statement)
+    end
+    sqlite3_finalize(statement)
+    if code is not 101
+        fail with "SQLite: " + sqlite3_errmsg(database)
+    end
+    return sqlite3_changes(database)
+end
+
+# the rows SQL like `select` gives, each a dictionary of its columns by their names
+to query with database, sql
+    return query_with(database, sql, empty list)
+end
+
+to query_with with database, sql, values
+    set statement to prepared(database, sql, values)
+    set rows to empty list
+    set columns to sqlite3_column_count(statement)
+    set code to sqlite3_step(statement)
+    repeat while code is 100
+        set row to empty dictionary
+        for each column from 0 to columns - 1
+            set item sqlite3_column_name(statement, column) of row to column_value(statement, column)
+        end
+        add row to rows
+        set code to sqlite3_step(statement)
+    end
+    sqlite3_finalize(statement)
+    if code is not 101
+        fail with "SQLite: " + sqlite3_errmsg(database)
+    end
+    return rows
+end
+
+to prepared with database, sql, values
+    set slot to 8 bytes
+    if sqlite3_prepare_v2(database, sql, -1, slot, nothing) is not 0
+        fail with "SQLite: " + sqlite3_errmsg(database)
+    end
+    set statement to pointer_in(slot)
+    if statement is nothing
+        fail with "SQLite: there's no SQL in '" + sql + "'"
+    end
+    set place to 0
+    for each value in values
+        add 1 to place
+        set code to 0
+        if value is nothing
+            set code to sqlite3_bind_null(statement, place)
+        else if value is yes
+            set code to sqlite3_bind_int64(statement, place, 1)
+        else if value is no
+            set code to sqlite3_bind_int64(statement, place, 0)
+        else if value is "" + value # text: -1 as its length is up to its end, and as a pointer, a copy
+            set code to sqlite3_bind_text(statement, place, value, -1, -1)
+        else # a number, which a column of whole numbers keeps as one
+            set code to sqlite3_bind_double(statement, place, value)
+        end
+        if code is not 0
+            sqlite3_finalize(statement)
+            fail with "SQLite: " + sqlite3_errmsg(database)
+        end
+    end
+    return statement
+end
+
+# a column of the row a statement is at, as Moth has it: whole numbers and others, text, or nothing
+to column_value with statement, column
+    set type to sqlite3_column_type(statement, column)
+    if type is 1
+        return sqlite3_column_int64(statement, column)
+    else if type is 2
+        return sqlite3_column_double(statement, column)
+    else if type is 5
+        return nothing
+    end
+    return sqlite3_column_text(statement, column)
+end
+
+# the pointer C put in 8 bytes, the low byte first, or nothing for none
+to pointer_in with slot
+    set made to 0
+    set place to 1
+    for each k from 1 to 8
+        set made to made + item k of slot * place
+        set place to place * 256
+    end
+    if made is 0
+        return nothing
+    end
+    return made
+end

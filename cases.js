@@ -153,6 +153,8 @@ export const PROGRAMS = [
     "{\"name\":\"Sam\",\"age\":30,\"tags\":[\"a\",\"b\"]}\n(dictionary where \"name\" is \"Sam\", \"age\" is 30, \"tags\" is [\"a\", \"b\"])\n[\"a\", \"b\"]\n[1,\"two\",true,false,null,0.5,1e-7,\"tab\\t\\\"q\\\"\"]\n{\"1\":\"one\",\"k\":{},\"2.5\":[]}"],
   ["say json from \" [1, 2e3, -0.5E-2, true, null, {\\\"a\\\": [], \\\"a\\\": {}}] \"\nset json to 3\nsay json + 1\nset send to \"s\"\nsay send\nto from with x\n    return x\nend\nsay from(json)",
     "[1, 2000, -0.005, yes, nothing, (dictionary where \"a\" is (empty dictionary))]\n4\ns\n3"],
+  // a library's functions, declared but not called: a program's own, with inputs that say what they are
+  ["use the library \"kernel32\" or \"c\" as k\n    GetCurrentProcessId() gives a whole number\n    \"remove\" as remove_file(text) gives a whole number\n    f(a number, a whole number, a long whole number, a pointer, text, wide text, bytes, yes or no) gives yes or no\nend\nuse the library \"msvcrt\" or \"m\"\n    sqrt(a number) gives a number\n    Beep()\nend\nsay \"declared\"", "declared"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -472,6 +474,16 @@ export const ERRORS = [
     "line 1: 'Bad Name' can't be a header's name: it's letters, digits and - (and !#$%&'*+.^_`|~)"],
   ["say read \"notes.txt\" with headers (empty dictionary)",
     "line 1: only a site is read with headers, and 'notes.txt' isn't one (its address starts http:// or https://)"],
+  // a library's function, called where only a program moth build makes can call it, or with the wrong inputs
+  ["use the library \"kernel32\" or \"c\"\n    abs(a whole number) gives a whole number\nend\nsay abs(0 - 1)", "line 2: can't use the library 'kernel32' here: only a program made by moth build can"],
+  ["use the library \"msvcrt\" or \"c\" as c\n    strlen(text) gives a long whole number\nend\nsay c's strlen(5)", "line 4: 'c's strlen' needs input 1 to be text, not a number"],
+  ["use the library \"c\"\n    abs(a whole number, a thing) gives a whole number\nend", "line 2: expected what it takes or gives ('a number', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no') but found 'a'"],
+  ["use the library \"c\"\n    malloc(a long whole number) gives bytes\nend", "line 2: a library's function can't give bytes: it can give a pointer to them"],
+  ["use the library \"c\"\n    remove(text) gives a whole number\nend", "line 2: 'remove' is a Moth word, so it can't be used as the name of one of the library's functions"],
+  ["use the library \"c\"\n    abs(a whole number) gives a whole number", "line 2: 'use' from line 1 is missing its 'end'"],
+  ["if yes\n    use the library \"c\"\n    end\nend", "line 2: 'use the library' only works at the top level of a program"],
+  ["use the library c\n    abs(a whole number)\nend", "line 1: expected a library's name in quotes, like \"sqlite3\" but found 'c'"],
+  ["use the library \"c\"\n    abs a whole number\nend", "line 2: expected '(' and what the function takes but found 'a'"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

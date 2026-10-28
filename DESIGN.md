@@ -2008,3 +2008,55 @@ hold them to agreeing.
 - **Not yet.** The clipboard, which X keeps by messages between programs; the
   pad; boxes for choosing a file; keysyms of the old kinds past Latin-1, such
   as Cyrillic's, which give nothing; and a Mac's window.
+
+## 45. Libraries: calling C
+
+- **Why.** A large program needs what's already written: a database, the
+  system's own functions, compression, a window toolkit. Writing each of them
+  into the runtime, as the Linux window was, doesn't scale. So a program can
+  call any C library's functions itself, as a C program would.
+- **Declaring them.** `use the library "sqlite3"`, then a line for each function
+  the program calls and `end`: its name as the library has it, what it takes,
+  and what it `gives`, in Moth's words for C's types. `a number` is a double,
+  `a whole number` an int (a uint fits too), `a long whole number` 64 bits,
+  `a pointer` a whole number, nothing or bytes, `text` UTF-8 and `wide text`
+  wchar_t's, both ending in a 0 C sees and Moth doesn't, `bytes` the program's
+  own memory, which C can fill (a pointer it gives back, say), and `yes or no`
+  an int. Each line makes a function of the program's, called like any other,
+  whose inputs say what they are, so a call with text for a number stops where
+  it's made. Names are the library's, in their case; Moth's own words go in
+  quotes with a name for them: `"remove" as remove_file(text)`. Libraries
+  named with `or` are tried in turn, so `"winsqlite3" or "sqlite3"` is SQLite
+  on Windows and Linux; `as` keeps a library's functions apart, as for a file.
+- **Calling one.** The first call loads the library and finds the function:
+  LoadLibraryExW and GetProcAddress on Windows, from System32 and then the
+  program's folder, never the current one or PATH; dlopen and dlsym on Linux,
+  where `"sqlite3"` is libsqlite3.so, or .so.0 to .so.9, as packages install
+  it. Each input is made what C wants, with text copied into memory of its own,
+  and put where the system's convention wants it: Windows' four registers,
+  each a number's xmm register too, for a function that takes any number of
+  inputs, and the stack; or Linux's six registers for whole numbers and eight
+  for numbers, and how many of those in al. Then what it gives is made a
+  value: a pointer of 0 and a text of none are nothing.
+- **Linux, dynamically linked.** A Linux program had no linker: the kernel ran
+  it as it was. One that uses a library is now linked by glibc's, which loads
+  libc and gives it dlopen and dlsym; it's otherwise the same program, still
+  speaking to the kernel itself. Every other program stays as it was.
+- **Asked first.** A library can do anything the program can, beyond the
+  reach of the --allow flags, so using one is asked for, as starting a program
+  is: at a terminal, once for each library; anywhere else, only with
+  `--allow-libraries` (or `--allow-all`).
+- **Only in machine code.** The playground and the JavaScript engines can't load
+  a library, so a call there is a mistake that says so, as `run program` is.
+- **A library of Moth's on one.** `tools/sqlite.moth` keeps a database in a file
+  through SQLite, which comes with Windows (winsqlite3.dll) and most Linux
+  systems: `open`, `run` and `query`, each row a dictionary, values bound to
+  `?`s, and SQLite's mistakes as `fail with`. An `out` pointer is 8 bytes C
+  fills, read back in Moth.
+- **Tested.** On Windows and Linux: the C library's own functions with each
+  kind of input and what they give, 15 inputs to `sprintf`, past the registers
+  on both systems, a function of a library's as a value, each mistake (a
+  number that isn't whole, a library or function that isn't there, no
+  --allow-libraries), and only a program with a library being linked; and
+  sqlite.moth's database, written, read back and opened again.
+- **Not yet.** Structs, floats, and C calling back into the program; a Mac.

@@ -17,7 +17,7 @@
 
 use "machine.moth" as machine
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -321,15 +321,16 @@ to cli_host
     end
 end
 
-# --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, the first three maybe with =names
+# --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all, the first three
+# maybe with =names
 to cli_allow_flag with cli_flag
-    for each cli_kind in list of "read", "write", "net", "run", "all"
+    for each cli_kind in list of "read", "write", "net", "run", "libraries", "all"
         set cli_start to "--allow-" + cli_kind
         if cli_flag is cli_start
             return yes
         end
         if length of cli_flag is greater than length of cli_start + 1 and cli_first(cli_flag, length of cli_start + 1) is cli_start + "="
-            return cli_kind is not "all" and cli_kind is not "run"
+            return cli_kind is not "all" and cli_kind is not "run" and cli_kind is not "libraries"
         end
     end
     return no

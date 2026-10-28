@@ -231,7 +231,8 @@ to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
-        charts no, pictures no, widgets no, sends no, controls no, files no, window no
+        charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
+        library_blocks empty dictionary
     set code of made to hot of made
     return made
 end
@@ -26615,7 +26616,7 @@ to emit_runtime with st
         emit_folders(a, target of st)
     end
     emit_gc_tables(a)
-    if uses_case of st or windowed or uses_saving of st or files of a # (and a file's name, from UTF-16)
+    if uses_case of st or windowed or uses_saving of st or files of a or libraries of a # (and a file's name, from UTF-16)
         emit_cases(a)
     end
     if uses_drawing of st or uses_app of st
@@ -26647,6 +26648,12 @@ to emit_runtime with st
         mark(a, chose_some)
         movi(a, rax, 0)
         ret(a)
+    end
+    if libraries of a
+        emit_libraries(a, target of st)
+        if target of st is "windows"
+            add (list of "KERNEL32.dll", (list of "LoadLibraryExW", "GetProcAddress")) to wanted
+        end
     end
     if files of a
         emit_file_hook(a)
@@ -27020,7 +27027,8 @@ set in_size to 4096 # bytes of input read at a time
 set permission_words to list of (list of "read", "this program isn't allowed to read files (start it with --allow-read)"),
     (list of "write", "this program isn't allowed to write files (start it with --allow-write)"),
     (list of "go online to", "this program isn't allowed to go online (start it with --allow-net)"),
-    (list of "run", "this program isn't allowed to start programs (start it with --allow-run)")
+    (list of "run", "this program isn't allowed to start programs (start it with --allow-run)"),
+    (list of "use the library", "this program isn't allowed to use libraries (start it with --allow-libraries)")
 # what Linux's error numbers mean, as glibc's strerror, and so Rust's io::Error, says it
 set errno_words to list of (list of 1, "Operation not permitted"), (list of 2, "No such file or directory"),
     (list of 4, "Interrupted system call"), (list of 5, "Input/output error"), (list of 6, "No such device or address"),
@@ -27037,7 +27045,7 @@ set errno_words to list of (list of 1, "Operation not permitted"), (list of 2, "
 # lowercase, as it's matched). --allow-run names nothing: a program may start any program, or none.
 to allowed_of with flags
     set made_bits to 0
-    set named to list of (empty list), (empty list), (empty list), (empty list)
+    set named to list of (empty list), (empty list), (empty list), (empty list), (empty list)
     for each flag in flags
         set head to ""
         set flag_word to ""
@@ -27065,8 +27073,10 @@ to allowed_of with flags
                 set kind_nums to list of 3
             else if flag_word is "run" and listed is nothing
                 set kind_nums to list of 4
+            else if flag_word is "libraries" and listed is nothing
+                set kind_nums to list of 5
             else if flag_word is "all" and listed is nothing
-                set kind_nums to list of 1, 2, 3, 4
+                set kind_nums to list of 1, 2, 3, 4, 5
             end
         end
         if length of kind_nums is 0
@@ -27074,7 +27084,7 @@ to allowed_of with flags
         end
         for each k in kind_nums
             if listed is nothing
-                set made_bits to made_bits bit or (item k of (list of 1, 2, 4, 8))
+                set made_bits to made_bits bit or (item k of (list of 1, 2, 4, 8, 16))
             else
                 set these to item k of named
                 for each one in split listed by ","
@@ -28398,7 +28408,7 @@ to emit_named with a, target
     push_r(a, r12)
     push_r(a, r13)
     mov_rr(a, rbx, rcx)
-    for each k from 0 to 3
+    for each k from 0 to 4
         set other to new_label(a)
         alui(a, "cmp", rbx, k)
         jcc(a, cc_ne, other)
@@ -33563,6 +33573,744 @@ to emit_run_why with a
     ret(a)
 end
 
+# ---------- libraries ----------
+# `use the library "sqlite3"` (see library in moth.js): each of its functions the program declares is a
+# function of the program's whose body calls into the library. The library is loaded, and the function
+# found in it, the first time it's called: LoadLibraryExW and GetProcAddress on Windows, dlopen and dlsym on
+# Linux, whose program is then linked by the system's dynamic linker (see linux_file). Its inputs are made
+# what C wants and put where the system's calling convention wants them, so it's called as a C compiler
+# would call it, and what it gives is made a Moth value (DESIGN §45).
+
+# register dst: the low 32 bits of src, with their sign
+to movsxd with a, dst, src
+    enc(a, empty list, yes, (list of 0x63), dst, reg_at(src), empty list)
+end
+
+# the files a library's name could be: on Windows "user32" is user32.dll, and on Linux "sqlite3" is
+# libsqlite3.so, or libsqlite3.so.0 to .so.9, the names a library is installed under; a name with a dot
+# or a folder in it is the file itself. Each is the name, and whether it has a folder in it.
+to library_files with library_name, target
+    set has_folder to position of "/" in library_name is greater than 0 or position of "\\" in library_name is greater than 0
+    if target is "windows"
+        if has_folder or position of "." in library_name is greater than 0
+            return list of (list of library_name, has_folder)
+        end
+        return list of (list of library_name + ".dll", no)
+    end
+    if has_folder or position of ".so" in library_name is greater than 0
+        return list of (list of library_name, has_folder)
+    end
+    set made to list of (list of "lib" + library_name + ".so", no)
+    for each version from 0 to 9
+        add (list of "lib" + library_name + ".so." + version, no) to made
+    end
+    return made
+end
+
+# the label of a library's block in the data: its handle once it's loaded, how many files it could be, its
+# names as text ("'msvcrt' or 'c'" once quoted), then for each file where its name is (as UTF-16 on
+# Windows), whether it has a folder in it, and the name it's for, which the names become once it's loaded;
+# one for each set of names
+to library_block with a, library_names, target
+    set key to join library_names with "|"
+    set known to library_blocks of a
+    if key is in known
+        return item key of known
+    end
+    set candidates to empty list
+    for each library_name in library_names
+        for each candidate in library_files(library_name, target)
+            add text_object(a, library_name) to candidate
+            add candidate to candidates
+        end
+    end
+    set placed to empty list
+    for each candidate in candidates
+        if target is "windows"
+            add wide_place(a, item 1 of candidate) to placed
+        else
+            add c_text_place(a, item 1 of candidate) to placed
+        end
+    end
+    set shown to text_object(a, join library_names with "' or '")
+    set dat to data of a
+    pad_to(dat, 8)
+    set label to "lib_block_" + length of dat
+    data_here(a, label)
+    put64(dat, 0)
+    put64(dat, length of candidates)
+    absolute(a, "data", length of dat, shown, 0)
+    put64(dat, 0)
+    set k to 0
+    for each candidate in candidates
+        add 1 to k
+        absolute(a, "data", length of dat, item k of placed, 0)
+        put64(dat, 0)
+        if item 2 of candidate
+            put64(dat, 1)
+        else
+            put64(dat, 0)
+        end
+        absolute(a, "data", length of dat, item 3 of candidate, 0)
+        put64(dat, 0)
+    end
+    set item key of known to label
+    return label
+end
+
+# the label of a function's descriptor in the data: where it is once found (0 until then), its library's
+# block, its name as C has it, and that name as text, for mistakes
+to library_desc with a, nat, target
+    set block to library_block(a, libraries of nat, target)
+    set c_name to c_text_place(a, symbol of nat)
+    set shown to text_object(a, symbol of nat)
+    set dat to data of a
+    pad_to(dat, 8)
+    set label to "lib_fn_" + length of dat
+    data_here(a, label)
+    put64(dat, 0)
+    for each pointed in list of block, c_name, shown
+        absolute(a, "data", length of dat, pointed, 0)
+        put64(dat, 0)
+    end
+    return label
+end
+
+# what makes an input what C wants, and what it must be for that, for a mistake that says so
+set library_takers to dictionary where "a whole number" is "rt_lib_whole", "a long whole number" is "rt_lib_long",
+    "a pointer" is "rt_lib_pointer", "text" is "rt_lib_text", "wide text" is "rt_lib_wide"
+set library_wants to dictionary where "a whole number" is "a whole number from -2147483648 to 4294967295",
+    "a long whole number" is "a whole number", "a pointer" is "a pointer (a whole number, nothing or bytes)"
+
+# The body of a library's function: the function found, each input made what C wants, in the registers and on
+# the stack as the system's calling convention has them, and the call; then what it gives, as a value in xmm0
+to gen_library_call with fc, e
+    set a to a of fc
+    set st to st of fc
+    set f to fn of fc
+    set nat to native of f
+    set target to target of st
+    set libraries of a to yes
+    set desc to library_desc(a, nat, target)
+    set types to types of nat
+    set n to length of types
+    lea(a, rcx, rip(desc))
+    call_to(a, "rt_lib_ready")
+    why_stub(fc, at of e, "rt_why_lib")
+    # where each input goes: a register, an xmm register (and on Windows, the register of its place too, as a
+    # function that takes any number of inputs reads it there), or the stack
+    set windows to target is "windows"
+    set int_regs to list of rdi, rsi, rdx, rcx, r8, r9
+    if windows
+        set int_regs to list of rcx, rdx, r8, r9
+    end
+    set places to empty list
+    set ints to 0
+    set floats to 0
+    set stacked to 0
+    set i to 0
+    for each type_name in types
+        add 1 to i
+        set is_float to type_name is "a number"
+        if windows and i is at most 4
+            add record with reg item i of int_regs, x i - 1, float is_float, slot -1 to places
+        else if not windows and is_float and floats is less than 8
+            add record with reg -1, x floats, float yes, slot -1 to places
+            add 1 to floats
+        else if not windows and not is_float and ints is less than 6
+            add 1 to ints
+            add record with reg item ints of int_regs, x -1, float no, slot -1 to places
+        else
+            add record with reg -1, x -1, float is_float, slot stacked to places
+            add 1 to stacked
+        end
+    end
+    set shadow to 0
+    if windows
+        set shadow to 32
+    end
+    set staging to shadow + 8 * stacked
+    set frame to staging + 8 * n
+    if (frame bit and 15) is not 0
+        set frame to frame + 8
+    end
+    set saved to hidden_place(fc)
+    store(a, saved, rsp)
+    alui(a, "and", rsp, -16)
+    if frame is greater than 0
+        alui(a, "sub", rsp, frame)
+    end
+    set i to 0
+    for each type_name in types # each input, made what C wants
+        add 1 to i
+        load(a, rax, mem(rbp, 16 + 8 * (n - i)))
+        if type_name is "bytes"
+            untag(a, rax)
+            load(a, rax, mem(rax, 8))
+        else if type_name is "yes or no"
+            movi64(a, rcx, bits_yes)
+            alu(a, "cmp", rax, rcx)
+            setcc(a, cc_e, rax)
+            movzx8(a, rax, rax)
+        else if type_name is not "a number"
+            call_to(a, item type_name of library_takers)
+            if type_name is in library_wants
+                set wrong to new_label(a)
+                test_rr(a, rdx, rdx)
+                jcc(a, cc_ne, wrong)
+                set was to enter_cold(a)
+                mark(a, wrong)
+                stub_start(fc, at of e)
+                stub_text(a, "'" + name of f + "' needs input " + i + " to be " + item type_name of library_wants + ", not ")
+                load(a, rax, rip("err_a"))
+                movi(a, rdx, 0)
+                call_to(a, "rt_e_shown")
+                jmp_to(a, "rt_e_end")
+                leave_cold(a, was)
+            end
+        end
+        store(a, mem(rsp, staging + 8 * (i - 1)), rax)
+    end
+    set i to 0
+    for each place in places # then where the convention wants them
+        add 1 to i
+        set from to mem(rsp, staging + 8 * (i - 1))
+        if slot of place is at least 0
+            load(a, rax, from)
+            store(a, mem(rsp, shadow + 8 * slot of place), rax)
+        else
+            if float of place
+                movsd_load(a, x of place, from)
+            end
+            if reg of place is not -1
+                load(a, reg of place, from)
+            end
+        end
+    end
+    if not windows # how many xmm registers hold inputs, for a function that takes any number of them
+        movi(a, rax, floats)
+    end
+    call_import(a, desc)
+    load(a, rsp, saved)
+    set gives to gives of nat # and what it gave, as a value
+    if gives is nothing
+        load_bits(a, xmm0, bits_nothing)
+    else if gives is "a number"
+        set strange to new_label(a)
+        ucomisd(a, xmm0, reg_at(xmm0))
+        jcc(a, cc_p, strange)
+        set was to enter_cold(a)
+        mark(a, strange)
+        stub_start(fc, at of e)
+        stub_text(a, "'" + name of f + "' gave something that isn't a number (NaN)")
+        jmp_to(a, "rt_e_end")
+        leave_cold(a, was)
+    else if gives is "a whole number"
+        movsxd(a, rax, rax)
+        cvtsi2sd(a, xmm0, rax)
+    else if gives is "a long whole number"
+        cvtsi2sd(a, xmm0, rax)
+    else if gives is "a pointer"
+        set given to new_label(a)
+        set null to new_label(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, null)
+        cvtsi2sd(a, xmm0, rax)
+        jmp_to(a, given)
+        mark(a, null)
+        load_bits(a, xmm0, bits_nothing)
+        mark(a, given)
+    else if gives is "yes or no"
+        set given to new_label(a)
+        load_bits(a, xmm0, bits_no)
+        test32(a, rax)
+        jcc(a, cc_e, given)
+        load_bits(a, xmm0, bits_yes)
+        mark(a, given)
+    else
+        mov_rr(a, rcx, rax)
+        if gives is "text"
+            call_to(a, "rt_lib_text_out")
+        else
+            call_to(a, "rt_lib_wide_out")
+        end
+        movq_xr(a, xmm0, rax)
+    end
+    return "value"
+end
+
+# The runtime's part: finding a library and a function in it, and making values what C wants and back
+to emit_libraries with a, target
+    # rt_lib_ready: rcx a function's descriptor (see library_desc): rax 0 once it's found, its library loaded
+    # if it wasn't, if the program may use it; or 2, with err_why 90 if it may not, 91 if there's no such
+    # library, 92 if the library has no such function, and err_file the library's name
+    set ready to new_label(a)
+    set not_ready to new_label(a)
+    set have_handle to new_label(a)
+    set permitted to new_label(a)
+    set try_loop to new_label(a)
+    set next_try to new_label(a)
+    set none to new_label(a)
+    set loaded to new_label(a)
+    set no_fn to new_label(a)
+    set ready_out to new_label(a)
+    mark(a, "rt_lib_ready")
+    load(a, rax, mem(rcx, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, not_ready)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_ready)
+    for each r in list of rbx, r12, r13, r14
+        push_r(a, r)
+    end
+    mov_rr(a, rbx, rcx)
+    load(a, r12, mem(rbx, 8))
+    load(a, rax, mem(r12, 16))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, rip("err_file"), rax)
+    load(a, rax, mem(r12, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_handle)
+    movi(a, rcx, 4) # may it?
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, permitted)
+    storei(a, rip("err_why"), 90)
+    movi(a, rax, 2)
+    jmp_to(a, ready_out)
+    mark(a, permitted)
+    movi(a, r13, 0)
+    mark(a, try_loop) # each file it could be, in turn
+    alu_load(a, "cmp", r13, mem(r12, 8))
+    jcc(a, cc_ae, none)
+    imul_ri(a, r14, r13, 24)
+    alu(a, "add", r14, r12)
+    if target is "windows" # a name alone from System32, then the program's folder; one with a folder in it as it is
+        set with_folder to new_label(a)
+        load(a, rax, mem(r14, 32))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, with_folder)
+        for each flags in list of 0x800, 0x200
+            win_enter(a)
+            load(a, rcx, mem(r14, 24))
+            movi(a, rdx, 0)
+            movi(a, r8, flags)
+            call_import(a, "imp_LoadLibraryExW")
+            win_leave(a)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, loaded)
+        end
+        jmp_to(a, next_try)
+        mark(a, with_folder)
+        win_enter(a)
+        load(a, rcx, mem(r14, 24))
+        movi(a, rdx, 0)
+        movi(a, r8, 0)
+        call_import(a, "imp_LoadLibraryExW")
+        win_leave(a)
+    else
+        push_r(a, rbp)
+        mov_rr(a, rbp, rsp)
+        alui(a, "and", rsp, -16)
+        load(a, rdi, mem(r14, 24))
+        movi(a, rsi, 2) # RTLD_NOW
+        call_import(a, "got_dlopen")
+        mov_rr(a, rsp, rbp)
+        pop_r(a, rbp)
+    end
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, loaded)
+    mark(a, next_try)
+    inc_r(a, r13)
+    jmp_to(a, try_loop)
+    mark(a, none)
+    storei(a, rip("err_why"), 91)
+    movi(a, rax, 2)
+    jmp_to(a, ready_out)
+    mark(a, loaded)
+    store(a, mem(r12, 0), rax)
+    load(a, rax, mem(r14, 40))
+    store(a, mem(r12, 16), rax)
+    mark(a, have_handle) # and the function in it
+    if target is "windows"
+        win_enter(a)
+        load(a, rcx, mem(r12, 0))
+        load(a, rdx, mem(rbx, 16))
+        call_import(a, "imp_GetProcAddress")
+        win_leave(a)
+    else
+        push_r(a, rbp)
+        mov_rr(a, rbp, rsp)
+        alui(a, "and", rsp, -16)
+        load(a, rdi, mem(r12, 0))
+        load(a, rsi, mem(rbx, 16))
+        call_import(a, "got_dlsym")
+        mov_rr(a, rsp, rbp)
+        pop_r(a, rbp)
+    end
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_fn)
+    store(a, mem(rbx, 0), rax)
+    movi(a, rax, 0)
+    jmp_to(a, ready_out)
+    mark(a, no_fn)
+    load(a, rax, mem(r12, 16)) # the library it loaded
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, rip("err_file"), rax)
+    load(a, rax, mem(rbx, 24))
+    alu(a, "or", rax, rcx)
+    store(a, rip("err_reason"), rax)
+    storei(a, rip("err_why"), 92)
+    movi(a, rax, 2)
+    mark(a, ready_out)
+    for each r in list of r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_why_lib: what went wrong finding a library's function, into the builder
+    set why_none to new_label(a)
+    set why_no_fn to new_label(a)
+    mark(a, "rt_why_lib")
+    load(a, rax, rip("err_why"))
+    alui(a, "cmp", rax, 91)
+    jcc(a, cc_e, why_none)
+    alui(a, "cmp", rax, 92)
+    jcc(a, cc_e, why_no_fn)
+    b_text(a, "can't use the library '")
+    file_name_text(a)
+    b_text(a, "': ")
+    reason_text(a)
+    ret(a)
+    mark(a, why_none)
+    b_text(a, "there is no library called '")
+    file_name_text(a)
+    b_text(a, "'")
+    ret(a)
+    mark(a, why_no_fn)
+    b_text(a, "the library '")
+    file_name_text(a)
+    b_text(a, "' has no function called '")
+    reason_text(a)
+    b_text(a, "'")
+    ret(a)
+
+    # rt_lib_whole, rt_lib_long: rax a number: rax it as a whole number, with rdx 0; or rdx 1, and the number in
+    # err_a, if it isn't whole or doesn't fit in 32 bits (from -2^31 to 2^32 - 1, for an int or an unsigned
+    # one) or 64
+    for each width in list of 32, 64
+        set bad to new_label(a)
+        if width is 32
+            mark(a, "rt_lib_whole")
+        else
+            mark(a, "rt_lib_long")
+        end
+        movq_xr(a, xmm0, rax)
+        cvttsd2si(a, rcx, xmm0)
+        cvtsi2sd(a, xmm1, rcx)
+        ucomisd(a, xmm0, reg_at(xmm1))
+        jcc(a, cc_ne, bad)
+        jcc(a, cc_p, bad)
+        if width is 32
+            alui(a, "cmp", rcx, -2147483648)
+            jcc(a, cc_l, bad)
+            movi(a, rdx, 0xFFFFFFFF)
+            alu(a, "cmp", rcx, rdx)
+            jcc(a, cc_g, bad)
+        end
+        mov_rr(a, rax, rcx)
+        movi(a, rdx, 0)
+        ret(a)
+        mark(a, bad)
+        store(a, rip("err_a"), rax)
+        movi(a, rdx, 1)
+        ret(a)
+    end
+
+    # rt_lib_pointer: rax a pointer as Moth has it, a whole number, nothing or bytes: rax the address, with rdx
+    # 0; or rdx 1, with it in err_a, for anything else
+    set not_nothing to new_label(a)
+    set not_bytes to new_label(a)
+    set not_pointer to new_label(a)
+    mark(a, "rt_lib_pointer")
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ne, not_nothing)
+    movi(a, rax, 0)
+    movi(a, rdx, 0)
+    ret(a)
+    mark(a, not_nothing)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_bytes)
+    jcc(a, cc_ne, not_bytes)
+    untag(a, rax)
+    load(a, rax, mem(rax, 8))
+    movi(a, rdx, 0)
+    ret(a)
+    mark(a, not_bytes) # nothing, yes and no, and any other value in memory, aren't numbers
+    alui(a, "cmp", rcx, 0x7FF8)
+    jcc(a, cc_e, not_pointer)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_ae, not_pointer)
+    jmp_to(a, "rt_lib_long")
+    mark(a, not_pointer)
+    store(a, rip("err_a"), rax)
+    movi(a, rdx, 1)
+    ret(a)
+
+    # rt_lib_text: rax text: its UTF-8, and a 0 after it, in memory of its own; rt_lib_wide: as wchar_t's,
+    # UTF-16 on Windows and UTF-32 on Linux: rax where, with rdx 0. The memory is bytes, which the collector
+    # keeps while the call is in progress, as the address is on the stack.
+    mark(a, "rt_lib_text")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    untag(a, rbx)
+    load(a, rcx, mem(rbx, 0))
+    inc_r(a, rcx)
+    call_to(a, "rt_bytes_new")
+    load(a, rdi, mem(rax, 8))
+    mov_rr(a, rax, rdi)
+    load(a, rsi, mem(rbx, 16))
+    load(a, rcx, mem(rbx, 0))
+    rep_movsb(a)
+    movi(a, rdx, 0)
+    pop_r(a, rbx)
+    ret(a)
+
+    set wide_loop to new_label(a)
+    set wide_done to new_label(a)
+    set wide_one to new_label(a)
+    set wide_put to new_label(a)
+    mark(a, "rt_lib_wide")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, rbx, rax)
+    untag(a, rbx)
+    load(a, rcx, mem(rbx, 8)) # how many characters: room for 4 bytes each, and the 0
+    inc_r(a, rcx)
+    shifti(a, "shl", rcx, 2)
+    call_to(a, "rt_bytes_new")
+    load(a, rdi, mem(rax, 8))
+    mov_rr(a, r13, rdi)
+    load(a, rsi, mem(rbx, 16))
+    load(a, r12, mem(rbx, 0))
+    alu(a, "add", r12, rsi)
+    mark(a, wide_loop) # each character from its UTF-8, which a text always is
+    alu(a, "cmp", rsi, r12)
+    jcc(a, cc_ae, wide_done)
+    char_size(a)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_e, wide_one)
+    set lead_masks to list of 0x1F, 0x0F, 0x07
+    for each size in list of 2, 3, 4
+        set other_size to new_label(a)
+        alui(a, "cmp", rdx, size)
+        jcc(a, cc_ne, other_size)
+        alui(a, "and", rax, item (size - 1) of lead_masks)
+        for each k from 1 to size - 1
+            shifti(a, "shl", rax, 6)
+            load8(a, rcx, mem(rsi, k))
+            alui(a, "and", rcx, 0x3F)
+            alu(a, "or", rax, rcx)
+        end
+        jmp_to(a, wide_one)
+        mark(a, other_size)
+    end
+    mark(a, wide_one)
+    alu(a, "add", rsi, rdx)
+    if target is "windows" # past U+FFFF, two UTF-16 units
+        alui(a, "cmp", rax, 0x10000)
+        jcc(a, cc_b, wide_put)
+        alui(a, "sub", rax, 0x10000)
+        mov_rr(a, rcx, rax)
+        shifti(a, "shr", rcx, 10)
+        alui(a, "add", rcx, 0xD800)
+        store16(a, mem(rdi, 0), rcx)
+        alui(a, "add", rdi, 2)
+        alui(a, "and", rax, 0x3FF)
+        alui(a, "add", rax, 0xDC00)
+        mark(a, wide_put)
+        store16(a, mem(rdi, 0), rax)
+        alui(a, "add", rdi, 2)
+    else
+        mark(a, wide_put)
+        store32(a, mem(rdi, 0), rax)
+        alui(a, "add", rdi, 4)
+    end
+    jmp_to(a, wide_loop)
+    mark(a, wide_done)
+    mov_rr(a, rax, r13)
+    movi(a, rdx, 0)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_lib_text_out: rcx a C text, UTF-8 ending in a 0: a new text of it in rax, what isn't UTF-8 as U+FFFD,
+    # or nothing for no text; rt_lib_wide_out: rcx wchar_t's ending in a 0, likewise
+    set text_null to new_label(a)
+    set length_loop to new_label(a)
+    set length_done to new_label(a)
+    mark(a, "rt_lib_text_out")
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, text_null)
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    call_to(a, "rt_b_reset")
+    mov_rr(a, rsi, rbx)
+    movi(a, rcx, 0)
+    mark(a, length_loop)
+    ld8x(a, rax, rsi, rcx, 0)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, length_done)
+    inc_r(a, rcx)
+    jmp_to(a, length_loop)
+    mark(a, length_done)
+    call_to(a, "rt_decode_bytes")
+    call_to(a, "rt_b_text")
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, text_null)
+    movi64(a, rax, bits_nothing)
+    ret(a)
+
+    set wide_null to new_label(a)
+    set out_loop to new_label(a)
+    set out_end to new_label(a)
+    set out_one to new_label(a)
+    set out_lone to new_label(a)
+    mark(a, "rt_lib_wide_out")
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, wide_null)
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    call_to(a, "rt_b_reset")
+    mark(a, out_loop)
+    if target is "windows" # UTF-16: a surrogate on its own as U+FFFD
+        load16(a, rax, mem(rbx, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, out_end)
+        alui(a, "add", rbx, 2)
+        mov_rr(a, rcx, rax)
+        alui(a, "and", rcx, 0xF800)
+        alui(a, "cmp", rcx, 0xD800)
+        jcc(a, cc_ne, out_one)
+        alui(a, "cmp", rax, 0xDC00)
+        jcc(a, cc_ae, out_lone)
+        load16(a, rdx, mem(rbx, 0))
+        mov_rr(a, rcx, rdx)
+        alui(a, "and", rcx, 0xFC00)
+        alui(a, "cmp", rcx, 0xDC00)
+        jcc(a, cc_ne, out_lone)
+        alui(a, "add", rbx, 2)
+        alui(a, "sub", rax, 0xD800)
+        shifti(a, "shl", rax, 10)
+        alui(a, "sub", rdx, 0xDC00)
+        alu(a, "add", rax, rdx)
+        alui(a, "add", rax, 0x10000)
+        jmp_to(a, out_one)
+    else # UTF-32: a surrogate or a number past U+10FFFF as U+FFFD
+        load32(a, rax, mem(rbx, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, out_end)
+        alui(a, "add", rbx, 4)
+        alui(a, "cmp", rax, 0x110000)
+        jcc(a, cc_ae, out_lone)
+        mov_rr(a, rcx, rax)
+        alui(a, "and", rcx, 0x1FF800)
+        alui(a, "cmp", rcx, 0xD800)
+        jcc(a, cc_e, out_lone)
+        jmp_to(a, out_one)
+    end
+    mark(a, out_lone)
+    movi(a, rax, 0xFFFD)
+    mark(a, out_one)
+    call_to(a, "rt_b_code")
+    jmp_to(a, out_loop)
+    mark(a, out_end)
+    call_to(a, "rt_b_text")
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, wide_null)
+    movi64(a, rax, bits_nothing)
+    ret(a)
+
+    if target is "linux" # what the dynamic linker needs to give the program dlopen and dlsym (see linux_file)
+        emit_dynamic(a)
+    end
+end
+
+# The tables of a Linux program that's dynamically linked: the linker's name, the libraries it needs
+# (libdl.so.2 for a glibc before 2.34, whose libc.so.6 has dlopen and dlsym since), the symbols it wants
+# and where to put them (got_dlopen and got_dlsym), and the dynamic section that says where all that is
+to emit_dynamic with a
+    set ro to rodata of a
+    rodata_here(a, "elf_interp")
+    put_all(ro, "/lib64/ld-linux-x86-64.so.2" as bytes)
+    add 0 to ro
+    rodata_here(a, "elf_dynstr") # "", libdl.so.2, libc.so.6, dlopen, dlsym
+    set strings to list of "", "libdl.so.2", "libc.so.6", "dlopen", "dlsym"
+    set offsets to empty list
+    set size to 0
+    for each one in strings
+        add size to offsets
+        put_all(ro, one as bytes)
+        add 0 to ro
+        set size to size + length of (one as bytes) + 1
+    end
+    pad_to(ro, 8)
+    rodata_here(a, "elf_dynsym")
+    repeat 24 times
+        add 0 to ro
+    end
+    for each k in list of 4, 5 # dlopen and dlsym: global functions, wanted from elsewhere
+        put32(ro, item k of offsets)
+        add 0x12 to ro
+        add 0 to ro
+        put16(ro, 0)
+        put64(ro, 0)
+        put64(ro, 0)
+    end
+    rodata_here(a, "elf_hash") # no symbols to give anyone: one empty bucket
+    for each word in list of 1, 3, 0, 0, 0, 0
+        put32(ro, word)
+    end
+    pad_to(ro, 8)
+    rodata_here(a, "elf_rela")
+    set k to 0
+    for each slot_name in list of "got_dlopen", "got_dlsym"
+        add 1 to k
+        absolute(a, "rodata", length of ro, slot_name, 0)
+        put64(ro, 0)
+        put64(ro, k * 4294967296 + 6) # R_X86_64_GLOB_DAT, symbol k
+        put64(ro, 0)
+    end
+    set dat to data of a
+    pad_to(dat, 8)
+    data_here(a, "got_dlopen")
+    put64(dat, 0)
+    data_here(a, "got_dlsym")
+    put64(dat, 0)
+    data_here(a, "elf_dynamic")
+    for each entry in list of (list of 1, item 2 of offsets, ""), (list of 1, item 3 of offsets, ""), (list of 4, 0, "elf_hash"),
+        (list of 5, 0, "elf_dynstr"), (list of 6, 0, "elf_dynsym"), (list of 10, size, ""), (list of 11, 24, ""),
+        (list of 7, 0, "elf_rela"), (list of 8, 48, ""), (list of 9, 24, ""), (list of 21, 0, ""), (list of 0, 0, "")
+        put64(dat, item 1 of entry)
+        if item 3 of entry is ""
+            put64(dat, item 2 of entry)
+        else
+            absolute(a, "data", length of dat, item 3 of entry, 0)
+            put64(dat, 0)
+        end
+    end
+end
+
 # ---------- what can't become machine code yet ----------
 
 set node_words to dictionary where "list" is "a list", "record" is "a record", "dictionary" is "a dictionary",
@@ -33952,7 +34700,7 @@ to new_function with st, s, parent, level
     set all_made to all_fns of st
     set id to length of all_made
     set made to record with name name of s, label "F" + id, id id, info "I" + id, params params of s, kinds kinds of s,
-        body body of s, at at of s, parent parent, level level, order order of s
+        body body of s, at at of s, parent parent, level level, order order of s, native native of s
     add made to all_made
     return made
 end
@@ -36379,6 +37127,8 @@ to gen_expr with fc, e
             alui(a, "add", rsp, 8 * n)
             set pushed of fc to pushed of fc - n
         end
+    else if what is "builtin" and name of e is "library call" # the body of a library's function
+        set made to gen_library_call(fc, e)
     else if what is "builtin" and (name of e is "run program" or name of e is "run program keeping")
         gen_pair(fc, item 1 of args of e, item 2 of args of e)
         movi(a, rdx, 0)
@@ -37168,6 +37918,11 @@ to linux_file with a
     set base to 4194304 # 0x400000
     set text_size to length of hot of a + length of cold of a
     set text_at to 256
+    set headers to 3
+    if libraries of a # and the linker's name, where these headers are, and the dynamic section (see emit_dynamic)
+        set text_at to 512
+        set headers to 6
+    end
     set rodata_at to align_up(text_at + text_size, 16)
     set first_end to rodata_at + length of rodata of a
     set data_at to align_up(first_end, 4096)
@@ -37191,12 +37946,21 @@ to linux_file with a
     put32(out, 0)
     put16(out, 64)
     put16(out, 56)
-    put16(out, 3)
+    put16(out, headers)
     put16(out, 64)
     put16(out, 0)
     put16(out, 0)
+    if libraries of a
+        program_header(out, 6, 4, 64, base + 64, 56 * headers, 56 * headers)
+        set interp_at to rodata_at + label_offset(a, "elf_interp")
+        program_header(out, 3, 4, interp_at, base + interp_at, 28, 28)
+    end
     program_header(out, 1, 5, 0, base, first_end, first_end) # the code and read-only data: read and run
     program_header(out, 1, 6, data_at, base + data_at, length of dat, length of dat + bss of a) # the data: read and write
+    if libraries of a
+        set dynamic_at to data_at + label_offset(a, "elf_dynamic")
+        program_header(out, 2, 6, dynamic_at, base + dynamic_at, 192, 192)
+    end
     program_header(out, 0x6474E551, 6, 0, 0, 0, 0) # a stack no code runs from
     pad_to_size(out, text_at)
     put_all(out, text)

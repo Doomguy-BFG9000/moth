@@ -320,6 +320,9 @@ bytes and dictionaries:
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
   tests it, with Moth's own test runner, on every push.
+- [`sqlite.moth`](tools/sqlite.moth) keeps a database in a file through SQLite
+  itself, the library Windows and most Linux systems come with: `open`, `run`
+  and `query`, each row a dictionary, with `?`s for values.
 
 ## The language
 
@@ -435,6 +438,11 @@ say code of answer " " length of output of answer " " mistakes of answer
 if code is not 0
     stop the program with 1                 # end the whole program, with a number from 0 to 255
 end
+
+use the library "user32"                    # a C library's functions, called as C calls them
+    MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number
+end
+MessageBoxW(nothing, "Hello from Moth", "Moth", 0)
 
 set block to 4 bytes                        # memory: bytes from 0 to 255
 set byte 1 of block to 0xFF                 # numbers in hex and binary: 0xFF, 0b1010
@@ -574,6 +582,14 @@ set name to choose a file to open           # or: to save; nothing if none is ch
 - **Inputs** can say what they are: `with name as text, age as a number` (also
   `yes or no`, `a list`, `a record`, `a dictionary`, `bytes`, `a function`), and
   each call checks them.
+- **Libraries:** `use the library "sqlite3"` (or `"winsqlite3" or "sqlite3"`,
+  for the first there is, and `as` a name), then a line for each function the
+  program calls, with what it takes and `gives`, as C has it: `a number` is a
+  double, `a whole number` an int, `a long whole number` 64 bits, `a pointer` a
+  whole number, nothing or bytes, `text` UTF-8, `wide text` wchar_t's, `bytes`
+  the program's own memory, for C to fill, and `yes or no` an int. A function
+  whose name Moth has for its own goes in quotes: `"remove" as
+  remove_file(text)`. Only a program `moth build` makes can call one.
 - **Comparisons:** `is`, `is not`, `is less than`, `is greater than`,
   `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
   `or`, `not`.
@@ -655,7 +671,7 @@ moth check hello.moth                    find problems in it without running it
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
 moth test                                the same for every .test.moth file here and in the folders inside
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
-moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-all)
+moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-libraries, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
 moth build moth.moth --allow-read --allow-write --allow-run    moth, built by itself
 ```
@@ -685,11 +701,13 @@ $ moth test tools/json.test.moth
 5 passed
 ```
 
-A program moth makes asks before it reads a file, writes one, goes online, or
-starts another program, the way Deno does: at a terminal you're asked, once for
-each file, site or program (or `a` for all of them); anywhere else, such as in a
-script, the answer is no unless it was built with `--allow-read`,
-`--allow-write`, `--allow-net`, `--allow-run` or `--allow-all`. The first three
+A program moth makes asks before it reads a file, writes one, goes online,
+starts another program or uses a library, the way Deno does: at a terminal
+you're asked, once for each file, site, program or library (or `a` for all of
+them); anywhere else, such as in a script, the answer is no unless it was built
+with `--allow-read`, `--allow-write`, `--allow-net`, `--allow-run`,
+`--allow-libraries` or `--allow-all`. A library can do anything the program
+can, so allowing one allows all of that. The first three
 can name what they allow: `--allow-read=data,notes.txt` lets it read those files
 and everything in those folders, wherever their links lead;
 `--allow-net=example.com` that site. `use` only reads files in the program's own
@@ -946,6 +964,14 @@ unboxed numbers were all caught, some only by the fuzzer.
   program's time. It has no limit on its steps, so a loop that never ends runs
   until it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
+- A library's function takes and gives numbers, whole numbers, pointers and
+  text: not a struct, a float (only doubles), or a function of the program's
+  to call back, so one that needs those can't be declared. Its whole numbers
+  are signed, and exact up to 2^53. A mistake in a library can crash the
+  program. On Linux a program that uses one needs glibc's dynamic linker, as
+  nearly every Linux has, and finds a library by its name as the system's
+  linker does: `"sqlite3"` is libsqlite3.so, or .so.0 to .so.9. On Windows
+  `"user32"` is user32.dll, from System32, or else the program's folder.
 - The window only opens at a terminal, or on Windows when started from
   Explorer: with its output going to a file or another program, a program that
   draws ends without showing it. On Linux it needs an X server (Xwayland's

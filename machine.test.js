@@ -47,7 +47,7 @@ function onEngine(source, name) {
     return { stdout, stderr, status };
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
-    if (/^stopped after|^can't run programs here/.test(err.reason)) return null; // too long to wait for, or a program it would run
+    if (/^stopped after|^can't run programs here|^can't use the library/.test(err.reason)) return null; // too long to wait for, or a program or library it would run
     stderr += `${err.file ?? name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
     if (err.trail.length) stderr += `${describeTrail(err.trail)}\n`;
     return { stdout, stderr, status: 1 };
@@ -897,6 +897,115 @@ test("a program reads sites: their text and bytes, moves to another address, and
 
 // A program that never reads is the bytes it was before it could go online: only one that reads has the
 // code for it, and on Windows only one that reads imports WinHTTP.
+// Libraries (DESIGN §45): a program built with --allow-libraries calls the C library every system has, as C
+// would: whole numbers, numbers, text and wide text both ways, bytes C writes into, pointers, nothing, yes
+// or no, more inputs than there are registers for, and a function of the library's as a value
+function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
+  try {
+    for (const name of ["sqlite.moth"]) writeFileSync(join(dir, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+    const exe = executable(dir, "p");
+    const bytes = machine(source, { target, name: "p.moth", allow, files: { "sqlite.moth": readFileSync(new URL("./tools/sqlite.moth", import.meta.url), "utf8") } });
+    writeFileSync(exe, bytes);
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", env: { ...process.env, ...env } });
+    return { ...ran, bytes };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const C_LIBRARY = `use the library "msvcrt" or "c"
+    strlen(text) gives a long whole number
+    abs(a whole number) gives a whole number
+    atof(text) gives a number
+    getenv(text) gives text
+    wcslen(wide text) gives a long whole number
+    strchr(text, a whole number) gives text
+    memset(bytes, a whole number, a long whole number) gives a pointer
+    isdigit(a whole number) gives yes or no
+    sprintf(bytes, text, a whole number, a number, text, a whole number, a whole number, a number, a number, a number,
+        a number, a number, a number, a number, a whole number) gives a whole number
+end
+use the library "msvcrt" or "m"
+    sqrt(a number) gives a number
+    pow(a number, a number) gives a number
+end
+to c_text with b
+    set k to 1
+    repeat while item k of b is not 0
+        add 1 to k
+    end
+    set kept to empty list
+    for each i from 1 to k - 1
+        add item i of b to kept
+    end
+    return (kept as bytes) as text
+end
+`;
+
+test("a program calls a C library's functions as C does, on Windows and on Linux", { skip }, () => {
+  const ran = libraryRun(`${C_LIBRARY}say strlen("héllo") " " abs(0 - 5) " " atof("2.5") " " sqrt(2) " " pow(2, 10)
+say getenv("MOTH_LIBRARY_TEST") " " getenv("MOTH_NO_SUCH_VARIABLE")
+say wcslen("héllo") " " strchr("hello", 108) " " strchr("hello", 122)
+set b to 4 bytes
+say (memset(b, 7, 3) is greater than 0) " " b
+say isdigit(55) " " isdigit(97)
+set out to 200 bytes
+sprintf(out, "%d %.1f %s %d %d %.0f %.0f %.0f %.0f %.0f %.0f %.0f %d", 1, 2.5, "x", 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+say c_text(out)
+set f to abs
+say f(0 - 8)`, ["--allow-libraries"], { MOTH_LIBRARY_TEST: "on" });
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [
+    "6 5 2.5 1.4142135623731 1024\non nothing\n5 llo nothing\nyes (4 bytes: 7, 7, 7, 0)\nyes no\n1 2.5 x 3 4 5 6 7 8 9 10 11 12\n8\n", "", 0]);
+  // a mistake in what it's given, a library that isn't there, a function that isn't in it, and no --allow-libraries
+  const wrong = (call, allow) => libraryRun(`${C_LIBRARY}use the library "no_such_library_here"
+    nowhere() gives a whole number
+end
+use the library "msvcrt" or "c" as c
+    no_such_function_here() gives a whole number
+end
+say ${call}`, allow).stderr.split("\n")[0];
+  const lib = target === "windows" ? "msvcrt" : "c";
+  assert.equal(wrong("abs(2.5)"), "p.moth:3:5: 'abs' needs input 1 to be a whole number from -2147483648 to 4294967295, not 2.5");
+  assert.equal(wrong("memset(\"x\", 0, 1)"), "p.moth:34:5: 'memset' needs input 1 to be bytes, not text");
+  assert.equal(wrong("nowhere()"), "p.moth:29:5: there is no library called 'no_such_library_here'");
+  assert.equal(wrong("c's no_such_function_here()"), `p.moth:32:5: the library '${lib}' has no function called 'no_such_function_here'`);
+  assert.equal(wrong("abs(1)", []), "p.moth:3:5: can't use the library 'msvcrt' or 'c': this program isn't allowed to use libraries (start it with --allow-libraries)");
+});
+
+test("only a program that uses a library is linked by Linux's dynamic linker, or imports what loads one on Windows", { skip }, () => {
+  for (const t of ["windows", "linux"]) {
+    const plain = Buffer.from(machine('say "hello"', { target: t, name: "p.moth" }));
+    const using = Buffer.from(machine('use the library "c"\n    abs(a whole number) gives a whole number\nend\nsay "hello"', { target: t, name: "p.moth" }));
+    const marks = t === "linux" ? "/lib64/ld-linux-x86-64.so.2" : "LoadLibraryExW";
+    assert.deepEqual([plain.includes(marks), using.includes(marks)], [false, true], t);
+  }
+});
+
+// tools/sqlite.moth, a library of Moth's on SQLite: Windows' own winsqlite3.dll, or Linux's libsqlite3.so.0
+const sqliteHere = target === "windows" ? existsSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "winsqlite3.dll"))
+  : ["/usr/lib/x86_64-linux-gnu/libsqlite3.so.0", "/usr/lib64/libsqlite3.so.0", "/usr/lib/libsqlite3.so.0"].some((f) => existsSync(f));
+test("tools/sqlite.moth keeps a database in a file, through SQLite", { skip: skip || (!sqliteHere && "SQLite isn't installed") }, () => {
+  const ran = libraryRun(`use "sqlite.moth" as sqlite
+set people to sqlite's open("people.db")
+sqlite's run(people, "create table people (name text, age integer, height real, note text)")
+say sqlite's run_with(people, "insert into people values (?, ?, ?, ?)", list of "Sam", 20, 1.8, nothing)
+say sqlite's run_with(people, "insert into people values (?, ?, ?, ?)", list of "Ana Lee 😀", 31, 1.65, "hé")
+for each row in sqlite's query(people, "select name, age, height, note from people order by age")
+    say item "name" of row " is " item "age" of row ", " item "height" of row " m, " item "note" of row
+end
+say sqlite's query_with(people, "select count(*) as n from people where age > ?", list of 25)
+try
+    sqlite's run(people, "select * from nowhere")
+if it fails with why
+    say why
+end
+sqlite's close(people)
+set again to sqlite's open("people.db")
+say length of sqlite's query(again, "select * from people")`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ['1\n1\nSam is 20, 1.8 m, nothing\nAna Lee 😀 is 31, 1.65 m, hé\n[(dictionary where "n" is 1)]\nSQLite: no such table: nowhere\n2\n', "", 0]);
+});
+
 test("only a program that reads can go online, and only it imports WinHTTP", () => {
   const imports = (bytes) => Buffer.from(bytes).includes(Buffer.from("WINHTTP.dll"));
   assert.ok(!imports(machine('say "hello"\nwrite "x" to "out.txt"\n', { target: "windows", name: "w.moth", allow: ["--allow-all"] })));

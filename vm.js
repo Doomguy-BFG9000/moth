@@ -766,6 +766,11 @@ export const BUILTINS = [
   { name: "slider value", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: null, run: ([label], error, turtle) => turtle?.values.get(show(label)) ?? null },
   // `choose a file to open`: what `ask "Which file to open?"` gives, or nothing for no answer (DESIGN §42)
   { name: "chosen file", needs: [["text", "nothing"]], gives: null, run: ([answer]) => (answer === "" || answer === null ? null : answer) },
+  // the body of a library's function (see library in moth.js): only a program moth build makes can call one
+  {
+    name: "library call", needs: [["text"]], gives: null,
+    run: ([library], error) => error(`can't use the library '${library}' here: only a program made by moth build can`),
+  },
 ];
 
 // `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
