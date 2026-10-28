@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, UNSET, execute } from "./vm.js";
+import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, UNSET, execute } from "./vm.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -536,6 +536,37 @@ class Compiler {
         return;
     }
   }
+}
+
+// ---------- reading bytecode ----------
+
+const shown = (v) => (v === null ? "nothing" : typeof v === "boolean" ? (v ? "yes" : "no") : JSON.stringify(v));
+
+// What an instruction's operands mean, where a number alone wouldn't say.
+function note(fn, op, args) {
+  switch (op) {
+    case "CONST": return shown(fn.consts[args[0]]);
+    case "MAKE_FN": return `function ${fn.consts[args[0]].name}`;
+    case "GET": case "GET_FN": case "ADD_TO": return fn.consts[args[2]];
+    case "CALL": return fn.consts[args[1]];
+    case "UNDEFINED": return fn.consts[args[0]];
+    case "COMPARE": return args[0] ? `is ${COMPARE_OPS[args[0]]}` : "is";
+    default: return "";
+  }
+}
+
+// Bytecode as readable text, for `moth bytecode` and the playground.
+export function disassemble(fn, out = []) {
+  out.push(`${fn.name}${fn.params.length ? ` with ${fn.params.join(", ")}` : ""}:`);
+  for (let i = 0; i < fn.code.length; ) {
+    const [op, count] = OPCODES[fn.code[i]];
+    const args = fn.code.slice(i + 1, i + 1 + count);
+    const why = note(fn, op, args);
+    out.push(`  ${String(i).padStart(4)}  ${op.padEnd(13)} ${args.join(" ").padEnd(8)}${why ? ` ; ${why}` : ""}`.trimEnd());
+    i += 1 + count;
+  }
+  for (const c of fn.consts) if (c?.code) disassemble(c, out); // functions made inside this one
+  return out.join("\n");
 }
 
 // ---------- running ----------

@@ -24,6 +24,8 @@
     <label>Example <select id="example"></select></label>
     <button id="run" type="button">Run</button>
     <button id="stop" type="button" disabled>Stop</button>
+    <button id="share" type="button">Share</button>
+    <label><input id="show-bytecode" type="checkbox"> Show bytecode</label>
     <span id="status" role="status"></span>
   </div>
   <label for="code">Code</label>
@@ -32,10 +34,18 @@
   <h2>Output</h2>
   <pre id="output" aria-live="polite"></pre>
 
+  <section id="bytecode-view" hidden>
+    <h2>Bytecode</h2>
+    <p>What the compiler turned your code into. The virtual machine runs these instructions.</p>
+    <pre id="bytecode"></pre>
+  </section>
+
   <script type="module">
     import examples from "./examples.js";
+    import { compile, disassemble, MothError } from "./moth.js";
 
-    const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map((id) => document.getElementById(id));
+    const $ = (id) => document.getElementById(id);
+    const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
     let worker = null;
 
     function finish(message) {
@@ -51,8 +61,20 @@
       finish("");
     }
 
+    function showBytecode() {
+      $("bytecode-view").hidden = !$("show-bytecode").checked;
+      if ($("bytecode-view").hidden) return;
+      try {
+        $("bytecode").textContent = disassemble(compile(code.value));
+      } catch (err) {
+        if (!(err instanceof MothError)) throw err;
+        $("bytecode").textContent = "(fix the error above to see the bytecode)";
+      }
+    }
+
     // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is.
     function runCode() {
+      showBytecode();
       finish("Running…");
       output.textContent = "";
       output.classList.remove("error");
@@ -76,6 +98,18 @@
       finish("Stopped.");
     };
 
+    // The code travels in the link's #fragment, which browsers never send to a server.
+    $("share").onclick = async () => {
+      history.replaceState(null, "", `#code=${encodeURIComponent(code.value)}`);
+      try {
+        await navigator.clipboard.writeText(location.href);
+        status.textContent = "Link copied.";
+      } catch {
+        status.textContent = "Copy the link from the address bar.";
+      }
+    };
+    $("show-bytecode").onchange = showBytecode;
+
     picker.append(...Object.keys(examples).map((name) => new Option(name)));
     picker.onchange = () => {
       code.value = examples[picker.value];
@@ -88,7 +122,16 @@
         runCode();
       }
     };
-    picker.onchange();
+    let shared = null;
+    try {
+      if (location.hash.startsWith("#code=")) shared = decodeURIComponent(location.hash.slice("#code=".length));
+    } catch {} // a broken link just opens the first example
+    if (shared === null) picker.onchange();
+    else {
+      code.value = shared;
+      picker.selectedIndex = -1;
+      runCode();
+    }
   </script>
 </body>
 </html>
