@@ -1096,6 +1096,82 @@ say length of sqlite's query(again, "select * from people")`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ['1\n1\nSam is 20, 1.8 m, nothing\nAna Lee 😀 is 31, 1.65 m, hé\n[(dictionary where "n" is 1)]\nSQLite: no such table: nowhere\n2\n', "", 0]);
 });
 
+// tools/server.moth: a web server of the program's, on Windows' and Linux's own sockets, asked by another program
+// of Moth's, which reads and sends to it as it would to any site
+test("tools/server.moth answers a program's requests with what its handler gives", { skip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-server-"));
+  const port = 21000 + (process.pid % 2000);
+  const files = { "server.moth": readFileSync(new URL("./tools/server.moth", import.meta.url), "utf8") };
+  const build = (name, source, allow) => {
+    const exe = executable(dir, name);
+    writeFileSync(exe, machine(source, { target, name: `${name}.moth`, allow, files }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    return exe;
+  };
+  writeFileSync(join(dir, "page.txt"), "a file's words");
+  const server = build("site", `use "server.moth" as web
+set visits to 0
+to answer with request
+    add 1 to visits
+    set p to path of request
+    if p is "/"
+        return "<h1>Hello from Moth</h1>"
+    else if p is "/hello"
+        return "Hello, " + item "name" of query of request + "! " + length of keys of query of request
+    else if p is "/json"
+        return dictionary where "visits" is visits, "method" is method of request, "agent" is ("user-agent" is in headers of request)
+    else if p is "/echo"
+        return record with status 201, body uppercase of body of request
+    else if p is "/file"
+        return record with file "page.txt"
+    else if p is "/missing"
+        return record with file "nowhere.txt"
+    else if p is "/broken"
+        return item 5 of list of 1
+    else if p is "/stop"
+        web's stop_serving()
+        return "bye"
+    end
+    return record with status 404, body "There's nothing at " + p
+end
+web's serve(${port}, answer)
+say "served " + visits`, ["--allow-libraries", "--allow-read"]);
+  const client = build("asker", `set site to "http://127.0.0.1:${port}"
+say read site + "/"
+say read site + "/hello?name=Sam%20Lee&x=1"
+say json from read site + "/json"
+say send "shout this ✓" to site + "/echo"
+say read site + "/file"
+for each p in list of "/missing", "/broken", "/nowhere"
+    try
+        say read site + p
+    if it fails with why
+        say why
+    end
+end
+say read site + "/stop"`, ["--allow-net"]);
+  try {
+    const running = spawn(server, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    running.stdout.on("data", (d) => (out += d));
+    running.stderr.on("data", (d) => (err += d));
+    const ended = new Promise((resolve) => running.on("exit", resolve));
+    for (let waited = 0; !err.includes("listening") && waited < 10000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+    const asked = spawnSync(client, [], { cwd: dir, encoding: "utf8", input: "" });
+    const code = await ended;
+    assert.deepEqual([asked.stdout, asked.stderr, asked.status], [
+      "<h1>Hello from Moth</h1>\nHello, Sam Lee! 2\n" + '(dictionary where "visits" is 3, "method" is "GET", "agent" is yes)\n'
+      + "SHOUT THIS ✓\na file's words\n"
+      + `can't read 'http://127.0.0.1:${port}/missing': the site answered 404\n`
+      + `can't read 'http://127.0.0.1:${port}/broken': the site answered 500\n`
+      + `can't read 'http://127.0.0.1:${port}/nowhere': the site answered 404\nbye\n`, "", 0]);
+    assert.deepEqual([out, err, code], ["served 9\n", `listening on http://127.0.0.1:${port}/\n`
+      + "a mistake answering GET /broken: there is no item 5, the list only has 1 item\n", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // tools/windows.moth, Windows' own controls for a program of Moth's: a window, hidden here, that drives itself
 // from a timer, sending its controls what a click or typing sends them, and pressing its menu's keys with Ctrl
 // held as this thread sees it

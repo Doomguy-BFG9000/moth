@@ -1,0 +1,476 @@
+# A web server, as a program `moth build` makes can be one, on Windows and Linux: each request a browser (or any
+# other program) makes is given to a function of the program's, which says what to send back.
+#
+#   use "server.moth" as web
+#   to answer with request
+#       if path of request is "/"
+#           return "<h1>Hello from Moth</h1>"
+#       end
+#       return record with status 404, body "There's nothing at " + path of request
+#   end
+#   web's serve(8080, answer)
+#
+# A request is a record: its method ("GET", "POST" and the rest), path ("/notes"), query (a dictionary of what
+# came after the ?, decoded), headers (a dictionary, each name in small letters) and body (text; body_bytes has
+# its bytes). The function gives back text, sent as a page if it starts with "<" and as plain text if not; a
+# list or a dictionary, sent as JSON; or a record with any of status (200 if it has none), body (text or bytes),
+# type (as "text/css"), headers (a dictionary) and file (a file's name, whose bytes are the body, its type from
+# its name). A mistake in it is sent as 500, and said to the error output, and the server goes on.
+#
+# serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. Requests are
+# answered one at a time; stop_serving() ends serve() after the one it's answering. Built with --allow-libraries.
+
+use the library "ws2_32"
+    WSAStartup(a whole number, bytes) gives a whole number
+    "socket" as win_socket(a whole number, a whole number, a whole number) gives a pointer
+    "bind" as win_bind(a pointer, bytes, a whole number) gives a whole number
+    "listen" as win_listen(a pointer, a whole number) gives a whole number
+    "accept" as win_accept(a pointer, a pointer, a pointer) gives a pointer
+    "recv" as win_recv(a pointer, bytes, a whole number, a whole number) gives a whole number
+    "send" as win_send(a pointer, bytes, a whole number, a whole number) gives a whole number
+    closesocket(a pointer) gives a whole number
+end
+use the library "c"
+    "socket" as unix_socket(a whole number, a whole number, a whole number) gives a whole number
+    "setsockopt" as unix_option(a whole number, a whole number, a whole number, bytes, a whole number) gives a whole number
+    "bind" as unix_bind(a whole number, bytes, a whole number) gives a whole number
+    "listen" as unix_listen(a whole number, a whole number) gives a whole number
+    "accept" as unix_accept(a whole number, a pointer, a pointer) gives a whole number
+    "recv" as unix_recv(a whole number, bytes, a long whole number, a whole number) gives a long whole number
+    "send" as unix_send(a whole number, bytes, a long whole number, a whole number) gives a long whole number
+    "close" as unix_close(a whole number) gives a whole number
+end
+use the library "kernel32"
+    GetTickCount() gives a whole number
+end
+
+# which system it is: a library every Windows has, which no Linux has
+set web_windows to yes
+try
+    GetTickCount()
+if it fails
+    set web_windows to no
+end
+set web_running to no
+set web_cr to (list of 13) as bytes as text
+set web_line to web_cr + "\n"
+set web_most to 16777216 # the most a request can be, in bytes
+set web_statuses to dictionary where 200 is "OK", 201 is "Created", 204 is "No Content", 301 is "Moved Permanently",
+    302 is "Found", 303 is "See Other", 304 is "Not Modified", 400 is "Bad Request", 401 is "Unauthorized",
+    403 is "Forbidden", 404 is "Not Found", 405 is "Method Not Allowed", 409 is "Conflict", 413 is "Content Too Large",
+    500 is "Internal Server Error", 503 is "Service Unavailable"
+set web_types to dictionary where "html" is "text/html; charset=utf-8", "htm" is "text/html; charset=utf-8",
+    "css" is "text/css; charset=utf-8", "js" is "text/javascript; charset=utf-8", "json" is "application/json",
+    "txt" is "text/plain; charset=utf-8", "moth" is "text/plain; charset=utf-8", "png" is "image/png", "jpg" is "image/jpeg", "jpeg" is "image/jpeg",
+    "gif" is "image/gif", "svg" is "image/svg+xml", "ico" is "image/x-icon", "wasm" is "application/wasm",
+    "pdf" is "application/pdf"
+
+# answers requests to this computer alone, on `port`, with `handler`, until stop()
+to serve with port, handler
+    web_serve(no, port, handler)
+end
+
+# answers requests from every network the computer is on
+to serve_everywhere with port, handler
+    web_serve(yes, port, handler)
+end
+
+to stop_serving
+    set web_running to no
+end
+
+to web_serve with everywhere, port, handler
+    set listener to web_listener(everywhere, port)
+    set host to "127.0.0.1"
+    if everywhere
+        set host to "0.0.0.0"
+    end
+    say "listening on http://" + host + ":" + port + "/" to the error output
+    set web_running to yes
+    repeat while web_running
+        set client to web_accept(listener)
+        try
+            web_answer(client, handler)
+        if it fails with why # a request it couldn't read, or a connection gone
+            say "couldn't answer a request: " + why to the error output
+        end
+        web_close(client)
+    end
+    web_close(listener)
+end
+
+to web_listener with everywhere, port
+    set address to 16 bytes # sockaddr_in: AF_INET, the port high byte first, and the address
+    set byte 1 of address to 2
+    set byte 3 of address to (shift port right by 8) bit and 255
+    set byte 4 of address to port bit and 255
+    if not everywhere
+        set byte 5 of address to 127
+        set byte 8 of address to 1
+    end
+    set taken to "can't listen on port " + port + ": something else is using it"
+    if web_windows
+        WSAStartup(514, 408 bytes)
+        set listener to win_socket(2, 1, 6)
+        if win_bind(listener, address, 16) is not 0
+            fail with taken
+        end
+        win_listen(listener, 64)
+        return listener
+    end
+    set listener to unix_socket(2, 1, 0)
+    set one to 4 bytes # SO_REUSEADDR: a port just used can be used again at once
+    set byte 1 of one to 1
+    unix_option(listener, 1, 2, one, 4)
+    if unix_bind(listener, address, 16) is not 0
+        fail with taken
+    end
+    unix_listen(listener, 64)
+    return listener
+end
+
+to web_accept with listener
+    if web_windows
+        return win_accept(listener, nothing, nothing)
+    end
+    return unix_accept(listener, nothing, nothing)
+end
+
+to web_receive with client, room
+    if web_windows
+        return win_recv(client, room, length of room, 0)
+    end
+    return unix_recv(client, room, length of room, 0)
+end
+
+to web_send with client, sent
+    set at to 0
+    if web_windows
+        return win_send(client, sent, length of sent, 0)
+    end
+    return unix_send(client, sent, length of sent, 16384) # MSG_NOSIGNAL: a connection gone is a mistake, not the end
+end
+
+to web_close with handle
+    if web_windows
+        closesocket(handle)
+    else
+        unix_close(handle)
+    end
+end
+
+# the first `count` bytes of `b`, from byte `from`
+to web_part with b, from, count
+    set made to count bytes
+    for each k from 1 to count
+        set byte k of made to byte (from + k - 1) of b
+    end
+    return made
+end
+
+# where the blank line after the headers starts, from 1, or 0 if it hasn't come yet
+to web_head_end with b, used
+    for each k from 1 to used - 3
+        if byte k of b is 13 and byte (k + 1) of b is 10 and byte (k + 2) of b is 13 and byte (k + 3) of b is 10
+            return k
+        end
+    end
+    return 0
+end
+
+# a request read, and answered
+to web_answer with client, handler
+    set whole to 65536 bytes
+    set used to 0
+    set room to 65536 bytes
+    set head_end to 0
+    set wanted to -1 # the whole request's bytes, once the headers say how long its body is
+    repeat while wanted is -1 or used is less than wanted
+        set got to web_receive(client, room)
+        if got is at most 0
+            if head_end is 0
+                return nothing # gone before it said anything
+            end
+            stop
+        end
+        if used + got is greater than length of whole
+            set bigger to (2 * (used + got)) bytes
+            for each k from 1 to used
+                set byte k of bigger to byte k of whole
+            end
+            set whole to bigger
+        end
+        for each k from 1 to got
+            set byte (used + k) of whole to byte k of room
+        end
+        set used to used + got
+        if head_end is 0
+            set head_end to web_head_end(whole, used)
+            if head_end is not 0
+                set wanted to head_end + 3 + web_body_length(web_part(whole, 1, head_end - 1) as text)
+            else if used is greater than 65536
+                web_reply(client, record with status 431, body "The request's headers are too long")
+                return nothing
+            end
+        end
+        if wanted is greater than web_most
+            web_reply(client, record with status 413, body "The request is too big")
+            return nothing
+        end
+    end
+    set request to web_request(web_part(whole, 1, head_end - 1) as text, web_part(whole, head_end + 4,
+        used - head_end - 3))
+    set answer to nothing
+    try
+        set answer to handler(request)
+    if it fails with why
+        say "a mistake answering " + method of request + " " + path of request + ": " + why to the error output
+        set answer to record with status 500, body "A mistake: " + why
+    end
+    web_reply(client, answer)
+end
+
+to web_body_length with head
+    for each one in split head by web_line
+        set parts to split one by ":"
+        if length of parts is at least 2 and lowercase of item 1 of parts is "content-length"
+            return number of item 2 of parts
+        end
+    end
+    return 0
+end
+
+# the request, from its head (the first line, then the headers) and the body's bytes
+to web_request with head, body
+    set lines to split head by web_line
+    set first to split item 1 of lines by " "
+    set target to "/"
+    if length of first is at least 2
+        set target to item 2 of first
+    end
+    set path to target
+    set query to empty dictionary
+    set mark to position of "?" in target
+    if mark is greater than 0
+        set path to web_text_part(target, 1, mark - 1)
+        set query to web_form(web_text_part(target, mark + 1, length of target - mark))
+    end
+    set headers to empty dictionary
+    set at to 0
+    for each one in lines
+        add 1 to at
+        set colon to position of ":" in one
+        if at is greater than 1 and colon is greater than 0
+            set name to lowercase of web_trim(web_text_part(one, 1, colon - 1))
+            set item name of headers to web_trim(web_text_part(one, colon + 1, length of one - colon))
+        end
+    end
+    return record with method item 1 of first, path web_decode(path), query query, headers headers, body body as text,
+        body_bytes body
+end
+
+# `count` characters of a text, from character `from`
+to web_text_part with words, from, count
+    set made to ""
+    set at to 0
+    for each c in words
+        add 1 to at
+        if at is at least from and at is less than from + count
+            add c to made
+        end
+    end
+    return made
+end
+
+to web_trim with words
+    set chars to empty list
+    for each c in words
+        add c to chars
+    end
+    set first to 1
+    repeat while first is at most length of chars and item first of chars is " "
+        add 1 to first
+    end
+    set last to length of chars
+    repeat while last is at least first and item last of chars is " "
+        set last to last - 1
+    end
+    return web_text_part(words, first, last - first + 1)
+end
+
+# a=1&b=two%20words, as a dictionary
+to web_form with words
+    set made to empty dictionary
+    for each pair in split words by "&"
+        if pair is not ""
+            set mark to position of "=" in pair
+            if mark is 0
+                set item web_decode(pair) of made to ""
+            else
+                set name to web_decode(web_text_part(pair, 1, mark - 1))
+                set item name of made to web_decode(web_text_part(pair, mark + 1, length of pair - mark))
+            end
+        end
+    end
+    return made
+end
+
+# %20 and + as what they stand for
+to web_decode with words
+    if position of "%" in words is 0 and position of "+" in words is 0
+        return words
+    end
+    set codes to words as bytes
+    set made to empty list
+    set k to 1
+    repeat while k is at most length of codes
+        set b to byte k of codes
+        if b is 37 and k + 2 is at most length of codes # %
+            add web_hex(byte (k + 1) of codes) * 16 + web_hex(byte (k + 2) of codes) to made
+            set k to k + 3
+        else
+            if b is 43 # +
+                add 32 to made
+            else
+                add b to made
+            end
+            add 1 to k
+        end
+    end
+    return made as bytes as text
+end
+
+# a hex digit's value, from its character's code
+to web_hex with code
+    if code is at least 97
+        return code - 87
+    else if code is at least 65
+        return code - 55
+    end
+    return code - 48
+end
+
+# what the handler gave, sent: its status line, headers and body
+to web_reply with client, answer
+    set status to 200
+    set body to ""
+    set kind to nothing
+    set extra to empty dictionary
+    if answer is nothing
+        set status to 204
+    else if web_is_text(answer)
+        set body to answer
+    else if web_is_collection(answer)
+        set body to answer as json
+        set kind to "application/json"
+    else
+        set status to web_field(answer, "status", 200)
+        set body to web_field(answer, "body", "")
+        set kind to web_field(answer, "type", nothing)
+        set extra to web_field(answer, "headers", empty dictionary)
+        set named to web_field(answer, "file", nothing)
+        if named is not nothing
+            try
+                set body to read bytes named
+                if kind is nothing
+                    set kind to web_type_of(named)
+                end
+            if it fails
+                set status to 404
+                set body to "There's no file called '" + named + "'"
+            end
+        end
+    end
+    if web_is_collection(body)
+        set body to body as json
+        if kind is nothing
+            set kind to "application/json"
+        end
+    end
+    set sent to body
+    if web_is_text(body)
+        set sent to body as bytes
+        if kind is nothing
+            set kind to "text/plain; charset=utf-8"
+            if length of body is greater than 0 and web_text_part(body, 1, 1) is "<"
+                set kind to "text/html; charset=utf-8"
+            end
+        end
+    end
+    if kind is nothing
+        set kind to "application/octet-stream"
+    end
+    set reason to "OK"
+    if status is in web_statuses
+        set reason to item status of web_statuses
+    end
+    set head to "HTTP/1.1 " + status + " " + reason + web_line + "Content-Type: " + kind + web_line
+    set head to head + "Content-Length: " + length of sent + web_line + "Connection: close" + web_line
+    for each name in extra
+        set head to head + name + ": " + item name of extra + web_line
+    end
+    web_send(client, (head + web_line) as bytes)
+    if length of sent is greater than 0
+        web_send(client, sent)
+    end
+end
+
+# a record's field, or `otherwise` if it has none
+to web_field with answer, name, otherwise
+    try
+        if name is "status"
+            return status of answer
+        else if name is "body"
+            return body of answer
+        else if name is "type"
+            return type of answer
+        else if name is "headers"
+            return headers of answer
+        end
+        return file of answer
+    if it fails
+        return otherwise
+    end
+end
+
+to web_text with value as text
+    return yes
+end
+
+to web_list with value as a list
+    return yes
+end
+
+to web_dictionary with value as a dictionary
+    return yes
+end
+
+to web_is_text with value
+    try
+        return web_text(value)
+    if it fails
+        return no
+    end
+end
+
+to web_is_collection with value
+    try
+        return web_list(value)
+    if it fails
+        try
+            return web_dictionary(value)
+        if it fails
+            return no
+        end
+    end
+end
+
+# a file's type, from what its name ends with
+to web_type_of with named
+    set parts to split lowercase of named by "."
+    set ending to item (length of parts) of parts
+    if ending is in web_types
+        return item ending of web_types
+    end
+    return "application/octet-stream"
+end

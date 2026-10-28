@@ -2318,3 +2318,35 @@ hold them to agreeing.
   person, and cleared. Each system's own look was checked by eye, from
   screenshots. And a click on GTK's drawing, sent by another program's X
   events, landed where it was sent.
+
+## 51. A web server
+
+- **Why.** A program could read sites and send to them, but not be one, and a
+  backend, an API or a page for a phone on the same network is a site.
+  [`tools/server.moth`](tools/server.moth) is one, in Moth, on the system's own
+  sockets: Winsock's on Windows, libc's on Linux, the same functions declared
+  in two libraries and the right one called, as ui.moth chooses.
+- **What a program writes.** `web's serve(8080, answer)`, where `answer` is
+  given a request, a record of its method, path, query, headers and body, and
+  gives back text (a page if it starts with `<`), a list or dictionary (sent as
+  JSON), or a record with any of status, body, type, headers and file, a file
+  whose bytes are sent with the type its name says. `serve` answers this
+  computer alone, at 127.0.0.1; `serve_everywhere` every network, which is the
+  program's choice to make. `stop_serving` ends it.
+- **How it reads a request.** Into a block that doubles when it must, until the
+  blank line after the headers, then as many more bytes as Content-Length says,
+  16 MB at most (413) and 64 KB of headers (431). The query is decoded, `%20`
+  and `+` included, by hand: `number of` doesn't read hex. Every answer says
+  `Connection: close`, and requests are answered one at a time.
+- **When the handler fails.** The mistake goes to the error output, the request
+  gets a 500 that says it, and the server goes on to the next. A connection that
+  goes before it's answered is a mistake too, said the same way; on Linux it's
+  sent with MSG_NOSIGNAL, so it isn't the end of the program, as SIGPIPE would
+  make it.
+- **Tested.** A server built from the test's program, answering another Moth
+  program, which `read`s and `send`s to it as to any site: a page, a query
+  decoded, JSON with a header seen, a POST's body given back with its status, a
+  file, a missing file's 404, the handler's mistake as a 500 with the server
+  going on, and `stop_serving`, on Windows and on Linux.
+- **Not yet.** More than one request at a time, keeping a connection open for
+  the next, HTTPS (a proxy in front can do it), and WebSockets.

@@ -337,6 +337,10 @@ bytes and dictionaries:
   GTK 3, in the desktop's own theme, and [`ui.moth`](tools/ui.moth) picks
   between the two as the program starts, so a program that uses it works on
   both.
+- [`server.moth`](tools/server.moth) is a web server: `web's serve(8080, answer)`
+  gives each request (its method, path, query, headers and body) to a function
+  of the program's, which gives back a page, JSON, a file, or a record with its
+  status, body, type and headers, on Windows' and Linux's own sockets.
 - [`notes.moth`](tools/notes.moth) is a notepad made with ui.moth, in under 120
   lines, on Windows and Linux: New, Open, Save and Save as, with their keys, a
   `*` in the title while a note isn't saved, and a question before one is lost.
@@ -903,7 +907,8 @@ calls that led there.
   procedure is a Moth function, and `tools/windows.moth` driving its own
   controls, menus and keys, and its tabs, tables, progress bars, pictures and
   drawings; on Linux `tools/linux.moth` doing the same with GTK's, on CI's
-  Xvfb display; and `tools/ui.moth` on both
+  Xvfb display; `tools/ui.moth` on both; and `tools/server.moth` answering
+  another Moth program's reads and sends, on both
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
