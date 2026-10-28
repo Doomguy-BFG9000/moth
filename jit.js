@@ -99,6 +99,8 @@ class JsCompiler extends Scope {
         return `{ const $o = recordFor(${this.expr(s.target)}, ${q(s.name)}, ${this.pos(s.at)}); $o[${q(s.name)}] = ${this.expr(s.value)}; }`;
       case "fail":
         return `failWith(${this.expr(s.value)}, ${this.pos(s.at)});`;
+      case "stop":
+        return "break;"; // every Moth loop is a JavaScript loop, and nothing else is
     }
   }
 

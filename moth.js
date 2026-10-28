@@ -76,7 +76,7 @@ function tokenize(src) {
 // words that start a statement or a value, so they can't name a variable
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
-  "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"]);
+  "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop"]);
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -84,6 +84,7 @@ const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "
 function parse(tokens) {
   let pos = 0;
   let fnDepth = 0;
+  let loopDepth = 0; // loops around this spot, in this function: `stop` needs one
   let indexing = false; // inside `item ... of`, where a name followed by `of` is the item number, not a field
   const peek = () => tokens[pos];
   const check = (type) => tokens[pos].type === type;
@@ -115,6 +116,13 @@ function parse(tokens) {
   function block(opener) {
     if (!peek().nl) expected("a new line");
     return statements(opener);
+  }
+
+  function loopBody(opener) {
+    loopDepth++;
+    const body = blockEnd(opener);
+    loopDepth--;
+    return body;
   }
 
   function blockEnd(opener) {
@@ -152,10 +160,10 @@ function parse(tokens) {
     }
     if (word("if")) return ifRest(t);
     if (word("repeat")) {
-      if (word("while")) return { kind: "while", cond: expression(), body: blockEnd(t), at: t };
+      if (word("while")) return { kind: "while", cond: expression(), body: loopBody(t), at: t };
       const count = expression();
       expectWord("times");
-      return { kind: "repeat", count, body: blockEnd(t), at: t };
+      return { kind: "repeat", count, body: loopBody(t), at: t };
     }
     if (word("for")) {
       expectWord("each");
@@ -163,18 +171,21 @@ function parse(tokens) {
       if (word("from")) {
         const from = expression();
         expectWord("to");
-        return { kind: "count", name: variable, from, to: expression(), body: blockEnd(t), at: t };
+        return { kind: "count", name: variable, from, to: expression(), body: loopBody(t), at: t };
       }
       if (!word("in")) expected("'in' or 'from'");
-      return { kind: "each", name: variable, list: expression(), body: blockEnd(t), at: t };
+      return { kind: "each", name: variable, list: expression(), body: loopBody(t), at: t };
     }
     if (word("to")) {
       const fnName = name("a function name");
       const params = [];
       if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
+      const outside = loopDepth; // a function's body starts outside any loop
       fnDepth++;
+      loopDepth = 0;
       const body = blockEnd(t);
       fnDepth--;
+      loopDepth = outside;
       return { kind: "define", name: fnName, params, body, at: t };
     }
     if (word("return")) {
@@ -184,6 +195,10 @@ function parse(tokens) {
     if (word("fail")) {
       expectWord("with");
       return { kind: "fail", value: expression(), at: t };
+    }
+    if (word("stop")) {
+      if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
+      return { kind: "stop", at: t };
     }
     const turtle = t.type === "word" && TURTLE_WORDS.get(t.value);
     if (turtle) {
@@ -346,6 +361,7 @@ class Compiler extends Scope {
   constructor(parent, name, params, body, options) {
     super(parent, name, params, body, options);
     Object.assign(this.fn, { code: [], consts: [], at: [] });
+    this.loops = []; // the loops being compiled, innermost last: how much each keeps on the stack, and its stops
     for (const s of body) this.statement(s);
     if (parent) this.emit(null, CONST, this.constant(null), RETURN);
     else this.emit(null, HALT);
@@ -393,14 +409,25 @@ class Compiler extends Scope {
     this.emit(at, SET, ...this.resolve(name)); // always found: declarations() saw every name that is stored
   }
 
-  loop(s, next) {
+  // `state` is how many values the loop keeps on the stack while it runs, which a `stop` takes off
+  loop(s, next, state) {
     const top = this.here();
     const exit = this.jump(s.at, next);
     if (s.name) this.store(s.name, s.at);
     this.mark(s); // every round pauses on the loop's line, after the loop variable has its new value
-    for (const inner of s.body) this.statement(inner);
+    this.body(s.body, state);
     this.jump(s.at, JUMP, top);
     this.patch(exit);
+    this.patchStops();
+  }
+
+  body(statements, state) {
+    this.loops.push({ state, stops: [] });
+    for (const inner of statements) this.statement(inner);
+  }
+
+  patchStops() {
+    for (const i of this.loops.pop().stops) this.patch(i);
   }
 
   call(e, statement = false) {
@@ -451,26 +478,27 @@ class Compiler extends Scope {
         this.mark(s);
         this.expr(s.cond);
         const exit = this.jump(s.at, JUMP_IF_FALSE);
-        for (const inner of s.body) this.statement(inner);
+        this.body(s.body, 0);
         this.jump(s.at, JUMP, top);
         this.patch(exit);
+        this.patchStops();
         return;
       }
       case "repeat":
         this.expr(s.count);
         this.emit(s.at, CHECK_REPEAT);
-        this.loop(s, REPEAT_NEXT);
+        this.loop(s, REPEAT_NEXT, 1);
         return;
       case "count":
         this.expr(s.from);
         this.expr(s.to);
         this.emit(s.at, CHECK_RANGE);
-        this.loop(s, RANGE_NEXT);
+        this.loop(s, RANGE_NEXT, 2);
         return;
       case "each":
         this.expr(s.list);
         this.emit(s.at, ITER);
-        this.loop(s, ITER_NEXT);
+        this.loop(s, ITER_NEXT, 1);
         return;
       case "define": {
         const fn = new Compiler(this, s.name, s.params, s.body).fn;
@@ -501,6 +529,12 @@ class Compiler extends Scope {
         this.expr(s.value);
         this.emit(s.at, FAIL);
         return;
+      case "stop": { // take the loop's own values off the stack, then jump to where it ends
+        const loop = this.loops.at(-1);
+        for (let i = 0; i < loop.state; i++) this.emit(s.at, POP);
+        loop.stops.push(this.jump(s.at, JUMP));
+        return;
+      }
     }
   }
 

@@ -90,6 +90,11 @@ const PROGRAMS = [
   ["set a to 0 / 1\nset b to 1\nrepeat 3 times\n    set b to b * 2 + a\nend\nsay b", "8"],
   // every control character is a space, and a comment runs to the end of the line
   ["say 1\v+\f2\r\n# a comment say 3\nsay 4", "3\n4"],
+  // stop leaves the loop it's in, and only that one
+  ["for each n from 1 to 10\n    if n is 4\n        stop\n    end\n    say n\nend", "1\n2\n3"],
+  ["repeat 3 times\n    for each c in \"abc\"\n        if c is \"b\"\n            stop\n        end\n        say c\n    end\nend", "a\na\na"],
+  ["set i to 0\nrepeat while yes\n    add 1 to i\n    if i is 5\n        stop\n    end\nend\nsay i", "5"],
+  ["to first_big with xs\n    set found to nothing\n    for each x in xs\n        if x is greater than 10\n            set found to x\n            stop\n        end\n    end\n    return found\nend\nsay first_big(list of 3, 12, 40)", "12"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -155,6 +160,10 @@ const ERRORS = [
   ["set n to 3\nsay n is divisible by 0", "line 2: can't divide by zero"],
   ['say "a\u0001b"', "line 1: this text is missing its closing quote"], // text can't hold control characters but tab
   ["say 1 😀", "line 1: I don't understand '😀'"],
+  // stop leaves the loop it's in, and only that one
+  ["stop", "line 1: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
+  ["repeat 2 times\n    to f\n        stop\n    end\nend", "line 3: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
+  ["set stop to 1", "line 1: 'stop' is a Moth word, so it can't be used as a variable name"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {

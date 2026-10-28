@@ -367,6 +367,8 @@ class WasmCompiler extends Scope {
   constructor(parent, name, params, body, ctx) {
     super(parent, name, params, body);
     this.ctx = ctx;
+    this.labels = 0; // blocks, loops and ifs open where code is being written
+    this.stops = []; // for each loop being written, the label count outside it, which a `stop` breaks out to
     const { m, T } = ctx;
     this.f = parent ? m.func(name, [refNull(T.env), ...params.map(() => EQ)], [EQ]) : m.func("main", [F64], []);
     this.c = this.f.code;
@@ -497,7 +499,9 @@ class WasmCompiler extends Scope {
   }
 
   e(op, ...args) {
+    if (op === "end") this.labels--;
     this.c.emit(op, ...args);
+    if (op === "block" || op === "loop" || op === "if") this.labels++;
     return this;
   }
 
@@ -579,12 +583,14 @@ class WasmCompiler extends Scope {
 
   // block, loop, then `test` (leaving an i32 that is 1 to stop), the body, a step, and round again
   loop(k, test, body) {
+    this.stops.push(this.labels);
     this.e("block").e("loop");
     test();
     this.e("br_if", 1);
     body();
     this.tick(k);
     this.e("br", 0).e("end").e("end");
+    this.stops.pop();
   }
 
   statement(s) {
@@ -714,6 +720,9 @@ class WasmCompiler extends Scope {
       case "fail":
         this.expr(s.value);
         this.e("i32.const", this.pos(s.at)).e("call", im.failWith).e("unreachable");
+        return;
+      case "stop":
+        this.e("br", this.labels - 1 - this.stops.at(-1)).note("stop");
         return;
     }
   }

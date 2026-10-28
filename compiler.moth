@@ -206,13 +206,14 @@ end
 
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
-    "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"
+    "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop"
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
 to parse with tokens
     set pos to 1
     set fn_depth to 0
+    set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
 
     to peek
@@ -305,6 +306,13 @@ to parse with tokens
         return statements(opener)
     end
 
+    to loop_body with opener
+        set loop_depth to loop_depth + 1
+        set body to block_end(opener)
+        set loop_depth to loop_depth - 1
+        return body
+    end
+
     to block_end with opener
         set body to block(opener)
         expect_word("end")
@@ -363,11 +371,11 @@ to parse with tokens
         end
         if word("repeat")
             if word("while")
-                return record with kind "while", cond expression(), body block_end(t), at t
+                return record with kind "while", cond expression(), body loop_body(t), at t
             end
             set count to expression()
             expect_word("times")
-            return record with kind "repeat", count count, body block_end(t), at t
+            return record with kind "repeat", count count, body loop_body(t), at t
         end
         if word("for")
             expect_word("each")
@@ -375,12 +383,12 @@ to parse with tokens
             if word("from")
                 set start to expression()
                 expect_word("to")
-                return record with kind "count", name variable, start start, stop expression(), body block_end(t), at t
+                return record with kind "count", name variable, start start, limit expression(), body loop_body(t), at t
             end
             if not word("in")
                 expected("'in' or 'from'")
             end
-            return record with kind "each", name variable, over expression(), body block_end(t), at t
+            return record with kind "each", name variable, over expression(), body loop_body(t), at t
         end
         if word("to")
             set fn_name to take_name("a function name")
@@ -391,9 +399,12 @@ to parse with tokens
                     add take_name("an input name") to params
                 end
             end
+            set outside_loops to loop_depth # a function's body starts outside any loop
             set fn_depth to fn_depth + 1
+            set loop_depth to 0
             set body to block_end(t)
             set fn_depth to fn_depth - 1
+            set loop_depth to outside_loops
             return record with kind "define", name fn_name, params params, body body, at t
         end
         if word("return")
@@ -408,6 +419,12 @@ to parse with tokens
         if word("fail")
             expect_word("with")
             return record with kind "fail", value expression(), at t
+        end
+        if word("stop")
+            if loop_depth is 0
+                fail with problem(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')")
+            end
+            return record with kind "stop", at t
         end
         set actions to turtle_words(t)
         if actions is not nothing
@@ -642,7 +659,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -939,7 +956,7 @@ to js_statement with scope, s
     end
     if what is "count"
         set k to position(at of s)
-        set range to "checkRange(" + js_expr(scope, start of s) + ", " + js_expr(scope, stop of s) + ", " + k + ")"
+        set range to "checkRange(" + js_expr(scope, start of s) + ", " + js_expr(scope, limit of s) + ", " + k + ")"
         return "for (let [$i, $last] = " + range + "; $i <= $last; $i++) {\n" + ref(scope, name of s) + " = $i;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "each"
@@ -977,6 +994,9 @@ to js_statement with scope, s
     end
     if what is "fail"
         return "failWith(" + js_expr(scope, value of s) + ", " + position(at of s) + ");"
+    end
+    if what is "stop"
+        return "break;"
     end
 end
 

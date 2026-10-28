@@ -112,7 +112,7 @@ class Checker extends Scope {
   block(body) {
     for (const [i, s] of body.entries()) {
       this.statement(s);
-      if ((s.kind === "return" || s.kind === "fail") && body[i + 1]) {
+      if ((s.kind === "return" || s.kind === "fail" || s.kind === "stop") && body[i + 1]) {
         this.warn(body[i + 1].at, "never runs", `this line can never run, because '${s.kind}' comes first`);
         break;
       }
@@ -202,6 +202,8 @@ class Checker extends Scope {
         return;
       case "fail": // stopping on purpose is not a mistake
         this.expr(s.value);
+        return;
+      case "stop":
         return;
       case "setField": {
         this.expr(s.target);
