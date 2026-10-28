@@ -247,7 +247,7 @@ end
 # or none at all, in quotes, a " in it and the \s before one doubled
 to task_quoted with input
     if input is not "" and position of " " in input is 0 and position of "\t" in input is 0
-            and position of "\"" in input is 0
+        and position of "\"" in input is 0
         return input
     end
     set made to "\""
