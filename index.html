@@ -182,7 +182,7 @@
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
-      + "move turn pen record fail stop ask uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
+      + "move turn pen record fail stop ask use uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
     // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
@@ -202,10 +202,24 @@
     }
 
     // The checker runs on every change, which takes well under a millisecond for programs this size.
+    // Files the code uses (`use "math.moth"`), fetched from this site the first time; until one arrives, the
+    // checker says it can't find it, and the editor checks again once it's here.
+    const usedFiles = new Map();
+    const files = (name) => usedFiles.get(name);
+    const usesIn = (text) => [...text.matchAll(/^[ \t]*use[ \t]+"([^"\n]*)"/gim)].map((m) => m[1]);
+    async function fetchUses(text) {
+      for (const name of usesIn(text)) {
+        if (usedFiles.has(name)) continue;
+        usedFiles.set(name, await fetchText(name).catch(() => undefined));
+        await fetchUses(usedFiles.get(name) ?? "");
+      }
+    }
+
     function refreshEditor() {
-      const problems = check(code.value);
+      if (usesIn(code.value).some((name) => !usedFiles.has(name))) fetchUses(code.value).then(refreshEditor);
+      const problems = check(code.value, { files });
       const marks = new Map();
-      for (const p of problems) marks.set(p.line, (marks.get(p.line) ?? new Map()).set(p.col, p.kind));
+      for (const p of problems) if (!p.file) marks.set(p.line, (marks.get(p.line) ?? new Map()).set(p.col, p.kind));
       $("highlight").innerHTML = highlight(code.value, marks) + "\n"; // the extra line keeps its height in step with the textarea
       $("gutter").textContent = code.value.split("\n").map((_, n) => n + 1).join("\n");
       showProblems(problems);
@@ -217,8 +231,8 @@
       $("problems").replaceChildren(...problems.map((p) => {
         const button = document.createElement("button");
         button.className = BAD.has(p.kind) ? "bad" : "meh";
-        button.textContent = `${BAD.has(p.kind) ? "⛔" : "⚠"} line ${p.line}: ${p.kind === "fails" ? "will fail: " : ""}${p.message}`;
-        button.onclick = () => jumpTo(p);
+        button.textContent = `${BAD.has(p.kind) ? "⛔" : "⚠"} ${p.file ? `${p.file}, ` : ""}line ${p.line}: ${p.kind === "fails" ? "will fail: " : ""}${p.message}`;
+        if (!p.file) button.onclick = () => jumpTo(p); // only this file is in the editor
         const li = document.createElement("li");
         li.append(button);
         return li;
@@ -277,19 +291,20 @@
     }
 
     // Moth programs kept in files of their own (compiler.moth, neural.moth), fetched the first time they're needed
-    const files = new Map();
+    const fetched = new Map();
     async function fetchText(file) {
-      if (!files.has(file)) {
+      if (!fetched.has(file)) {
         const response = await fetch(file);
         if (!response.ok) throw new Error(`${file}: ${response.status} ${response.statusText}`);
-        files.set(file, await response.text());
+        fetched.set(file, await response.text());
       }
-      return files.get(file);
+      return fetched.get(file);
     }
     let mothCompiled = null; // compiler.moth, Moth's compiler written in Moth, compiled by the JIT
     async function compileWithMoth(source) {
       mothCompiled ??= mothCompiler(await fetchText("compiler.moth"));
-      return mothCompiled(source).source;
+      await fetchUses(source);
+      return mothCompiled(source, Object.fromEntries([...usedFiles].filter(([, text]) => text !== undefined))).source;
     }
 
     // What the compilers made of the code: the VM's bytecode, the JavaScript from the JIT, or the
@@ -303,13 +318,13 @@
         if (which === "moth") {
           const js = await compileWithMoth(source);
           if (source !== code.value) return; // the code changed while compiler.moth loaded; that call shows it
-          const same = js === compileToJs(source).source;
+          const same = js === compileToJs(source, { files }).source;
           $("compiled-title").textContent = `JavaScript · written by compiler.moth, Moth's compiler in Moth: ${same ? "the same as the JIT's, byte for byte" : "DIFFERENT from the JIT's"}`;
           $("bytecode").textContent = js;
           return;
         }
         if (which === "wasm") {
-          const { bytes, listing } = compileToWasmBytes(source);
+          const { bytes, listing } = compileToWasmBytes(source, { files });
           $("compiled-title").textContent = `WebAssembly · ${bytes.length.toLocaleString("en")} bytes, which the browser compiles to machine code`;
           $("bytecode").textContent = listing;
           return;
@@ -317,7 +332,7 @@
         $("compiled-title").textContent = which === "js"
           ? "JavaScript · what the JIT made, which V8 then compiles to machine code"
           : "Bytecode · what the compiler made, which the virtual machine runs";
-        $("bytecode").textContent = which === "js" ? compileToJs(source).source : disassemble(compile(source));
+        $("bytecode").textContent = which === "js" ? compileToJs(source, { files }).source : disassemble(compile(source, { files }));
       } catch (err) {
         if (!(err instanceof MothError) && which === "moth") {
           $("bytecode").textContent = `(compiler.moth didn't load: ${err.message})`;
@@ -375,7 +390,10 @@
         }
       };
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
-      current.postMessage({ source: code.value, engine: $("engine").value, answers });
+      const source = code.value;
+      fetchUses(source).then(() => {
+        if (worker === current) current.postMessage({ source, engine: $("engine").value, answers, files: Object.fromEntries(usedFiles) });
+      });
     }
 
     function waitForAnswer(question) {
@@ -404,7 +422,7 @@
       output.classList.remove("error");
       render((drawing = []));
       try {
-        trace = timeline(code.value, { answers }); // the answers given when it last ran
+        trace = timeline(code.value, { answers, files }); // the answers given when it last ran
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
         output.classList.add("error");

@@ -1,0 +1,76 @@
+# Maths Moth doesn't have built in, written in Moth: random numbers, sine and cosine, and rounding.
+# Any program can have them with `use "math.moth"`, as neural.moth does.
+
+# ---------- random numbers (Park and Miller, 1988) ----------
+
+set seed to 42
+
+# the whole-number part of a number that isn't negative, found one power of two at a time
+to whole with x
+    set n to 0
+    set p to 1
+    repeat while p * 2 is at most x
+        set p to p * 2
+    end
+    repeat while p is at least 1
+        if n + p is at most x
+            add p to n
+        end
+        set p to p / 2
+    end
+    return n
+end
+
+# a number between 0 and 1, different every time and the same on every run
+to random
+    set product to seed * 16807
+    set seed to product - whole(product / 2147483647) * 2147483647
+    if seed is less than 0
+        add 2147483647 to seed
+    end
+    return seed / 2147483647
+end
+
+# ---------- sine and cosine ----------
+
+set pi to 3.141592653589793
+
+# x - x³/3! + x⁵/5! - ..., after moving x between -pi and pi, where 12 terms are plenty
+to sine with x
+    repeat while x is greater than pi
+        set x to x - 2 * pi
+    end
+    repeat while x is less than 0 - pi
+        set x to x + 2 * pi
+    end
+    set term to x
+    set total to x
+    for each k from 1 to 12
+        set term to 0 - term * x * x / (2 * k * (2 * k + 1))
+        add term to total
+    end
+    return total
+end
+
+to cosine with x
+    return sine(x + pi / 2)
+end
+
+# ---------- rounding ----------
+
+# the whole-number part of a number below 0 too: -2.5 gives -3
+to floor with x
+    if x is at least 0
+        return whole(x)
+    end
+    set w to 0 - whole(0 - x)
+    if w is greater than x
+        return w - 1
+    end
+    return w
+end
+
+# a number with at most 3 decimals, for saying
+to rounded with x
+    return whole(x * 1000 + 0.5) / 1000
+end

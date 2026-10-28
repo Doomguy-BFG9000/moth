@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
 import { readFileSync, readSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
 
@@ -54,12 +54,26 @@ function askAtTerminal(question) {
   return answer;
 }
 
+// What `use "x.moth"` reads: a file next to the program. Each one is kept, so a mistake in it can show its line.
+const sources = new Map();
+const besides = (program) => (name) => {
+  if (!sources.has(name)) {
+    try {
+      sources.set(name, readFileSync(join(dirname(program), name), "utf8").replace(/^\uFEFF/, ""));
+    } catch {
+      sources.set(name, undefined);
+    }
+  }
+  return sources.get(name);
+};
+const reading = (file) => ({ files: besides(file), file: basename(file) });
+
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
-  const problems = check(source);
+  const problems = check(source, reading(file));
   for (const p of problems) {
     const kind = p.kind === "fails" ? "will fail" : p.kind;
-    console.log(`${file}:${p.line}:${p.col}: ${kind}: ${p.message}\n${excerpt(source, p)}`);
+    console.log(`${p.file ?? file}:${p.line}:${p.col}: ${kind}: ${p.message}\n${excerpt(p.file ? sources.get(p.file) : source, p)}`);
   }
   if (!problems.length) console.log(`${file}: no problems found`);
   return problems.some((p) => p.kind === "fails" || p.kind === "error");
@@ -84,13 +98,14 @@ function svg(lines) {
 // With a file name: file:line:col: reason, the way editors and terminals can jump to. Then the line, with a ^ under the spot.
 function report(err, source, file) {
   if (!(err instanceof MothError)) throw err;
-  console.error(`${file ? `${file}:${err.line}:${err.col}: ${err.reason}` : err.message}\n${excerpt(source, err)}`);
+  const where = err.file ?? file; // a mistake in a file the program uses is shown in that file
+  console.error(`${where ? `${where}:${err.line}:${err.col}: ${err.reason}` : err.message}\n${excerpt(err.file ? sources.get(err.file) ?? "" : source, err)}`);
 }
 
 function build(file, source) {
   const out = file.replace(/\.moth$/i, "") + ".mjs";
   // a token is only kept for its position, so the compiled program's errors can still point at the spot
-  const program = JSON.stringify(compile(source), (key, v) => (key === "at" ? v.map((t) => t && { line: t.line, col: t.col }) : v));
+  const program = JSON.stringify(compile(source, reading(file)), (key, v) => (key === "at" ? v.map((t) => t && { line: t.line, col: t.col, file: t.file }) : v));
   const vm = readFileSync(new URL("./vm.js", import.meta.url), "utf8");
   writeFileSync(out, `#!/usr/bin/env node
 // Compiled by Moth from ${basename(file)}: the program's bytecode plus the Moth virtual machine.
@@ -112,7 +127,7 @@ ${vm}
 }
 
 function shell() {
-  const enter = session();
+  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")) }); // `use` reads from the folder it runs in
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "moth> " });
   const rawMode = (on) => process.stdin.isTTY && process.stdin.setRawMode(on);
   let pending = ""; // the lines of a block that hasn't reached its `end` yet
@@ -182,7 +197,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal });
+      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, ...reading(file) });
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));
@@ -191,12 +206,12 @@ function main([command, file, ...extra]) {
     }
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
     else if (command === "build") build(file, source);
-    else if (command === "js") console.log(compileToJs(source).source);
+    else if (command === "js") console.log(compileToJs(source, reading(file)).source);
     else if (command === "wasm") {
-      const { bytes, listing } = compileToWasmBytes(source);
+      const { bytes, listing } = compileToWasmBytes(source, reading(file));
       console.log(`;; ${bytes.length} bytes\n${listing}`);
     }
-    else console.log(disassemble(compile(source)));
+    else console.log(disassemble(compile(source, reading(file))));
   } catch (err) {
     report(err, source, file);
     return 1;

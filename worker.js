@@ -10,7 +10,7 @@ const MAX_DRAWN = 100_000;
 // program again from the start with every answer so far. It says and draws the same things up to there.
 class Waiting {}
 
-onmessage = ({ data: { source, engine, answers = [] } }) => {
+onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
   let lines = [];
   let drawn = [];
   let said = 0;
@@ -47,12 +47,13 @@ onmessage = ({ data: { source, engine, answers = [] } }) => {
       },
       engine,
       ask,
+      files: (name) => files[name],
     });
     flush();
     postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });
   } catch (err) {
     if (err instanceof Waiting) return; // the page asks, and runs it again
     flush();
-    postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(source, err)}` : `Moth itself crashed: ${err.message}` });
+    postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}` : `Moth itself crashed: ${err.message}` });
   }
 };

@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, makeRecord, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -31,7 +31,8 @@ const HINTS = {
   ".": "to get a field write 'name of person'",
 };
 
-function tokenize(src) {
+// `file` names a file the program uses, for errors in it; the program's own file has none
+function tokenize(src, file) {
   const tokens = [];
   let line = 1;
   let lineStart = 0;
@@ -39,7 +40,7 @@ function tokenize(src) {
   for (let at = 0; at < src.length; at = TOKEN.lastIndex) {
     TOKEN.lastIndex = at;
     const m = TOKEN.exec(src);
-    const where = { line, col: at - lineStart + 1 };
+    const where = file ? { line, col: at - lineStart + 1, file } : { line, col: at - lineStart + 1 };
     if (!m) {
       const c = String.fromCodePoint(src.codePointAt(at)); // a whole emoji, not half of one
       if (c === '"') fail(where, "this text is missing its closing quote");
@@ -67,7 +68,7 @@ function tokenize(src) {
     tokens.push(token);
     nl = false;
   }
-  tokens.push({ type: "eof", value: "", line, col: src.length - lineStart + 1, nl: true });
+  tokens.push({ type: "eof", value: "", line, col: src.length - lineStart + 1, nl: true, ...(file && { file }) });
   return tokens;
 }
 
@@ -77,7 +78,7 @@ function tokenize(src) {
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-  "uppercase", "lowercase", "split", "join", "number", "position", "ask"]);
+  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -85,9 +86,12 @@ const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
-// Every node keeps the token it came from (`at`), so errors can point at it.
-function parse(tokens) {
+// Every node keeps the token it came from (`at`), so errors can point at it. `reading` is shared with the
+// files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
+// once), and `open` the files being read right now, to catch two that use each other.
+function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   let pos = 0;
+  let atTop = false; // directly in the program, not in a block or a function
   let fnDepth = 0;
   let loopDepth = 0; // loops around this spot, in this function: `stop` needs one
   let indexing = false; // inside `item ... of`, where a name followed by `of` is the item number, not a field
@@ -110,11 +114,30 @@ function parse(tokens) {
 
   function statements(opener) {
     const body = [];
+    const outside = atTop;
+    atTop = !opener;
     while (opener ? !isWord("end") && !isWord("else") : !check("eof")) {
       if (check("eof")) fail(peek(), `'${opener.value}' from line ${opener.line} is missing its 'end'`);
-      body.push(statement());
+      const s = statement();
+      if (s.kind === "use") body.push(...s.body); // the file's code, in its place
+      else body.push(s);
       if (!peek().nl) expected("a new line");
     }
+    atTop = outside;
+    return body;
+  }
+
+  // The statements of a file the program uses, or none if it was read already.
+  function useFile(nameToken) {
+    const name = nameToken.value;
+    if (reading.open.includes(name)) fail(nameToken, `'${name}' is already being read, so it can't be used here: files can't use each other in a circle`);
+    if (reading.loaded.has(name)) return [];
+    const text = reading.files?.(name);
+    if (typeof text !== "string") fail(nameToken, `there is no file called '${name}'`);
+    reading.loaded.add(name);
+    reading.open.push(name);
+    const body = parse(tokenize(text, name), reading);
+    reading.open.pop();
     return body;
   }
 
@@ -200,6 +223,11 @@ function parse(tokens) {
     if (word("fail")) {
       expectWord("with");
       return { kind: "fail", value: expression(), at: t };
+    }
+    if (word("use")) {
+      const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
+      if (!atTop) fail(t, "'use' only works at the top level of a program");
+      return { kind: "use", body: useFile(nameToken), at: t };
     }
     if (word("stop")) {
       if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
@@ -384,7 +412,7 @@ class Compiler extends Scope {
 
   // In a debug build, the machine can pause here: a statement on this line is about to run.
   mark(s) {
-    if (this.debug) this.emit(s.at, LINE, s.at.line);
+    if (this.debug && !s.at.file) this.emit(s.at, LINE, s.at.line); // the debugger steps through this file, not the ones it uses
   }
 
   emit(at, ...code) {
@@ -663,9 +691,10 @@ export function disassemble(fn, scopes = [fn], out = []) {
 // ---------- running ----------
 
 // Parses the source and hands the syntax tree to a back end.
-function build(source, backEnd) {
+// `files` gives the text of a file the program uses, by name, and `file` is the program's own name, if it has one.
+function build(source, backEnd, { files, file } = {}) {
   try {
-    return backEnd(parse(tokenize(source)));
+    return backEnd(parse(tokenize(source), { files, loaded: new Set(file ? [file] : []), open: file ? [file] : [] }));
   } catch (err) {
     // shortcut: points at line 1, since the overflow hides where the nesting was; only ~1,000 levels of brackets get here
     if (err instanceof RangeError) fail({ line: 1, col: 1 }, "the code is nested too deeply");
@@ -676,41 +705,43 @@ function build(source, backEnd) {
 // Compiles Moth source to bytecode for vm.js. Options: `slots` carries over the top-level variables of
 // earlier shell entries; `debug` adds LINE markers so a debugger can pause at each statement.
 export function compile(source, options) {
-  return build(source, (program) => new Compiler(null, "main", [], program, options).fn);
+  return build(source, (program) => new Compiler(null, "main", [], program, options).fn, options);
 }
 
 // Compiles Moth source to JavaScript (jit.js): { source, run(print, draw, maxSteps) }.
-export function compileToJs(source) {
-  return build(source, jit);
+export function compileToJs(source, options) {
+  return build(source, jit, options);
 }
 
 // Compiles Moth source to a WebAssembly module (wasm.js): { bytes, listing, run(print, draw, maxSteps) }.
-export function compileToWasm(source) {
-  return build(source, wasm);
+export function compileToWasm(source, options) {
+  return build(source, wasm, options);
 }
 
 // The same module's bytes and a readable listing, without compiling it (which a browser page may only do
 // for small modules unless it waits): { bytes, listing }.
-export function compileToWasmBytes(source) {
-  return build(source, compileToWasmModule);
+export function compileToWasmBytes(source, options) {
+  return build(source, compileToWasmModule, options);
 }
 
 // Problems found without running the program (checker.js): [{ line, col, kind, message }]. Code that
 // can't even be read comes back as a single problem of kind "error".
-export function check(source) {
+export function check(source, options) {
   try {
-    return build(source, checkProgram);
+    return build(source, checkProgram, options);
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
-    return [{ line: err.line, col: err.col, kind: "error", message: err.reason }];
+    return [{ line: err.line, col: err.col, kind: "error", message: err.reason, ...(err.file && { file: err.file }) }];
   }
 }
 
 // Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`, and each
 // `ask` to `ask`, which returns the answer (see askFor in vm.js); mistakes in the program throw MothError.
 // `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
-// `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode).
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask } = {}) {
+// `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
+// for `use` (see build).
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file } = {}) {
+  const reading = { files, file };
   const answers = []; // kept, so that running the program again (below) gets the same ones
   const answer = ask && ((question) => {
     const reply = ask(question);
@@ -720,12 +751,12 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   let program = null;
   if (engine !== "vm") {
     try {
-      program = engine === "wasm" ? compileToWasm(source) : compileToJs(source);
+      program = engine === "wasm" ? compileToWasm(source, reading) : compileToJs(source, reading);
     } catch (err) {
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
   }
-  if (!program) return new Machine(compile(source), print, { maxSteps, draw, ask: answer }).run();
+  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer }).run();
   let said = 0;
   let drawn = 0;
   try {
@@ -739,7 +770,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     // own stack and reports a too-big value at the right line, and pass on only what the first run hadn't already.
     let asked = 0;
     const again = answer && ((question) => (asked < answers.length ? answers[asked++] : answer(question)));
-    new Machine(compile(source), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again }).run();
+    new Machine(compile(source, reading), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again }).run();
   }
 }
 
@@ -764,10 +795,10 @@ function loadProgram(program, print = console.log) {
 // made by this function, which is how the tests show the compiler compiling itself.
 export function mothCompiler(compilerSource, using = compileToJs) {
   const { compile } = loadProgram(using(compilerSource));
-  return (source) => {
+  return (source, files = {}) => { // files: each file a program may use, by name
     let made;
     try {
-      made = compile(source);
+      made = compile(source, Object.entries(files).map(([name, text]) => makeRecord(["name", "text"], [name, text])));
     } catch (err) {
       // a mistake in the program it compiles comes back as `fail with` a record of where and why
       if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
@@ -782,15 +813,15 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined, ask = undefined) {
-  return new Machine(compile(source, { debug: true }), print, { draw, ask });
+export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file } = {}) {
+  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
 // variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
 // (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
 // `answers` answer its questions, in order, each shown after its question as a line of output.
-export function timeline(source, { limit = 10_000, answers = [] } = {}) {
+export function timeline(source, { limit = 10_000, answers = [], files, file } = {}) {
   const said = [];
   const drawn = [];
   let asked = 0;
@@ -799,7 +830,7 @@ export function timeline(source, { limit = 10_000, answers = [] } = {}) {
     said.push(`${question} ${answers[asked]}`);
     return answers[asked++];
   };
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask);
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file });
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;
@@ -820,11 +851,11 @@ export function timeline(source, { limit = 10_000, answers = [] } = {}) {
 }
 
 // A shell session: each entry runs with the variables and functions made by the entries before it.
-export function session(print = console.log) {
+export function session(print = console.log, { files } = {}) {
   const slots = new Map();
   const env = [null];
   return (source) => {
-    const main = compile(source, { slots });
+    const main = compile(source, { slots, files });
     while (env.length <= main.nslots) env.push(UNSET); // room for the variables this entry adds
     execute(main, print, Infinity, env);
   };

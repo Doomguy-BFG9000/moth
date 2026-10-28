@@ -54,8 +54,8 @@ to problem with at, reason
     return record with at at, reason reason
 end
 
-to place with line, col
-    return record with type "", line line, col col
+to place with line, col, file
+    return record with type "", line line, col col, file file
 end
 
 # ---------- characters ----------
@@ -106,7 +106,8 @@ end
 
 # ---------- tokens ----------
 
-to tokenize with source
+# `file` names a file the program uses, for errors in it ("" for the program's own)
+to tokenize with source, file
     set chars to letters(source)
     add "" to chars # the end, so looking one past the last character is safe
     set tokens to empty list
@@ -145,7 +146,7 @@ to tokenize with source
                     add 1 to k
                 end
             end
-            add record with type "number", value text, line line, col start, nl nl to tokens # kept as written
+            add record with type "number", value text, line line, col start, nl nl, file file to tokens # kept as written
             set col to start + length of text
             set nl to no
         else if starts_word(c)
@@ -154,7 +155,7 @@ to tokenize with source
                 add small(item k of chars) to text
                 add 1 to k
             end
-            add record with type "word", value text, line line, col start, nl nl to tokens
+            add record with type "word", value text, line line, col start, nl nl, file file to tokens
             set col to start + length of text
             set nl to no
         else if c is "\""
@@ -173,7 +174,7 @@ to tokenize with source
                         set d to "\t"
                     end
                 else if d is "\\" or not fits_text(d)
-                    fail with problem(place(line, start), "this text is missing its closing quote")
+                    fail with problem(place(line, start, file), "this text is missing its closing quote")
                 end
                 add d to text
                 add width(item k of chars) to col
@@ -181,10 +182,10 @@ to tokenize with source
             end
             add 1 to k
             add 1 to col
-            add record with type "string", value text, line line, col start, nl nl to tokens
+            add record with type "string", value text, line line, col start, nl nl, file file to tokens
             set nl to no
         else if contains(symbols, c)
-            add record with type c, value c, line line, col start, nl nl to tokens
+            add record with type c, value c, line line, col start, nl nl, file file to tokens
             add 1 to k
             add 1 to col
             set nl to no
@@ -195,10 +196,10 @@ to tokenize with source
             else
                 set hint to " (" + hint + ")"
             end
-            fail with problem(place(line, start), "I don't understand '" + c + "'" + hint)
+            fail with problem(place(line, start, file), "I don't understand '" + c + "'" + hint)
         end
     end
-    add record with type "eof", value "", line line, col col, nl yes to tokens
+    add record with type "eof", value "", line line, col col, nl yes, file file to tokens
     return tokens
 end
 
@@ -207,13 +208,16 @@ end
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-    "uppercase", "lowercase", "split", "join", "number", "position", "ask"
+    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use"
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position" # in the order of BUILTINS in vm.js
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
-to parse with tokens
+# `reading` is shared with the files the program uses: `files` (a list of records with a name and a text),
+# `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
+to parse with tokens, reading
     set pos to 1
+    set at_top to no # directly in the program, not in a block or a function
     set fn_depth to 0
     set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
@@ -289,16 +293,57 @@ to parse with tokens
 
     to statements with opener
         set body to empty list
+        set outside_top to at_top
+        set at_top to opener is nothing
         repeat while more(opener)
             if check("eof")
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
-            add statement() to body
+            set made to statement()
+            if kind of made is "use" # the file's code, in its place
+                for each inner in body of made
+                    add inner to body
+                end
+            else
+                add made to body
+            end
             if not nl of peek()
                 expected("a new line")
             end
         end
+        set at_top to outside_top
         return body
+    end
+
+    # The statements of a file the program uses, or none if it was read already.
+    to use_file with name_token
+        set wanted to value of name_token
+        if contains(open of reading, wanted)
+            fail with problem(name_token, "'" + wanted + "' is already being read, so it can't be used here: files can't use each other in a circle")
+        end
+        if contains(loaded of reading, wanted)
+            return empty list
+        end
+        set text to nothing
+        for each f in files of reading
+            if name of f is wanted
+                set text to text of f
+            end
+        end
+        if text is nothing
+            fail with problem(name_token, "there is no file called '" + wanted + "'")
+        end
+        set loaded_now to loaded of reading
+        add wanted to loaded_now
+        set open_now to open of reading
+        add wanted to open_now
+        set inner to parse(tokenize(text, wanted), reading)
+        set still_open to empty list # all but the last
+        for each n from 1 to length of open_now - 1
+            add item n of open_now to still_open
+        end
+        set open of reading to still_open
+        return inner
     end
 
     to block with opener
@@ -442,6 +487,16 @@ to parse with tokens
         if word("fail")
             expect_word("with")
             return record with kind "fail", value expression(), at t
+        end
+        if word("use")
+            set name_token to match("string")
+            if not name_token
+                expected("a file name in quotes, like \"shapes.moth\"")
+            end
+            if not at_top
+                fail with problem(t, "'use' only works at the top level of a program")
+            end
+            return record with kind "use", body use_file(name_token), at t
         end
         if word("stop")
             if loop_depth is 0
@@ -701,7 +756,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -1153,11 +1208,13 @@ to function_code with parent, params, body
     return record with scope scope, code "let " + joined(locals, ", ") + ";\n" + statements
 end
 
-# Moth source in; out come the JavaScript (for fromJs() in jit.js), the tokens its positions point at,
-# and the names of the top-level variables, whose values the JavaScript returns.
-to compile with source
+# Moth source, and the files it may use (records with a name and a text); out come the JavaScript (for
+# fromJs() in jit.js), the tokens its positions point at, and the names of the top-level variables, whose
+# values the JavaScript returns.
+to compile with source, files
     set ats to empty list
-    set main to function_code(nothing, empty list, parse(tokenize(source)))
+    set reading to record with files files, loaded empty list, open empty list
+    set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading))
     set slots to empty list
     for each slot from 1 to length of names of scope of main
         add v(slot, 0) to slots

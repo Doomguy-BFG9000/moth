@@ -4,7 +4,8 @@
 // `value` is set by `fail with value`, so a program that called Moth code (see load()) can read it.
 export class MothError extends Error {
   constructor(at, message, value) {
-    super(`line ${at.line}: ${message}`);
+    super(`${at.file ? `${at.file}, ` : ""}line ${at.line}: ${message}`); // file: a file the program uses
+    this.file = at.file || undefined;
     this.line = at.line;
     this.col = at.col;
     this.reason = message;

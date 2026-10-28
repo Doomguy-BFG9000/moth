@@ -50,7 +50,8 @@ class Checker extends Scope {
   }
 
   warn(at, kind, message) {
-    this.all.warnings.push({ line: at.line, col: at.col, kind, message });
+    if (at.file && kind === "unused") return; // a file the program uses can make more than this program needs
+    this.all.warnings.push({ line: at.line, col: at.col, kind, message, ...(at.file && { file: at.file }) });
   }
 
   // Runs `test` once the types are known; if it throws, this spot will fail whenever it runs.
@@ -362,7 +363,9 @@ export function check(program) {
     }
   }
   for (const run of all.checks) run();
-  for (const [key, { at, message }] of all.made) if (!all.used.has(key)) all.warnings.push({ line: at.line, col: at.col, kind: "unused", message });
+  for (const [key, { at, message }] of all.made) {
+    if (!all.used.has(key) && !at.file) all.warnings.push({ line: at.line, col: at.col, kind: "unused", message }); // a used file can make more than one program needs
+  }
   const seen = new Set();
   return all.warnings
     .filter((w) => !seen.has(`${w.line}:${w.col}:${w.message}`) && seen.add(`${w.line}:${w.col}:${w.message}`))

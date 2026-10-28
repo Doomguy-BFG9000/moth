@@ -536,10 +536,11 @@ test("the compiler written in Moth compiles itself, and what it makes does the s
 // exactly the same things, and the network must learn to put every dot on the right side.
 test("the neural network written in Moth learns, the same way on all three engines", () => {
   const network = readFileSync(new URL("./neural.moth", import.meta.url), "utf8");
+  const files = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8"); // math.moth
   const train = (engine) => {
     const said = [];
     const drawn = [];
-    run(network, (line) => said.push(line), { engine, draw: (line) => drawn.push(line) });
+    run(network, (line) => said.push(line), { engine, draw: (line) => drawn.push(line), files });
     return { said, drawn };
   };
   const jit = train("jit");
@@ -547,7 +548,7 @@ test("the neural network written in Moth learns, the same way on all three engin
   assert.deepEqual(train("wasm"), jit);
   assert.equal(jit.said[1], "step 1: loss 1.173, 50% right");
   assert.equal(jit.said.at(-1), "after 60 steps: 100% of the dots are on the right side");
-  assert.deepEqual(check(network), []);
+  assert.deepEqual(check(network, { files }), []);
 });
 
 // ---------- the WebAssembly encoder ----------
@@ -582,4 +583,44 @@ test("ask gets answers, on all three engines, and a hand-over to the VM doesn't 
   const { said } = timeline('say ask "name?"\nsay "bye"', { answers: ["Sam"] });
   assert.deepEqual(said, ["name? Sam", "Sam", "bye"]); // the debugger replays the answers it was given
   assert.equal(error('say ask "x"', { ask: () => null }).message, "line 1: there was no answer to this question: the input ended");
+});
+
+// ---------- use ----------
+
+// `use "x.moth"` puts another file's code in the program, once; a mistake in it names that file. The
+// compiler written in Moth reads files the same way, and still writes the JIT's JavaScript.
+test("use reads other files once, on all three engines, and mistakes in them say which file", () => {
+  const files = {
+    "shapes.moth": "to square with n\n    return n * n\nend\nset unit to 1",
+    "twice.moth": 'use "shapes.moth"\nsay "twice"',
+    "bad.moth": "say 1 +",
+    "loop.moth": 'use "loop2.moth"',
+    "loop2.moth": 'use "loop.moth"',
+    "boom.moth": "to boom\n    say 1 / 0\nend",
+  };
+  const reading = { files: (name) => files[name] };
+  const program = 'use "shapes.moth"\nuse "twice.moth"\nsay square(4) + unit';
+  const mistakes = [
+    ['use "nope.moth"', "line 1: there is no file called 'nope.moth'", undefined],
+    ['use "bad.moth"', "bad.moth, line 1: expected a value but found the end of the code", "bad.moth"],
+    ['use "loop.moth"', "loop2.moth, line 1: 'loop.moth' is already being read, so it can't be used here: files can't use each other in a circle", "loop2.moth"],
+    ['if yes\n    use "shapes.moth"\nend', "line 2: 'use' only works at the top level of a program", undefined],
+    ['use "boom.moth"\nboom', "boom.moth, line 2: can't divide by zero", "boom.moth"],
+    ["use shapes", 'line 1: expected a file name in quotes, like "shapes.moth" but found \'shapes\'', undefined],
+  ];
+  for (const engine of ENGINES) {
+    assert.equal(output(program, { engine, ...reading }), "twice\n17", engine);
+    for (const [source, message, file] of mistakes) {
+      const err = error(source, { engine, ...reading });
+      assert.equal(err.message, message, `${engine}: ${source}`);
+      assert.equal(err.file, file);
+    }
+  }
+  files["warns.moth"] = "say 1 / 0";
+  assert.deepEqual(check('use "warns.moth"\nsay "a" * 2', reading).map((p) => [p.file, p.line, p.message]),
+    [["warns.moth", 1, "can't divide by zero"], [undefined, 2, "can't use '*' on text and a number"]]);
+  const moth = mothCompiler(COMPILER);
+  for (const source of [program, ...mistakes.map(([source]) => source)]) {
+    assert.deepEqual(compiled((s) => moth(s, files), source), compiled((s) => compileToJs(s, reading), source), source);
+  }
 });

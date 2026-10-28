@@ -92,6 +92,27 @@ test("moth wasm shows the WebAssembly module the third engine makes", (t) => {
   assert.match(result.stdout, /^;; \d+ bytes\n\(func \$init[\s\S]*\(func \$main[\s\S]*call \$moth\.say/);
 });
 
+test("moth run finds a used file next to the program, and points into it when it fails", (t) => {
+  const file = tempFile(t, "main.moth", 'use "lib.moth"\nsay double(21)\nbreak_it');
+  writeFileSync(join(file, "..", "lib.moth"), "to double with n\n    return n * 2\nend\nto break_it\n    say 1 / 0\nend");
+  const result = moth(["run", file]);
+  assert.equal(result.stdout, "42\n");
+  assert.equal(result.stderr, "lib.moth:5:11: can't divide by zero\n    say 1 / 0\n          ^\n");
+});
+
+test("moth run answers ask from what's typed in", (t) => {
+  const result = moth(["run", tempFile(t, "ask.moth", 'set name to ask "Name?"\nsay "Hi " name')], "Sam\n");
+  assert.equal(result.stdout, "Name? Sam\nHi Sam\n");
+});
+
+// The playground's script isn't run by any test, so at least it must parse: node --check on a copy of it.
+test("the playground's script has no syntax errors", (t) => {
+  const page = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const script = page.slice(page.indexOf('<script type="module">') + '<script type="module">'.length, page.lastIndexOf("</script>"));
+  const result = node(["--check", tempFile(t, "playground.mjs", script)]);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("moth bootstrap compiles the compiler written in Moth with itself", () => {
   const result = moth(["bootstrap"]);
   assert.equal(result.status, 0, result.stderr);
