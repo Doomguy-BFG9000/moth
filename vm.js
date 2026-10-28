@@ -93,10 +93,15 @@ export class Closure {
 
 export const UNSET = Symbol("unset"); // a variable that is declared but hasn't been given a value yet
 const isList = Array.isArray;
-// A record is an object with no prototype, so a field can be called anything, even "constructor".
-export const isRecord = (v) => v !== null && typeof v === "object" && !isList(v) && !(v instanceof Closure);
+// A record is made by `new Record()`, whose prototype has no properties and no prototype of its own, so a
+// field can be called anything, even "constructor" or "__proto__". Object.create(null) would do that too,
+// but V8 keeps those as slow dictionaries; objects made with `new` get shapes, so field access is fast.
+export function Record() {}
+Record.prototype = Object.create(null);
+export const isRecord = (v) => v instanceof Record;
 export const truthy = (v) => v !== null && v !== false;
 export function equal(a, b) {
+  if (a === b) return true;
   if (isList(a) && isList(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
   if (isRecord(a) && isRecord(b)) {
     const fields = Object.keys(a);
@@ -219,8 +224,8 @@ export function checkInputs(f, argc, name, error) {
 
 // `record with name "Sam", age 20`
 export function makeRecord(fields, values) {
-  const record = Object.create(null);
-  fields.forEach((field, i) => (record[field] = values[i]));
+  const record = new Record();
+  for (let i = 0; i < fields.length; i++) record[fields[i]] = values[i];
   return record;
 }
 

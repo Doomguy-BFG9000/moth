@@ -32,6 +32,13 @@ for each n from 2 to 5000
 end
 say length of primes`,
 
+  "200,000 records, made and read": `set total to 0
+for each i from 1 to 200000
+    set point to record with x i, y i * 2, label "a"
+    set total to total + x of point + y of point
+end
+say total`,
+
   "recursion 10,000 deep": `to sum with n
     if n is 0
         return 0

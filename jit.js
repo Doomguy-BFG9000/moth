@@ -3,7 +3,7 @@
 // run thousands of random programs through both and require the same output, drawings and errors.
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
-  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, isRecord, makeRecord, fieldOf, recordFor,
+  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
@@ -221,7 +221,10 @@ function helpers(ats, print, draw, maxSteps) {
     itemsOf: (v, k) => itemsOf(v, errors[k]),
     turtle: (action, value, k) => turtle.act(action, value, errors[k]),
     record: makeRecord,
-    field: (r, name, k) => (isRecord(r) && Object.hasOwn(r, name) ? r[name] : fieldOf(r, name, errors[k])),
+    field: (r, name, k) => {
+      const value = r instanceof Record ? r[name] : undefined; // no Moth value is undefined, and a record's prototype is empty
+      return value !== undefined ? value : fieldOf(r, name, errors[k]);
+    },
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
   };
