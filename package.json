@@ -1,8 +1,13 @@
 {
   "name": "moth",
+  "version": "1.0.0",
+  "description": "A programming language that reads like plain English",
   "private": true,
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "moth": "cli.js"
+  },
   "scripts": {
     "test": "node --test",
     "bench": "node bench.js"
