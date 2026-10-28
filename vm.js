@@ -42,11 +42,12 @@ export const OPCODES = [
   ["AND", 1], ["OR", 1], ["NEG", 0], ["NOT", 0], ["LIST", 1], ["LENGTH", 0], ["ITEM", 0], ["ITEM_REF", 0],
   ["SET_ITEM", 0], ["ADD_TO", 3], ["SAY", 1], ["CHECK_REPEAT", 0], ["REPEAT_NEXT", 1], ["CHECK_RANGE", 0],
   ["RANGE_NEXT", 1], ["ITER", 0], ["ITER_NEXT", 1], ["MAKE_FN", 1], ["UNDEFINED", 1], ["HALT", 0],
+  ["LINE", 1], // only in debug builds: a new statement starts on this line
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE } = OP;
 
 // ---------- values ----------
 
@@ -82,7 +83,7 @@ function show(v, nested = false) {
   return String(v);
 }
 
-function item(target, n, writing, error) {
+function item(target, n, writing, error = oops) {
   if (writing && !isList(target)) error(`can only change items of a list, not ${kindOf(target)}`);
   if (!isList(target) && typeof target !== "string") error(`can only take an item of a list or text, not ${kindOf(target)}`);
   const seq = typeof target === "string" ? [...target] : target; // by character, so "é" and emoji count as one
@@ -92,7 +93,7 @@ function item(target, n, writing, error) {
   return [seq, n - 1];
 }
 
-function compare(op, a, b, error) {
+function compare(op, a, b, error = oops) {
   if (op === "is") return equal(a, b);
   const ok = op === "divisible by"
     ? typeof a === "number" && typeof b === "number"
@@ -104,6 +105,17 @@ function compare(op, a, b, error) {
 
 // ---------- the virtual machine ----------
 
+// Thrown inside the run loop; the loop's catch block turns it into a MothError at the instruction that was running.
+class Failure {
+  constructor(message) {
+    this.message = message;
+  }
+}
+const oops = (message) => {
+  throw new Failure(message);
+};
+const stopped = (steps) => oops(`stopped after ${steps.toLocaleString("en")} steps (is there a loop that never ends?)`);
+
 const MAX_DEPTH = 100_000; // function calls in progress at once; the VM keeps its own stack, so this is a choice, not a JS limit
 
 export function newEnv(fn, parent) {
@@ -112,259 +124,303 @@ export function newEnv(fn, parent) {
   return env;
 }
 
-export function execute(main, print = console.log, maxSteps = Infinity, env = newEnv(main, null)) {
-  const stack = [];
-  const frames = [];
-  let fn = main;
-  let code = fn.code;
-  let consts = fn.consts;
-  let ip = 0; // next instruction
-  let pc = 0; // instruction being run, for error positions
-  let base = 0; // where this call's values start on the stack
-  let steps = 0;
-  const error = (message) => fail(fn.at[pc], message);
-  const tick = () => {
-    if (++steps > maxSteps) error(`stopped after ${maxSteps.toLocaleString("en")} steps (is there a loop that never ends?)`);
-  };
-
-  try {
-    for (;;) {
-      pc = ip;
-      switch (code[ip++]) {
-        case GET: {
-          let e = env;
-          for (let d = code[ip]; d > 0; d--) e = e[0];
-          const v = e[code[ip + 1]];
-          if (v === UNSET) error(noValue(consts[code[ip + 2]]));
-          ip += 3;
-          stack.push(v);
-          break;
-        }
-        case SET: {
-          let e = env;
-          for (let d = code[ip]; d > 0; d--) e = e[0];
-          e[code[ip + 1]] = stack.pop();
-          ip += 2;
-          break;
-        }
-        case CONST:
-          stack.push(consts[code[ip++]]);
-          break;
-        case JUMP: {
-          const to = code[ip];
-          if (to < ip) tick(); // jumping back means another loop round
-          ip = to;
-          break;
-        }
-        case JUMP_IF_FALSE: {
-          const to = code[ip++];
-          if (!truthy(stack.pop())) ip = to;
-          break;
-        }
-        case COMPARE: {
-          const op = code[ip++];
-          const b = stack.pop();
-          const a = stack.pop();
-          // two numbers is the common case; compare() handles the rest, divisible by, and the error messages
-          if (typeof a === "number" && typeof b === "number" && op !== DIVISIBLE) stack.push(COMPARE_FNS[op](a, b));
-          else stack.push(compare(COMPARE_OPS[op], a, b, error));
-          break;
-        }
-        case ADD: {
-          const b = stack.pop();
-          const a = stack.pop();
-          if (typeof a === "number" && typeof b === "number") stack.push(a + b);
-          else if (typeof a === "string" || typeof b === "string") stack.push(show(a) + show(b));
-          else error(`can't use '+' on ${kindOf(a)} and ${kindOf(b)}`);
-          break;
-        }
-        case SUB:
-        case MUL:
-        case DIV: {
-          const op = code[pc];
-          const b = stack.pop();
-          const a = stack.pop();
-          if (typeof a !== "number" || typeof b !== "number") error(`can't use '${op === SUB ? "-" : op === MUL ? "*" : "/"}' on ${kindOf(a)} and ${kindOf(b)}`);
-          if (op === DIV && b === 0) error("can't divide by zero");
-          stack.push(op === SUB ? a - b : op === MUL ? a * b : a / b);
-          break;
-        }
-        case GET_FN: {
-          let e = env;
-          for (let d = code[ip]; d > 0; d--) e = e[0];
-          const f = e[code[ip + 1]];
-          const name = consts[code[ip + 2]];
-          ip += 3;
-          if (f === UNSET) error(`there is no function called '${name}'`);
-          if (!(f instanceof Closure)) error(`'${name}' is ${kindOf(f)}, not a function`);
-          stack.push(f);
-          break;
-        }
-        case CALL: {
-          const argc = code[ip];
-          const name = consts[code[ip + 1]];
-          ip += 2;
-          const first = stack.length - argc;
-          const callee = stack[first - 1];
-          if (argc !== callee.fn.params.length) error(`'${name}' needs ${plural(callee.fn.params.length, "input")} but got ${argc}`);
-          if (frames.length >= MAX_DEPTH) error("too much recursion: a function kept calling itself");
-          tick();
-          const inner = newEnv(callee.fn, callee.env);
-          for (let i = 0; i < argc; i++) inner[i + 1] = stack[first + i]; // inputs take the first slots
-          for (let i = argc; i >= 0; i--) stack.pop();
-          frames.push({ fn, ip, env, base });
-          fn = callee.fn;
-          code = fn.code;
-          consts = fn.consts;
-          env = inner;
-          ip = 0;
-          base = stack.length;
-          break;
-        }
-        case RETURN: {
-          const value = stack.pop();
-          while (stack.length > base) stack.pop(); // drops anything a loop left behind
-          stack.push(value);
-          ({ fn, ip, env, base } = frames.pop());
-          code = fn.code;
-          consts = fn.consts;
-          break;
-        }
-        case POP:
-          stack.pop();
-          break;
-        case AND: {
-          const to = code[ip++];
-          if (truthy(stack[stack.length - 1])) stack.pop();
-          else ip = to;
-          break;
-        }
-        case OR: {
-          const to = code[ip++];
-          if (truthy(stack[stack.length - 1])) ip = to;
-          else stack.pop();
-          break;
-        }
-        case NEG: {
-          const v = stack.pop();
-          if (typeof v !== "number") error(`'-' needs a number, not ${kindOf(v)}`);
-          stack.push(-v);
-          break;
-        }
-        case NOT:
-          stack.push(!truthy(stack.pop()));
-          break;
-        case LIST: {
-          const n = code[ip++];
-          stack.push(stack.splice(stack.length - n, n));
-          break;
-        }
-        case LENGTH: {
-          const v = stack.pop();
-          if (typeof v === "string") stack.push([...v].length);
-          else if (isList(v)) stack.push(v.length);
-          else error(`'length of' needs a list or text, not ${kindOf(v)}`);
-          break;
-        }
-        case ITEM: {
-          const n = stack.pop();
-          const [seq, i] = item(stack.pop(), n, false, error);
-          stack.push(seq[i]);
-          break;
-        }
-        case ITEM_REF: {
-          const n = stack.pop();
-          stack.push(...item(stack.pop(), n, true, error)); // leaves the list and the index for SET_ITEM
-          break;
-        }
-        case SET_ITEM: {
-          const v = stack.pop();
-          const i = stack.pop();
-          stack.pop()[i] = v;
-          break;
-        }
-        case ADD_TO: {
-          const value = stack.pop();
-          let e = env;
-          for (let d = code[ip]; d > 0; d--) e = e[0];
-          const slot = code[ip + 1];
-          const current = e[slot];
-          if (current === UNSET) error(noValue(consts[code[ip + 2]]));
-          ip += 3;
-          if (isList(current)) current.push(value);
-          else if (typeof current === "string") e[slot] = current + show(value);
-          else if (typeof current === "number" && typeof value === "number") e[slot] = current + value;
-          else error(`can't add ${kindOf(value)} to ${kindOf(current)}`);
-          break;
-        }
-        case SAY: {
-          const n = code[ip++];
-          print(stack.splice(stack.length - n, n).map((v) => show(v)).join(""));
-          break;
-        }
-        case CHECK_REPEAT: {
-          const n = stack[stack.length - 1];
-          if (!Number.isInteger(n) || n < 0) error(`repeat needs a whole number of times, not ${show(n, true)}`);
-          break;
-        }
-        case REPEAT_NEXT: { // stack: [... times left]
-          const exit = code[ip++];
-          const left = stack[stack.length - 1];
-          if (left > 0) stack[stack.length - 1] = left - 1;
-          else {
-            stack.pop();
-            ip = exit;
-          }
-          break;
-        }
-        case CHECK_RANGE: {
-          const to = stack[stack.length - 1];
-          const from = stack[stack.length - 2];
-          if (typeof from !== "number" || typeof to !== "number") error(`'from' and 'to' need numbers, not ${kindOf(from)} and ${kindOf(to)}`);
-          break;
-        }
-        case RANGE_NEXT: { // stack: [... next, last]; pushes the loop variable's value
-          const exit = code[ip++];
-          const top = stack.length;
-          const next = stack[top - 2];
-          if (next <= stack[top - 1]) {
-            stack[top - 2] = next + 1;
-            stack.push(next);
-          } else {
-            stack.length = top - 2;
-            ip = exit;
-          }
-          break;
-        }
-        case ITER: {
-          const v = stack.pop();
-          if (!isList(v) && typeof v !== "string") error(`can only go through a list or text, not ${kindOf(v)}`);
-          stack.push({ items: [...v], i: 0 }); // a copy, so adding to the list inside the loop can't make it endless
-          break;
-        }
-        case ITER_NEXT: { // stack: [... iterator]; pushes the loop variable's value
-          const exit = code[ip++];
-          const it = stack[stack.length - 1];
-          if (it.i < it.items.length) stack.push(it.items[it.i++]);
-          else {
-            stack.pop();
-            ip = exit;
-          }
-          break;
-        }
-        case MAKE_FN:
-          stack.push(new Closure(consts[code[ip++]], env));
-          break;
-        case UNDEFINED: // a name nothing ever sets; the compiler wrote the message, with any "did you mean"
-          error(consts[code[ip]]);
-          break;
-        case HALT:
-          return;
-      }
-    }
-  } catch (err) {
-    // with no recursion in the VM, a RangeError here means a string or list grew past what JavaScript allows
-    if (err instanceof RangeError) error("a value got too big to fit in memory");
-    throw err;
+// Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
+export class Machine {
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null) } = {}) {
+    Object.assign(this, { main, print, maxSteps, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
   }
+
+  // Runs until the program ends ("done"), reaches a LINE marker while `pauseAtLines` is on ("line"), or has
+  // gone round loops `slice` more times ("slice"), which lets a page stay responsive between slices.
+  run({ pauseAtLines = false, slice = Infinity } = {}) {
+    const { frames, print, maxSteps } = this;
+    // A stack made right here runs ~1.4x faster than one read off `this`: V8 optimises push and pop best on
+    // arrays it saw being created. So each run starts a fresh one with whatever an earlier, paused run left.
+    const stack = [];
+    for (const v of this.stack) stack.push(v);
+    let { fn, env, ip, base, steps } = this; // the hot loop works on locals, written back when it pauses
+    let code = fn.code;
+    let consts = fn.consts;
+    let pc = ip; // instruction being run, for error positions
+    const yieldAt = steps + slice;
+    let why; // why the loop below stopped
+
+    try {
+      loop: for (;;) {
+        pc = ip;
+        switch (code[ip++]) {
+          case GET: {
+            let e = env;
+            for (let d = code[ip]; d > 0; d--) e = e[0];
+            const v = e[code[ip + 1]];
+            if (v === UNSET) oops(noValue(consts[code[ip + 2]]));
+            ip += 3;
+            stack.push(v);
+            break;
+          }
+          case SET: {
+            let e = env;
+            for (let d = code[ip]; d > 0; d--) e = e[0];
+            e[code[ip + 1]] = stack.pop();
+            ip += 2;
+            break;
+          }
+          case CONST:
+            stack.push(consts[code[ip++]]);
+            break;
+          case JUMP: {
+            const to = code[ip];
+            const back = to < ip; // jumping back means another loop round
+            ip = to;
+            if (back) {
+              if (++steps > maxSteps) stopped(maxSteps);
+              if (steps >= yieldAt) {
+                why = "slice";
+                break loop;
+              }
+            }
+            break;
+          }
+          case JUMP_IF_FALSE: {
+            const to = code[ip++];
+            if (!truthy(stack.pop())) ip = to;
+            break;
+          }
+          case COMPARE: {
+            const op = code[ip++];
+            const b = stack.pop();
+            const a = stack.pop();
+            // two numbers is the common case; compare() handles the rest, divisible by, and the error messages
+            if (typeof a === "number" && typeof b === "number" && op !== DIVISIBLE) stack.push(COMPARE_FNS[op](a, b));
+            else stack.push(compare(COMPARE_OPS[op], a, b));
+            break;
+          }
+          case ADD: {
+            const b = stack.pop();
+            const a = stack.pop();
+            if (typeof a === "number" && typeof b === "number") stack.push(a + b);
+            else if (typeof a === "string" || typeof b === "string") stack.push(show(a) + show(b));
+            else oops(`can't use '+' on ${kindOf(a)} and ${kindOf(b)}`);
+            break;
+          }
+          case SUB:
+          case MUL:
+          case DIV: {
+            const op = code[pc];
+            const b = stack.pop();
+            const a = stack.pop();
+            if (typeof a !== "number" || typeof b !== "number") oops(`can't use '${op === SUB ? "-" : op === MUL ? "*" : "/"}' on ${kindOf(a)} and ${kindOf(b)}`);
+            if (op === DIV && b === 0) oops("can't divide by zero");
+            stack.push(op === SUB ? a - b : op === MUL ? a * b : a / b);
+            break;
+          }
+          case GET_FN: {
+            let e = env;
+            for (let d = code[ip]; d > 0; d--) e = e[0];
+            const f = e[code[ip + 1]];
+            const name = consts[code[ip + 2]];
+            ip += 3;
+            if (f === UNSET) oops(`there is no function called '${name}'`);
+            if (!(f instanceof Closure)) oops(`'${name}' is ${kindOf(f)}, not a function`);
+            stack.push(f);
+            break;
+          }
+          case CALL: {
+            const argc = code[ip];
+            const name = consts[code[ip + 1]];
+            ip += 2;
+            const first = stack.length - argc;
+            const callee = stack[first - 1];
+            if (argc !== callee.fn.params.length) oops(`'${name}' needs ${plural(callee.fn.params.length, "input")} but got ${argc}`);
+            if (frames.length >= MAX_DEPTH) oops("too much recursion: a function kept calling itself");
+            if (++steps > maxSteps) stopped(maxSteps);
+            const inner = newEnv(callee.fn, callee.env);
+            for (let i = 0; i < argc; i++) inner[i + 1] = stack[first + i]; // inputs take the first slots
+            for (let i = argc; i >= 0; i--) stack.pop();
+            frames.push({ fn, ip, env, base });
+            fn = callee.fn;
+            code = fn.code;
+            consts = fn.consts;
+            env = inner;
+            ip = 0;
+            base = stack.length;
+            break;
+          }
+          case RETURN: {
+            const value = stack.pop();
+            while (stack.length > base) stack.pop(); // drops anything a loop left behind
+            stack.push(value);
+            ({ fn, ip, env, base } = frames.pop());
+            code = fn.code;
+            consts = fn.consts;
+            break;
+          }
+          case POP:
+            stack.pop();
+            break;
+          case AND: {
+            const to = code[ip++];
+            if (truthy(stack[stack.length - 1])) stack.pop();
+            else ip = to;
+            break;
+          }
+          case OR: {
+            const to = code[ip++];
+            if (truthy(stack[stack.length - 1])) ip = to;
+            else stack.pop();
+            break;
+          }
+          case NEG: {
+            const v = stack.pop();
+            if (typeof v !== "number") oops(`'-' needs a number, not ${kindOf(v)}`);
+            stack.push(-v);
+            break;
+          }
+          case NOT:
+            stack.push(!truthy(stack.pop()));
+            break;
+          case LIST: {
+            const n = code[ip++];
+            stack.push(stack.splice(stack.length - n, n));
+            break;
+          }
+          case LENGTH: {
+            const v = stack.pop();
+            if (typeof v === "string") stack.push([...v].length);
+            else if (isList(v)) stack.push(v.length);
+            else oops(`'length of' needs a list or text, not ${kindOf(v)}`);
+            break;
+          }
+          case ITEM: {
+            const n = stack.pop();
+            const [seq, i] = item(stack.pop(), n, false);
+            stack.push(seq[i]);
+            break;
+          }
+          case ITEM_REF: {
+            const n = stack.pop();
+            stack.push(...item(stack.pop(), n, true)); // leaves the list and the index for SET_ITEM
+            break;
+          }
+          case SET_ITEM: {
+            const v = stack.pop();
+            const i = stack.pop();
+            stack.pop()[i] = v;
+            break;
+          }
+          case ADD_TO: {
+            const value = stack.pop();
+            let e = env;
+            for (let d = code[ip]; d > 0; d--) e = e[0];
+            const slot = code[ip + 1];
+            const current = e[slot];
+            if (current === UNSET) oops(noValue(consts[code[ip + 2]]));
+            ip += 3;
+            if (isList(current)) current.push(value);
+            else if (typeof current === "string") e[slot] = current + show(value);
+            else if (typeof current === "number" && typeof value === "number") e[slot] = current + value;
+            else oops(`can't add ${kindOf(value)} to ${kindOf(current)}`);
+            break;
+          }
+          case SAY: {
+            const n = code[ip++];
+            print(stack.splice(stack.length - n, n).map((v) => show(v)).join(""));
+            break;
+          }
+          case CHECK_REPEAT: {
+            const n = stack[stack.length - 1];
+            if (!Number.isInteger(n) || n < 0) oops(`repeat needs a whole number of times, not ${show(n, true)}`);
+            break;
+          }
+          case REPEAT_NEXT: { // stack: [... times left]
+            const exit = code[ip++];
+            const left = stack[stack.length - 1];
+            if (left > 0) stack[stack.length - 1] = left - 1;
+            else {
+              stack.pop();
+              ip = exit;
+            }
+            break;
+          }
+          case CHECK_RANGE: {
+            const to = stack[stack.length - 1];
+            const from = stack[stack.length - 2];
+            if (typeof from !== "number" || typeof to !== "number") oops(`'from' and 'to' need numbers, not ${kindOf(from)} and ${kindOf(to)}`);
+            break;
+          }
+          case RANGE_NEXT: { // stack: [... next, last]; pushes the loop variable's value
+            const exit = code[ip++];
+            const top = stack.length;
+            const next = stack[top - 2];
+            if (next <= stack[top - 1]) {
+              stack[top - 2] = next + 1;
+              stack.push(next);
+            } else {
+              stack.length = top - 2;
+              ip = exit;
+            }
+            break;
+          }
+          case ITER: {
+            const v = stack.pop();
+            if (!isList(v) && typeof v !== "string") oops(`can only go through a list or text, not ${kindOf(v)}`);
+            stack.push({ items: [...v], i: 0 }); // a copy, so adding to the list inside the loop can't make it endless
+            break;
+          }
+          case ITER_NEXT: { // stack: [... iterator]; pushes the loop variable's value
+            const exit = code[ip++];
+            const it = stack[stack.length - 1];
+            if (it.i < it.items.length) stack.push(it.items[it.i++]);
+            else {
+              stack.pop();
+              ip = exit;
+            }
+            break;
+          }
+          case MAKE_FN:
+            stack.push(new Closure(consts[code[ip++]], env));
+            break;
+          case UNDEFINED: // a name nothing ever sets; the compiler wrote the message, with any "did you mean"
+            oops(consts[code[ip]]);
+            break;
+          case LINE:
+            this.line = code[ip++];
+            if (pauseAtLines) {
+              why = "line";
+              break loop;
+            }
+            break;
+          case HALT:
+            this.done = true;
+            why = "done";
+            break loop;
+        }
+      }
+    } catch (err) {
+      if (err instanceof Failure) fail(fn.at[pc], err.message);
+      // with no recursion in the VM, a RangeError here means a string or list grew past what JavaScript allows
+      if (err instanceof RangeError) fail(fn.at[pc], "a value got too big to fit in memory");
+      throw err;
+    }
+    Object.assign(this, { fn, env, ip, base, steps, stack });
+    return why;
+  }
+
+  // For a debugger: the functions being run (outermost first), and the variables with values that the
+  // current function and the top level can see. shortcut: an enclosing function's own variables aren't listed.
+  inspect() {
+    const named = (fn, env) => fn.names.flatMap((name, slot) => (env[slot] === UNSET ? [] : [[name, show(env[slot], true)]]));
+    let top = this.env;
+    while (top[0]) top = top[0];
+    return {
+      line: this.line,
+      calls: [...this.frames.map((f) => f.fn.name), this.fn.name],
+      local: this.fn === this.main ? [] : named(this.fn, this.env),
+      global: named(this.main, top),
+    };
+  }
+}
+
+export function execute(main, print, maxSteps, env) {
+  new Machine(main, print, { maxSteps, env }).run();
 }

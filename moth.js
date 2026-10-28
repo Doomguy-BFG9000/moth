@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, UNSET, execute } from "./vm.js";
+import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, UNSET, Machine, execute } from "./vm.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -284,8 +284,9 @@ function parse(tokens) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
+const LOOPS = new Set(["while", "repeat", "count", "each"]);
 const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return"];
 
 // Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
@@ -325,10 +326,13 @@ function declarations(body, found = { own: [], shared: [] }) {
 // Compiles one function (or the whole program) to bytecode. Variables are resolved here, once,
 // to a (depth, slot) pair: how many scopes out to walk, and which slot in that scope's array.
 class Compiler {
-  constructor(parent, name, params, body, slots = new Map()) {
+  // `slots` carries a shell's earlier top-level variables; `debug` adds LINE markers for the debugger.
+  constructor(parent, name, params, body, { slots = new Map(), debug = parent?.debug ?? false } = {}) {
     this.parent = parent;
     this.slots = slots;
-    this.fn = { name, params, nslots: slots.size, code: [], consts: [], at: [] };
+    this.debug = debug;
+    this.fn = { name, params, nslots: slots.size, names: [], code: [], consts: [], at: [] };
+    for (const [n, slot] of slots) this.fn.names[slot] = n; // each slot's name, for the debugger and disassembler
     for (const p of params) this.declare(p);
     const { own, shared } = declarations(body);
     for (const n of own) if (!this.slots.has(n)) this.declare(n);
@@ -340,6 +344,12 @@ class Compiler {
 
   declare(name) {
     this.slots.set(name, ++this.fn.nslots);
+    this.fn.names[this.fn.nslots] = name;
+  }
+
+  // In a debug build, the machine can pause here: a statement on this line is about to run.
+  mark(s) {
+    if (this.debug) this.emit(s.at, LINE, s.at.line);
   }
 
   resolve(name) {
@@ -393,6 +403,7 @@ class Compiler {
     const top = this.here();
     const exit = this.jump(s.at, next);
     if (s.name) this.store(s.name, s.at);
+    this.mark(s); // every round pauses on the loop's line, after the loop variable has its new value
     for (const inner of s.body) this.statement(inner);
     this.jump(s.at, JUMP, top);
     this.patch(exit);
@@ -407,6 +418,7 @@ class Compiler {
   }
 
   statement(s) {
+    if (!LOOPS.has(s.kind)) this.mark(s); // loops mark each round instead
     switch (s.kind) {
       case "set":
         this.expr(s.value);
@@ -442,6 +454,7 @@ class Compiler {
       }
       case "while": {
         const top = this.here();
+        this.mark(s);
         this.expr(s.cond);
         const exit = this.jump(s.at, JUMP_IF_FALSE);
         for (const inner of s.body) this.statement(inner);
@@ -543,8 +556,10 @@ class Compiler {
 const shown = (v) => (v === null ? "nothing" : typeof v === "boolean" ? (v ? "yes" : "no") : JSON.stringify(v));
 
 // What an instruction's operands mean, where a number alone wouldn't say.
-function note(fn, op, args) {
+function note(fn, op, args, scopes) {
   switch (op) {
+    case "SET": return scopes.at(-1 - args[0]).names[args[1]];
+    case "LINE": return `line ${args[0]}`;
     case "CONST": return shown(fn.consts[args[0]]);
     case "MAKE_FN": return `function ${fn.consts[args[0]].name}`;
     case "GET": case "GET_FN": case "ADD_TO": return fn.consts[args[2]];
@@ -556,25 +571,26 @@ function note(fn, op, args) {
 }
 
 // Bytecode as readable text, for `moth bytecode` and the playground.
-export function disassemble(fn, out = []) {
+export function disassemble(fn, scopes = [fn], out = []) {
   out.push(`${fn.name}${fn.params.length ? ` with ${fn.params.join(", ")}` : ""}:`);
   for (let i = 0; i < fn.code.length; ) {
     const [op, count] = OPCODES[fn.code[i]];
     const args = fn.code.slice(i + 1, i + 1 + count);
-    const why = note(fn, op, args);
+    const why = note(fn, op, args, scopes);
     out.push(`  ${String(i).padStart(4)}  ${op.padEnd(13)} ${args.join(" ").padEnd(8)}${why ? ` ; ${why}` : ""}`.trimEnd());
     i += 1 + count;
   }
-  for (const c of fn.consts) if (c?.code) disassemble(c, out); // functions made inside this one
+  for (const c of fn.consts) if (c?.code) disassemble(c, [...scopes, c], out); // functions made inside this one
   return out.join("\n");
 }
 
 // ---------- running ----------
 
-// Compiles Moth source to bytecode for vm.js. `slots` carries over the top-level variables of earlier shell entries.
-export function compile(source, slots) {
+// Compiles Moth source to bytecode for vm.js. Options: `slots` carries over the top-level variables of
+// earlier shell entries; `debug` adds LINE markers so a debugger can pause at each statement.
+export function compile(source, options) {
   try {
-    return new Compiler(null, "main", [], parse(tokenize(source)), slots).fn;
+    return new Compiler(null, "main", [], parse(tokenize(source)), options).fn;
   } catch (err) {
     // shortcut: points at line 1, since the overflow hides where the nesting was; only ~1,000 levels of brackets get here
     if (err instanceof RangeError) fail({ line: 1, col: 1 }, "the code is nested too deeply");
@@ -588,12 +604,18 @@ export function run(source, print = console.log, { maxSteps = Infinity } = {}) {
   execute(compile(source), print, maxSteps);
 }
 
+// A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
+// inspect() to see where it is and what its variables hold.
+export function debug(source, print = console.log) {
+  return new Machine(compile(source, { debug: true }), print);
+}
+
 // A shell session: each entry runs with the variables and functions made by the entries before it.
 export function session(print = console.log) {
   const slots = new Map();
   const env = [null];
   return (source) => {
-    const main = compile(source, slots);
+    const main = compile(source, { slots });
     while (env.length <= main.nslots) env.push(UNSET); // room for the variables this entry adds
     execute(main, print, Infinity, env);
   };

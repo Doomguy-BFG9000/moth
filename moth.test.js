@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, excerpt, MothError } from "./moth.js";
+import { run, debug, excerpt, MothError } from "./moth.js";
 import examples from "./examples.js";
 
 function output(source, options) {
@@ -128,6 +128,49 @@ test("output said before a mistake is kept", () => {
   const lines = [];
   assert.throws(() => run('say "first"\nsay nope', (line) => lines.push(line)), MothError);
   assert.deepEqual(lines, ["first"]);
+});
+
+// The debugger: a debug build pauses before each statement, and on a loop's line before each round.
+function pauses(source) {
+  const lines = [];
+  const machine = debug(source, () => {});
+  while (machine.run({ pauseAtLines: true }) === "line") lines.push(machine.line);
+  return lines;
+}
+
+test("the debugger pauses at each statement and each loop round", () => {
+  assert.deepEqual(pauses("set x to 1\nrepeat 2 times\n    add 1 to x\nend\nsay x"), [1, 2, 3, 2, 3, 5]);
+  assert.deepEqual(pauses("for each n from 1 to 2\n    say n\nend"), [1, 2, 1, 2]);
+  assert.deepEqual(pauses("set n to 0\nrepeat while n is less than 2\n    add 1 to n\nend"), [1, 2, 3, 2, 3, 2]);
+  assert.deepEqual(pauses("if no\n    say 1\nelse if yes\n    say 2\nend"), [1, 3, 4]);
+});
+
+test("the debugger shows the calls in progress and the variables they can see", () => {
+  const machine = debug("set x to 10\nto double with n\n    set y to n * 2\n    return y\nend\nsay double(x)", () => {});
+  while (machine.run({ pauseAtLines: true }) === "line" && machine.line !== 4);
+  assert.deepEqual(machine.inspect(), {
+    line: 4,
+    calls: ["main", "double"],
+    local: [["n", "10"], ["y", "20"]],
+    global: [["double", "<function double>"], ["x", "10"]],
+  });
+});
+
+test("a debug build prints exactly what a normal run prints", () => {
+  for (const [name, source] of Object.entries(examples)) {
+    if (name === "Errors") continue;
+    const lines = [];
+    const machine = debug(source, (line) => lines.push(line));
+    while (machine.run({ pauseAtLines: true }) !== "done");
+    assert.equal(lines.join("\n"), EXAMPLES[name], name);
+  }
+});
+
+test("run() can stop after a slice of loop rounds and carry on", () => {
+  const machine = debug("set n to 0\nrepeat while yes\n    add 1 to n\nend", () => {});
+  assert.equal(machine.run({ slice: 1000 }), "slice");
+  assert.equal(machine.run({ slice: 1000 }), "slice");
+  assert.deepEqual(machine.inspect().global, [["n", "2000"]]);
 });
 
 // Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points
