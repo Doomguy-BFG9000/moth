@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { run, debug, timeline, check, compile, compileToJs, load, mothCompiler, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, excerpt, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
+
+const ENGINES = ["jit", "wasm", "vm"];
 
 function output(source, options) {
   const lines = [];
@@ -34,10 +36,12 @@ const EXAMPLES = {
   "Primes": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]",
 };
 
-test("every playground example runs", () => {
-  for (const [name, source] of Object.entries(examples)) {
-    if (name === "Errors") assert.equal(error(source).message, "line 3: there is no item 5, the list only has 2 items");
-    else assert.equal(output(source), EXAMPLES[name], name);
+test("every playground example runs, on all three engines", () => {
+  for (const engine of ENGINES) {
+    for (const [name, source] of Object.entries(examples)) {
+      if (name === "Errors") assert.equal(error(source, { engine }).message, "line 3: there is no item 5, the list only has 2 items");
+      else assert.equal(output(source, { engine }), EXAMPLES[name], `${engine}: ${name}`);
+    }
   }
 });
 
@@ -77,12 +81,14 @@ const PROGRAMS = [
   // numbers: leading zeros are fine, and one too big for JavaScript is Infinity on both engines
   ["say 007 + 00.5 \" \" 2.50", "7.5 2.5"],
   [`say 1${"0".repeat(400)}`, "Infinity"],
+  // divisible by: fractions, negatives, and numbers past 2^52, where the WebAssembly engine leaves it to JavaScript
+  ["say (7.5 is divisible by 2.5) \" \" (0 - 4 is divisible by 2) \" \" (9007199254740992 is divisible by 3) \" \" (10 is divisible by 4)", "yes yes no no"],
   // every control character is a space, and a comment runs to the end of the line
   ["say 1\v+\f2\r\n# a comment say 3\nsay 4", "3\n4"],
 ];
 
-test("programs print what they should, on both engines", () => {
-  for (const engine of ["jit", "vm"]) for (const [source, expected] of PROGRAMS) assert.equal(output(source, { engine }), expected, `${engine}: ${source}`);
+test("programs print what they should, on all three engines", () => {
+  for (const engine of ENGINES) for (const [source, expected] of PROGRAMS) assert.equal(output(source, { engine }), expected, `${engine}: ${source}`);
 });
 
 const ERRORS = [
@@ -140,8 +146,8 @@ const ERRORS = [
   ["say 1 😀", "line 1: I don't understand '😀'"],
 ];
 
-test("mistakes give a clear message, on both engines", () => {
-  for (const engine of ["jit", "vm"]) for (const [source, message] of ERRORS) assert.equal(error(source, { engine }).message, message, `${engine}: ${source}`);
+test("mistakes give a clear message, on all three engines", () => {
+  for (const engine of ENGINES) for (const [source, message] of ERRORS) assert.equal(error(source, { engine }).message, message, `${engine}: ${source}`);
 });
 
 test("errors point at the exact spot", () => {
@@ -424,10 +430,14 @@ function brokenPrograms(seed, count) {
 }
 
 // Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points inside
-// the code, never with a JavaScript crash, and the JIT must do exactly what the VM does with every one of
-// them: same output, same drawing, same mistake at the same spot.
-test("randomly broken programs fail cleanly, and the JIT matches the VM on all of them", () => {
-  for (const source of brokenPrograms(42, 5000)) assert.deepEqual(outcome(source, "jit"), outcome(source, "vm"), source);
+// the code, never with a JavaScript crash, and the JIT and the WebAssembly engine must do exactly what the
+// VM does with every one of them: same output, same drawing, same mistake at the same spot.
+test("randomly broken programs fail cleanly, and all three engines agree on every one", () => {
+  for (const source of brokenPrograms(42, 5000)) {
+    const vm = outcome(source, "vm");
+    assert.deepEqual(outcome(source, "jit"), vm, source);
+    assert.deepEqual(outcome(source, "wasm"), vm, `wasm: ${source}`);
+  }
 });
 
 // ---------- the compiler written in Moth ----------
@@ -479,9 +489,9 @@ test("the compiler written in Moth compiles itself, and what it makes does the s
 
 // ---------- the neural network written in Moth ----------
 
-// It makes its own random numbers, so a run is the same every time: both engines must say and draw
+// It makes its own random numbers, so a run is the same every time: all three engines must say and draw
 // exactly the same things, and the network must learn to put every dot on the right side.
-test("the neural network written in Moth learns, the same way on both engines", () => {
+test("the neural network written in Moth learns, the same way on all three engines", () => {
   const network = readFileSync(new URL("./neural.moth", import.meta.url), "utf8");
   const train = (engine) => {
     const said = [];
@@ -491,7 +501,25 @@ test("the neural network written in Moth learns, the same way on both engines", 
   };
   const jit = train("jit");
   assert.deepEqual(train("vm"), jit);
+  assert.deepEqual(train("wasm"), jit);
   assert.equal(jit.said[1], "step 1: loss 1.173, 50% right");
   assert.equal(jit.said.at(-1), "after 60 steps: 100% of the dots are on the right side");
   assert.deepEqual(check(network), []);
+});
+
+// ---------- the WebAssembly encoder ----------
+
+test("the WebAssembly encoder writes numbers as the spec does, and modules that validate", async () => {
+  const { uleb, sleb, Module } = await import("./wasm-binary.js");
+  assert.deepEqual(uleb(624485), [0xe5, 0x8e, 0x26]); // the examples from the LEB128 article the spec points to
+  assert.deepEqual(sleb(-123456), [0xc0, 0xbb, 0x78]);
+  assert.deepEqual([sleb(63), sleb(64), sleb(-64), sleb(-65)], [[0x3f], [0xc0, 0x00], [0x40], [0xbf, 0x7f]]);
+  const m = new Module();
+  const f = m.func("answer", [], ["i32"]);
+  f.code.emit("i32.const", 42);
+  m.export("answer", f.index);
+  const { instance } = await WebAssembly.instantiate(m.encode());
+  assert.equal(instance.exports.answer(), 42);
+  assert.throws(() => f.code.emit("local.get", undefined), /needs indices/);
+  for (const source of Object.values(examples)) assert.ok(WebAssembly.validate(compileToWasm(source).bytes));
 });

@@ -4,6 +4,7 @@
 import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
+import { wasm } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt } from "./vm.js";
@@ -625,6 +626,11 @@ export function compileToJs(source) {
   return build(source, jit);
 }
 
+// Compiles Moth source to a WebAssembly module (wasm.js): { bytes, listing, run(print, draw, maxSteps) }.
+export function compileToWasm(source) {
+  return build(source, wasm);
+}
+
 // Problems found without running the program (checker.js): [{ line, col, kind, message }]. Code that
 // can't even be read comes back as a single problem of kind "error".
 export function check(source) {
@@ -638,12 +644,12 @@ export function check(source) {
 
 // Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`; mistakes in
 // the program throw MothError. `maxSteps` stops loops and calls after that many rounds, for running
-// untrusted code without a Stop button. `engine` is "jit" (compile to JavaScript) or "vm" (bytecode).
+// untrusted code without a Stop button. `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode).
 export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit" } = {}) {
   let program = null;
-  if (engine === "jit") {
+  if (engine !== "vm") {
     try {
-      program = compileToJs(source);
+      program = engine === "wasm" ? compileToWasm(source) : compileToJs(source);
     } catch (err) {
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
@@ -656,7 +662,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps);
   } catch (err) {
     if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
-    // Calls went deeper than the JIT goes (or JavaScript's stack ran out anyway), or a value outgrew what
+    // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value outgrew what
     // JavaScript allows. Moth programs can't read input or the clock, so a second run says and draws exactly
     // the same things: run it again on the VM, which keeps its own stack and reports a too-big value at the
     // right line, and pass on only what the first run hadn't already.

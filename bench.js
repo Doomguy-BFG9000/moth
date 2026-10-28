@@ -65,10 +65,9 @@ function time(source, engine) {
 }
 
 const ms = (n) => `${n < 10 ? n.toFixed(1) : n.toFixed(0)} ms`.padStart(9);
-console.log(`${"".padEnd(28)} ${"VM".padStart(9)} ${"JIT".padStart(9)}   speed-up`);
+console.log(`${"".padEnd(32)} ${"VM".padStart(9)} ${"JIT".padStart(9)} ${"Wasm".padStart(9)}`);
 for (const [name, source] of Object.entries(PROGRAMS)) {
-  const vm = time(source, "vm");
-  const jit = time(source, "jit");
-  const same = vm.result === jit.result ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result}`;
-  console.log(`${name.padEnd(28)} ${ms(vm.ms)} ${ms(jit.ms)}   ${(vm.ms / jit.ms).toFixed(1)}x${same}`);
+  const [vm, jit, wasm] = ["vm", "jit", "wasm"].map((engine) => time(source, engine));
+  const same = vm.result === jit.result && vm.result === wasm.result ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result} / ${wasm.result}`;
+  console.log(`${name.padEnd(32)} ${ms(vm.ms)} ${ms(jit.ms)} ${ms(wasm.ms)}${same}`);
 }

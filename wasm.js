@@ -1,0 +1,852 @@
+// The WebAssembly engine: Moth's third back end. It compiles a program to a WebAssembly module, byte by
+// byte (wasm-binary.js), which the browser or node compiles to machine code.
+//
+// Moth's values live inside the module, as WebAssembly GC values: a number is a struct holding an f64,
+// yes and no are i31 values, nothing is null, and lists, records and functions are structs. Text is a
+// struct holding a JavaScript string, so joining it is as cheap as in JavaScript (which joins long text
+// without copying it) and it fails at exactly the same length. The common cases run in WebAssembly: arithmetic on numbers, comparisons, list
+// items, fields, calls and loops. Everything else, and every mistake, calls out to the same checks the VM
+// and the JIT use (vm.js), so all three engines say exactly the same things.
+import { Scope } from "./scope.js";
+import { Module, Code, ref, refNull } from "./wasm-binary.js";
+import { TooDeep } from "./jit.js";
+import { UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
+  lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
+  recordFor, failWith } from "./vm.js";
+
+const EQ = refNull("eq"); // any Moth value
+const I32 = "i32";
+const F64 = "f64";
+const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has its own stack
+const MATH = ["+", "-", "*", "/"];
+const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6 };
+
+// What the module imports: the checks and actions it leaves to JavaScript. Most only ever throw.
+const IMPORTS = {
+  say: [[EQ], []],
+  fail: [[I32, I32], []], // a message the compiler worked out (a name nothing sets), and a position
+  unset: [[I32, I32], []],
+  plus: [[EQ, EQ, I32], [EQ]],
+  arithmetic: [[I32, EQ, EQ, I32], []],
+  negate: [[EQ, I32], []],
+  compare: [[I32, EQ, EQ, I32], [I32]],
+  remainder: [[F64, F64], [F64]],
+  equal: [[EQ, EQ], [I32]],
+  sameText: [["externref", "externref"], [I32]],
+  text: [[I32], ["externref"]], // the program's text, by number
+  lengthOf: [[EQ, I32], [F64]],
+  item: [[EQ, EQ, I32], [EQ]],
+  itemRef: [[EQ, EQ, I32], []],
+  addInto: [[EQ, EQ, I32, I32], [EQ]],
+  checkRepeat: [[EQ, I32], []],
+  checkRange: [[EQ, EQ, I32], []],
+  itemsOf: [[EQ, I32], [EQ]],
+  callable: [[EQ, I32, I32], []],
+  checkInputs: [[EQ, I32, I32, I32], []],
+  stopped: [[I32], []],
+  tooDeep: [[], []],
+  turtle: [[I32, EQ, I32], []],
+  field: [[EQ, I32, I32], []],
+  recordFor: [[EQ, I32, I32], []],
+  failWith: [[EQ, I32], []],
+};
+
+// ---------- the module's types and runtime ----------
+
+function declareTypes(m) {
+  const T = {};
+  T.num = m.type({ kind: "struct", fields: [{ type: F64 }] });
+  T.text = m.type({ kind: "struct", fields: [{ type: "externref" }] });
+  T.items = m.type({ kind: "array", element: { type: EQ, mutable: true } });
+  T.list = m.type({ kind: "struct", fields: [{ type: ref(T.items), mutable: true }, { type: I32, mutable: true }] });
+  T.ids = m.type({ kind: "array", element: { type: I32, mutable: true } });
+  T.record = m.type({ kind: "struct", fields: [{ type: ref(T.ids), mutable: true }, { type: ref(T.items), mutable: true }, { type: I32, mutable: true }] });
+  T.env = m.types.length; // a scope: the one it was made in, and its variables' slots
+  m.type({ kind: "struct", fields: [{ type: refNull(T.env) }, { type: ref(T.items) }] });
+  T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }] });
+  T.unset = m.type({ kind: "struct", fields: [] });
+  T.fn = (n) => m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]); // a Moth function with n inputs
+  return T;
+}
+
+// Small helpers for writing WebAssembly by hand: each takes the Code and emits a few instructions.
+const isNum = (c, T, local) => c.emit("local.get", local).emit("ref.test", T.num);
+const numOf = (c, T, local) => c.emit("local.get", local).emit("ref.cast", T.num).emit("struct.get", T.num, 0);
+const bothNums = (c, T, a, b) => (isNum(c, T, a), isNum(c, T, b), c.emit("i32.and"));
+
+// The functions every module has: fast paths for the common cases, calling out to JavaScript for the rest.
+function declareRuntime(m, T, im) {
+  const R = {};
+  const fn = (label, params, results, write) => {
+    const f = m.func(label, params, results);
+    R[label] = f.index;
+    write(f.code, f);
+  };
+
+  fn("truthy", [EQ], [I32], (c) => {
+    c.emit("local.get", 0).emit("ref.is_null").emit("if", I32).emit("i32.const", 0).emit("else");
+    c.emit("local.get", 0).emit("ref.test", "i31").emit("if", I32);
+    c.emit("local.get", 0).emit("ref.cast", "i31").emit("i31.get_u").emit("else").emit("i32.const", 1).emit("end");
+    c.emit("end");
+  });
+
+  // + - * /: two numbers here, anything else (joining text, or a mistake) in JavaScript
+  MATH.forEach((sign, op) => {
+    fn(["add", "sub", "mul", "div"][op], [EQ, EQ, I32], [EQ], (c) => {
+      bothNums(c, T, 0, 1).emit("if", EQ);
+      if (sign === "/") numOf(c, T, 1).emit("f64.const", 0).emit("f64.ne").emit("if", EQ);
+      numOf(c, T, 0);
+      numOf(c, T, 1);
+      c.emit(["f64.add", "f64.sub", "f64.mul", "f64.div"][op]).emit("struct.new", T.num);
+      const slow = () => {
+        if (sign === "+") c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.plus);
+        else c.emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic).emit("unreachable");
+      };
+      if (sign === "/") c.emit("else").emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic).emit("unreachable").emit("end");
+      c.emit("else");
+      slow();
+      c.emit("end");
+    });
+  });
+
+  fn("neg", [EQ, I32], [EQ], (c) => {
+    isNum(c, T, 0).emit("if", EQ);
+    numOf(c, T, 0).emit("f64.neg").emit("struct.new", T.num);
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("unreachable").emit("end");
+  });
+
+  // `is`: numbers by value, text by its letters, lists and records (in JavaScript) by what they hold,
+  // everything else (yes, no, nothing, functions) by identity
+  fn("eq", [EQ, EQ], [I32], (c) => {
+    bothNums(c, T, 0, 1).emit("if");
+    numOf(c, T, 0);
+    numOf(c, T, 1);
+    c.emit("f64.eq").emit("return").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("ref.eq").emit("if").emit("i32.const", 1).emit("return").emit("end");
+    const both = (type) => c.emit("local.get", 0).emit("ref.test", type).emit("local.get", 1).emit("ref.test", type).emit("i32.and");
+    both(T.text).emit("if");
+    c.emit("local.get", 0).emit("ref.cast", T.text).emit("struct.get", T.text, 0).emit("local.get", 1).emit("ref.cast", T.text).emit("struct.get", T.text, 0);
+    c.emit("call", im.sameText).emit("return").emit("end");
+    both(T.list);
+    both(T.record);
+    c.emit("i32.or").emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", im.equal).emit("return").emit("end");
+    c.emit("i32.const", 0);
+  });
+
+  // less than, greater than, at least, at most: numbers here, text and mistakes in JavaScript
+  ["lt", "gt", "ge", "le"].forEach((label, i) => {
+    fn(label, [EQ, EQ, I32], [I32], (c) => {
+      bothNums(c, T, 0, 1).emit("if", I32);
+      numOf(c, T, 0);
+      numOf(c, T, 1);
+      c.emit(["f64.lt", "f64.gt", "f64.ge", "f64.le"][i]).emit("else");
+      c.emit("i32.const", i + 1).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.compare).emit("end");
+    });
+  });
+
+  // `is divisible by`: for whole numbers below 2^52, a is divisible by b exactly when a = trunc(a / b) * b,
+  // since a whole quotient divides exactly and every product here is a whole number a float holds exactly.
+  // Anything else (fractions, huge numbers, zero, text) goes to JavaScript's %.
+  fn("dv", [EQ, EQ, I32], [I32], (c, f) => {
+    const [a, b] = [f.local(F64), f.local(F64)];
+    const whole = (x) => c.emit("local.get", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq").emit("local.get", x).emit("f64.abs").emit("f64.const", 2 ** 52).emit("f64.lt").emit("i32.and");
+    bothNums(c, T, 0, 1).emit("if");
+    numOf(c, T, 0).emit("local.set", a);
+    numOf(c, T, 1).emit("local.set", b);
+    whole(a);
+    whole(b);
+    c.emit("i32.and").emit("local.get", b).emit("f64.const", 0).emit("f64.ne").emit("i32.and").emit("if");
+    c.emit("local.get", a).emit("local.get", a).emit("local.get", b).emit("f64.div").emit("f64.trunc").emit("local.get", b).emit("f64.mul").emit("f64.eq").emit("return");
+    c.emit("end");
+    c.emit("local.get", b).emit("f64.const", 0).emit("f64.ne").emit("if");
+    c.emit("local.get", a).emit("local.get", b).emit("call", im.remainder).emit("f64.const", 0).emit("f64.eq").emit("return").emit("end");
+    c.emit("end");
+    c.emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.compare);
+  });
+
+  fn("lengthOf", [EQ, I32], [EQ], (c) => {
+    c.emit("local.get", 0).emit("ref.test", T.list).emit("if", F64);
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1).emit("f64.convert_i32_s");
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.lengthOf).emit("end").emit("struct.new", T.num);
+  });
+
+  // The 0-based place of item n in a list, if n is a whole number from 1 to its length, or -1.
+  fn("place", [EQ, EQ], [I32], (c, f) => {
+    const x = f.local(F64);
+    c.emit("local.get", 0).emit("ref.test", T.list);
+    isNum(c, T, 1).emit("i32.and").emit("i32.eqz").emit("if").emit("i32.const", -1).emit("return").emit("end");
+    numOf(c, T, 1).emit("local.tee", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq");
+    c.emit("local.get", x).emit("f64.const", 1).emit("f64.ge").emit("i32.and");
+    c.emit("local.get", x).emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1).emit("f64.convert_i32_s").emit("f64.le").emit("i32.and");
+    c.emit("if", I32).emit("local.get", x).emit("i32.trunc_f64_s").emit("i32.const", 1).emit("i32.sub").emit("else").emit("i32.const", -1).emit("end");
+  });
+
+  fn("item", [EQ, EQ, I32], [EQ], (c, f) => {
+    const at = f.local(I32);
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", R.place).emit("local.tee", at).emit("i32.const", 0).emit("i32.ge_s").emit("if", EQ);
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", at).emit("array.get", T.items);
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.item).emit("end");
+  });
+
+  // where `set item n of list to ...` goes; anything that isn't a list item fails in JavaScript
+  fn("itemRef", [EQ, EQ, I32], [I32], (c, f) => {
+    const at = f.local(I32);
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", R.place).emit("local.tee", at).emit("i32.const", 0).emit("i32.lt_s");
+    c.emit("if").emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.itemRef).emit("unreachable").emit("end");
+    c.emit("local.get", at);
+  });
+
+  // grows the list's array by doubling when it's full
+  fn("push", [EQ, EQ], [], (c, f) => {
+    const [list, items, n, bigger] = [f.local(refNull(T.list)), f.local(refNull(T.items)), f.local(I32), f.local(refNull(T.items))];
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("local.tee", list).emit("struct.get", T.list, 0).emit("local.set", items);
+    c.emit("local.get", list).emit("struct.get", T.list, 1).emit("local.tee", n).emit("local.get", items).emit("array.len").emit("i32.eq").emit("if");
+    c.emit("local.get", n).emit("i32.const", 1).emit("i32.shl").emit("i32.const", 4).emit("i32.add").emit("array.new_default", T.items).emit("local.tee", bigger);
+    c.emit("i32.const", 0).emit("local.get", items).emit("i32.const", 0).emit("local.get", n).emit("array.copy", T.items, T.items);
+    c.emit("local.get", list).emit("local.get", bigger).emit("ref.as_non_null").emit("struct.set", T.list, 0).emit("local.get", bigger).emit("local.set", items).emit("end");
+    c.emit("local.get", items).emit("local.get", n).emit("local.get", 1).emit("array.set", T.items);
+    c.emit("local.get", list).emit("local.get", n).emit("i32.const", 1).emit("i32.add").emit("struct.set", T.list, 1);
+  });
+
+  // `add value to name`: numbers and lists here, text and mistakes in JavaScript; returns the new value
+  fn("addInto", [EQ, EQ, I32, I32], [EQ], (c) => {
+    bothNums(c, T, 0, 1).emit("if");
+    numOf(c, T, 0);
+    numOf(c, T, 1);
+    c.emit("f64.add").emit("struct.new", T.num).emit("return").emit("end");
+    c.emit("local.get", 0).emit("ref.test", T.list).emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", R.push).emit("local.get", 0).emit("return").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("local.get", 3).emit("call", im.addInto);
+  });
+
+  // what `for each` goes through: a copy, so adding to the list inside the loop can't make it endless
+  fn("itemsOf", [EQ, I32], [refNull(T.list)], (c, f) => {
+    const [n, copy] = [f.local(I32), f.local(refNull(T.items))];
+    c.emit("local.get", 0).emit("ref.test", T.list).emit("if", refNull(T.list));
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1).emit("local.tee", n).emit("array.new_default", T.items).emit("local.tee", copy);
+    c.emit("i32.const", 0).emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("i32.const", 0).emit("local.get", n).emit("array.copy", T.items, T.items);
+    c.emit("local.get", copy).emit("ref.as_non_null").emit("local.get", n).emit("struct.new", T.list);
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.itemsOf).emit("ref.cast", T.list).emit("end");
+  });
+
+  fn("repeatCount", [EQ, I32], [F64], (c, f) => {
+    const x = f.local(F64);
+    isNum(c, T, 0).emit("if");
+    numOf(c, T, 0).emit("local.tee", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq");
+    c.emit("local.get", x).emit("f64.const", 0).emit("f64.ge").emit("i32.and");
+    c.emit("local.get", x).emit("local.get", x).emit("f64.sub").emit("f64.const", 0).emit("f64.eq").emit("i32.and"); // not infinite
+    c.emit("if").emit("local.get", x).emit("return").emit("end").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", im.checkRepeat).emit("unreachable");
+  });
+
+  // where a field is in a record, or -1
+  fn("find", [EQ, I32], [I32], (c, f) => {
+    const [i, n] = [f.local(I32), f.local(I32)];
+    c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 2).emit("local.set", n);
+    c.emit("block").emit("loop").emit("local.get", i).emit("local.get", n).emit("i32.ge_s").emit("br_if", 1);
+    c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 0).emit("local.get", i).emit("array.get", T.ids);
+    c.emit("local.get", 1).emit("i32.eq").emit("if").emit("local.get", i).emit("return").emit("end");
+    c.emit("local.get", i).emit("i32.const", 1).emit("i32.add").emit("local.set", i).emit("br", 0).emit("end").emit("end");
+    c.emit("i32.const", -1);
+  });
+
+  fn("newRecord", [], [EQ], (c) => {
+    c.emit("i32.const", 4).emit("array.new_default", T.ids).emit("i32.const", 4).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.record);
+  });
+
+  // sets a field, adding it at the end if the record doesn't have it yet
+  fn("setField", [EQ, I32, EQ], [], (c, f) => {
+    const [r, at, n, ids, values] = [f.local(refNull(T.record)), f.local(I32), f.local(I32), f.local(refNull(T.ids)), f.local(refNull(T.items))];
+    c.emit("local.get", 0).emit("ref.cast", T.record).emit("local.set", r);
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", R.find).emit("local.tee", at).emit("i32.const", 0).emit("i32.ge_s").emit("if");
+    c.emit("local.get", r).emit("struct.get", T.record, 1).emit("local.get", at).emit("local.get", 2).emit("array.set", T.items).emit("return").emit("end");
+    c.emit("local.get", r).emit("struct.get", T.record, 2).emit("local.tee", n).emit("local.get", r).emit("struct.get", T.record, 0).emit("array.len").emit("i32.eq").emit("if");
+    c.emit("local.get", n).emit("i32.const", 1).emit("i32.shl").emit("i32.const", 4).emit("i32.add").emit("array.new_default", T.ids).emit("local.tee", ids);
+    c.emit("i32.const", 0).emit("local.get", r).emit("struct.get", T.record, 0).emit("i32.const", 0).emit("local.get", n).emit("array.copy", T.ids, T.ids);
+    c.emit("local.get", n).emit("i32.const", 1).emit("i32.shl").emit("i32.const", 4).emit("i32.add").emit("array.new_default", T.items).emit("local.tee", values);
+    c.emit("i32.const", 0).emit("local.get", r).emit("struct.get", T.record, 1).emit("i32.const", 0).emit("local.get", n).emit("array.copy", T.items, T.items);
+    c.emit("local.get", r).emit("local.get", ids).emit("ref.as_non_null").emit("struct.set", T.record, 0);
+    c.emit("local.get", r).emit("local.get", values).emit("ref.as_non_null").emit("struct.set", T.record, 1).emit("end");
+    c.emit("local.get", r).emit("struct.get", T.record, 0).emit("local.get", n).emit("local.get", 1).emit("array.set", T.ids);
+    c.emit("local.get", r).emit("struct.get", T.record, 1).emit("local.get", n).emit("local.get", 2).emit("array.set", T.items);
+    c.emit("local.get", r).emit("local.get", n).emit("i32.const", 1).emit("i32.add").emit("struct.set", T.record, 2);
+  });
+
+  fn("field", [EQ, I32, I32], [EQ], (c, f) => {
+    const at = f.local(I32);
+    c.emit("local.get", 0).emit("ref.test", T.record).emit("if");
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", R.find).emit("local.tee", at).emit("i32.const", 0).emit("i32.ge_s").emit("if");
+    c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 1).emit("local.get", at).emit("array.get", T.items).emit("return");
+    c.emit("end").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.field).emit("unreachable");
+  });
+
+  return R;
+}
+
+// What JavaScript calls to look inside Moth's values, and to make them, when a check or `say` needs them.
+function declareExports(m, T, R) {
+  const fn = (label, params, results, write) => {
+    const f = m.func(label, params, results);
+    write(f.code);
+    m.export(label, f.index);
+  };
+  fn("tag", [EQ], [I32], (c) => {
+    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function]])
+      c.emit("local.get", 0).emit("ref.test", type).emit("if").emit("i32.const", tag).emit("return").emit("end");
+    c.emit("i32.const", TAGS.unset);
+  });
+  fn("num", [EQ], [F64], (c) => numOf(c, T, 0));
+  fn("textValue", [EQ], ["externref"], (c) => c.emit("local.get", 0).emit("ref.cast", T.text).emit("struct.get", T.text, 0));
+  fn("listLength", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1));
+  fn("listItem", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", 1).emit("array.get", T.items));
+  fn("recordSize", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 2));
+  fn("recordKey", [EQ, I32], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 0).emit("local.get", 1).emit("array.get", T.ids));
+  fn("recordValue", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 1).emit("local.get", 1).emit("array.get", T.items));
+  fn("functionName", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 3));
+  fn("functionInputs", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 2));
+  fn("makeNum", [F64], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.num));
+  fn("makeText", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.text));
+  fn("newList", [], [EQ], (c) => c.emit("i32.const", 0).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.list));
+  fn("listPush", [EQ, EQ], [], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("call", R.push));
+}
+
+// ---------- which variables need the heap ----------
+
+// Escape analysis: a variable that a function made inside its own function uses must outlive the call,
+// so it goes in the heap; every other variable is a WebAssembly local, which the machine can keep in a
+// register. Returns, for each function's body (the program's, or a `define`'s), the slots to keep in the heap.
+function findCaptured(program) {
+  const captured = new Map();
+  function visit(scope, body) {
+    captured.set(body, new Set());
+    const use = (name) => {
+      const found = scope.resolve(name);
+      if (!found || found[0] === 0) return;
+      let owner = scope;
+      for (let d = 0; d < found[0]; d++) owner = owner.parent;
+      captured.get(owner.body).add(found[1]);
+    };
+    const expr = (e) => {
+      if (e.kind === "name" || e.kind === "call") use(e.name);
+      for (const child of [e.left, e.right, e.operand, e.of, e.index, ...(e.args ?? []), ...(e.items ?? []), ...(e.values ?? [])]) if (child) expr(child);
+    };
+    const statement = (s) => {
+      if (["set", "add", "count", "each", "call"].includes(s.kind)) use(s.name);
+      for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
+      if (s.kind === "define") {
+        const inner = new Scope(scope, s.name, s.params, s.body);
+        inner.body = s.body;
+        return visit(inner, s.body);
+      }
+      for (const block of [s.then, s.otherwise, s.body]) if (block) block.forEach(statement);
+    };
+    body.forEach(statement);
+  }
+  const main = new Scope(null, "main", [], program);
+  main.body = program;
+  visit(main, program);
+  return captured;
+}
+
+const makesFunctions = (body) => body.some((s) => s.kind === "define" || [s.then, s.otherwise, s.body].some((b) => b && makesFunctions(b)));
+
+// ---------- compiling Moth ----------
+
+// One Moth function (or the program) as one WebAssembly function. Variables that functions made inside it
+// use live in an array of slots in a scope struct, made when it's called, so those functions can reach
+// them later; the rest are locals.
+class WasmCompiler extends Scope {
+  constructor(parent, name, params, body, ctx) {
+    super(parent, name, params, body);
+    this.ctx = ctx;
+    const { m, T } = ctx;
+    this.f = parent ? m.func(name, [refNull(T.env), ...params.map(() => EQ)], [EQ]) : m.func("main", [F64], []);
+    this.c = this.f.code;
+    const c = this.c;
+    if (!parent) c.emit("local.get", 0).emit("global.set", ctx.maxSteps).emit("call", ctx.init.index);
+    const captured = ctx.captured.get(body);
+    this.locals = []; // slot -> local, for the variables that stay here
+    for (let slot = 1; slot <= this.fn.nslots; slot++) {
+      if (captured.has(slot)) continue;
+      if (parent && slot <= params.length) this.locals[slot] = slot; // an input, already a parameter
+      else c.emit("global.get", ctx.unset).emit("local.set", (this.locals[slot] = this.f.local(EQ))).note(`${this.fn.names[slot]} has no value yet`);
+    }
+    if (captured.size || makesFunctions(body)) {
+      this.slotArray = this.f.local(refNull(T.items));
+      this.envLocal = this.f.local(refNull(T.env));
+      c.emit("global.get", ctx.unset).emit("i32.const", this.fn.nslots + 1).emit("array.new", T.items).emit("local.set", this.slotArray);
+      if (parent) c.emit("local.get", 0); // the scope the function was made in
+      else c.emit("ref.null", T.env);
+      c.emit("local.get", this.slotArray).emit("ref.as_non_null").emit("struct.new", T.env).emit("local.set", this.envLocal);
+      params.forEach((_, i) => {
+        if (captured.has(i + 1)) c.emit("local.get", this.slotArray).emit("i32.const", i + 1).emit("local.get", i + 1).emit("array.set", T.items);
+      });
+    }
+    for (const s of body) this.statement(s);
+    if (parent) c.emit("ref.null", "eq");
+  }
+
+  e(op, ...args) {
+    this.c.emit(op, ...args);
+    return this;
+  }
+
+  note(text) {
+    this.c.note(text);
+    return this;
+  }
+
+  pos(at) {
+    return this.ctx.ats.push(at) - 1;
+  }
+
+  id(name) {
+    return this.ctx.id(name);
+  }
+
+  temp(type = EQ) {
+    return this.f.local(type);
+  }
+
+  // pushes the slots array a variable lives in, and its slot number
+  slotOf(name) {
+    const [depth, slot] = this.resolve(name);
+    if (depth === 0) this.e("local.get", this.slotArray);
+    else {
+      // from this function's own scope, or, if it made none, from the one it was made in (its first parameter)
+      const own = this.envLocal !== undefined;
+      this.e("local.get", own ? this.envLocal : 0);
+      for (let d = own ? 0 : 1; d < depth; d++) this.e("struct.get", this.ctx.T.env, 0);
+      this.e("struct.get", this.ctx.T.env, 1);
+    }
+    this.e("i32.const", slot);
+  }
+
+  load(name) {
+    const [depth, slot] = this.resolve(name);
+    if (depth === 0 && this.locals[slot] !== undefined) return this.e("local.get", this.locals[slot]).note(name);
+    this.slotOf(name);
+    this.e("array.get", this.ctx.T.items).note(name);
+  }
+
+  // `write` emits the value
+  store(name, write) {
+    const [depth, slot] = this.resolve(name);
+    if (depth === 0 && this.locals[slot] !== undefined) {
+      write();
+      return this.e("local.set", this.locals[slot]).note(`set ${name}`);
+    }
+    this.slotOf(name);
+    write();
+    this.e("array.set", this.ctx.T.items).note(`set ${name}`);
+  }
+
+  // A name nothing ever sets: fail when this runs, with the same message (and "did you mean") as the other engines.
+  undefinedName(name, at, options) {
+    this.e("i32.const", this.ctx.message(this.undefinedMessage(name, options))).e("i32.const", this.pos(at)).e("call", this.ctx.im.fail).e("unreachable");
+  }
+
+  // Each loop counts a step at the end of each round, and each call when it starts, as the other engines do.
+  tick(k) {
+    const { ctx } = this;
+    this.e("global.get", ctx.steps).e("f64.const", 1).e("f64.add").e("global.set", ctx.steps).e("global.get", ctx.steps).e("global.get", ctx.maxSteps).e("f64.gt");
+    this.e("if").e("i32.const", k).e("call", ctx.im.stopped).e("unreachable").e("end");
+  }
+
+  truthy() {
+    this.e("call", this.ctx.R.truthy);
+  }
+
+  block(body) {
+    for (const s of body) this.statement(s);
+  }
+
+  // block, loop, then `test` (leaving an i32 that is 1 to stop), the body, a step, and round again
+  loop(k, test, body) {
+    this.e("block").e("loop");
+    test();
+    this.e("br_if", 1);
+    body();
+    this.tick(k);
+    this.e("br", 0).e("end").e("end");
+  }
+
+  statement(s) {
+    const { T, R, im } = this.ctx;
+    switch (s.kind) {
+      case "set":
+        return this.store(s.name, () => this.expr(s.value));
+      case "setItem": {
+        const k = this.pos(s.target.at);
+        const [list, at, value] = [this.temp(), this.temp(I32), this.temp()];
+        this.expr(s.target.of);
+        this.e("local.set", list);
+        this.e("local.get", list);
+        this.expr(s.target.index);
+        this.e("i32.const", k).e("call", R.itemRef).e("local.set", at);
+        this.expr(s.value);
+        this.e("local.set", value);
+        this.e("local.get", list).e("ref.cast", T.list).e("struct.get", T.list, 0).e("local.get", at).e("local.get", value).e("array.set", T.items);
+        return;
+      }
+      case "add": {
+        const value = this.temp();
+        this.expr(s.value);
+        this.e("local.set", value);
+        if (!this.resolve(s.name)) return this.undefinedName(s.name, s.at);
+        return this.store(s.name, () => {
+          this.load(s.name);
+          this.e("local.get", value).e("i32.const", this.id(s.name)).e("i32.const", this.pos(s.at)).e("call", R.addInto);
+        });
+      }
+      case "say":
+        for (const part of s.parts) this.expr(part);
+        this.e("array.new_fixed", T.items, s.parts.length).e("i32.const", s.parts.length).e("struct.new", T.list).e("call", im.say);
+        return;
+      case "if":
+        this.expr(s.cond);
+        this.truthy();
+        this.e("if");
+        this.block(s.then);
+        this.e("else");
+        this.block(s.otherwise);
+        this.e("end");
+        return;
+      case "while":
+        return this.loop(this.pos(s.at), () => (this.expr(s.cond), this.truthy(), this.e("i32.eqz")), () => this.block(s.body));
+      case "repeat": {
+        const k = this.pos(s.at);
+        const n = this.temp(F64);
+        this.expr(s.count);
+        this.e("i32.const", k).e("call", R.repeatCount).e("local.set", n);
+        return this.loop(k, () => this.e("local.get", n).e("f64.const", 0).e("f64.le"), () => {
+          this.block(s.body);
+          this.e("local.get", n).e("f64.const", 1).e("f64.sub").e("local.set", n);
+        });
+      }
+      case "count": {
+        const k = this.pos(s.at);
+        const [from, to, i, last] = [this.temp(), this.temp(), this.temp(F64), this.temp(F64)];
+        this.expr(s.from);
+        this.e("local.set", from);
+        this.expr(s.to);
+        this.e("local.set", to);
+        bothNums(this.c, T, from, to);
+        this.e("i32.eqz").e("if").e("local.get", from).e("local.get", to).e("i32.const", k).e("call", im.checkRange).e("unreachable").e("end");
+        numOf(this.c, T, from);
+        this.e("local.set", i);
+        numOf(this.c, T, to);
+        this.e("local.set", last);
+        return this.loop(k, () => this.e("local.get", i).e("local.get", last).e("f64.le").e("i32.eqz"), () => {
+          this.store(s.name, () => this.e("local.get", i).e("struct.new", T.num));
+          this.block(s.body);
+          this.e("local.get", i).e("f64.const", 1).e("f64.add").e("local.set", i);
+        });
+      }
+      case "each": {
+        const k = this.pos(s.at);
+        const [list, i] = [this.temp(refNull(T.list)), this.temp(I32)];
+        this.expr(s.list);
+        this.e("i32.const", k).e("call", R.itemsOf).e("local.set", list).e("i32.const", 0).e("local.set", i); // locals start at 0 only once per call
+        return this.loop(k, () => this.e("local.get", i).e("local.get", list).e("struct.get", T.list, 1).e("i32.ge_s"), () => {
+          this.store(s.name, () => this.e("local.get", list).e("struct.get", T.list, 0).e("local.get", i).e("array.get", T.items));
+          this.e("local.get", i).e("i32.const", 1).e("i32.add").e("local.set", i);
+          this.block(s.body);
+        });
+      }
+      case "define": {
+        const inner = new WasmCompiler(this, s.name, s.params, s.body, this.ctx);
+        this.ctx.m.declared.add(inner.f.index);
+        return this.store(s.name, () => {
+          this.e("ref.func", inner.f.index).e("local.get", this.envLocal).e("i32.const", s.params.length).e("i32.const", this.id(s.name)).e("struct.new", T.closure);
+        });
+      }
+      case "return":
+        if (s.value) this.expr(s.value);
+        else this.e("ref.null", "eq");
+        this.e("return");
+        return;
+      case "call":
+        this.call(s, true);
+        this.e("drop");
+        return;
+      case "turtle":
+        this.e("i32.const", TURTLE_ACTIONS.indexOf(s.action));
+        if (s.value) this.expr(s.value);
+        else this.e("ref.null", "eq");
+        this.e("i32.const", this.pos(s.at)).e("call", im.turtle);
+        return;
+      case "setField": {
+        const k = this.pos(s.at);
+        const [target, value] = [this.temp(), this.temp()];
+        this.expr(s.target);
+        this.e("local.tee", target).e("ref.test", T.record).e("i32.eqz");
+        this.e("if").e("local.get", target).e("i32.const", this.id(s.name)).e("i32.const", k).e("call", im.recordFor).e("unreachable").e("end");
+        this.expr(s.value);
+        this.e("local.set", value);
+        this.e("local.get", target).e("i32.const", this.id(s.name)).e("local.get", value).e("call", R.setField);
+        return;
+      }
+      case "fail":
+        this.expr(s.value);
+        this.e("i32.const", this.pos(s.at)).e("call", im.failWith).e("unreachable");
+        return;
+    }
+  }
+
+  // The function is looked up before its inputs are worked out, and checked after, as in the other engines.
+  call(e, statement = false) {
+    if (!this.resolve(e.name)) return this.undefinedName(e.name, e.at, { call: true, statement });
+    const { T, im, ctx } = { ...this.ctx, ctx: this.ctx };
+    const k = this.pos(e.at);
+    const f = this.temp();
+    const args = e.args.map(() => this.temp());
+    this.load(e.name);
+    this.e("local.tee", f).e("ref.test", T.closure).e("i32.eqz");
+    this.e("if").e("local.get", f).e("i32.const", this.id(e.name)).e("i32.const", k).e("call", im.callable).e("unreachable").e("end");
+    e.args.forEach((arg, i) => {
+      this.expr(arg);
+      this.e("local.set", args[i]);
+    });
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 2).e("i32.const", args.length).e("i32.ne");
+    this.e("if").e("local.get", f).e("i32.const", args.length).e("i32.const", this.id(e.name)).e("i32.const", k).e("call", im.checkInputs).e("unreachable").e("end");
+    this.tick(k);
+    this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.add").e("global.set", ctx.depth).e("global.get", ctx.depth).e("i32.const", MAX_DEPTH).e("i32.gt_s");
+    this.e("if").e("call", im.tooDeep).e("unreachable").e("end");
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 1);
+    for (const a of args) this.e("local.get", a);
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 0).e("ref.cast", T.fn(args.length)).e("call_ref", T.fn(args.length)).note(e.name);
+    this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.sub").e("global.set", ctx.depth);
+  }
+
+  expr(e) {
+    const { T, R, im } = this.ctx;
+    switch (e.kind) {
+      case "value":
+        if (e.value === null) this.e("ref.null", "eq");
+        else if (typeof e.value === "boolean") this.e("i32.const", e.value ? 1 : 0).e("ref.i31");
+        else if (typeof e.value === "number") this.e("global.get", this.ctx.number(e.value)).note(e.value);
+        else this.e("global.get", this.ctx.text(e.value)).note(JSON.stringify(e.value).slice(0, 40));
+        return;
+      case "name": {
+        if (!this.resolve(e.name)) return this.undefinedName(e.name, e.at);
+        const value = this.temp();
+        this.load(e.name);
+        this.e("local.tee", value).e("global.get", this.ctx.unset).e("ref.eq");
+        this.e("if").e("i32.const", this.id(e.name)).e("i32.const", this.pos(e.at)).e("call", im.unset).e("unreachable").e("end");
+        this.e("local.get", value);
+        return;
+      }
+      case "call":
+        return this.call(e);
+      case "math":
+        this.expr(e.left);
+        this.expr(e.right);
+        this.e("i32.const", this.pos(e.at)).e("call", R[["add", "sub", "mul", "div"][MATH.indexOf(e.op)]]);
+        return;
+      case "compare":
+        this.expr(e.left);
+        this.expr(e.right);
+        if (e.op === "is") this.e("call", R.eq);
+        else this.e("i32.const", this.pos(e.at)).e("call", R[{ "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv" }[e.op]]);
+        if (e.negate) this.e("i32.eqz");
+        this.e("ref.i31");
+        return;
+      case "and":
+      case "or": {
+        const left = this.temp();
+        this.expr(e.left);
+        this.e("local.tee", left);
+        this.truthy();
+        this.e("if", EQ);
+        if (e.kind === "and") this.expr(e.right);
+        else this.e("local.get", left);
+        this.e("else");
+        if (e.kind === "and") this.e("local.get", left);
+        else this.expr(e.right);
+        this.e("end");
+        return;
+      }
+      case "not":
+        this.expr(e.operand);
+        this.truthy();
+        this.e("i32.eqz").e("ref.i31");
+        return;
+      case "negate":
+        this.expr(e.operand);
+        this.e("i32.const", this.pos(e.at)).e("call", R.neg);
+        return;
+      case "list":
+        for (const x of e.items) this.expr(x);
+        this.e("array.new_fixed", T.items, e.items.length).e("i32.const", e.items.length).e("struct.new", T.list);
+        return;
+      case "length":
+        this.expr(e.of);
+        this.e("i32.const", this.pos(e.at)).e("call", R.lengthOf);
+        return;
+      case "item":
+        this.expr(e.of);
+        this.expr(e.index);
+        this.e("i32.const", this.pos(e.at)).e("call", R.item);
+        return;
+      case "record": {
+        if (new Set(e.fields).size === e.fields.length) {
+          for (const field of e.fields) this.e("i32.const", this.id(field));
+          this.e("array.new_fixed", T.ids, e.fields.length);
+          for (const v of e.values) this.expr(v);
+          this.e("array.new_fixed", T.items, e.values.length).e("i32.const", e.fields.length).e("struct.new", T.record);
+          return;
+        }
+        const record = this.temp(); // a name given twice: the later value wins, in the place of the first
+        this.e("call", R.newRecord).e("local.set", record);
+        e.fields.forEach((field, i) => {
+          this.e("local.get", record).e("i32.const", this.id(field));
+          this.expr(e.values[i]);
+          this.e("call", R.setField);
+        });
+        this.e("local.get", record);
+        return;
+      }
+      case "field":
+        this.expr(e.of);
+        this.e("i32.const", this.id(e.name)).e("i32.const", this.pos(e.at)).e("call", R.field);
+        return;
+    }
+  }
+}
+
+// ---------- the whole module, and running it ----------
+
+export function compileToWasmModule(program) {
+  const m = new Module();
+  const T = declareTypes(m);
+  const im = {};
+  for (const [label, [params, results]] of Object.entries(IMPORTS)) im[label] = m.import("moth", label, m.funcType(params, results));
+  const R = declareRuntime(m, T, im);
+  declareExports(m, T, R);
+
+  const names = [];
+  const nameIds = new Map();
+  const messages = [];
+  const numbers = new Map();
+  const texts = new Map();
+  const ctx = {
+    m, T, R, im, ats: [], names, messages, captured: findCaptured(program),
+    unset: m.global(ref(T.unset), false, new Code().emit("struct.new", T.unset)),
+    steps: m.global(F64, true, new Code().emit("f64.const", 0)),
+    maxSteps: m.global(F64, true, new Code().emit("f64.const", Infinity)),
+    depth: m.global(I32, true, new Code().emit("i32.const", 0)),
+    init: m.func("init", [], []), // makes the text the program holds
+    texts: [],
+    id(name) {
+      if (!nameIds.has(name)) nameIds.set(name, names.push(name) - 1);
+      return nameIds.get(name);
+    },
+    message: (text) => messages.push(text) - 1,
+    number(value) {
+      const key = String(value);
+      if (!numbers.has(key)) numbers.set(key, m.global(ref(T.num), false, new Code().emit("f64.const", value).emit("struct.new", T.num)));
+      return numbers.get(key);
+    },
+    text(value) {
+      if (!texts.has(value)) {
+        const global = m.global(refNull(T.text), true, new Code().emit("ref.null", T.text));
+        texts.set(value, global);
+        ctx.init.code.emit("i32.const", ctx.texts.push(value) - 1).emit("call", im.text).emit("struct.new", T.text).emit("global.set", global);
+      }
+      return texts.get(value);
+    },
+  };
+  const main = new WasmCompiler(null, "main", [], program, ctx);
+  m.export("main", main.f.index);
+  return { bytes: m.encode(), listing: m.listing(), ats: ctx.ats, names, messages, texts: ctx.texts };
+}
+
+// Compiles a parsed program: { bytes, listing, run(print, draw, maxSteps) }, like jit() in jit.js.
+export function wasm(program) {
+  const made = compileToWasmModule(program);
+  const module = new WebAssembly.Module(made.bytes);
+  return { ...made, run: (print, draw, maxSteps) => instantiate(module, made, print, draw, maxSteps).main(maxSteps) };
+}
+
+// The JavaScript side of a run: the imports, and moving values in and out of the module.
+function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps) {
+  const errors = ats.map((at) => (message, value) => fail(at, message, value));
+  const turtle = new Turtle(draw);
+  let x = null; // the module's exports, once it exists
+
+  function toJs(v, seen = new Map()) {
+    if (v === null) return null;
+    if (typeof v === "number") return v === 1; // yes and no are i31 values, which reach JavaScript as numbers
+    if (seen.has(v)) return seen.get(v);
+    switch (x.tag(v)) {
+      case TAGS.number:
+        return x.num(v);
+      case TAGS.text:
+        return x.textValue(v);
+      case TAGS.list: {
+        const list = [];
+        seen.set(v, list);
+        for (let i = 0, n = x.listLength(v); i < n; i++) list.push(toJs(x.listItem(v, i), seen));
+        return list;
+      }
+      case TAGS.record: {
+        const record = makeRecord([], []);
+        seen.set(v, record);
+        for (let i = 0, n = x.recordSize(v); i < n; i++) record[names[x.recordKey(v, i)]] = toJs(x.recordValue(v, i), seen);
+        return record;
+      }
+      case TAGS.function:
+        return new Closure({ name: names[x.functionName(v)], params: Array(x.functionInputs(v)) }, null);
+      default:
+        return UNSET;
+    }
+  }
+
+  // only new values come back from JavaScript (text, and the letters of a text), never a list it changed
+  function toWasm(v) {
+    if (v === null) return null;
+    if (typeof v === "boolean") return v ? 1 : 0;
+    if (typeof v === "number") return x.makeNum(v);
+    if (typeof v === "string") return x.makeText(v);
+    const list = x.newList();
+    for (const item of v) x.listPush(list, toWasm(item));
+    return list;
+  }
+
+  const imports = {
+    say: (parts) => print(toJs(parts).map((p) => show(p)).join("")),
+    fail: (message, k) => errors[k](messages[message]),
+    unset: (name, k) => errors[k](noValue(names[name])),
+    plus: (a, b, k) => toWasm(plus(toJs(a), toJs(b), errors[k])),
+    arithmetic: (op, a, b, k) => arithmetic(MATH[op], toJs(a), toJs(b), errors[k]),
+    negate: (v, k) => negate(toJs(v), errors[k]),
+    compare: (op, a, b, k) => (compare(COMPARE_OPS[op], toJs(a), toJs(b), errors[k]) ? 1 : 0),
+    remainder: (a, b) => a % b,
+    equal: (a, b) => (equal(toJs(a), toJs(b)) ? 1 : 0),
+    sameText: (a, b) => (a === b ? 1 : 0),
+    text: (i) => texts[i],
+    lengthOf: (v, k) => lengthOf(toJs(v), errors[k]),
+    item: (target, n, k) => {
+      const [seq, i] = item(toJs(target), toJs(n), false, errors[k]);
+      return toWasm(seq[i]);
+    },
+    itemRef: (target, n, k) => item(toJs(target), toJs(n), true, errors[k]),
+    addInto: (current, value, name, k) => toWasm(addInto(toJs(current), toJs(value), names[name], errors[k])),
+    checkRepeat: (n, k) => checkRepeat(toJs(n), errors[k]),
+    checkRange: (from, to, k) => checkRange(toJs(from), toJs(to), errors[k]),
+    itemsOf: (v, k) => toWasm(itemsOf(toJs(v), errors[k])),
+    callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),
+    checkInputs: (f, argc, name, k) => checkInputs(toJs(f), argc, names[name], errors[k]),
+    stopped: (k) => errors[k](stoppedMessage(maxSteps)),
+    tooDeep: () => {
+      throw new TooDeep();
+    },
+    turtle: (action, value, k) => turtle.act(action, toJs(value), errors[k]),
+    field: (r, name, k) => fieldOf(toJs(r), names[name], errors[k]),
+    recordFor: (r, name, k) => recordFor(toJs(r), names[name], errors[k]),
+    failWith: (value, k) => failWith(toJs(value), errors[k]),
+  };
+  x = new WebAssembly.Instance(module, { moth: imports }).exports;
+  return x;
+}
