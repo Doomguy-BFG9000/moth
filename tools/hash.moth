@@ -1,0 +1,124 @@
+# SHA-256, as FIPS 180-4 has it: a text's or bytes' hash, the 64 hex digits that `sha256sum` and every other
+# program give for the same bytes (a text's are its UTF-8). In Moth alone, so it works everywhere.
+#
+#   use "hash.moth" as hash
+#   say hash's sha256("abc")             # ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+#   say hash's sha256(read bytes "moth.exe")
+
+set hash_constants to list of 1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748,
+    2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580,
+    3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882,
+    2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912,
+    1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800,
+    3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877,
+    958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474,
+    2756734187, 3204031479, 3329325298
+set hash_starts to list of 1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225
+set hash_powers to list of 1 # 2 to the 0th, 1st, ... 32nd, from item 1
+repeat 32 times
+    add item (length of hash_powers) of hash_powers * 2 to hash_powers
+end
+
+# a 32-bit number turned right by n: what falls off the right comes back on the left, kept below 2^53 all along
+to hash_turn with x, n
+    return (shift x right by n) + (x bit and (item (n + 1) of hash_powers - 1)) * item (33 - n) of hash_powers
+end
+
+to hash_add with x, y
+    return (x + y) bit and 4294967295
+end
+
+to hash_bytes_of with data as text
+    return data as bytes
+end
+
+# the hash of a text or of bytes, as 64 hex digits
+to sha256 with data
+    set message to data
+    try
+        set message to hash_bytes_of(data)
+    if it fails
+        set message to data
+    end
+    set count to length of message
+    set blocks to hash_whole((count + 8) / 64) + 1 # a whole number of 64-byte blocks, with room for 128 and the length
+    set padded to (64 * blocks) bytes
+    for each k from 1 to count
+        set byte k of padded to byte k of message
+    end
+    set byte (count + 1) of padded to 128
+    set bits to count * 8
+    for each k from 0 to 6 # its length in bits, highest byte first, in the last 8 (2^56 bits is plenty)
+        set byte (64 * blocks - k) of padded to bits bit and 255
+        set bits to shift bits right by 8
+    end
+    set h to empty list
+    for each start in hash_starts
+        add start to h
+    end
+    set w to empty list
+    repeat 64 times
+        add 0 to w
+    end
+    for each block from 0 to blocks - 1
+        set at to 64 * block
+        for each t from 1 to 16
+            set b to at + 4 * t - 3
+            set item t of w to byte b of padded * 16777216 + byte (b + 1) of padded * 65536 + byte (b + 2) of padded * 256
+                + byte (b + 3) of padded
+        end
+        for each t from 17 to 64
+            set x to item (t - 15) of w
+            set y to item (t - 2) of w
+            set small0 to hash_turn(x, 7) bit xor hash_turn(x, 18) bit xor (shift x right by 3)
+            set small1 to hash_turn(y, 17) bit xor hash_turn(y, 19) bit xor (shift y right by 10)
+            set item t of w to (item (t - 16) of w + small0 + item (t - 7) of w + small1) bit and 4294967295
+        end
+        set a to item 1 of h
+        set b2 to item 2 of h
+        set c to item 3 of h
+        set d to item 4 of h
+        set e to item 5 of h
+        set f to item 6 of h
+        set g to item 7 of h
+        set hh to item 8 of h
+        for each t from 1 to 64
+            set big1 to hash_turn(e, 6) bit xor hash_turn(e, 11) bit xor hash_turn(e, 25)
+            set choice to (e bit and f) bit xor ((4294967295 - e) bit and g)
+            set temp1 to (hh + big1 + choice + item t of hash_constants + item t of w) bit and 4294967295
+            set big0 to hash_turn(a, 2) bit xor hash_turn(a, 13) bit xor hash_turn(a, 22)
+            set most to (a bit and b2) bit xor (a bit and c) bit xor (b2 bit and c)
+            set temp2 to hash_add(big0, most)
+            set hh to g
+            set g to f
+            set f to e
+            set e to hash_add(d, temp1)
+            set d to c
+            set c to b2
+            set b2 to a
+            set a to hash_add(temp1, temp2)
+        end
+        set item 1 of h to hash_add(item 1 of h, a)
+        set item 2 of h to hash_add(item 2 of h, b2)
+        set item 3 of h to hash_add(item 3 of h, c)
+        set item 4 of h to hash_add(item 4 of h, d)
+        set item 5 of h to hash_add(item 5 of h, e)
+        set item 6 of h to hash_add(item 6 of h, f)
+        set item 7 of h to hash_add(item 7 of h, g)
+        set item 8 of h to hash_add(item 8 of h, hh)
+    end
+    set made to ""
+    for each part in h
+        set shown to part as hex
+        repeat 8 - length of shown times
+            set shown to "0" + shown
+        end
+        set made to made + shown
+    end
+    return made
+end
+
+# the whole part of a number from 0 up
+to hash_whole with x
+    return number of item 1 of split ("" + x) by "."
+end

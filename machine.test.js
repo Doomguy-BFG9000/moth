@@ -952,7 +952,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     const exe = executable(dir, "p");
     const bytes = machine(source, { target, name: "p.moth", allow, files });
@@ -1145,16 +1145,72 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth and dates.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth and hash.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
-  for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth"]) {
+  for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
-  const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "14 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "17 passed");
+});
+
+// tools/system.moth: files, folders and the environment, the same on Windows and Linux
+test("tools/system.moth copies, moves and removes files and folders, and reads the environment", { skip }, () => {
+  const ran = libraryRun(String.raw`use "system.moth" as system
+write "hello" to "a.txt"
+say system's is_file("a.txt") " " system's is_folder("a.txt") " " system's exists("nope")
+say system's file_size("a.txt")
+say system's modified("a.txt") is greater than 1700000000
+system's make_folder("x/y/z")
+system's make_folder("x/y")
+say system's is_folder("x/y/z") " " system's is_file("x/y/z")
+system's copy_file("a.txt", "x/y/z/b.txt")
+say read "x/y/z/b.txt"
+system's move_file("x/y/z/b.txt", "x/c.txt")
+say system's exists("x/y/z/b.txt") " " read "x/c.txt"
+system's remove_file("x/c.txt")
+system's remove_folder("x/y/z")
+try
+    system's remove_folder("x")
+if it fails with why
+    say why
+end
+system's remove_folder("x/y")
+system's remove_folder("x")
+say system's exists("x")
+system's set_environment("MOTH_TRY", "é value")
+say system's environment("MOTH_TRY")
+system's set_environment("MOTH_TRY", nothing)
+say system's environment("MOTH_TRY")
+set here to system's current_folder()
+system's make_folder("inner")
+system's change_folder("inner")
+set inside to system's current_folder()
+say length of inside is length of here + 6
+system's change_folder("..")
+say system's current_folder() is here
+system's remove_folder("inner")
+say system's home_folder() is not nothing and system's temporary_folder() is not ""
+for each wrong in list of "size", "move", "folder"
+    try
+        if wrong is "size"
+            say system's file_size("nope")
+        else if wrong is "move"
+            system's move_file("nope", "nowhere")
+        else
+            system's change_folder("nope")
+        end
+    if it fails with why
+        say why
+    end
+end
+remove the file "a.txt"`, ["--allow-libraries", "--allow-read", "--allow-write"]);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes no no\n5\nyes\nyes no\nhello\nno hello\n"
+    + "can't remove the folder 'x': it isn't there, or it isn't empty\nno\né value\nnothing\nyes\nyes\nyes\n"
+    + "there is no file called 'nope'\ncan't move 'nope' to 'nowhere'\ncan't go into the folder 'nope'\n", "", 0]);
 });
 
 // tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote

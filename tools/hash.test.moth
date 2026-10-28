@@ -1,0 +1,35 @@
+# hash.moth's tests: the hashes FIPS 180-4 and everyone else give, which moth.test.js runs on every engine
+
+use "hash.moth" as hash
+
+to test_known_hashes
+    expect hash's sha256("") is "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    expect hash's sha256("abc") is "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    expect hash's sha256("The quick brown fox jumps over the lazy dog") is "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+    expect hash's sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") is "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+end
+
+to test_block_edges
+    set a55 to ""
+    repeat 55 times
+        add "a" to a55
+    end
+    expect hash's sha256(a55) is "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"
+    expect hash's sha256(a55 + "a") is "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
+    set a64 to a55 + "aaaaaaaaa"
+    expect hash's sha256(a64) is "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
+end
+
+to test_text_and_bytes
+    expect hash's sha256("é😀") is hash's sha256("é😀" as bytes)
+    set block to 3 bytes
+    set byte 1 of block to 0
+    set byte 2 of block to 255
+    set byte 3 of block to 10
+    expect hash's sha256(block) is "712450d3c4a79eea9509e75dc1dacdeff58034df538536cfae2da882bd8a0c50"
+    set big to 1000 bytes # as Node's crypto hashes the same bytes
+    for each k from 1 to 1000
+        set byte k of big to ((k - 1) * 7) bit and 255
+    end
+    expect hash's sha256(big) is "89f4ff56a25dd1db06a4ce6033603775d705fb96f30f8693733fef602a1ca532"
+end

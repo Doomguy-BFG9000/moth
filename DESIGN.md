@@ -2462,3 +2462,33 @@ hold them to agreeing.
   patterns' mistakes, rounding at the edges, CSV both ways and back, and
   every week of 400 years, counted as a person counts them, against both of
   the date's directions.
+
+## 55. Files, folders, the environment and SHA-256
+
+- **Why.** Moth reads, writes and removes files, and lists a folder, but a real
+  program also moves a file, makes a folder for its data, asks how big a file
+  is or when it changed, reads `PATH` or `HOME`, and checks a download against
+  its hash.
+- **SHA-256** is [`tools/hash.moth`](tools/hash.moth), FIPS 180-4 in Moth, so
+  it works everywhere. Moth's numbers are doubles, exact to 2^53, and its bit
+  operations work on whole numbers up to there on every engine, so 32-bit
+  words fit, and a sum of five of them does before it's cut back to 32 bits.
+  Turning a word right by n would shift it left by up to 31 bits, past 2^53, so
+  it's done by multiplying what falls off by 2^(32 - n) instead.
+- **Files, folders and the environment** are
+  [`tools/system.moth`](tools/system.moth), on the system's own functions:
+  kernel32's on Windows (GetFileAttributesExW for a file's size and when it
+  changed, a FILETIME's 100 ns since 1601 made seconds since 1970; MoveFileExW,
+  CreateDirectoryW, GetEnvironmentVariableW and the rest), libc's on Linux
+  (`stat`, its mode at byte 24, its size at 48 and its time at 88 on x86-64;
+  `rename`, `mkdir`, `getenv`, `getcwd` and the rest). `make_folder` makes the
+  folders a folder is in too, as `mkdir -p`. `move` and `copy` are Moth's own
+  words, so they're `move_file` and `copy_file`.
+- **Tested.** hash.test.moth: the empty text, `abc`, the fox, FIPS 180-4's
+  448-bit one, 55, 56 and 64 bytes of `a` (where the padding takes another
+  block), text and its bytes alike, and 1000 bytes against Node's crypto, on
+  all three engines and in machine code. system.moth: one program, run on
+  Windows and on Linux, saying the same, word for word: a file made, its size
+  and time, folders made in folders and removed, a folder that isn't empty
+  refused, a file copied, moved and removed, a variable set, read and
+  removed, the current folder changed and back, and the mistakes.

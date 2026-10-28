@@ -1,0 +1,291 @@
+# Files, folders and the environment, on Windows and Linux: copying and moving files, making and removing
+# folders, whether a name is a file or a folder, how big a file is and when it last changed, the program's
+# environment variables, and the folders it's in, the home folder and the temporary one.
+#
+#   use "system.moth" as system
+#   system's make_folder("backup/2026")              # and the folders it's in, if they aren't there
+#   system's copy_file("notes.txt", "backup/2026/notes.txt")
+#   say system's file_size("notes.txt") " bytes, changed " system's modified("notes.txt")
+#   say system's environment("PATH")
+#   say system's home_folder()
+#
+# modified() is seconds since 1 January 1970, as dates.moth's day_number counts days. A program that uses it
+# is built with --allow-libraries.
+
+use the library "kernel32"
+    GetFileAttributesW(wide text) gives a whole number
+    GetFileAttributesExW(wide text, a whole number, bytes) gives yes or no
+    CreateDirectoryW(wide text, a pointer) gives yes or no
+    RemoveDirectoryW(wide text) gives yes or no
+    MoveFileExW(wide text, wide text, a whole number) gives yes or no
+    CopyFileW(wide text, wide text, yes or no) gives yes or no
+    DeleteFileW(wide text) gives yes or no
+    GetEnvironmentVariableW(wide text, bytes, a whole number) gives a whole number
+    "SetEnvironmentVariableW" as win_set_environment(wide text, wide text) gives yes or no
+    "SetEnvironmentVariableW" as win_unset_environment(wide text, a pointer) gives yes or no
+    GetCurrentDirectoryW(a whole number, bytes) gives a whole number
+    SetCurrentDirectoryW(wide text) gives yes or no
+    GetTempPathW(a whole number, bytes) gives a whole number
+    "lstrcatW" as wide_in(bytes, wide text) gives wide text
+    GetTickCount() gives a whole number
+end
+use the library "c"
+    "stat" as unix_stat(text, bytes) gives a whole number
+    "mkdir" as unix_mkdir(text, a whole number) gives a whole number
+    "rmdir" as unix_rmdir(text) gives a whole number
+    "rename" as unix_rename(text, text) gives a whole number
+    "unlink" as unix_unlink(text) gives a whole number
+    "getenv" as unix_getenv(text) gives text
+    "setenv" as unix_setenv(text, text, a whole number) gives a whole number
+    "unsetenv" as unix_unsetenv(text) gives a whole number
+    "getcwd" as unix_getcwd(bytes, a long whole number) gives a pointer
+    "chdir" as unix_chdir(text) gives a whole number
+end
+
+# which system it is: a library every Windows has, which no Linux has
+set system_windows to yes
+try
+    GetTickCount()
+if it fails
+    set system_windows to no
+end
+
+to system_number with b, from, count
+    set made to 0
+    set k to count
+    repeat count times
+        set made to made * 256 + byte (from + k - 1) of b
+        set k to k - 1
+    end
+    return made
+end
+
+# what Linux's stat says of a name: its mode, size and when it changed; or nothing if there's nothing there
+to system_stat with path
+    set room to 256 bytes
+    if unix_stat(path, room) is not 0
+        return nothing
+    end
+    return record with mode system_number(room, 25, 4), size system_number(room, 49, 8), changed system_number(room, 89, 8)
+end
+
+to is_file with path
+    if system_windows
+        set attributes to GetFileAttributesW(path)
+        return attributes is not -1 and (attributes bit and 16) is 0
+    end
+    set found to system_stat(path)
+    return found is not nothing and (mode of found bit and 61440) is 32768
+end
+
+to is_folder with path
+    if system_windows
+        set attributes to GetFileAttributesW(path)
+        return attributes is not -1 and (attributes bit and 16) is not 0
+    end
+    set found to system_stat(path)
+    return found is not nothing and (mode of found bit and 61440) is 16384
+end
+
+to exists with path
+    return is_file(path) or is_folder(path)
+end
+
+# how many bytes a file is
+to file_size with path
+    if system_windows
+        set data to 36 bytes
+        if not GetFileAttributesExW(path, 0, data)
+            fail with "there is no file called '" + path + "'"
+        end
+        return system_number(data, 29, 4) * 4294967296 + system_number(data, 33, 4)
+    end
+    set found to system_stat(path)
+    if found is nothing
+        fail with "there is no file called '" + path + "'"
+    end
+    return size of found
+end
+
+# when a file last changed, in whole seconds since 1 January 1970
+to modified with path
+    if system_windows
+        set data to 36 bytes
+        if not GetFileAttributesExW(path, 0, data)
+            fail with "there is no file called '" + path + "'"
+        end
+        set ticks to system_number(data, 25, 4) * 429.4967296 + system_number(data, 21, 4) / 10000000 # 100 ns since 1601
+        set seconds to ticks - 11644473600
+        return number of item 1 of split ("" + seconds) by "."
+    end
+    set found to system_stat(path)
+    if found is nothing
+        fail with "there is no file called '" + path + "'"
+    end
+    return changed of found
+end
+
+# a file copied, a file already at `to_path` replaced
+to copy_file with from, to_path
+    if system_windows
+        if not CopyFileW(from, to_path, no)
+            fail with "can't copy '" + from + "' to '" + to_path + "'"
+        end
+        return nothing
+    end
+    if not is_file(from)
+        fail with "can't copy '" + from + "' to '" + to_path + "'"
+    end
+    write (read bytes from) to to_path
+end
+
+# a file or a folder moved, or renamed; a file already at `to_path` replaced
+to move_file with from, to_path
+    if system_windows
+        if not MoveFileExW(from, to_path, 3) # MOVEFILE_REPLACE_EXISTING, MOVEFILE_COPY_ALLOWED
+            fail with "can't move '" + from + "' to '" + to_path + "'"
+        end
+    else if unix_rename(from, to_path) is not 0
+        fail with "can't move '" + from + "' to '" + to_path + "'"
+    end
+end
+
+to remove_file with path
+    if system_windows
+        if not DeleteFileW(path)
+            fail with "can't remove the file '" + path + "'"
+        end
+    else if unix_unlink(path) is not 0
+        fail with "can't remove the file '" + path + "'"
+    end
+end
+
+# a folder, and the folders it's in if they aren't there; a folder that's there already is fine
+to make_folder with path
+    set parts to split join (split path by "\\") with "/" by "/"
+    set so_far to ""
+    set k to 0
+    for each part in parts
+        add 1 to k
+        if k is greater than 1
+            set so_far to so_far + "/"
+        end
+        set so_far to so_far + part
+        if part is not "" and not (k is 1 and position of ":" in part is length of part) and not is_folder(so_far)
+            set made to no
+            if system_windows
+                set made to CreateDirectoryW(so_far, nothing)
+            else
+                set made to unix_mkdir(so_far, 511) is 0
+            end
+            if not made and not is_folder(so_far)
+                fail with "can't make the folder '" + path + "'"
+            end
+        end
+    end
+end
+
+# an empty folder removed
+to remove_folder with path
+    set gone to no
+    if system_windows
+        set gone to RemoveDirectoryW(path)
+    else
+        set gone to unix_rmdir(path) is 0
+    end
+    if not gone
+        fail with "can't remove the folder '" + path + "': it isn't there, or it isn't empty"
+    end
+end
+
+# an environment variable's value, or nothing if there's none
+to environment with name
+    if system_windows
+        set room to 65536 bytes
+        set n to GetEnvironmentVariableW(name, room, 32768)
+        if n is 0
+            return nothing
+        end
+        return wide_in(room, "")
+    end
+    return unix_getenv(name)
+end
+
+# an environment variable set, for this program and those it starts; nothing for its value removes it
+to set_environment with name, value
+    if system_windows
+        if value is nothing
+            win_unset_environment(name, nothing)
+        else
+            win_set_environment(name, value)
+        end
+    else if value is nothing
+        unix_unsetenv(name)
+    else
+        unix_setenv(name, value, 1)
+    end
+end
+
+# the folder the program is working in, which names that aren't whole paths are from
+to current_folder
+    if system_windows
+        set room to 65536 bytes
+        GetCurrentDirectoryW(32768, room)
+        return wide_in(room, "")
+    end
+    set room to 65536 bytes
+    unix_getcwd(room, 65536)
+    set n to 0
+    repeat while n is less than 65536 and byte (n + 1) of room is not 0
+        add 1 to n
+    end
+    set made to n bytes
+    for each k from 1 to n
+        set byte k of made to byte k of room
+    end
+    return made as text
+end
+
+to change_folder with path
+    set changed to no
+    if system_windows
+        set changed to SetCurrentDirectoryW(path)
+    else
+        set changed to unix_chdir(path) is 0
+    end
+    if not changed
+        fail with "can't go into the folder '" + path + "'"
+    end
+end
+
+to home_folder
+    if system_windows
+        return environment("USERPROFILE")
+    end
+    return environment("HOME")
+end
+
+# the folder for files a program needs a short while, without a \ or / at its end
+to temporary_folder
+    if system_windows
+        set room to 65536 bytes
+        GetTempPathW(32768, room)
+        set made to wide_in(room, "")
+        set chars to empty list
+        for each c in made
+            add c to chars
+        end
+        if length of chars is greater than 0 and item (length of chars) of chars is "\\"
+            set made to ""
+            for each k from 1 to length of chars - 1
+                add item k of chars to made
+            end
+        end
+        return made
+    end
+    set made to environment("TMPDIR")
+    if made is nothing or made is ""
+        return "/tmp"
+    end
+    return made
+end

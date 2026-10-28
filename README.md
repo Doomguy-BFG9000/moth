@@ -332,6 +332,11 @@ bytes and dictionaries:
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
   `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
   on every engine, the playground's too, and test themselves.
+- [`hash.moth`](tools/hash.moth) gives a text's or bytes' SHA-256, in Moth alone,
+  and [`system.moth`](tools/system.moth) copies, moves and removes files, makes
+  and removes folders, says whether a name is a file or a folder, how big a
+  file is and when it changed, reads and sets environment variables, and
+  knows the current, home and temporary folders, on Windows and Linux.
 - [`windows.moth`](tools/windows.moth) makes Windows' own windows and controls,
   written in Moth on user32.dll: buttons, labels, text boxes and areas,
   checkboxes, lists, dropdowns, menus with their keys (`"Save\tCtrl+S"`),
@@ -926,7 +931,9 @@ calls that led there.
   `moth build --icon --version --include`, a program moved away from its files
   reading them from inside itself, on both, and Windows' resources read back;
   and `tools/text.test.moth` and `tools/dates.test.moth` on all three engines
-  and in machine code, 400 years of the calendar among them
+  and in machine code, 400 years of the calendar among them; `tools/hash.test.moth`
+  against FIPS 180-4's hashes and Node's crypto, the same way; and
+  `tools/system.moth` saying the same, word for word, on Windows and Linux
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

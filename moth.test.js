@@ -1019,13 +1019,14 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
   }
 });
 
-test("text.moth and dates.moth pass their own tests on all three engines", () => {
+test("text.moth, dates.moth and hash.moth pass their own tests on all three engines", () => {
   for (const engine of ENGINES) {
     for (const [file, names] of [
       ["text.test.moth", ["test_whole_matches", "test_finding", "test_replacing_and_splitting", "test_no_endless_loops",
         "test_bad_patterns", "test_numbers", "test_widths", "test_csv"]],
       ["dates.test.moth", ["test_days", "test_four_hundred_years", "test_months_and_weekdays", "test_reading_and_writing",
-        "test_today", "test_mistakes"]]]) {
+        "test_today", "test_mistakes"]],
+      ["hash.test.moth", ["test_known_hashes", "test_block_edges", "test_text_and_bytes"]]]) {
       const results = testMoth(tool(file), { engine, files: (name) => tool(name) });
       assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
     }
