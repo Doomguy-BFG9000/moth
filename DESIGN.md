@@ -261,3 +261,69 @@ can't inject anything into the page.
   checker predicts 44% of runtime errors with no false alarms. The one known
   gap: it doesn't follow the order code runs in, so a name used before its line
   of `set` fails with "has no value yet" instead of what the checker said.
+
+## 12. Records, `fail with`, and `load()`
+
+- **Records are the smallest thing a compiler needs.** A syntax tree needs nodes
+  with named parts, so Moth got `record with kind "set", name n`, `name of
+  node` and `set name of node to ...`. A record is a JavaScript object with no
+  prototype, so a field can be called anything, even `constructor`, and a
+  misspelled field gets "did you mean". Both engines share the checks, and `is`
+  compares records field by field, as it does lists.
+- **`fail with value`** stops the program with the value as its message and
+  keeps the value on the error. The compiler written in Moth uses it to report
+  a mistake in the code it compiles: `fail with record with at token, reason
+  "..."`, which JavaScript turns back into a normal Moth error at that spot.
+- **`load(source)`** runs a program and hands its top-level variables to
+  JavaScript, with Moth functions as JavaScript functions. A failed call deep
+  inside used to leave the JIT's call depth raised, so after a few thousand
+  failed calls a short one was taken for runaway recursion. An error now resets
+  the depth, since it ends every call in progress anyway.
+
+## 13. Self-hosting: Moth's compiler, in Moth
+
+[`compiler.moth`](compiler.moth) is a second compiler for the language,
+written in the language: a tokenizer, a recursive-descent parser that builds
+records, the scope rules, and a JavaScript writer. It writes exactly the
+JavaScript `jit.js` writes, and stops at the same mistakes with the same
+messages and positions.
+
+- **Byte for byte, not "close enough".** Matching output means every decision
+  has to be the same: the order positions are numbered in, when a temporary is
+  made for `and`, how "did you mean" breaks a tie. That makes the JIT a precise
+  spec, and the tests can compare whole programs with `===` instead of
+  guessing what counts as the same.
+- **Bootstrapping.** `compiler.moth` compiled by the JIT compiles itself. The
+  compiler that makes compiles it again, and the one after that. All three
+  stages write the same 94 KB of JavaScript, so the compiler has reached a
+  fixed point. `moth bootstrap` runs it; each stage takes about 60 ms.
+- **The language changed to make this possible, not the compiler.** Moth has no
+  character codes, so the rules for reading text had to be ones Moth can
+  follow with comparisons alone. Every control character now counts as a space
+  (as in Wirth's Pascal compilers), comments run to the end of the line, and
+  text can't hold a control character other than tab. Before, `\s` and `.` in
+  the tokenizer's regular expression brought in Unicode spaces and line ends
+  that Moth couldn't name. A character's width in columns (JavaScript counts
+  an emoji as 2) is one comparison against the first and last characters past
+  the 65,536 that fit in one unit.
+- **Numbers go out as written.** The JIT used to print a number literal with
+  `JSON.stringify`, so matching it would have meant writing JavaScript's float
+  formatting in Moth. Now both compilers write the number as it appears in the
+  source, without leading zeros (JavaScript reads `07` as octal). That turned up
+  a real bug: `JSON.stringify` prints a number too big for a float as `null`,
+  so a 400-digit literal was `nothing` on the JIT and `Infinity` on the VM.
+- **One rule to watch.** A name a function sets belongs to the top level when
+  the top level sets it too. So in `compiler.moth`, a name set at the top
+  (`ats`, the tables) is never set inside a function, and the parser's helpers
+  live inside `parse`, sharing its position the way the JavaScript parser's
+  closures do.
+- **How it's kept honest.** The tests run it beside the JIT on every example,
+  every table program and 3,000 fuzzed programs. Of two bugs planted in it,
+  one (the "did you mean" distance for short names) was caught only by the
+  fuzzed programs. Writing it also found a crash in the real parser: a line
+  starting with `constructor` looked up the turtle's words in a plain object
+  and found `Object.prototype.constructor`.
+- **Known gaps.** Moth sees text as whole characters, so it can't tell half of
+  an emoji (a lone surrogate, which no file can hold) from a whole one. Its
+  parser is 8 Moth calls deep per bracket and the JIT stops at 2,000 calls, so
+  it gives up at about 245 levels of brackets, where the JIT goes past 1,000.

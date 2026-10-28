@@ -102,6 +102,7 @@
         <option value="">hidden</option>
         <option value="bytecode">bytecode (VM)</option>
         <option value="js">JavaScript (JIT)</option>
+        <option value="moth">JavaScript (compiler written in Moth)</option>
       </select>
     </label>
     <span class="spacer"></span>
@@ -159,7 +160,7 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, compileToJs, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
+    import { compile, compileToJs, mothCompiler, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -265,17 +266,40 @@
       finish("");
     }
 
-    // What the compilers made of the code: the VM's bytecode, or the JavaScript from the JIT.
-    function showCompiled() {
+    // compiler.moth, Moth's compiler written in Moth, fetched the first time it's needed
+    let compilerSource = null;
+    const loadCompiler = async () => (compilerSource ??= await (await fetch("compiler.moth")).text());
+    let mothCompiled = null; // compiler.moth itself, compiled by the JIT
+    async function compileWithMoth(source) {
+      mothCompiled ??= mothCompiler(await loadCompiler());
+      return mothCompiled(source).source;
+    }
+
+    // What the compilers made of the code: the VM's bytecode, the JavaScript from the JIT, or the
+    // JavaScript from the compiler written in Moth, checked against the JIT's.
+    async function showCompiled() {
       const which = $("compiled").value;
       $("bytecode-view").hidden = !which;
       if (!which) return;
-      $("compiled-title").textContent = which === "js"
-        ? "JavaScript · what the JIT made, which V8 then compiles to machine code"
-        : "Bytecode · what the compiler made, which the virtual machine runs";
+      const source = code.value;
       try {
-        $("bytecode").textContent = which === "js" ? compileToJs(code.value).source : disassemble(compile(code.value));
+        if (which === "moth") {
+          const js = await compileWithMoth(source);
+          if (source !== code.value) return; // the code changed while compiler.moth loaded; that call shows it
+          const same = js === compileToJs(source).source;
+          $("compiled-title").textContent = `JavaScript · written by compiler.moth, Moth's compiler in Moth: ${same ? "the same as the JIT's, byte for byte" : "DIFFERENT from the JIT's"}`;
+          $("bytecode").textContent = js;
+          return;
+        }
+        $("compiled-title").textContent = which === "js"
+          ? "JavaScript · what the JIT made, which V8 then compiles to machine code"
+          : "Bytecode · what the compiler made, which the virtual machine runs";
+        $("bytecode").textContent = which === "js" ? compileToJs(source).source : disassemble(compile(source));
       } catch (err) {
+        if (!(err instanceof MothError) && which === "moth") {
+          $("bytecode").textContent = `(compiler.moth didn't load: ${err.message})`;
+          return;
+        }
         if (!(err instanceof MothError)) throw err;
         $("bytecode").textContent = "(fix the mistake in the code to see it compiled)";
       }
@@ -406,9 +430,12 @@
     };
     $("compiled").onchange = showCompiled;
 
-    picker.append(...Object.keys(examples).map((name) => new Option(name)));
-    picker.onchange = () => {
-      code.value = examples[picker.value];
+    // The last example is the compiler written in Moth, with a line at the end that uses it.
+    const COMPILER = "Moth's own compiler";
+    const TRY_IT = `\n\n# The compiler above, compiling a line of Moth to JavaScript:\nsay js of compile("say 1 + 2")\n`;
+    picker.append(...[...Object.keys(examples), COMPILER].map((name) => new Option(name)));
+    picker.onchange = async () => {
+      code.value = picker.value === COMPILER ? (await loadCompiler()).trimEnd() + TRY_IT : examples[picker.value];
       refreshEditor();
       runCode();
     };

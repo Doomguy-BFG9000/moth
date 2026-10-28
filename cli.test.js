@@ -86,6 +86,13 @@ test("moth js shows the JavaScript the JIT makes", (t) => {
   assert.match(result.stdout, /"use strict";[\s\S]*say\(\["hi"\]\);/);
 });
 
+test("moth bootstrap compiles the compiler written in Moth with itself", () => {
+  const result = moth(["bootstrap"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.match(/the same JavaScript/g).length, 3);
+  assert.match(result.stdout, /^fixed point: /m);
+});
+
 test("bad usage and missing files get a clear message", () => {
   const usage = moth(["frobnicate"]);
   assert.equal(usage.status, 2);

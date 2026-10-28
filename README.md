@@ -8,6 +8,10 @@ virtual machine, and a JIT that compiles Moth to JavaScript and runs 6–9×
 faster. It also has a checker that finds mistakes before the code runs, turtle
 drawing, a debugger that can go backwards in time, and a `moth` command with
 its own shell.
+
+Moth's compiler is also written in Moth: [`compiler.moth`](compiler.moth),
+1,100 lines that compile any Moth program, itself included, to exactly the
+JavaScript the JIT writes, byte for byte.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 <p>
@@ -83,6 +87,16 @@ to greet with person
 end
 greet "Sam"                         # or call it on its own line
 
+set sam to record with name "Sam", age 20   # a record keeps named values together
+set age of sam to 21
+say name of sam " is " age of sam
+
+to check_age with age
+    if age is less than 0
+        fail with "an age can't be below 0"  # stop with your own message
+    end
+end
+
 # drawing: the turtle starts in the middle, facing up, with its pen down
 move forward 100                    # or: move back 50
 turn right 90                       # or: turn left 45
@@ -92,7 +106,7 @@ pen up                              # move without drawing
 pen down
 ```
 
-- Values: numbers, `"text"`, `yes`, `no`, `nothing`, and lists.
+- Values: numbers, `"text"`, `yes`, `no`, `nothing`, lists, and records.
 - Comparisons: `is`, `is not`, `is less than`, `is greater than`, `is at least`,
   `is at most`, `is divisible by`. Combine them with `and`, `or`, `not`.
 - Math: `+ - * /`. Adding text to anything joins them into text.
@@ -100,6 +114,9 @@ pen down
   enclosing function) also sets; otherwise the variable stays inside the
   function. Functions remember the variables around them (closures).
 - Only `no` and `nothing` count as false. Upper or lower case doesn't matter.
+- Text holds any character except control characters; write `
+` for a new
+  line and `	` for a tab.
 
 Mistakes get a plain-words message that points at the exact spot. Moth
 suggests the right name when you misspell one, and the right word when you type
@@ -145,8 +162,11 @@ nothing to install.
   under code that will fail when it runs, yellow under code that never runs or
   is never used. Click one to jump to it.
 - **Share** puts the code into the link, so opening the link opens the program.
-- **Compiled** shows what the code turned into: the VM's bytecode, or the
-  JavaScript the JIT made.
+- **Compiled** shows what the code turned into: the VM's bytecode, the
+  JavaScript the JIT made, or the JavaScript from the compiler written in Moth,
+  checked against the JIT's.
+- The last example, **Moth's own compiler**, is `compiler.moth` itself, with
+  a line at the end that uses it to compile some Moth.
 
 ![The checker in the playground: wavy lines under five mistakes, listed under Problems, found without running the code](docs/checker.png)
 
@@ -164,6 +184,7 @@ npm install -g github:samyyy2423/moth
 | `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
 | `moth bytecode hello.moth` | Shows the bytecode the compiler made for the VM |
 | `moth js hello.moth` | Shows the JavaScript the JIT made |
+| `moth bootstrap` | Compiles the compiler written in Moth with itself, three times over |
 
 `moth check` gives each problem the same words the error would have when the
 line runs:
@@ -212,6 +233,16 @@ main:
     22  SAY           1
 ```
 
+`moth bootstrap` shows the compiler written in Moth compiling itself:
+
+```text
+compiler.moth: 1098 lines of Moth, which the JIT compiles to 93952 characters of JavaScript
+stage 1, made by the JIT, compiles compiler.moth: the same JavaScript (76 ms)
+stage 2, made by stage 1, compiles compiler.moth: the same JavaScript (56 ms)
+stage 3, made by stage 2, compiles compiler.moth: the same JavaScript (61 ms)
+fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it
+```
+
 Errors give the file, line, and column, so editors can jump straight to them:
 
 ```text
@@ -229,6 +260,7 @@ say item 5 of fruits
 | [`vm.js`](vm.js) | The virtual machine, plus every check and error message both engines use. It imports nothing, so `moth build` copies it into compiled programs |
 | [`jit.js`](jit.js) | The JIT: Moth to JavaScript, which V8 compiles to machine code |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
+| [`compiler.moth`](compiler.moth) | Moth's compiler written in Moth: tokenizer, parser, scope rules and JavaScript writer |
 | [`cli.js`](cli.js) | The `moth` command and shell |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground. Each run gets its own Web Worker, so **Stop** works even on a loop that never ends |
 
@@ -244,6 +276,10 @@ say item 5 of fruits
      variable a JavaScript variable, so V8 can keep them in machine registers.
    - **Checker**: works out every variable's type and tests each operation
      without running it.
+
+The compiler written in Moth repeats steps 1–3 and the JIT in Moth, with
+records for the syntax tree. `load()` runs a Moth program and hands its
+functions to JavaScript, which is how `mothCompiler()` runs it.
 
 **Run** uses the JIT. The debugger and the shell use the VM. The JIT hands deep
 recursion (more than 2,000 calls) to the VM, without showing any output twice.
@@ -272,23 +308,33 @@ are in **[DESIGN.md](DESIGN.md)**.
   will fail ever runs in a program that finishes, and its message matches the
   real error when the program does fail there. It predicts 44% of runtime
   errors before running, with no false alarms
+- the compiler written in Moth against the JIT, on every example, every table
+  program and 3,000 broken ones: the same JavaScript byte for byte, the same
+  positions, and the same mistakes
+- bootstrapping: `compiler.moth` compiles itself, and the compiler that makes
+  does too, three stages deep, each writing the same JavaScript
 - every `moth` command, run as a real process
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT and the
-checker were caught, one of them only by the JIT-versus-VM fuzzer.
+checker were caught, one of them only by the JIT-versus-VM fuzzer. Two bugs
+planted in `compiler.moth` were caught too, one of them only by its fuzzer.
 
 ## Limits
 
 - No dictionaries, `break`, text functions (like upper case or split), or imports.
 - These words are part of the language and can't be variable names:
   `set add say if else end repeat while for to return and or not is yes no
-  nothing list empty length item move turn pen`.
+  nothing list empty length item move turn pen record fail`.
 - Recursion goes up to 100,000 calls deep.
 - The checker only warns when it is sure, so it misses some mistakes: the length
   of a list, and a name used before the line that sets it.
 - The playground shows the first 10,000 lines of output, and the debugger
   records the first 10,000 steps.
 - In the shell, Ctrl+C stops a program that never ends by quitting the shell.
+- The compiler written in Moth gives up on code nested more than about 245
+  brackets deep (the JIT goes to about 1,000). Moth sees text as whole
+  characters, so text holding half an emoji (which no file can hold) can come
+  out differently from the JIT's.
 
 ## Run it from the source
 

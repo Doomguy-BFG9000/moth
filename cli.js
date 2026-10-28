@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
-import { run, compile, compileToJs, check, disassemble, session, excerpt, MothError } from "./moth.js";
+import { run, compile, compileToJs, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -11,7 +11,8 @@ const USAGE = `usage:
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
-  moth js <file.moth>         show the JavaScript the JIT makes`;
+  moth js <file.moth>         show the JavaScript the JIT makes
+  moth bootstrap              compile Moth's compiler written in Moth with itself, three times over`;
 
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
@@ -104,8 +105,28 @@ function shell() {
   rl.on("close", () => process.stdout.write("\n"));
 }
 
+// compiler.moth compiled by the JIT compiles itself; that compiler compiles it again, and so on. Every
+// stage must write exactly the JavaScript the JIT does.
+function bootstrap() {
+  const source = readFileSync(new URL("./compiler.moth", import.meta.url), "utf8");
+  const js = compileToJs(source).source;
+  const lines = source.trimEnd().split(/\r?\n/).length;
+  console.log(`compiler.moth: ${lines} lines of Moth, which the JIT compiles to ${js.length} characters of JavaScript`);
+  let compiler = compileToJs;
+  for (let stage = 1; stage <= 3; stage++) {
+    compiler = mothCompiler(source, compiler);
+    const start = performance.now();
+    const same = compiler(source).source === js;
+    const ms = Math.round(performance.now() - start);
+    console.log(`stage ${stage}, made by ${stage === 1 ? "the JIT" : `stage ${stage - 1}`}, compiles compiler.moth: ${same ? "the same JavaScript" : "DIFFERENT JavaScript"} (${ms} ms)`);
+    if (!same) return 1;
+  }
+  console.log("fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it");
+}
+
 function main([command, file, ...extra]) {
   if (!command) return shell();
+  if (command === "bootstrap" && !file) return bootstrap();
   if (["help", "--help", "-h"].includes(command)) return console.log(USAGE);
   if (!["run", "check", "build", "bytecode", "js"].includes(command) || !file || extra.length) {
     console.error(USAGE);
