@@ -331,9 +331,13 @@ bytes and dictionaries:
   timers, message boxes and the Open and Save boxes, in Windows' modern look,
   sharp on a screen set larger than 100%. Each calls a function of the
   program's when something happens to it.
-- [`notes.moth`](tools/notes.moth) is a notepad made with it, in under 120 lines:
-  New, Open, Save and Save as, with their keys, a `*` in the title while a
-  note isn't saved, and a question before one is lost.
+- [`linux.moth`](tools/linux.moth) has the same functions on Linux, through
+  GTK 3, in the desktop's own theme, and [`ui.moth`](tools/ui.moth) picks
+  between the two as the program starts, so a program that uses it works on
+  both.
+- [`notes.moth`](tools/notes.moth) is a notepad made with ui.moth, in under 120
+  lines, on Windows and Linux: New, Open, Save and Save as, with their keys, a
+  `*` in the title while a note isn't saved, and a question before one is lost.
 
   ```text
   $ moth build tools/notes.moth --allow-libraries --allow-read --allow-write
@@ -895,7 +899,8 @@ calls that led there.
   `qsort` calling a Moth function, floats and each mistake, on Windows and
   Linux; SQLite through `tools/sqlite.moth`; and on Windows a window whose
   procedure is a Moth function, and `tools/windows.moth` driving its own
-  controls, menus and keys
+  controls, menus and keys; on Linux `tools/linux.moth` doing the same with
+  GTK's, on CI's Xvfb display; and `tools/ui.moth` on both
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

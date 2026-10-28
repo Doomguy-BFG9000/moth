@@ -904,7 +904,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     const exe = executable(dir, "p");
     const bytes = machine(source, { target, name: "p.moth", allow, files });
     writeFileSync(exe, bytes);
@@ -1216,6 +1216,140 @@ end`);
     + "changed Sam\ngreet Sam\nticked yes\nis ticked yes\nbanana at 2 of 3\nsize large\nnow 2, 1\nopen\n"
     + '["one", "two"]\nresized\nsaved\nreloaded\nchanged Sams\nclosing\n', "", 0]);
   assert.ok(width > 400 && height > 250, `${width} by ${height}`);
+});
+
+// tools/linux.moth, GTK's own controls, with windows.moth's functions: the same window, driven by its own timer
+// through GTK's functions for a click, typing and choosing, its menu's keys pressed through its accelerators.
+// It needs GTK 3 and a display (CI's comes from Xvfb).
+const gtkHere = ["/usr/lib/x86_64-linux-gnu/libgtk-3.so.0", "/usr/lib64/libgtk-3.so.0", "/usr/lib/libgtk-3.so.0"].some((f) => existsSync(f));
+const onGtk = target !== "linux" ? "Linux only" : !gtkHere ? "GTK 3 isn't installed" : !process.env.DISPLAY ? "there's no display" : skip;
+test("tools/linux.moth makes GTK's own controls, menus and keys call a program's functions", { skip: onGtk }, () => {
+  const ran = libraryRun(`use "linux.moth" as ui
+set log to empty list
+set step to 0
+set resizes to 0
+to greet
+    add "greet " + ui's text_of(name) to log
+end
+to ticked_it with on
+    add "ticked " + on to log
+end
+to chose_it with fruit
+    add "chose " + fruit to log
+end
+to changed with t
+    add "changed " + t to log
+end
+to opened
+    add "open" to log
+end
+to saved
+    add "saved" to log
+end
+to reloaded
+    add "reloaded" to log
+end
+to resized with width, height
+    add 1 to resizes
+end
+to closing
+    add "closing" to log
+    return yes
+end
+to drive
+    add 1 to step
+    if step is 1
+        ui's set_text(name, "set, not typed")
+        ui's gtk_entry_set_text(handle of name, "Sam")
+        ui's gtk_button_clicked(handle of go)
+        ui's gtk_button_clicked(handle of tick)
+        add "is ticked " + ui's ticked(tick) to log
+    else if step is 2
+        ui's choose(fruits, 2)
+        add ui's chosen(fruits) + " at " + ui's chosen_place(fruits) + " of " + ui's count_of(fruits) to log
+        ui's choose(sizes, 3)
+        add "size " + ui's chosen(sizes) to log
+        ui's remove_item(fruits, 1)
+        add "now " + ui's count_of(fruits) + ", " + ui's chosen_place(fruits) to log
+        ui's gtk_list_box_select_row(handle of fruits, ui's gtk_list_box_get_row_at_index(handle of fruits, 1))
+        ui's gtk_menu_item_activate(handle of open_item)
+    else if step is 3
+        ui's set_text(notes, "one\\ntwo")
+        add (split ui's text_of(notes) by "\\n") to log
+        ui's set_text(w, "Driven again")
+        add ui's text_of(w) to log
+    else if step is 4
+        add "keys " + ui's gtk_accel_groups_activate(handle of w, 115, 4) to log
+    else if step is 5
+        ui's gtk_accel_groups_activate(handle of w, 65474, 5)
+    else
+        ui's close(w)
+    end
+end
+set w to ui's window("Driven", 400, 300)
+set name to ui's text_box(w, 10, 10, 200, 26)
+ui's on_change(name, changed)
+set go to ui's button(w, "Go", 220, 10, 80, 28, greet)
+set tick to ui's checkbox(w, "Dark", 10, 50, 100, 24, ticked_it)
+set fruits to ui's list_box(w, 10, 80, 150, 100, chose_it)
+for each fruit in list of "apple", "banana", "cherry"
+    ui's add_item(fruits, fruit)
+end
+set sizes to ui's dropdown(w, 170, 80, 120, 200, nothing)
+for each s in list of "small", "medium", "large"
+    ui's add_item(sizes, s)
+end
+set notes to ui's text_area(w, 10, 190, 380, 100)
+set open_item to ui's menu_item(w, "File", "Open", opened)
+ui's menu_item(w, "File", "-", nothing)
+ui's menu_item(w, "File", "Save\\tCtrl+S", saved)
+ui's menu_item(w, "File", "Reload\\tCtrl+Shift+F5", reloaded)
+for each bad in list of "Ctrl+Bogus", "Ctrl+Shift"
+    try
+        ui's menu_item(w, "File", "Bad\\t" + bad, nothing)
+    if it fails with why
+        add why to log
+    end
+end
+ui's on_resize(w, resized)
+ui's on_close(w, closing)
+ui's timer(w, 50, drive)
+ui's run()
+for each line in log
+    say line
+end
+say "resized " + (resizes is greater than 0)`, ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
+  assert.deepEqual([ran.stdout, ran.status], [
+    "linux.moth doesn't know the key 'Bogus' in 'Ctrl+Bogus'\n'Ctrl+Shift' has no key to press, only ones to hold\n"
+    + "changed Sam\ngreet Sam\nticked yes\nis ticked yes\nbanana at 2 of 3\nsize large\nnow 2, 1\nchose cherry\nopen\n"
+    + '["one", "two"]\nDriven again\nsaved\nkeys yes\nreloaded\nclosing\nresized yes\n', 0], ran.stderr);
+});
+
+// tools/ui.moth: windows.moth on Windows and linux.moth on Linux, through the same functions
+const onUi = target === "windows" ? skip : onGtk;
+test("tools/ui.moth uses the system's own controls, on Windows and on Linux", { skip: onUi }, () => {
+  const ran = libraryRun(`use "ui.moth" as ui
+set w to ui's window("Both", 300, 200)
+set name to ui's text_box(w, 10, 10, 200, 26)
+set tick to ui's checkbox(w, "Dark", 10, 40, 100, 24, nothing)
+set fruits to ui's list_box(w, 10, 70, 120, 80, nothing)
+set sizes to ui's dropdown(w, 140, 70, 100, 120, nothing)
+for each fruit in list of "apple", "banana"
+    ui's add_item(fruits, fruit)
+    ui's add_item(sizes, fruit)
+end
+to finish
+    ui's set_text(name, "Sam")
+    ui's set_ticked(tick, yes)
+    ui's choose(fruits, 2)
+    ui's choose(sizes, 1)
+    say ui's text_of(name) " " ui's ticked(tick) " " ui's chosen(fruits) " " ui's chosen(sizes) " " ui's count_of(fruits)
+    ui's close(w)
+end
+ui's timer(w, 50, finish)
+ui's run()
+say "done"`, ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
+  assert.deepEqual([ran.stdout, ran.status], ["Sam yes banana apple 2\ndone\n", 0], ran.stderr);
 });
 
 test("only a program that reads can go online, and only it imports WinHTTP", () => {

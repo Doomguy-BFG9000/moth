@@ -1,0 +1,257 @@
+# The system's own windows and controls, on Windows or Linux: windows.moth's on Windows and linux.moth's (GTK)
+# on Linux, which have the same functions, so a program that uses this one works on both. It needs both files
+# beside it, and is built with --allow-libraries.
+#
+#   use "ui.moth" as ui
+#   to say_hello
+#       ui's message(w, "Hello, " + ui's text_of(name))
+#   end
+#   set w to ui's window("Hello", 360, 140)
+#   set name to ui's text_box(w, 20, 20, 200, 26)
+#   ui's button(w, "Greet", 230, 20, 100, 28, say_hello)
+#   ui's run()
+
+use "windows.moth" as win
+use "linux.moth" as gtk
+use the library "kernel32"
+    GetTickCount() gives a whole number
+end
+
+# which it is: a library every Windows has, which no Linux has
+set on_windows to yes
+try
+    GetTickCount()
+if it fails
+    set on_windows to no
+end
+
+to window with title, width, height
+    if on_windows
+        return win's window(title, width, height)
+    end
+    return gtk's window(title, width, height)
+end
+
+to button with parent, text, x, y, width, height, handler
+    if on_windows
+        return win's button(parent, text, x, y, width, height, handler)
+    end
+    return gtk's button(parent, text, x, y, width, height, handler)
+end
+
+to label with parent, text, x, y, width, height
+    if on_windows
+        return win's label(parent, text, x, y, width, height)
+    end
+    return gtk's label(parent, text, x, y, width, height)
+end
+
+to text_box with parent, x, y, width, height
+    if on_windows
+        return win's text_box(parent, x, y, width, height)
+    end
+    return gtk's text_box(parent, x, y, width, height)
+end
+
+to text_area with parent, x, y, width, height
+    if on_windows
+        return win's text_area(parent, x, y, width, height)
+    end
+    return gtk's text_area(parent, x, y, width, height)
+end
+
+to on_change with control, handler
+    if on_windows
+        return win's on_change(control, handler)
+    end
+    return gtk's on_change(control, handler)
+end
+
+to checkbox with parent, text, x, y, width, height, handler
+    if on_windows
+        return win's checkbox(parent, text, x, y, width, height, handler)
+    end
+    return gtk's checkbox(parent, text, x, y, width, height, handler)
+end
+
+to list_box with parent, x, y, width, height, handler
+    if on_windows
+        return win's list_box(parent, x, y, width, height, handler)
+    end
+    return gtk's list_box(parent, x, y, width, height, handler)
+end
+
+to dropdown with parent, x, y, width, height, handler
+    if on_windows
+        return win's dropdown(parent, x, y, width, height, handler)
+    end
+    return gtk's dropdown(parent, x, y, width, height, handler)
+end
+
+to text_of with control
+    if on_windows
+        return win's text_of(control)
+    end
+    return gtk's text_of(control)
+end
+
+to set_text with control, text
+    if on_windows
+        return win's set_text(control, text)
+    end
+    return gtk's set_text(control, text)
+end
+
+to ticked with control
+    if on_windows
+        return win's ticked(control)
+    end
+    return gtk's ticked(control)
+end
+
+to set_ticked with control, tick
+    if on_windows
+        return win's set_ticked(control, tick)
+    end
+    return gtk's set_ticked(control, tick)
+end
+
+to add_item with control, text
+    if on_windows
+        return win's add_item(control, text)
+    end
+    return gtk's add_item(control, text)
+end
+
+to clear_items with control
+    if on_windows
+        return win's clear_items(control)
+    end
+    return gtk's clear_items(control)
+end
+
+to remove_item with control, place
+    if on_windows
+        return win's remove_item(control, place)
+    end
+    return gtk's remove_item(control, place)
+end
+
+to count_of with control
+    if on_windows
+        return win's count_of(control)
+    end
+    return gtk's count_of(control)
+end
+
+to chosen_place with control
+    if on_windows
+        return win's chosen_place(control)
+    end
+    return gtk's chosen_place(control)
+end
+
+to choose with control, place
+    if on_windows
+        return win's choose(control, place)
+    end
+    return gtk's choose(control, place)
+end
+
+to chosen with control
+    if on_windows
+        return win's chosen(control)
+    end
+    return gtk's chosen(control)
+end
+
+to enable with control, on
+    if on_windows
+        return win's enable(control, on)
+    end
+    return gtk's enable(control, on)
+end
+
+to focus with control
+    if on_windows
+        return win's focus(control)
+    end
+    return gtk's focus(control)
+end
+
+to place with control, x, y, width, height
+    if on_windows
+        return win's place(control, x, y, width, height)
+    end
+    return gtk's place(control, x, y, width, height)
+end
+
+to on_resize with parent, handler
+    if on_windows
+        return win's on_resize(parent, handler)
+    end
+    return gtk's on_resize(parent, handler)
+end
+
+to on_close with parent, handler
+    if on_windows
+        return win's on_close(parent, handler)
+    end
+    return gtk's on_close(parent, handler)
+end
+
+to menu_item with parent, title, text, handler
+    if on_windows
+        return win's menu_item(parent, title, text, handler)
+    end
+    return gtk's menu_item(parent, title, text, handler)
+end
+
+to timer with parent, milliseconds, handler
+    if on_windows
+        return win's timer(parent, milliseconds, handler)
+    end
+    return gtk's timer(parent, milliseconds, handler)
+end
+
+to message with parent, text
+    if on_windows
+        return win's message(parent, text)
+    end
+    return gtk's message(parent, text)
+end
+
+to ask_yes_no with parent, question
+    if on_windows
+        return win's ask_yes_no(parent, question)
+    end
+    return gtk's ask_yes_no(parent, question)
+end
+
+to choose_file_to_open with parent
+    if on_windows
+        return win's choose_file_to_open(parent)
+    end
+    return gtk's choose_file_to_open(parent)
+end
+
+to choose_file_to_save with parent
+    if on_windows
+        return win's choose_file_to_save(parent)
+    end
+    return gtk's choose_file_to_save(parent)
+end
+
+to close with parent
+    if on_windows
+        return win's close(parent)
+    end
+    return gtk's close(parent)
+end
+
+to run
+    if on_windows
+        return win's run()
+    end
+    return gtk's run()
+end

@@ -2162,9 +2162,9 @@ hold them to agreeing.
   saved through the Save box, saved again without it, closed with changes
   (No kept it, Yes closed it), a file opened through the Open box, one with CR
   LF opened as it was, and New.
-- **Not yet.** Linux's own controls, which would mean GTK; pictures and
-  drawing in a window of its own; more than one window's Tab order; and
-  windows.moth on the JavaScript engines, which can't call a library.
+- **Not yet.** Linux's own controls (see §49); pictures and drawing in a
+  window of its own; more than one window's Tab order; and windows.moth on the
+  JavaScript engines, which can't call a library.
 
 ## 48. Faster calls
 
@@ -2223,3 +2223,49 @@ hold them to agreeing.
 - **Not yet.** Inputs in registers instead of on the stack, a function's
   variables kept in registers through the calls it makes, and functions put
   in line where they're called.
+
+## 49. Linux's own controls, and one module for both
+
+- **Why.** windows.moth gave a program Windows' own controls, and only
+  Windows'. Linux has no one set of its own, but GTK 3 comes with nearly every
+  desktop, GNOME's and the rest, and libgtk-3.so.0 is a library like any other,
+  so [`tools/linux.moth`](tools/linux.moth) is windows.moth's functions again,
+  on it, in Moth, about 600 lines.
+- **How it's made.** A window is a GtkWindow holding a box: the menu bar, when
+  there is one, on top, and under it a GtkFixed, which puts each control where
+  it's asked, as Windows does. A text area and a list are in a scrolled window
+  with a border; a list is a GtkListBox of labels, and a dropdown a
+  GtkComboBoxText, each keeping its items' text in Moth as well, which GTK makes
+  hard to read back. Places and sizes are as at 100%, which GTK makes bigger
+  itself for a screen set larger, and it makes nothing smaller than it can be
+  drawn.
+- **What happens.** GTK calls a C function for each signal. Every one is
+  connected with the control's number as its data, to one of four Moth
+  functions, by what the signal gives: a click, a tick, a change of text, a
+  menu item chosen and a window gone; a list's choice and a new size; a window
+  being closed, which says whether it may; and a timer, which keeps going. So
+  four callback entries are all a program uses, however many controls it has.
+  A control the program changes itself doesn't tell it: as in windows.moth,
+  `set_text`, `choose` and the rest are kept quiet, where GTK would signal
+  them. A new size is told on Linux as the window first opens, too.
+- **Keys.** A menu item's keys, `"Save\tCtrl+S"`, become an accelerator of the
+  window's, which GTK shows beside the item and handles itself.
+- **GTK's own text.** What GTK makes and the program must free, as a text
+  view's text and a file box's name, comes back as a pointer: `strstr(p, "")`,
+  which gives p, reads it as text, and `g_free` frees it.
+- **One module for both.** [`tools/ui.moth`](tools/ui.moth) uses both, and as
+  it starts asks Windows' kernel32 for the time: on Linux there's no library
+  called that, which is a mistake it catches. Each of its functions then calls
+  windows.moth's or linux.moth's. A library is only loaded when it's first
+  called, so the other system's is never looked for.
+  [`tools/notes.moth`](tools/notes.moth) uses it, so the notepad is one
+  program for both.
+- **Tested.** On Linux, linux.moth's own test, the same window as
+  windows.moth's, driven by its own timer through GTK's functions for a click
+  and typing, a list's choice made as a person would make it, and its menu's
+  keys pressed through `gtk_accel_groups_activate`; ui.moth's, on Windows and
+  on Linux; on WSLg's display here, and on CI's from Xvfb. And notes, on
+  Linux, typed into by another program's X events, its Save box answered,
+  saving what was typed, and closed.
+- **Not yet.** A Mac's controls, which are Objective-C's and need more than
+  calling C; and GTK 4.

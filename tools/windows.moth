@@ -387,18 +387,21 @@ to menu_item with parent, title, text, handler
         set item title of menus to CreatePopupMenu()
         append_menu(bar of parent, 16, item title of menus, title)
     end
+    set made to record with handle nothing, id 0, kind "menu item", on handler, window parent
     if text is "-"
         append_line(item title of menus, 2048, 0, nothing)
     else
         set id to ui_next
         set ui_next to ui_next + 1
+        set id of made to id
         append_menu(item title of menus, 0, id, text)
-        set item id of ui_controls to record with handle nothing, id id, kind "menu item", on handler, window parent
+        set item id of ui_controls to made
         if pressed is not nothing
             set item pressed of ui_shortcuts to id
         end
     end
     DrawMenuBar(handle of parent)
+    return made
 end
 
 # "Ctrl+Shift+S" as ui_keys gives it when those keys are pressed: what's held, by 256, and the key's number

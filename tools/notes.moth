@@ -1,8 +1,8 @@
-# A notepad for Windows, made with windows.moth: write, open and save text files.
+# A notepad, made with ui.moth, for Windows and Linux: write, open and save text files.
 #
 #   moth build tools/notes.moth --allow-libraries --allow-read --allow-write
-#   tools\notes.exe
-use "windows.moth" as ui
+#   tools/notes
+use "ui.moth" as ui
 
 set file to nothing # the file's name, or nothing while it has none
 set changed to no
@@ -11,8 +11,8 @@ set notes to ui's text_area(w, 0, 0, 640, 440)
 
 to show_title
     set name to "Untitled"
-    if file is not nothing
-        set parts to split file by "\\"
+    if file is not nothing # the file's own name, after the last \ or /
+        set parts to split (join (split file by "\\") with "/") by "/"
         set name to item (length of parts) of parts
     end
     if changed

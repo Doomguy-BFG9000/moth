@@ -10,4 +10,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm test # the JavaScript engines, the playground's, and machine.moth's machine code against them, moth.exe included
+      # the JavaScript engines, the playground's, and machine.moth's machine code against them, moth.exe included; on
+      # a display of Xvfb's, where there's one, for tools/linux.moth's GTK windows
+      - run: if command -v xvfb-run > /dev/null; then xvfb-run -a npm test; else npm test; fi

@@ -1,0 +1,620 @@
+# Linux's own windows, buttons, text boxes, lists, menus and file boxes, through GTK 3, as a program `moth
+# build` makes can use them: the same functions as windows.moth, so the same program works with either, and
+# real ones, which look and behave as every other GTK program's, in the desktop's own theme.
+#
+#   use "linux.moth" as ui
+#   to say_hello
+#       ui's message(w, "Hello, " + ui's text_of(name))
+#   end
+#   set w to ui's window("Hello", 360, 140)
+#   set name to ui's text_box(w, 20, 20, 200, 26)
+#   ui's button(w, "Greet", 230, 20, 100, 28, say_hello)
+#   ui's run()
+#
+# Places and sizes are in pixels as at 100% on the screen, which GTK makes bigger for a screen set larger. A
+# control is put where it's asked, but GTK won't make one smaller than it can be drawn. What happens calls the
+# function given for it, a function of the program's, as in windows.moth. GTK 3 (libgtk-3.so.0) comes with
+# nearly every Linux desktop; a program that uses it is built with --allow-libraries, and needs a display.
+
+use the library "gtk-3"
+    gtk_init_check(a pointer, a pointer) gives yes or no
+    gtk_window_new(a whole number) gives a pointer
+    gtk_window_set_title(a pointer, text)
+    gtk_window_set_default_size(a pointer, a whole number, a whole number)
+    gtk_window_resize(a pointer, a whole number, a whole number)
+    gtk_window_close(a pointer)
+    gtk_window_add_accel_group(a pointer, a pointer)
+    gtk_widget_show_all(a pointer)
+    gtk_widget_destroy(a pointer)
+    gtk_widget_set_size_request(a pointer, a whole number, a whole number)
+    gtk_widget_set_sensitive(a pointer, yes or no)
+    gtk_widget_grab_focus(a pointer)
+    gtk_widget_get_allocated_width(a pointer) gives a whole number
+    gtk_widget_get_allocated_height(a pointer) gives a whole number
+    gtk_widget_add_accelerator(a pointer, text, a pointer, a whole number, a whole number, a whole number)
+    gtk_container_add(a pointer, a pointer)
+    gtk_box_new(a whole number, a whole number) gives a pointer
+    gtk_box_pack_start(a pointer, a pointer, yes or no, yes or no, a whole number)
+    gtk_box_reorder_child(a pointer, a pointer, a whole number)
+    gtk_fixed_new() gives a pointer
+    gtk_fixed_put(a pointer, a pointer, a whole number, a whole number)
+    gtk_fixed_move(a pointer, a pointer, a whole number, a whole number)
+    gtk_button_new_with_label(text) gives a pointer
+    gtk_button_get_label(a pointer) gives text
+    gtk_button_set_label(a pointer, text)
+    gtk_button_clicked(a pointer)
+    gtk_label_new(text) gives a pointer
+    gtk_label_get_text(a pointer) gives text
+    gtk_label_set_text(a pointer, text)
+    gtk_label_set_xalign(a pointer, a float)
+    gtk_entry_new() gives a pointer
+    gtk_entry_get_text(a pointer) gives text
+    gtk_entry_set_text(a pointer, text)
+    gtk_text_view_new() gives a pointer
+    gtk_text_view_get_buffer(a pointer) gives a pointer
+    gtk_text_view_set_wrap_mode(a pointer, a whole number)
+    gtk_text_buffer_set_text(a pointer, text, a whole number)
+    gtk_text_buffer_get_bounds(a pointer, bytes, bytes)
+    gtk_text_buffer_get_text(a pointer, bytes, bytes, yes or no) gives a pointer
+    gtk_scrolled_window_new(a pointer, a pointer) gives a pointer
+    gtk_scrolled_window_set_shadow_type(a pointer, a whole number)
+    gtk_check_button_new_with_label(text) gives a pointer
+    gtk_toggle_button_get_active(a pointer) gives yes or no
+    gtk_toggle_button_set_active(a pointer, yes or no)
+    gtk_list_box_new() gives a pointer
+    gtk_list_box_insert(a pointer, a pointer, a whole number)
+    gtk_list_box_get_selected_row(a pointer) gives a pointer
+    gtk_list_box_get_row_at_index(a pointer, a whole number) gives a pointer
+    gtk_list_box_select_row(a pointer, a pointer)
+    gtk_list_box_row_get_index(a pointer) gives a whole number
+    gtk_combo_box_text_new() gives a pointer
+    gtk_combo_box_text_append_text(a pointer, text)
+    gtk_combo_box_text_remove(a pointer, a whole number)
+    gtk_combo_box_text_remove_all(a pointer)
+    gtk_combo_box_get_active(a pointer) gives a whole number
+    gtk_combo_box_set_active(a pointer, a whole number)
+    gtk_menu_bar_new() gives a pointer
+    gtk_menu_new() gives a pointer
+    gtk_menu_item_new_with_label(text) gives a pointer
+    gtk_menu_item_set_submenu(a pointer, a pointer)
+    gtk_menu_item_activate(a pointer)
+    gtk_separator_menu_item_new() gives a pointer
+    gtk_menu_shell_append(a pointer, a pointer)
+    gtk_accel_group_new() gives a pointer
+    gtk_accel_groups_activate(a pointer, a whole number, a whole number) gives yes or no
+    gtk_message_dialog_new(a pointer, a whole number, a whole number, a whole number, text, text) gives a pointer
+    gtk_dialog_run(a pointer) gives a whole number
+    gtk_file_chooser_native_new(text, a pointer, a whole number, text, text) gives a pointer
+    gtk_file_chooser_set_do_overwrite_confirmation(a pointer, yes or no)
+    gtk_native_dialog_run(a pointer) gives a whole number
+    gtk_file_chooser_get_filename(a pointer) gives a pointer
+    gtk_main()
+    gtk_main_quit()
+end
+use the library "gobject-2.0"
+    callback gsignal(a pointer, a pointer)
+    callback gsignal3(a pointer, a pointer, a pointer)
+    callback gdecide(a pointer, a pointer, a pointer) gives yes or no
+    "g_signal_connect_data" as connect(a pointer, text, a gsignal, a pointer, a pointer, a whole number) gives a long whole number
+    "g_signal_connect_data" as connect3(a pointer, text, a gsignal3, a pointer, a pointer, a whole number) gives a long whole number
+    "g_signal_connect_data" as connect_decide(a pointer, text, a gdecide, a pointer, a pointer, a whole number) gives a long whole number
+    g_object_unref(a pointer)
+end
+use the library "glib-2.0"
+    callback gtick(a pointer) gives yes or no
+    g_timeout_add(a whole number, a gtick, a pointer) gives a whole number
+    g_free(a pointer)
+end
+use the library "c"
+    "strstr" as text_at(a pointer, text) gives text # a C string GTK made, as text: where "" is in it is its start
+end
+
+set ui_ready to no
+set ui_main to nothing # the first window: closing it ends run()
+set ui_controls to empty dictionary # each window, control and menu item, by its number
+set ui_timers to empty dictionary
+set ui_next to 100
+set ui_quiet to no # yes while the program changes a control, which isn't the one using it changing it
+set ui_key_names to dictionary where "DELETE" is 65535, "INSERT" is 65379, "HOME" is 65360, "END" is 65367,
+    "PAGEUP" is 65365, "PAGEDOWN" is 65366, "SPACE" is 32
+
+# a pointer, as a number: 0 for nothing
+to ui_number with p
+    if p is nothing
+        return 0
+    end
+    return p
+end
+
+# once, before the first window
+to ui_start
+    if ui_ready
+        return nothing
+    end
+    if not gtk_init_check(nothing, nothing)
+        fail with "there's no display to open a window on: GTK couldn't start"
+    end
+    set ui_ready to yes
+end
+
+# What GTK says happened, to a control or window with this number: a click, a tick, a change of text or of
+# what's chosen, a menu item chosen, a window gone
+to ui_signal with widget, data
+    set id to ui_number(data)
+    if not (id is in ui_controls)
+        return nothing
+    end
+    set control to item id of ui_controls
+    set kind to kind of control
+    if kind is "window"
+        if ui_main is not nothing and id is id of ui_main
+            gtk_main_quit()
+        end
+        return nothing
+    end
+    set handler to on of control
+    if handler is nothing or ui_quiet
+        return nothing
+    end
+    if kind is "button" or kind is "menu item"
+        handler()
+    else if kind is "checkbox"
+        handler(ticked(control))
+    else if kind is "dropdown"
+        handler(chosen(control))
+    else if kind is "text"
+        handler(text_of(control))
+    end
+end
+
+# a list's choice, or a window's new size
+to ui_signal3 with widget, extra, data
+    set id to ui_number(data)
+    if not (id is in ui_controls)
+        return nothing
+    end
+    set control to item id of ui_controls
+    if kind of control is "window"
+        set width to gtk_widget_get_allocated_width(fixed of control)
+        set height to gtk_widget_get_allocated_height(fixed of control)
+        if resized of control is not nothing and (width is not width of control or height is not height of control)
+            set width of control to width
+            set height of control to height
+            set handler to resized of control
+            handler(width, height)
+        end
+    else if on of control is not nothing and not ui_quiet and extra is not nothing
+        set handler to on of control
+        handler(chosen(control))
+    end
+end
+
+# whether a window that's being closed stays open: if its handler says it may not close
+to ui_decide with widget, event, data
+    set id to ui_number(data)
+    if id is in ui_controls
+        set made to item id of ui_controls
+        if closing of made is not nothing
+            set handler to closing of made
+            if handler() is no
+                return yes
+            end
+        end
+    end
+    return no
+end
+
+to ui_tick with data
+    set id to ui_number(data)
+    if id is in ui_timers
+        set handler to item id of ui_timers
+        handler()
+    end
+    return yes
+end
+
+to ui_new_id
+    set id to ui_next
+    set ui_next to ui_next + 1
+    return id
+end
+
+# a new window, `width` by `height` inside, shown, with `title` at its top
+to window with title, width, height
+    ui_start()
+    set id to ui_new_id()
+    set handle to gtk_window_new(0)
+    gtk_window_set_title(handle, title)
+    gtk_window_set_default_size(handle, width, height)
+    set column to gtk_box_new(1, 0)
+    gtk_container_add(handle, column)
+    set fixed to gtk_fixed_new()
+    gtk_box_pack_start(column, fixed, yes, yes, 0)
+    set made to record with handle handle, id id, title title, kind "window", resized nothing, closing nothing,
+        menus empty dictionary, bar nothing, column column, fixed fixed, accels nothing, width -1, height -1
+    set item id of ui_controls to made
+    connect_decide(handle, "delete-event", ui_decide, id, nothing, 0)
+    connect(handle, "destroy", ui_signal, id, nothing, 0)
+    connect3(fixed, "size-allocate", ui_signal3, id, nothing, 0)
+    if ui_main is nothing
+        set ui_main to made
+    end
+    gtk_widget_show_all(handle)
+    return made
+end
+
+# a control of GTK's in a window: `widget` is it, `outer` what's put in the window (a scrolled window around
+# it, or itself)
+to ui_control with parent, widget, outer, x, y, width, height, kind, handler
+    set id to ui_new_id()
+    gtk_widget_set_size_request(outer, width, height)
+    gtk_fixed_put(fixed of parent, outer, x, y)
+    gtk_widget_show_all(outer)
+    set made to record with handle widget, outer outer, id id, kind kind, on handler, window parent,
+        items empty list, buffer nothing
+    set item id of ui_controls to made
+    return made
+end
+
+to button with parent, text, x, y, width, height, handler
+    set widget to gtk_button_new_with_label(text)
+    set made to ui_control(parent, widget, widget, x, y, width, height, "button", handler)
+    connect(widget, "clicked", ui_signal, id of made, nothing, 0)
+    return made
+end
+
+to label with parent, text, x, y, width, height
+    set widget to gtk_label_new(text)
+    gtk_label_set_xalign(widget, 0)
+    return ui_control(parent, widget, widget, x, y, width, height, "label", nothing)
+end
+
+# a box for a line of text; `text_area` for many, with a scroll bar; `on_change` gives either a handler, for
+# what's typed into it (not what set_text puts there)
+to text_box with parent, x, y, width, height
+    set widget to gtk_entry_new()
+    set made to ui_control(parent, widget, widget, x, y, width, height, "text", nothing)
+    connect(widget, "changed", ui_signal, id of made, nothing, 0)
+    return made
+end
+
+to text_area with parent, x, y, width, height
+    set widget to gtk_text_view_new()
+    gtk_text_view_set_wrap_mode(widget, 3) # by words, or characters where a word is too long
+    set outer to ui_scroller(widget)
+    set made to ui_control(parent, widget, outer, x, y, width, height, "text", nothing)
+    set buffer of made to gtk_text_view_get_buffer(widget)
+    connect(buffer of made, "changed", ui_signal, id of made, nothing, 0)
+    return made
+end
+
+# a scrolled window with a border, around a widget
+to ui_scroller with widget
+    set outer to gtk_scrolled_window_new(nothing, nothing)
+    gtk_scrolled_window_set_shadow_type(outer, 1)
+    gtk_container_add(outer, widget)
+    return outer
+end
+
+to on_change with control, handler
+    set on of control to handler
+end
+
+to checkbox with parent, text, x, y, width, height, handler
+    set widget to gtk_check_button_new_with_label(text)
+    set made to ui_control(parent, widget, widget, x, y, width, height, "checkbox", handler)
+    connect(widget, "toggled", ui_signal, id of made, nothing, 0)
+    return made
+end
+
+to list_box with parent, x, y, width, height, handler
+    set widget to gtk_list_box_new()
+    set made to ui_control(parent, widget, ui_scroller(widget), x, y, width, height, "list", handler)
+    connect3(widget, "row-selected", ui_signal3, id of made, nothing, 0)
+    return made
+end
+
+# a list that drops down, of which one is chosen; `height` includes the list when it's open in windows.moth,
+# and GTK opens it as tall as it needs, so it's only how tall it is closed, if it's room for it
+to dropdown with parent, x, y, width, height, handler
+    set widget to gtk_combo_box_text_new()
+    set shut to height
+    if shut is greater than 30
+        set shut to 30
+    end
+    set made to ui_control(parent, widget, widget, x, y, width, shut, "dropdown", handler)
+    connect(widget, "changed", ui_signal, id of made, nothing, 0)
+    return made
+end
+
+# what a control says: a text box's text, a button's label, a window's title
+to text_of with control
+    set kind to kind of control
+    if kind is "text" and buffer of control is not nothing
+        set start to 128 bytes
+        set finish to 128 bytes
+        gtk_text_buffer_get_bounds(buffer of control, start, finish)
+        set made to gtk_text_buffer_get_text(buffer of control, start, finish, yes)
+        set got to text_at(made, "")
+        g_free(made)
+        return got
+    else if kind is "text"
+        return gtk_entry_get_text(handle of control)
+    else if kind is "label"
+        return gtk_label_get_text(handle of control)
+    else if kind is "window"
+        return title of control
+    end
+    return gtk_button_get_label(handle of control)
+end
+
+to set_text with control, text
+    set kind to kind of control
+    set ui_quiet to yes
+    if kind is "text" and buffer of control is not nothing
+        gtk_text_buffer_set_text(buffer of control, text, -1)
+    else if kind is "text"
+        gtk_entry_set_text(handle of control, text)
+    else if kind is "label"
+        gtk_label_set_text(handle of control, text)
+    else if kind is "window"
+        set title of control to text
+        gtk_window_set_title(handle of control, text)
+    else
+        gtk_button_set_label(handle of control, text)
+    end
+    set ui_quiet to no
+end
+
+to ticked with control
+    return gtk_toggle_button_get_active(handle of control)
+end
+
+to set_ticked with control, tick
+    set ui_quiet to yes
+    gtk_toggle_button_set_active(handle of control, tick)
+    set ui_quiet to no
+end
+
+to add_item with control, text
+    set ui_quiet to yes
+    set items to items of control
+    add text to items
+    if kind of control is "dropdown"
+        gtk_combo_box_text_append_text(handle of control, text)
+    else
+        set row to gtk_label_new(text)
+        gtk_label_set_xalign(row, 0)
+        gtk_list_box_insert(handle of control, row, -1)
+        gtk_widget_show_all(handle of control)
+    end
+    set ui_quiet to no
+end
+
+to clear_items with control
+    set ui_quiet to yes
+    if kind of control is "dropdown"
+        gtk_combo_box_text_remove_all(handle of control)
+    else
+        repeat length of items of control times
+            gtk_widget_destroy(gtk_list_box_get_row_at_index(handle of control, 0))
+        end
+    end
+    set items of control to empty list
+    set ui_quiet to no
+end
+
+to remove_item with control, place
+    set ui_quiet to yes
+    if kind of control is "dropdown"
+        gtk_combo_box_text_remove(handle of control, place - 1)
+    else
+        gtk_widget_destroy(gtk_list_box_get_row_at_index(handle of control, place - 1))
+    end
+    set kept to empty list
+    set at to 0
+    for each one in items of control
+        add 1 to at
+        if at is not place
+            add one to kept
+        end
+    end
+    set items of control to kept
+    set ui_quiet to no
+end
+
+to count_of with control
+    return length of items of control
+end
+
+# where the chosen item is, from 1, or 0 for none
+to chosen_place with control
+    if kind of control is "dropdown"
+        return gtk_combo_box_get_active(handle of control) + 1
+    end
+    set row to gtk_list_box_get_selected_row(handle of control)
+    if row is nothing
+        return 0
+    end
+    return gtk_list_box_row_get_index(row) + 1
+end
+
+to choose with control, place
+    set ui_quiet to yes
+    if kind of control is "dropdown"
+        gtk_combo_box_set_active(handle of control, place - 1)
+    else
+        gtk_list_box_select_row(handle of control, gtk_list_box_get_row_at_index(handle of control, place - 1))
+    end
+    set ui_quiet to no
+end
+
+# the chosen item, or nothing for none
+to chosen with control
+    set place to chosen_place(control)
+    if place is 0
+        return nothing
+    end
+    return item place of items of control
+end
+
+to enable with control, on
+    gtk_widget_set_sensitive(handle of control, on)
+end
+
+to focus with control
+    gtk_widget_grab_focus(handle of control)
+end
+
+# a control put somewhere else, or made another size, as when its window is resized
+to place with control, x, y, width, height
+    gtk_fixed_move(fixed of window of control, outer of control, x, y)
+    gtk_widget_set_size_request(outer of control, width, height)
+end
+
+to on_resize with parent, handler
+    set resized of parent to handler
+end
+
+# a function that says whether the window may close, asked when someone closes it
+to on_close with parent, handler
+    set closing of parent to handler
+end
+
+# an item at the end of the menu called `title` on the window's bar, made if it isn't there; "-" is a line.
+# Keys after a tab, as in "Save\tCtrl+S", are shown beside it and choose it too: Ctrl, Shift and Alt, then a
+# letter, a digit, F1 to F12, Space, Delete, Insert, Home, End, PageUp or PageDown.
+to menu_item with parent, title, text, handler
+    set parts to split text by "\t"
+    set pressed to nothing
+    if length of parts is 2
+        set pressed to ui_named_keys(item 2 of parts)
+    end
+    if bar of parent is nothing
+        set bar of parent to gtk_menu_bar_new()
+        gtk_box_pack_start(column of parent, bar of parent, no, no, 0)
+        gtk_box_reorder_child(column of parent, bar of parent, 0)
+    end
+    set menus to menus of parent
+    if not (title is in menus)
+        set top to gtk_menu_item_new_with_label(title)
+        set item title of menus to gtk_menu_new()
+        gtk_menu_item_set_submenu(top, item title of menus)
+        gtk_menu_shell_append(bar of parent, top)
+    end
+    set made to record with handle nothing, id ui_new_id(), kind "menu item", on handler, window parent
+    if text is "-"
+        set handle of made to gtk_separator_menu_item_new()
+    else
+        set handle of made to gtk_menu_item_new_with_label(item 1 of parts)
+        set item (id of made) of ui_controls to made
+        connect(handle of made, "activate", ui_signal, id of made, nothing, 0)
+        if pressed is not nothing
+            if accels of parent is nothing
+                set accels of parent to gtk_accel_group_new()
+                gtk_window_add_accel_group(handle of parent, accels of parent)
+            end
+            gtk_widget_add_accelerator(handle of made, "activate", accels of parent, item 1 of pressed,
+                item 2 of pressed, 1)
+        end
+    end
+    gtk_menu_shell_append(item title of menus, handle of made)
+    gtk_widget_show_all(bar of parent)
+    return made
+end
+
+# "Ctrl+Shift+S" as GTK has it: the key's number, and what's held with it
+to ui_named_keys with named
+    set held to 0
+    set key to nothing
+    for each written in split named by "+"
+        set part to uppercase of written
+        set codes to part as bytes
+        if part is "CTRL"
+            set held to held bit or 4
+        else if part is "SHIFT"
+            set held to held bit or 1
+        else if part is "ALT"
+            set held to held bit or 8
+        else if part is in ui_key_names
+            set key to item part of ui_key_names
+        else if length of codes is 1 and (byte 1 of codes) is at least 65 and (byte 1 of codes) is at most 90
+            set key to (byte 1 of codes) + 32 # a letter's key is its small letter
+        else if length of codes is 1 and (byte 1 of codes) is at least 48 and (byte 1 of codes) is at most 57
+            set key to byte 1 of codes
+        else if length of codes is 2 and (byte 1 of codes) is 70 and (byte 2 of codes) is greater than 48
+            and (byte 2 of codes) is less than 58 # F1 to F9
+            set key to 65470 + (byte 2 of codes) - 49
+        else if part is "F10" or part is "F11" or part is "F12"
+            set key to 65470 + 9 + (byte 3 of codes) - 48
+        else
+            fail with "linux.moth doesn't know the key '" + written + "' in '" + named + "'"
+        end
+    end
+    if key is nothing
+        fail with "'" + named + "' has no key to press, only ones to hold"
+    end
+    return list of key, held
+end
+
+# a handler called every so many milliseconds, while run() runs
+to timer with parent, milliseconds, handler
+    set id to ui_new_id()
+    set item id of ui_timers to handler
+    g_timeout_add(milliseconds, ui_tick, id)
+end
+
+to message with parent, text
+    set box to gtk_message_dialog_new(handle of parent, 1, 0, 1, "%s", text)
+    gtk_window_set_title(box, title of parent)
+    gtk_dialog_run(box)
+    gtk_widget_destroy(box)
+end
+
+to ask_yes_no with parent, question
+    set box to gtk_message_dialog_new(handle of parent, 1, 2, 4, "%s", question)
+    gtk_window_set_title(box, title of parent)
+    set answer to gtk_dialog_run(box)
+    gtk_widget_destroy(box)
+    return answer is -8
+end
+
+# the desktop's own box for choosing a file: its name, or nothing if none was chosen
+to choose_file_to_open with parent
+    return ui_choose_file(parent, yes)
+end
+
+to choose_file_to_save with parent
+    return ui_choose_file(parent, no)
+end
+
+to ui_choose_file with parent, opening
+    set asking to nothing
+    if opening
+        set asking to gtk_file_chooser_native_new("Open", handle of parent, 0, "_Open", "_Cancel")
+    else
+        set asking to gtk_file_chooser_native_new("Save", handle of parent, 1, "_Save", "_Cancel")
+        gtk_file_chooser_set_do_overwrite_confirmation(asking, yes)
+    end
+    set name to nothing
+    if gtk_native_dialog_run(asking) is -3
+        set made to gtk_file_chooser_get_filename(asking)
+        if made is not nothing
+            set name to text_at(made, "")
+            g_free(made)
+        end
+    end
+    g_object_unref(asking)
+    return name
+end
+
+to close with parent
+    gtk_window_close(handle of parent)
+end
+
+# what happens to the windows, to their handlers, until the first window is closed
+to run
+    if ui_main is not nothing
+        gtk_main()
+    end
+end
