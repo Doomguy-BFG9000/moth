@@ -22,7 +22,7 @@ use the library "user32"
         class_extra as a whole number, window_extra as a whole number, instance as a pointer, icon as a pointer,
         cursor as a pointer, background as a pointer, menu_name as a pointer, class_name as wide text,
         small_icon as a pointer
-    structure rectangle with left as a whole number, top as a whole number, right as a whole number,
+    structure box_edges with left as a whole number, top as a whole number, right as a whole number,
         bottom as a whole number
     RegisterClassExW(a window_class) gives a whole number
     CreateWindowExW(a whole number, wide text, wide text, a whole number, a whole number, a whole number,
@@ -47,7 +47,7 @@ use the library "user32"
     DispatchMessageW(bytes) gives a pointer
     PostQuitMessage(a whole number)
     LoadCursorW(a pointer, a pointer) gives a pointer
-    AdjustWindowRectEx(a rectangle, a whole number, yes or no, a whole number) gives yes or no
+    AdjustWindowRectEx(a box_edges, a whole number, yes or no, a whole number) gives yes or no
     MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number
     SetTimer(a pointer, a pointer, a whole number, a pointer) gives a pointer
     CreateMenu() gives a pointer
@@ -59,6 +59,26 @@ use the library "user32"
     GetKeyState(a whole number) gives a whole number
     SetProcessDPIAware() gives yes or no
     GetDpiForSystem() gives a whole number
+    GetSysColor(a whole number) gives a whole number
+    SetWindowPos(a pointer, a pointer, a whole number, a whole number, a whole number, a whole number,
+        a whole number) gives yes or no
+    InvalidateRect(a pointer, a pointer, yes or no) gives yes or no
+    BeginPaint(a pointer, bytes) gives a pointer
+    EndPaint(a pointer, bytes) gives yes or no
+    DrawTextW(a pointer, wide text, a whole number, a box_edges, a whole number) gives a whole number
+    structure tab_item with mask as a whole number, state as a whole number, state_mask as a whole number,
+        text as wide text, text_most as a whole number, image as a whole number, data as a pointer
+    structure table_column with mask as a whole number, format as a whole number, width as a whole number,
+        text as wide text, text_most as a whole number, sub_item as a whole number, image as a whole number,
+        order as a whole number, least as a whole number, usual as a whole number, ideal as a whole number
+    structure table_item with mask as a whole number, row as a whole number, sub_item as a whole number,
+        state as a whole number, state_mask as a whole number, text as wide text, text_most as a whole number,
+        image as a whole number, data as a pointer, indent as a whole number, group_id as a whole number,
+        columns as a whole number, column_list as a pointer, column_formats as a pointer, group as a whole number
+    "SendMessageW" as send_tab(a pointer, a whole number, a pointer, a tab_item) gives a pointer
+    "SendMessageW" as send_column(a pointer, a whole number, a pointer, a table_column) gives a pointer
+    "SendMessageW" as send_item(a pointer, a whole number, a pointer, a table_item) gives a pointer
+    "SendMessageW" as send_rectangle(a pointer, a whole number, a pointer, a box_edges) gives a pointer
 end
 use the library "kernel32"
     structure activation with size as a whole number, flags as a whole number, source as wide text,
@@ -70,11 +90,38 @@ use the library "kernel32"
     ActivateActCtx(a pointer, bytes) gives yes or no
     GetSystemDirectoryW(bytes, a whole number) gives a whole number
     "lstrcatW" as wide_in(bytes, wide text) gives wide text
+    "RtlMoveMemory" as copy_in(bytes, a pointer, a whole number)
 end
 use the library "gdi32"
     CreateFontW(a whole number, a whole number, a whole number, a whole number, a whole number, a whole number,
         a whole number, a whole number, a whole number, a whole number, a whole number, a whole number,
         a whole number, wide text) gives a pointer
+    GetStockObject(a whole number) gives a pointer
+    DeleteObject(a pointer) gives yes or no
+    SelectObject(a pointer, a pointer) gives a pointer
+    SetDCBrushColor(a pointer, a whole number) gives a whole number
+    SetDCPenColor(a pointer, a whole number) gives a whole number
+    SetTextColor(a pointer, a whole number) gives a whole number
+    SetBkMode(a pointer, a whole number) gives a whole number
+    "Rectangle" as fill_box(a pointer, a whole number, a whole number, a whole number, a whole number) gives yes or no
+    "Ellipse" as fill_ellipse(a pointer, a whole number, a whole number, a whole number, a whole number) gives yes or no
+    MoveToEx(a pointer, a whole number, a whole number, a pointer) gives yes or no
+    LineTo(a pointer, a whole number, a whole number) gives yes or no
+end
+use the library "msvcrt"
+    floor(a number) gives a number
+end
+use the library "comctl32"
+    structure common_controls with size as a whole number, classes as a whole number
+    InitCommonControlsEx(a common_controls) gives yes or no
+end
+use the library "gdiplus"
+    structure gdiplus_start with version as a whole number, debug as a pointer, no_thread as a whole number,
+        no_codecs as a whole number
+    GdiplusStartup(bytes, a gdiplus_start, a pointer) gives a whole number
+    GdipCreateBitmapFromFile(wide text, bytes) gives a whole number
+    GdipCreateHBITMAPFromBitmap(a pointer, bytes, a whole number) gives a whole number
+    GdipDisposeImage(a pointer) gives a whole number
 end
 use the library "comdlg32"
     structure open_file_name with size as a whole number, owner as a pointer, instance as a pointer,
@@ -95,6 +142,8 @@ set ui_font to nothing
 set ui_main to nothing # the first window: closing it ends run()
 set ui_controls to empty dictionary # each control and menu item, by its number
 set ui_windows to empty dictionary # each window, by its handle
+set ui_drawings to empty dictionary # each drawing, by its handle
+set ui_gdiplus to no
 set ui_timers to empty dictionary
 set ui_shortcuts to empty dictionary # each menu item's number, by its keys, as ui_keys gives them
 set ui_key_names to dictionary where "DELETE" is 46, "INSERT" is 45, "HOME" is 36, "END" is 35, "PAGEUP" is 33,
@@ -141,12 +190,37 @@ to ui_start
     set class to record with size 80, procedure ui_procedure, instance ui_instance, cursor LoadCursorW(nothing, 32512),
         background 16, class_name "MothWindow"
     RegisterClassExW(class)
+    InitCommonControlsEx(record with size 8, classes 255) # progress bars, tabs, tables, and the rest Windows 95 had
+    set class to record with size 80, style 3, procedure ui_procedure, instance ui_instance,
+        cursor LoadCursorW(nothing, 32512), background GetStockObject(0), class_name "MothDrawing"
+    RegisterClassExW(class)
 end
 
 # What Windows tells a window: a command from one of its controls or menus, a timer, a new size, closing
 to ui_procedure with handle, message, w, l
     set wn to ui_number(w)
     set ln to ui_number(l)
+    if handle is in ui_drawings # a drawing, drawn when Windows asks (WM_PAINT), or clicked
+        set drawn to item handle of ui_drawings
+        if message is 15
+            ui_paint(drawn)
+            return 0
+        else if message is 513 and clicked of drawn is not nothing
+            set handler to clicked of drawn
+            handler(MulDiv(ln bit and 65535, 96, ui_dpi), MulDiv((shift ln right by 16) bit and 65535, 96, ui_dpi))
+            return 0
+        end
+        return DefWindowProcW(handle, message, w, l)
+    end
+    if message is 78 # WM_NOTIFY: a tab or a table says what happened to it
+        set header to 24 bytes
+        copy_in(header, l, 24)
+        set id to ui_bytes_number(header, 9, 4)
+        if id is in ui_controls
+            ui_notify(item id of ui_controls, ui_bytes_number(header, 17, 4))
+        end
+        return 0
+    end
     if message is 273 # WM_COMMAND: which control, and what happened to it
         set id to wn bit and 65535
         if id is in ui_controls
@@ -219,14 +293,32 @@ to window with title, width, height
 end
 
 # a control of Windows' own kind (`class`) in a window, with its style, its text and its handler
+# (or on a tab's page: in the page's window, where the page is, shown only while its tab is chosen)
 to ui_control with parent, class, text, style, outer, x, y, width, height, kind, handler
     set id to ui_next
     set ui_next to ui_next + 1
-    set handle to CreateWindowExW(outer, class, text, 1342177280 + style, ui_scaled(x), ui_scaled(y), ui_scaled(width),
-        ui_scaled(height), handle of parent, id, ui_instance, nothing)
+    set host to parent
+    set page to nothing
+    set dx to 0
+    set dy to 0
+    if kind of parent is "page"
+        set page to parent
+        set host to window of parent
+        set dx to left of parent
+        set dy to top of parent
+    end
+    set handle to CreateWindowExW(outer, class, text, 1342177280 + style, ui_scaled(x + dx), ui_scaled(y + dy),
+        ui_scaled(width), ui_scaled(height), handle of host, id, ui_instance, nothing)
     SendMessageW(handle, 48, ui_font, 1) # WM_SETFONT
-    set made to record with handle handle, id id, kind kind, on handler, window parent
+    set made to record with handle handle, id id, kind kind, on handler, window host, page page, dx dx, dy dy
     set item id of ui_controls to made
+    if page is not nothing
+        set held to controls of page
+        add made to held
+        if nth of page is not chosen_tab(tabs of page)
+            ShowWindow(handle, 0)
+        end
+    end
     return made
 end
 
@@ -319,11 +411,17 @@ to remove_item with control, place
 end
 
 to count_of with control
+    if kind of control is "table"
+        return length of rows of control
+    end
     return ui_number(SendMessageW(handle of control, ui_list_message(control, 395, 326), 0, 0))
 end
 
 # where the chosen item is, from 1, or 0 for none
 to chosen_place with control
+    if kind of control is "table"
+        return ui_number(SendMessageW(handle of control, 4108, -1, 2)) + 1 # LVM_GETNEXTITEM, the chosen one
+    end
     set at to ui_number(SendMessageW(handle of control, ui_list_message(control, 392, 327), 0, 0))
     if at is -1
         return 0
@@ -357,7 +455,8 @@ end
 
 # a control put somewhere else, or made another size, as when its window is resized
 to place with control, x, y, width, height
-    MoveWindow(handle of control, ui_scaled(x), ui_scaled(y), ui_scaled(width), ui_scaled(height), yes)
+    MoveWindow(handle of control, ui_scaled(x + dx of control), ui_scaled(y + dy of control), ui_scaled(width),
+        ui_scaled(height), yes)
 end
 
 to on_resize with parent, handler
@@ -541,4 +640,261 @@ to run
             DispatchMessageW(got)
         end
     end
+end
+
+# ---------- progress bars, pictures, tabs, tables and drawings ----------
+
+# a whole number from `count` bytes of `b`, lowest first, from byte `from`
+to ui_bytes_number with b, from, count
+    set made to 0
+    set k to count
+    repeat count times
+        set made to made * 256 + byte (from + k - 1) of b
+        set k to k - 1
+    end
+    return made
+end
+
+# the nearest whole number to n, from `least` to `most`
+to ui_whole with n, least, most
+    set made to floor(n + 0.5)
+    if made is less than least
+        return least
+    end
+    if made is greater than most
+        return most
+    end
+    return made
+end
+
+# a place or size as at 100%, in the screen's pixels, for drawing
+to ui_px with n
+    return floor(n * ui_dpi / 96 + 0.5)
+end
+
+# what a tab or a table says happened to it: another tab chosen, or another row
+to ui_notify with control, code
+    if kind of control is "tabs" and code is 4294966745 # TCN_SELCHANGE
+        ui_show_page(control)
+        if on of control is not nothing and not ui_quiet
+            set handler to on of control
+            handler(title of item chosen_tab(control) of pages of control)
+        end
+    else if kind of control is "table" and code is 4294967195 # LVN_ITEMCHANGED
+        set at to chosen_place(control)
+        if at is not last of control
+            set last of control to at
+            if at is greater than 0 and on of control is not nothing and not ui_quiet
+                set handler to on of control
+                handler(item at of rows of control)
+            end
+        end
+    end
+end
+
+# a bar that fills up as something gets done: set_progress says how far, from 0 to 100
+to progress with parent, x, y, width, height
+    return ui_control(parent, "msctls_progress32", "", 0, 0, x, y, width, height, "progress", nothing)
+end
+
+to set_progress with control, percent
+    SendMessageW(handle of control, 1026, ui_whole(percent, 0, 100), 0) # PBM_SETPOS
+end
+
+# a picture from a file, a PNG, JPEG, GIF or BMP, made the size it's put at
+to picture with parent, file, x, y, width, height
+    set made to ui_control(parent, "STATIC", "", 14 + 64, 0, x, y, width, height, "picture", nothing)
+    set_picture(made, file)
+    return made
+end
+
+to set_picture with control, file
+    if not ui_gdiplus
+        GdiplusStartup(8 bytes, (record with version 1), nothing)
+        set ui_gdiplus to yes
+    end
+    set got to 8 bytes
+    if GdipCreateBitmapFromFile(file, got) is not 0
+        fail with "can't show '" + file + "': it isn't there, or isn't a picture"
+    end
+    set image to ui_bytes_number(got, 1, 8)
+    set back to GetSysColor(15) # the window's own colour, under what's see-through: its red, green and blue
+    set argb to 4278190080 + (back bit and 255) * 65536 + (back bit and 65280) + ((shift back right by 16) bit and 255)
+    set bitmap to 8 bytes
+    GdipCreateHBITMAPFromBitmap(image, bitmap, argb)
+    GdipDisposeImage(image)
+    set made to ui_bytes_number(bitmap, 1, 4) # a GDI handle: 32 bits, made 64 by its sign
+    if made is at least 2147483648
+        set made to made - 4294967296
+    end
+    set was to SendMessageW(handle of control, 370, 0, made) # STM_SETIMAGE, a bitmap
+    if was is not nothing
+        DeleteObject(was)
+    end
+end
+
+# tabs, each with a page of its own (see tab) for controls; `handler` is given a tab's title when the person
+# chooses it
+to tabs with parent, x, y, width, height, handler
+    set made to ui_control(parent, "SysTabControl32", "", 65536 + 67108864, 0, x, y, width, height, "tabs", handler)
+    set pages of made to empty list
+    set left of made to x + dx of made
+    set top of made to y + dy of made
+    return made
+end
+
+# a page of the tabs, with `title` on its tab: what's put on it, as on a window, shows while its tab is chosen
+to tab with tabs_control, title
+    set pages to pages of tabs_control
+    set made to record with kind "page", title title, tabs tabs_control, window window of tabs_control,
+        controls empty list, nth length of pages + 1, left 0, top 0
+    send_tab(handle of tabs_control, 4926, length of pages, record with mask 1, text title) # TCM_INSERTITEMW
+    add made to pages
+    set room to record with left 0, top 0, right 1000, bottom 1000
+    send_rectangle(handle of tabs_control, 4904, 0, room) # TCM_ADJUSTRECT: where a page goes, inside the tabs
+    set left of made to left of tabs_control + MulDiv(left of room, 96, ui_dpi)
+    set top of made to top of tabs_control + MulDiv(top of room, 96, ui_dpi)
+    return made
+end
+
+# which tab is chosen, from 1
+to chosen_tab with control
+    return ui_number(SendMessageW(handle of control, 4875, 0, 0)) + 1 # TCM_GETCURSEL
+end
+
+to choose_tab with control, place
+    SendMessageW(handle of control, 4876, place - 1, 0) # TCM_SETCURSEL
+    ui_show_page(control)
+end
+
+# the chosen tab's page shown, and the others hidden; the tabs kept under them, for clicks to reach them
+to ui_show_page with control
+    set chosen_one to chosen_tab(control)
+    for each page in pages of control
+        for each held in controls of page
+            if nth of page is chosen_one
+                ShowWindow(handle of held, 5)
+            else
+                ShowWindow(handle of held, 0)
+            end
+        end
+    end
+    SetWindowPos(handle of control, 1, 0, 0, 0, 0, 19) # at the bottom, not moved, sized or made active
+end
+
+# a table, with a column for each title in `columns`, and rows of values (add_row); `handler` is given a row's
+# values when the person chooses it
+to table with parent, columns, x, y, width, height, handler
+    set made to ui_control(parent, "SysListView32", "", 65536 + 1 + 4 + 8, 512, x, y, width, height, "table", handler)
+    SendMessageW(handle of made, 4150, 33, 33) # LVM_SETEXTENDEDLISTVIEWSTYLE: whole rows chosen, and grid lines
+    set rows of made to empty list
+    set last of made to 0
+    set each to MulDiv(width - 4, ui_dpi, 96 * length of columns)
+    set k to 0
+    for each title in columns
+        send_column(handle of made, 4193, k, record with mask 6, width each, text title) # LVM_INSERTCOLUMNW
+        add 1 to k
+    end
+    return made
+end
+
+# a row at the end of the table: its values, each shown as `say` shows it
+to add_row with control, values
+    set ui_quiet to yes
+    set at to length of rows of control
+    set texts to empty list
+    for each v in values
+        add "" + v to texts
+    end
+    set held to rows of control
+    add values to held
+    send_item(handle of control, 4173, 0, record with mask 1, row at, text item 1 of texts) # LVM_INSERTITEMW
+    for each k from 2 to length of texts
+        send_item(handle of control, 4212, at, record with mask 1, row at, sub_item k - 1, text item k of texts)
+    end
+    set ui_quiet to no
+end
+
+to clear_rows with control
+    set ui_quiet to yes
+    SendMessageW(handle of control, 4105, 0, 0) # LVM_DELETEALLITEMS
+    set rows of control to empty list
+    set last of control to 0
+    set ui_quiet to no
+end
+
+# the chosen row's values, or nothing for none
+to chosen_row with control
+    set at to chosen_place(control)
+    if at is 0
+        return nothing
+    end
+    return item at of rows of control
+end
+
+to choose_row with control, place
+    set ui_quiet to yes
+    send_item(handle of control, 4139, place - 1, record with state 3, state_mask 3) # LVM_SETITEMSTATE: chosen
+    set last of control to place
+    set ui_quiet to no
+end
+
+# A drawing: `painter` draws it whenever it must be drawn, and after redraw, given a canvas to draw on with
+# colour, rectangle, circle, line and words, in pixels as at 100% from the drawing's top left
+to drawing with parent, x, y, width, height, painter
+    set made to ui_control(parent, "MothDrawing", "", 0, 0, x, y, width, height, "drawing", nothing)
+    set painter of made to painter
+    set clicked of made to nothing
+    set item (handle of made) of ui_drawings to made
+    return made
+end
+
+# a drawing's handler for a click on it, given where: x and y
+to on_click with control, handler
+    set clicked of control to handler
+end
+
+to redraw with control
+    InvalidateRect(handle of control, nothing, yes)
+end
+
+to ui_paint with drawn
+    set painted to 72 bytes
+    set dc to BeginPaint(handle of drawn, painted)
+    SelectObject(dc, GetStockObject(18)) # DC_BRUSH and DC_PEN, whose colours colour() sets
+    SelectObject(dc, GetStockObject(19))
+    SelectObject(dc, ui_font)
+    SetBkMode(dc, 1) # words drawn on what's there
+    set canvas to record with dc dc
+    colour(canvas, 0, 0, 0)
+    set painter to painter of drawn
+    painter(canvas)
+    EndPaint(handle of drawn, painted)
+end
+
+# what's drawn next is this colour: red, green and blue, each from 0 to 255
+to colour with canvas, red, green, blue
+    set made to ui_whole(red, 0, 255) + ui_whole(green, 0, 255) * 256 + ui_whole(blue, 0, 255) * 65536
+    SetDCBrushColor(dc of canvas, made)
+    SetDCPenColor(dc of canvas, made)
+    SetTextColor(dc of canvas, made)
+end
+
+to rectangle with canvas, x, y, width, height
+    fill_box(dc of canvas, ui_px(x), ui_px(y), ui_px(x + width), ui_px(y + height))
+end
+
+to circle with canvas, x, y, radius
+    fill_ellipse(dc of canvas, ui_px(x - radius), ui_px(y - radius), ui_px(x + radius), ui_px(y + radius))
+end
+
+to line with canvas, x1, y1, x2, y2
+    MoveToEx(dc of canvas, ui_px(x1), ui_px(y1), nothing)
+    LineTo(dc of canvas, ui_px(x2), ui_px(y2))
+end
+
+# words with their top left at x, y, in the windows' own font
+to words with canvas, text, x, y
+    set room to record with left ui_px(x), top ui_px(y), right ui_px(x), bottom ui_px(y)
+    DrawTextW(dc of canvas, text, -1, room, 256 + 32 + 2048) # not cut off, on one line, & as it is
 end

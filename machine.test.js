@@ -905,6 +905,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     const exe = executable(dir, "p");
     const bytes = machine(source, { target, name: "p.moth", allow, files });
     writeFileSync(exe, bytes);
@@ -1350,6 +1351,109 @@ ui's timer(w, 50, finish)
 ui's run()
 say "done"`, ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
   assert.deepEqual([ran.stdout, ran.status], ["Sam yes banana apple 2\ndone\n", 0], ran.stderr);
+});
+
+// Progress bars, pictures, tabs, tables and drawings, the same in windows.moth and linux.moth: a window of each
+// kind, driven by its own timer, with what a person does done through the system's own calls (on Windows, a
+// tab chosen with TCM_SETCURFOCUS, a row with LVM_SETITEMSTATE, a click and a paint as their messages; on Linux,
+// GTK's own calls for a tab and a row, and a paint as GTK asks for it)
+const moreControls = (module, person) => `use "${module}" as ui
+set log to empty list
+set step to 0
+set painted to 0
+to paint with canvas
+    add 1 to painted
+    ui's colour(canvas, 240, 248, 255)
+    ui's rectangle(canvas, 0, 0, 200, 120)
+    ui's colour(canvas, 220, 60, 60)
+    ui's circle(canvas, 50, 60, 30)
+    ui's colour(canvas, 30, 90, 200)
+    ui's line(canvas, 100, 20, 190, 100)
+    ui's colour(canvas, 0, 0, 0)
+    ui's words(canvas, "Drawn by Moth", 95, 100)
+end
+to clicked_at with x, y
+    add "clicked " + x + " " + y to log
+end
+to tab_chosen with title
+    add "tab " + title to log
+end
+to row_chosen with values
+    add "row " + values to log
+end
+to drive
+    add 1 to step
+    if step is 1
+        ui's set_progress(bar, 40)
+        ui's set_progress(bar, 140)
+        ${person.click}
+    else if step is 2
+        ${person.paint}
+        add "painted " + (painted is greater than 0) to log
+        ${person.tab}
+        add "now tab " + ui's chosen_tab(pages) to log
+    else if step is 3
+        ui's choose_row(people, 2)
+        add "chosen " + ui's chosen_row(people) + " of " + ui's count_of(people) to log
+        ${person.row}
+    else if step is 4
+        ui's clear_rows(people)
+        add "rows " + ui's count_of(people) + " " + ui's chosen_row(people) to log
+        ui's choose_tab(pages, 1)
+        add "back to tab " + ui's chosen_tab(pages) to log
+        try
+            ui's set_picture(art, "no such picture.png")
+        if it fails with why
+            add why to log
+        end
+    else
+        ui's close(w)
+    end
+end
+set w to ui's window("More", 460, 360)
+set pages to ui's tabs(w, 10, 10, 440, 340, tab_chosen)
+set first to ui's tab(pages, "Things")
+set second to ui's tab(pages, "People")
+ui's label(first, "Working:", 10, 12, 70, 20)
+set bar to ui's progress(first, 80, 10, 200, 20)
+set art to ui's picture(first, "mandelbrot.png", 10, 50, 180, 120)
+set board to ui's drawing(first, 200, 50, 200, 120, paint)
+ui's on_click(board, clicked_at)
+set people to ui's table(second, (list of "Name", "Age", "Town"), 10, 10, 400, 200, row_chosen)
+ui's add_row(people, (list of "Sam", 20, "Pune"))
+ui's add_row(people, (list of "Ana", 31, "Lisbon"))
+ui's add_row(people, (list of "Bo", 7, "Oslo"))
+ui's timer(w, ${person.every}, drive)
+${person.hide}
+ui's run()
+for each line in log
+    say line
+end`;
+const moreSaid = (click) => `${click}painted yes\ntab People\nnow tab 2\nchosen ["Ana", 31, "Lisbon"] of 3\nrow ["Bo", 7, "Oslo"]\n`
+  + "rows 0 nothing\nback to tab 1\ncan't show 'no such picture.png': it isn't there, or isn't a picture\n";
+
+test("tools/windows.moth makes progress bars, pictures, tabs, tables and drawings", { skip: target === "windows" ? skip : "Windows only" }, () => {
+  const ran = libraryRun(moreControls("windows.moth", {
+    click: "ui's postmessagew(handle of board, 513, 0, 20 + 30 * 65536)",
+    paint: "ui's sendmessagew(handle of board, 15, 0, 0)",
+    tab: "ui's sendmessagew(handle of pages, 4912, 1, 0)",
+    row: "ui's send_item(handle of people, 4139, 2, record with state 3, state_mask 3)",
+    every: 50,
+    hide: "ui's showwindow(handle of w, 0)",
+  }));
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [moreSaid("clicked 20 30\n"), "", 0]);
+});
+
+test("tools/linux.moth makes progress bars, pictures, tabs, tables and drawings", { skip: onGtk }, () => {
+  const ran = libraryRun(moreControls("linux.moth", {
+    click: "set clicks to 0",
+    paint: "ui's redraw(board)",
+    tab: "ui's gtk_notebook_set_current_page(handle of pages, 1)",
+    row: "ui's gtk_tree_selection_select_path(chosen_rows of people, ui's gtk_tree_path_new_from_string(\"2\"))",
+    every: 400,
+    hide: "",
+  }), ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
+  assert.deepEqual([ran.stdout, ran.status], [moreSaid(""), 0], ran.stderr);
 });
 
 test("only a program that reads can go online, and only it imports WinHTTP", () => {

@@ -255,3 +255,152 @@ to run
     end
     return gtk's run()
 end
+
+# progress bars, pictures, tabs, tables and drawings
+
+to progress with parent, x, y, width, height
+    if on_windows
+        return win's progress(parent, x, y, width, height)
+    end
+    return gtk's progress(parent, x, y, width, height)
+end
+
+to set_progress with control, percent
+    if on_windows
+        return win's set_progress(control, percent)
+    end
+    return gtk's set_progress(control, percent)
+end
+
+to picture with parent, file, x, y, width, height
+    if on_windows
+        return win's picture(parent, file, x, y, width, height)
+    end
+    return gtk's picture(parent, file, x, y, width, height)
+end
+
+to set_picture with control, file
+    if on_windows
+        return win's set_picture(control, file)
+    end
+    return gtk's set_picture(control, file)
+end
+
+to tabs with parent, x, y, width, height, handler
+    if on_windows
+        return win's tabs(parent, x, y, width, height, handler)
+    end
+    return gtk's tabs(parent, x, y, width, height, handler)
+end
+
+to tab with tabs_control, title
+    if on_windows
+        return win's tab(tabs_control, title)
+    end
+    return gtk's tab(tabs_control, title)
+end
+
+to chosen_tab with control
+    if on_windows
+        return win's chosen_tab(control)
+    end
+    return gtk's chosen_tab(control)
+end
+
+to choose_tab with control, place
+    if on_windows
+        return win's choose_tab(control, place)
+    end
+    return gtk's choose_tab(control, place)
+end
+
+to table with parent, columns, x, y, width, height, handler
+    if on_windows
+        return win's table(parent, columns, x, y, width, height, handler)
+    end
+    return gtk's table(parent, columns, x, y, width, height, handler)
+end
+
+to add_row with control, values
+    if on_windows
+        return win's add_row(control, values)
+    end
+    return gtk's add_row(control, values)
+end
+
+to clear_rows with control
+    if on_windows
+        return win's clear_rows(control)
+    end
+    return gtk's clear_rows(control)
+end
+
+to chosen_row with control
+    if on_windows
+        return win's chosen_row(control)
+    end
+    return gtk's chosen_row(control)
+end
+
+to choose_row with control, place
+    if on_windows
+        return win's choose_row(control, place)
+    end
+    return gtk's choose_row(control, place)
+end
+
+to drawing with parent, x, y, width, height, painter
+    if on_windows
+        return win's drawing(parent, x, y, width, height, painter)
+    end
+    return gtk's drawing(parent, x, y, width, height, painter)
+end
+
+to on_click with control, handler
+    if on_windows
+        return win's on_click(control, handler)
+    end
+    return gtk's on_click(control, handler)
+end
+
+to redraw with control
+    if on_windows
+        return win's redraw(control)
+    end
+    return gtk's redraw(control)
+end
+
+to colour with canvas, red, green, blue
+    if on_windows
+        return win's colour(canvas, red, green, blue)
+    end
+    return gtk's colour(canvas, red, green, blue)
+end
+
+to rectangle with canvas, x, y, width, height
+    if on_windows
+        return win's rectangle(canvas, x, y, width, height)
+    end
+    return gtk's rectangle(canvas, x, y, width, height)
+end
+
+to circle with canvas, x, y, radius
+    if on_windows
+        return win's circle(canvas, x, y, radius)
+    end
+    return gtk's circle(canvas, x, y, radius)
+end
+
+to line with canvas, x1, y1, x2, y2
+    if on_windows
+        return win's line(canvas, x1, y1, x2, y2)
+    end
+    return gtk's line(canvas, x1, y1, x2, y2)
+end
+
+to words with canvas, text, x, y
+    if on_windows
+        return win's words(canvas, text, x, y)
+    end
+    return gtk's words(canvas, text, x, y)
+end

@@ -2269,3 +2269,52 @@ hold them to agreeing.
   saving what was typed, and closed.
 - **Not yet.** A Mac's controls, which are Objective-C's and need more than
   calling C; and GTK 4.
+
+## 50. Tabs, tables, progress bars, pictures and drawings
+
+- **What an app was missing.** Real programs show more than buttons and boxes:
+  settings on tabs, rows of data, a bar while something's being done, a
+  picture, and something they draw themselves. Each is now in windows.moth
+  and linux.moth, with the same functions, and in ui.moth.
+- **Tabs.** `tabs` makes them, and `tab(tabs, "People")` a page, which is a
+  parent like a window: controls put on it show while its tab is chosen. GTK's
+  notebook has a page of its own for each; Windows' tab control is only the
+  tabs, so a page's controls are the window's, put inside the tabs (where
+  TCM_ADJUSTRECT says), shown and hidden as its tab is chosen, and the tabs
+  kept under them for clicks to reach them. The handler is given the tab's
+  title when the person chooses one, from WM_NOTIFY's TCN_SELCHANGE, or GTK's
+  switch-page.
+- **Tables.** `table(parent, columns, ...)` and `add_row(table, values)`, each
+  value shown as `say` shows it; `chosen_row` gives the chosen row's values,
+  and the handler is given them when the person chooses one. Windows' list
+  view, in report view, a whole row chosen at a time, with grid lines; GTK's
+  tree view on a list store of texts.
+- **Progress bars** from 0 to 100, Windows' with the green of version 6 of its
+  common controls, which InitCommonControlsEx makes ready under the activation
+  context from §47.
+- **Pictures.** `picture(parent, file, ...)`, made the size it's put at: on
+  Windows by GDI+, which reads PNG, JPEG, GIF and BMP and gives a bitmap for a
+  static control, the window's own colour under what's see-through; on Linux
+  by GdkPixbuf. A file that isn't there, or isn't a picture, is a mistake.
+- **Drawings.** `drawing(parent, ..., painter)` calls the painter whenever it
+  must be drawn, and after `redraw`, with a canvas: `colour`, then `rectangle`,
+  `circle`, `line` and `words`, at places as at 100%, and `on_click` gives
+  where it was clicked. Windows paints it with GDI on WM_PAINT, in a window
+  class of its own that shares the windows' procedure, with the DC's own brush
+  and pen, whose colours change without making any; GTK with cairo, on its
+  draw signal.
+- **Names.** Moth's names don't mind capitals, so a function called
+  `rectangle` and Windows' `Rectangle` are the same name: windows.moth calls
+  GDI's `"Rectangle" as fill_box` and `"Ellipse" as fill_ellipse`, and cairo's
+  is `cairo_box`.
+- **What GDI gives.** A GDI handle is 32 bits, sign-extended to 64, so read
+  from memory as 8 bytes it would be a number past what a pointer can be; it's
+  read as 4, with its sign.
+- **Tested.** On Windows and on Linux, the same window: a progress bar set,
+  and set past 100; a picture shown, and a mistake for one that isn't there; a
+  drawing painted (and on Windows clicked, by its message); a tab chosen as a
+  person would choose it, with its handler, and one chosen by the program,
+  without; a table's rows added, one chosen by the program and one by a
+  person, and cleared. Each system's own look was checked by eye, from
+  screenshots. And a click on GTK's drawing, sent by another program's X
+  events, landed where it was sent.
