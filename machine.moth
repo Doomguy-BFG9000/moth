@@ -232,7 +232,8 @@ to new_asm
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
-        library_blocks empty dictionary
+        library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
+        library_callbacks empty dictionary, callback_jobs empty list
     set code of made to hot of made
     return made
 end
@@ -26847,6 +26848,9 @@ to emit_runtime with st
         end
     end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
+    for each job in callback_jobs of a # the functions C calls back, which it keeps
+        reserve(a, slots of job, 8 * callback_slots, 8)
+    end
     if uses_folders of st
         for each name in list of "fs_list", "fs_tmp", "ms_mid", "ms_hi", "ms_i", "ms_j"
             reserve(a, name, 8, 8)
@@ -33682,8 +33686,125 @@ set library_takers to dictionary where "a whole number" is "rt_lib_whole", "a lo
 set library_wants to dictionary where "a whole number" is "a whole number from -2147483648 to 4294967295",
     "a long whole number" is "a whole number", "a pointer" is "a pointer (a whole number, nothing or bytes)"
 
+# xmm x: the 4 bytes at `at`, a float
+to movss_load with a, x, at
+    sse(a, 0xF3, 0x10, x, at)
+end
+
+# a structure's or callback's name, from `a point`, or nothing for a type of C's
+to named_type with type_name
+    set type_text to "" + type_name
+    if length of type_text is less than 3 or item 1 of type_text is not "a" or item 2 of type_text is not " "
+        return nothing
+    end
+    set rest to ""
+    for each k from 3 to length of type_text
+        add item k of type_text to rest
+    end
+    return rest
+end
+
+to is_structure with nat, type_name
+    set named to named_type(type_name)
+    return named is not nothing and named is in structures of nat
+end
+
+to is_callback with nat, type_name
+    set named to named_type(type_name)
+    return named is not nothing and named is in callbacks of nat
+end
+
+# `32 bytes`, in a structure: how many, or 0 for any other type
+to inline_bytes with type_name
+    set type_text to "" + type_name
+    if type_text is "bytes" or position of " bytes" in type_text is 0
+        return 0
+    end
+    return number of (item 1 of split type_text by " ")
+end
+
+# how much room a type takes in a structure, and on what boundary, as C lays it out
+to type_room with nat, type_name
+    if type_name is "a float" or type_name is "a whole number" or type_name is "yes or no"
+        return list of 4, 4
+    end
+    if inline_bytes(type_name) is greater than 0
+        return list of inline_bytes(type_name), 1
+    end
+    if is_structure(nat, type_name)
+        set laid to structure_layout(nat, named_type(type_name))
+        return list of size of laid, align of laid
+    end
+    return list of 8, 8
+end
+
+# a structure's fields where C puts them: each at the next boundary its type wants, and the whole rounded up to
+# its largest boundary
+to structure_layout with nat, structure_name
+    set at_now to 0
+    set biggest to 1
+    set laid to empty list
+    for each field in item structure_name of structures of nat
+        set room to type_room(nat, type of field)
+        set at_now to align_up(at_now, item 2 of room)
+        add (record with name name of field, type type of field, at at_now, size item 1 of room) to laid
+        set at_now to at_now + item 1 of room
+        if item 2 of room is greater than biggest
+            set biggest to item 2 of room
+        end
+    end
+    return record with fields laid, size align_up(at_now, biggest), align biggest
+end
+
+# the labels of the routines that make a structure from a record and back (see emit_structure), made once for
+# each structure of each library's block
+to structure_routines with a, nat, structure_name
+    set key to (join libraries of nat with "|") + ":" + structure_name
+    set known to library_structs of a
+    if key is in known
+        return item key of known
+    end
+    set n to length of known
+    set made to record with into "rt_si_" + n, back "rt_so_" + n, nat nat, name structure_name, layout structure_layout(nat, structure_name)
+    set item key of known to made
+    set jobs to struct_jobs of a
+    add made to jobs
+    for each field in fields of layout of made # and the ones it holds
+        if is_structure(nat, type of field)
+            structure_routines(a, nat, named_type(type of field))
+        else if is_callback(nat, type of field)
+            callback_routines(a, nat, named_type(type of field))
+        end
+    end
+    return made
+end
+
+# a callback's: its entries, which C calls, its slots, which hold the program's functions they call, and what
+# makes a function an entry (see emit_callback)
+set callback_slots to 64
+to callback_routines with a, nat, callback_name
+    set key to (join libraries of nat with "|") + ":" + callback_name
+    set known to library_callbacks of a
+    if key is in known
+        return item key of known
+    end
+    set n to length of known
+    set made to record with entry "cb_" + n, slots "cb_slots_" + n, taker "rt_cb_" + n, nat nat, name callback_name,
+        shape item callback_name of callbacks of nat
+    set item key of known to made
+    set jobs to callback_jobs of a
+    add made to jobs
+    for each type_name in types of shape of made
+        if is_structure(nat, type_name)
+            structure_routines(a, nat, named_type(type_name))
+        end
+    end
+    return made
+end
+
 # The body of a library's function: the function found, each input made what C wants, in the registers and on
-# the stack as the system's calling convention has them, and the call; then what it gives, as a value in xmm0
+# the stack as the system's calling convention has them, and the call; then each structure it was given made
+# what C left in it, and what it gives as a value in xmm0
 to gen_library_call with fc, e
     set a to a of fc
     set st to st of fc
@@ -33711,7 +33832,7 @@ to gen_library_call with fc, e
     set i to 0
     for each type_name in types
         add 1 to i
-        set is_float to type_name is "a number"
+        set is_float to type_name is "a number" or type_name is "a float"
         if windows and i is at most 4
             add record with reg item i of int_regs, x i - 1, float is_float, slot -1 to places
         else if not windows and is_float and floats is less than 8
@@ -33730,19 +33851,19 @@ to gen_library_call with fc, e
         set shadow to 32
     end
     set staging to shadow + 8 * stacked
-    set frame to staging + 8 * n
+    set kept_at to staging + 8 * n # what it gave, while the structures are made what C left
+    set frame to kept_at + 16
     if (frame bit and 15) is not 0
         set frame to frame + 8
     end
     set saved to hidden_place(fc)
     store(a, saved, rsp)
     alui(a, "and", rsp, -16)
-    if frame is greater than 0
-        alui(a, "sub", rsp, frame)
-    end
+    alui(a, "sub", rsp, frame)
     set i to 0
     for each type_name in types # each input, made what C wants
         add 1 to i
+        set slot_at to mem(rsp, staging + 8 * (i - 1))
         load(a, rax, mem(rbp, 16 + 8 * (n - i)))
         if type_name is "bytes"
             untag(a, rax)
@@ -33752,6 +33873,62 @@ to gen_library_call with fc, e
             alu(a, "cmp", rax, rcx)
             setcc(a, cc_e, rax)
             movzx8(a, rax, rax)
+        else if type_name is "a float"
+            movq_xr(a, xmm0, rax)
+            cvtsd2ss(a, xmm0, xmm0)
+            movq_rx(a, rax, xmm0)
+        else if is_structure(nat, type_name) # a record made a structure in memory of its own, or nothing for none
+            set routines to structure_routines(a, nat, named_type(type_name))
+            set null to new_label(a)
+            set filled to new_label(a)
+            set wrong to new_label(a)
+            set wrong_field to new_label(a)
+            movi64(a, rcx, bits_nothing)
+            alu(a, "cmp", rax, rcx)
+            jcc(a, cc_e, null)
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_record)
+            jcc(a, cc_ne, wrong)
+            movi(a, rcx, size of layout of routines + 8)
+            call_to(a, "rt_alloc")
+            store(a, slot_at, rax)
+            mov_rr(a, rdi, rax)
+            load(a, rcx, mem(rbp, 16 + 8 * (n - i)))
+            call_to(a, into of routines)
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, wrong_field)
+            load(a, rax, slot_at)
+            jmp_to(a, filled)
+            mark(a, null)
+            movi(a, rax, 0)
+            mark(a, filled)
+            set was to enter_cold(a)
+            mark(a, wrong)
+            store(a, rip("err_a"), rax)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input " + i + " to be a record (" + type_name + ") or nothing, not ")
+            stub_kind(a, "err_a")
+            jmp_to(a, "rt_e_end")
+            mark(a, wrong_field)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input " + i + "'s ")
+            call_to(a, "rt_lib_tell_field")
+            jmp_to(a, "rt_e_end")
+            leave_cold(a, was)
+        else if is_callback(nat, type_name) # a function of the program's, as an entry C can call
+            set routines to callback_routines(a, nat, named_type(type_name))
+            set wrong to new_label(a)
+            call_to(a, taker of routines)
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, wrong)
+            set was to enter_cold(a)
+            mark(a, wrong)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input " + i + " to be ")
+            call_to(a, "rt_cb_tell")
+            jmp_to(a, "rt_e_end")
+            leave_cold(a, was)
         else if type_name is not "a number"
             call_to(a, item type_name of library_takers)
             if type_name is in library_wants
@@ -33763,13 +33940,12 @@ to gen_library_call with fc, e
                 stub_start(fc, at of e)
                 stub_text(a, "'" + name of f + "' needs input " + i + " to be " + item type_name of library_wants + ", not ")
                 load(a, rax, rip("err_a"))
-                movi(a, rdx, 0)
-                call_to(a, "rt_e_shown")
+                call_to(a, "rt_lib_tell_value")
                 jmp_to(a, "rt_e_end")
                 leave_cold(a, was)
             end
         end
-        store(a, mem(rsp, staging + 8 * (i - 1)), rax)
+        store(a, slot_at, rax)
     end
     set i to 0
     for each place in places # then where the convention wants them
@@ -33791,11 +33967,39 @@ to gen_library_call with fc, e
         movi(a, rax, floats)
     end
     call_import(a, desc)
+    set structured to no
+    for each type_name in types
+        if is_structure(nat, type_name)
+            set structured to yes
+        end
+    end
+    if structured # each structure it was given, made what C left in it
+        store(a, mem(rsp, kept_at), rax)
+        movsd_store(a, mem(rsp, kept_at + 8), xmm0)
+        set i to 0
+        for each type_name in types
+            add 1 to i
+            if is_structure(nat, type_name)
+                set none_given to new_label(a)
+                load(a, rsi, mem(rsp, staging + 8 * (i - 1)))
+                test_rr(a, rsi, rsi)
+                jcc(a, cc_e, none_given)
+                load(a, rcx, mem(rbp, 16 + 8 * (n - i)))
+                call_to(a, back of structure_routines(a, nat, named_type(type_name)))
+                mark(a, none_given)
+            end
+        end
+        load(a, rax, mem(rsp, kept_at))
+        movsd_load(a, xmm0, mem(rsp, kept_at + 8))
+    end
     load(a, rsp, saved)
     set gives to gives of nat # and what it gave, as a value
     if gives is nothing
         load_bits(a, xmm0, bits_nothing)
-    else if gives is "a number"
+    else if gives is "a number" or gives is "a float"
+        if gives is "a float"
+            cvtss2sd(a, xmm0, reg_at(xmm0))
+        end
         set strange to new_label(a)
         ucomisd(a, xmm0, reg_at(xmm0))
         jcc(a, cc_p, strange)
@@ -33827,6 +34031,26 @@ to gen_library_call with fc, e
         jcc(a, cc_e, given)
         load_bits(a, xmm0, bits_yes)
         mark(a, given)
+    else if is_structure(nat, gives) # a pointer to one: a new record of it, or nothing for none
+        set given to new_label(a)
+        set null to new_label(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, null)
+        push_r(a, rax)
+        push_r(a, rax)
+        movi(a, rcx, 0)
+        call_to(a, "rt_record_make")
+        store(a, mem(rsp, 0), rax)
+        mov_rr(a, rcx, rax)
+        load(a, rsi, mem(rsp, 8))
+        call_to(a, back of structure_routines(a, nat, named_type(gives)))
+        pop_r(a, rax)
+        pop_r(a, rcx)
+        movq_xr(a, xmm0, rax)
+        jmp_to(a, given)
+        mark(a, null)
+        load_bits(a, xmm0, bits_nothing)
+        mark(a, given)
     else
         mov_rr(a, rcx, rax)
         if gives is "text"
@@ -33837,6 +34061,567 @@ to gen_library_call with fc, e
         movq_xr(a, xmm0, rax)
     end
     return "value"
+end
+
+# A structure's two routines. rt_si_N: rcx a record, rdi a structure's memory, all 0: each field the record has,
+# made what C wants, where it goes; rdx 0, or 1 for a field that can't be, with err_field its name, err_what
+# what it must be and err_a what it is. rt_so_N: rcx a record, rsi a structure's memory: each field made a
+# value, and the record's field of its name made that (a structure's own record made for one in it, if it has
+# none), but a callback, which stays as it was.
+to emit_structure with a, job
+    set nat to nat of job
+    set laid to layout of job
+    mark(a, into of job)
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, rbx, rcx)
+    untag(a, rbx)
+    mov_rr(a, r12, rdi)
+    set bad to new_label(a)
+    for each field in fields of laid
+        set type_name to type of field
+        set field_text to text_object(a, name of field)
+        set missing to new_label(a)
+        set want to new_label(a)
+        mov_rr(a, rax, rbx)
+        lea(a, rdx, rip(field_text))
+        call_to(a, "rt_record_find")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, missing)
+        load(a, rax, mem(rax, 8))
+        lea(a, rcx, rip(field_text)) # for a mistake in it
+        store(a, rip("err_field"), rcx)
+        set target_at to mem(r12, at of field)
+        if type_name is "a number" or type_name is "a float"
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, 0x7FF8)
+            jcc(a, cc_e, want)
+            alui(a, "cmp", rcx, kind_text)
+            jcc(a, cc_ae, want)
+            if type_name is "a number"
+                store(a, target_at, rax)
+            else
+                movq_xr(a, xmm0, rax)
+                cvtsd2ss(a, xmm0, xmm0)
+                movq_rx(a, rax, xmm0)
+                store32(a, target_at, rax)
+            end
+        else if type_name is "yes or no"
+            set is_no to new_label(a)
+            set put_it to new_label(a)
+            movi64(a, rcx, bits_yes)
+            alu(a, "cmp", rax, rcx)
+            movi(a, rdx, 1)
+            jcc(a, cc_e, put_it)
+            movi64(a, rcx, bits_no)
+            alu(a, "cmp", rax, rcx)
+            jcc(a, cc_ne, want)
+            movi(a, rdx, 0)
+            mark(a, put_it)
+            store32(a, target_at, rdx)
+        else if type_name is in library_takers
+            if type_name is "text" or type_name is "wide text" # text, or nothing for none
+                movi64(a, rcx, bits_nothing)
+                alu(a, "cmp", rax, rcx)
+                jcc(a, cc_e, missing)
+                mov_rr(a, rcx, rax)
+                shifti(a, "shr", rcx, 48)
+                alui(a, "cmp", rcx, kind_text)
+                jcc(a, cc_ne, want)
+            end
+            call_to(a, item type_name of library_takers)
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, want)
+            if type_name is "a whole number"
+                store32(a, target_at, rax)
+            else
+                store(a, target_at, rax)
+            end
+        else if inline_bytes(type_name) is greater than 0 # as many of its bytes as fit
+            set fits to new_label(a)
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_bytes)
+            jcc(a, cc_ne, want)
+            untag(a, rax)
+            load(a, rcx, mem(rax, 0))
+            load(a, rsi, mem(rax, 8))
+            alui(a, "cmp", rcx, inline_bytes(type_name))
+            jcc(a, cc_be, fits)
+            movi(a, rcx, inline_bytes(type_name))
+            mark(a, fits)
+            lea(a, rdi, target_at)
+            rep_movsb(a)
+        else if is_structure(nat, type_name)
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_record)
+            jcc(a, cc_ne, want)
+            mov_rr(a, rcx, rax)
+            lea(a, rdi, target_at)
+            call_to(a, into of structure_routines(a, nat, named_type(type_name)))
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, bad) # err_field and the rest say which of its fields
+        else if is_callback(nat, type_name)
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_function)
+            jcc(a, cc_ne, want)
+            call_to(a, taker of callback_routines(a, nat, named_type(type_name)))
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, want)
+            store(a, target_at, rax)
+        end
+        jmp_to(a, missing)
+        mark(a, want) # what it must be, and what it is
+        set wanted to type_name
+        if type_name is in library_wants
+            set wanted to item type_name of library_wants
+        else if is_structure(nat, type_name)
+            set wanted to "a record (" + type_name + ")"
+        else if is_callback(nat, type_name)
+            set wanted to "a function that takes " + length of types of item named_type(type_name) of callbacks of nat + " inputs"
+        else if inline_bytes(type_name) is greater than 0
+            set wanted to "bytes"
+        end
+        store(a, rip("err_a"), rax)
+        lea(a, rcx, rip(text_object(a, wanted)))
+        store(a, rip("err_what"), rcx)
+        jmp_to(a, bad)
+        mark(a, missing)
+    end
+    set done to new_label(a)
+    movi(a, rdx, 0)
+    jmp_to(a, done)
+    mark(a, bad)
+    movi(a, rdx, 1)
+    mark(a, done)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    mark(a, back of job)
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, rbx, rcx)
+    mov_rr(a, r12, rsi)
+    for each field in fields of laid
+        set type_name to type of field
+        set field_text to text_object(a, name of field)
+        set from to mem(r12, at of field)
+        set skip_field to new_label(a)
+        if type_name is "a number"
+            load(a, rax, from)
+        else if type_name is "a float"
+            movss_load(a, xmm0, from)
+            cvtss2sd(a, xmm0, reg_at(xmm0))
+            movq_rx(a, rax, xmm0)
+        else if type_name is "a whole number" or type_name is "a long whole number"
+            if type_name is "a whole number"
+                load32s(a, rax, from)
+            else
+                load(a, rax, from)
+            end
+            cvtsi2sd(a, xmm0, rax)
+            movq_rx(a, rax, xmm0)
+        else if type_name is "a pointer"
+            set pointed to new_label(a)
+            set as_value to new_label(a)
+            load(a, rax, from)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, pointed)
+            movi64(a, rax, bits_nothing)
+            jmp_to(a, as_value)
+            mark(a, pointed)
+            cvtsi2sd(a, xmm0, rax)
+            movq_rx(a, rax, xmm0)
+            mark(a, as_value)
+        else if type_name is "yes or no"
+            set said to new_label(a)
+            load32(a, rcx, from)
+            movi64(a, rax, bits_no)
+            test32(a, rcx)
+            jcc(a, cc_e, said)
+            movi64(a, rax, bits_yes)
+            mark(a, said)
+        else if type_name is "text" or type_name is "wide text"
+            load(a, rcx, from)
+            if type_name is "text"
+                call_to(a, "rt_lib_text_out")
+            else
+                call_to(a, "rt_lib_wide_out")
+            end
+        else if inline_bytes(type_name) is greater than 0
+            movi(a, rcx, inline_bytes(type_name))
+            call_to(a, "rt_bytes_new")
+            push_r(a, rax)
+            load(a, rdi, mem(rax, 8))
+            lea(a, rsi, from)
+            movi(a, rcx, inline_bytes(type_name))
+            rep_movsb(a)
+            pop_r(a, rax)
+            movi64(a, rcx, tag_bytes)
+            alu(a, "or", rax, rcx)
+        else if is_structure(nat, type_name) # into the record it has there, or a new one
+            set has_one to new_label(a)
+            mov_rr(a, rax, rbx)
+            untag(a, rax)
+            lea(a, rdx, rip(field_text))
+            call_to(a, "rt_record_find")
+            test_rr(a, rax, rax)
+            set make_one to new_label(a)
+            jcc(a, cc_e, make_one)
+            load(a, rax, mem(rax, 8))
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_record)
+            jcc(a, cc_e, has_one)
+            mark(a, make_one)
+            movi(a, rcx, 0)
+            call_to(a, "rt_record_make")
+            push_r(a, rax)
+            push_r(a, rax)
+            mov_rr(a, r8, rax)
+            mov_rr(a, rax, rbx)
+            untag(a, rax)
+            lea(a, rdx, rip(field_text))
+            call_to(a, "rt_record_put")
+            pop_r(a, rax)
+            pop_r(a, rcx)
+            mark(a, has_one)
+            mov_rr(a, rcx, rax)
+            lea(a, rsi, from)
+            call_to(a, back of structure_routines(a, nat, named_type(type_name)))
+            jmp_to(a, skip_field)
+        else # a callback: as it was
+            jmp_to(a, skip_field)
+        end
+        mov_rr(a, r8, rax)
+        mov_rr(a, rax, rbx)
+        untag(a, rax)
+        lea(a, rdx, rip(field_text))
+        call_to(a, "rt_record_put")
+        mark(a, skip_field)
+    end
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+end
+
+# A callback's entries and what makes a function one (see callback_routines). rt_cb_N: rax a function: rax the
+# entry that calls it, with rdx 0, the same entry each time it's given; or rdx 1, and err_why 1 if it doesn't
+# take as many inputs as C gives (err_a how many it takes), or 2 if every entry is taken. cb_N_k: what C calls,
+# in turn calling the function in slot k, its inputs made values and what it gives made what C wants. A
+# mistake in it ends the program, there and then, as a mistake in an app's handler does.
+to emit_callback with a, job, target
+    set nat to nat of job
+    set shape to shape of job
+    set count to length of types of shape
+    set found to new_label(a)
+    set free_slot to new_label(a)
+    set full to new_label(a)
+    set slot_loop to new_label(a)
+    set slot_next to new_label(a)
+    set arity_ok to new_label(a)
+    mark(a, taker of job)
+    mov_rr(a, rcx, rax) # how many inputs it takes
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 16))
+    load(a, rcx, mem(rcx, 0))
+    alui(a, "cmp", rcx, count)
+    jcc(a, cc_e, arity_ok)
+    store(a, rip("err_a"), rcx)
+    storei(a, rip("err_b"), count)
+    storei(a, rip("err_why"), 1)
+    movi(a, rdx, 1)
+    ret(a)
+    mark(a, arity_ok)
+    lea(a, rsi, rip(slots of job))
+    movi(a, rcx, 0)
+    mark(a, slot_loop) # the slot it's in already, or the first that's empty
+    alui(a, "cmp", rcx, callback_slots)
+    jcc(a, cc_ae, full)
+    load(a, rdx, mem(rsi, 0))
+    alu(a, "cmp", rdx, rax)
+    jcc(a, cc_e, found)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, free_slot)
+    alui(a, "add", rsi, 8)
+    inc_r(a, rcx)
+    jmp_to(a, slot_loop)
+    mark(a, full)
+    storei(a, rip("err_why"), 2)
+    movi(a, rdx, 1)
+    ret(a)
+    mark(a, free_slot)
+    store(a, mem(rsi, 0), rax)
+    mark(a, found)
+    imul_ri(a, rcx, rcx, 16) # each entry is 16 bytes
+    lea(a, rax, rip(entry of job))
+    alu(a, "add", rax, rcx)
+    movi(a, rdx, 0)
+    ret(a)
+
+    set body to entry of job + "_body"
+    pad_to(code of a, 16)
+    mark(a, entry of job)
+    for each k from 0 to callback_slots - 1 # each 16 bytes: mov r11d, k; jmp body; and room
+        set entry_code to code of a
+        set at_start to length of entry_code
+        movi(a, r11, k)
+        jmp_to(a, body)
+        repeat at_start + 16 - length of entry_code times
+            add 0xCC to entry_code
+        end
+    end
+    set windows to target is "windows"
+    mark(a, body)
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    for each r in list of rbx, rsi, rdi, r12, r13, r14, r15 # what C keeps, kept
+        push_r(a, r)
+    end
+    set kept to 56
+    if windows # and xmm6 to xmm15
+        alui(a, "sub", rsp, 160)
+        for each k from 6 to 15
+            movdqu_store(a, mem(rsp, 16 * (k - 6)), k)
+        end
+        set kept to kept + 160
+    end
+    set raw_at to kept + 8 * count # where what C gave goes, as it was, below what's kept
+    alui(a, "sub", rsp, 8 * count + 8)
+    set int_regs to list of rdi, rsi, rdx, rcx, r8, r9
+    if windows
+        set int_regs to list of rcx, rdx, r8, r9
+    end
+    set ints to 0
+    set floats to 0
+    set stacked to 0
+    set i to 0
+    for each type_name in types of shape # each input, from where the convention has it
+        add 1 to i
+        set is_float to type_name is "a number" or type_name is "a float"
+        set into_at to mem(rbp, 0 - raw_at + 8 * (i - 1))
+        if windows and i is at most 4
+            if is_float
+                movsd_store(a, into_at, i - 1)
+            else
+                store(a, into_at, item i of int_regs)
+            end
+        else if not windows and is_float and floats is less than 8
+            movsd_store(a, into_at, floats)
+            add 1 to floats
+        else if not windows and not is_float and ints is less than 6
+            add 1 to ints
+            store(a, into_at, item ints of int_regs)
+        else
+            if windows
+                load(a, rax, mem(rbp, 48 + 8 * stacked))
+            else
+                load(a, rax, mem(rbp, 16 + 8 * stacked))
+            end
+            store(a, into_at, rax)
+            add 1 to stacked
+        end
+    end
+    mov_rr(a, r12, r11) # the slot
+    load(a, rax, rip("try_top")) # nothing to catch a mistake further out, past C
+    push_r(a, rax)
+    storei(a, rip("try_top"), 0)
+    mov_rr(a, r14, rsp)
+    lea(a, rax, rip(slots of job))
+    shifti(a, "shl", r12, 3)
+    alu(a, "add", rax, r12)
+    load(a, r13, mem(rax, 0))
+    push_r(a, r13) # the function, then its inputs, as values
+    set i to 0
+    for each type_name in types of shape
+        add 1 to i
+        set from to mem(rbp, 0 - raw_at + 8 * (i - 1))
+        if type_name is "a number"
+            load(a, rax, from)
+        else if type_name is "a float"
+            movss_load(a, xmm0, from)
+            cvtss2sd(a, xmm0, reg_at(xmm0))
+            movq_rx(a, rax, xmm0)
+        else if type_name is "a whole number" or type_name is "a long whole number"
+            load(a, rax, from)
+            if type_name is "a whole number"
+                movsxd(a, rax, rax)
+            end
+            cvtsi2sd(a, xmm0, rax)
+            movq_rx(a, rax, xmm0)
+        else if type_name is "a pointer"
+            set pointed to new_label(a)
+            set as_value to new_label(a)
+            load(a, rax, from)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, pointed)
+            movi64(a, rax, bits_nothing)
+            jmp_to(a, as_value)
+            mark(a, pointed)
+            cvtsi2sd(a, xmm0, rax)
+            movq_rx(a, rax, xmm0)
+            mark(a, as_value)
+        else if type_name is "yes or no"
+            set said to new_label(a)
+            load32(a, rcx, from)
+            movi64(a, rax, bits_no)
+            test32(a, rcx)
+            jcc(a, cc_e, said)
+            movi64(a, rax, bits_yes)
+            mark(a, said)
+        else if type_name is "text" or type_name is "wide text"
+            load(a, rcx, from)
+            if type_name is "text"
+                call_to(a, "rt_lib_text_out")
+            else
+                call_to(a, "rt_lib_wide_out")
+            end
+        else if is_structure(nat, type_name) # a record of what it points at, or nothing
+            set pointed to new_label(a)
+            set as_value to new_label(a)
+            load(a, rax, from)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, pointed)
+            movi64(a, rax, bits_nothing)
+            jmp_to(a, as_value)
+            mark(a, pointed)
+            movi(a, rcx, 0)
+            call_to(a, "rt_record_make")
+            push_r(a, rax)
+            mov_rr(a, rcx, rax)
+            load(a, rsi, from)
+            call_to(a, back of structure_routines(a, nat, named_type(type_name)))
+            pop_r(a, rax)
+            mark(a, as_value)
+        end
+        push_r(a, rax)
+    end
+    movi(a, r15, 1) # the first call in progress, as a handler is
+    mov_rr(a, rax, r13)
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    movi(a, rax, -1)
+    call_r(a, rcx)
+    mov_rr(a, rsp, r14)
+    pop_r(a, rcx)
+    store(a, rip("try_top"), rcx)
+    set gives to gives of shape # what it gave, as C wants it
+    movq_rx(a, rax, xmm0)
+    if gives is "a number" or gives is "a float" or gives is "a whole number" or gives is "a long whole number" or gives is "a pointer"
+        set not_number to new_label(a)
+        set given to new_label(a)
+        mov_rr(a, rcx, rax)
+        shifti(a, "shr", rcx, 48)
+        alui(a, "cmp", rcx, 0x7FF8)
+        jcc(a, cc_e, not_number)
+        alui(a, "cmp", rcx, kind_text)
+        jcc(a, cc_ae, not_number)
+        if gives is "a number"
+            jmp_to(a, given)
+        else if gives is "a float"
+            cvtsd2ss(a, xmm0, xmm0)
+            jmp_to(a, given)
+        else
+            cvttsd2si(a, rax, xmm0)
+            jmp_to(a, given)
+        end
+        mark(a, not_number) # yes as 1, and anything else as 0
+        movi64(a, rcx, bits_yes)
+        alu(a, "cmp", rax, rcx)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        cvtsi2sd(a, xmm0, rax)
+        if gives is "a float"
+            cvtsd2ss(a, xmm0, xmm0)
+        end
+        mark(a, given)
+    else if gives is "yes or no" # yes, or a number not 0
+        set given to new_label(a)
+        set not_number to new_label(a)
+        mov_rr(a, rcx, rax)
+        shifti(a, "shr", rcx, 48)
+        alui(a, "cmp", rcx, 0x7FF8)
+        jcc(a, cc_e, not_number)
+        alui(a, "cmp", rcx, kind_text)
+        jcc(a, cc_ae, not_number)
+        load_bits(a, xmm1, double_bytes(0))
+        ucomisd(a, xmm0, reg_at(xmm1))
+        setcc(a, cc_ne, rax)
+        movzx8(a, rax, rax)
+        jmp_to(a, given)
+        mark(a, not_number)
+        movi64(a, rcx, bits_yes)
+        alu(a, "cmp", rax, rcx)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        mark(a, given)
+    end
+    if windows
+        for each k from 6 to 15
+            movdqu_load(a, k, mem(rbp, 0 - kept + 16 * (k - 6)))
+        end
+    end
+    lea(a, rsp, mem(rbp, -56))
+    for each r in list of r15, r14, r13, r12, rdi, rsi, rbx
+        pop_r(a, r)
+    end
+    pop_r(a, rbp)
+    ret(a)
+end
+
+# rt_lib_tell_field: a structure's field that can't be what C wants, into the mistake: its name, what it must
+# be and what it is (see emit_structure); rt_cb_tell: a function that can't be a callback, likewise
+to emit_library_tellers with a
+    mark(a, "rt_lib_tell_field")
+    load(a, rax, rip("err_field"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    b_text(a, " to be ")
+    load(a, rax, rip("err_what"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    b_text(a, ", not ")
+    load(a, rax, rip("err_a"))
+    mark(a, "rt_lib_tell_value") # rax a value it can't be: a number as it is, anything else by its kind
+    set not_number to new_label(a)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, 0x7FF8)
+    jcc(a, cc_e, not_number)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_ae, not_number)
+    movi(a, rdx, 0)
+    jmp_to(a, "rt_e_shown")
+    mark(a, not_number)
+    jmp_to(a, "rt_e_kind")
+
+    set every_taken to new_label(a)
+    mark(a, "rt_cb_tell")
+    load(a, rax, rip("err_why"))
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, every_taken)
+    b_text(a, "a function that takes ")
+    load(a, rax, rip("err_b"))
+    call_to(a, "rt_e_plain")
+    b_text(a, " inputs, not one that takes ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_plain")
+    mark(a, every_taken)
+    b_text(a, "one of at most " + callback_slots + " functions this kind of callback can be")
+    ret(a)
 end
 
 # The runtime's part: finding a library and a function in it, and making values what C wants and back
@@ -34241,6 +35026,13 @@ to emit_libraries with a, target
     movi64(a, rax, bits_nothing)
     ret(a)
 
+    for each job in struct_jobs of a # each structure's and callback's own (see emit_structure, emit_callback)
+        emit_structure(a, job)
+    end
+    for each job in callback_jobs of a
+        emit_callback(a, job, target)
+    end
+    emit_library_tellers(a)
     if target is "linux" # what the dynamic linker needs to give the program dlopen and dlsym (see linux_file)
         emit_dynamic(a)
     end

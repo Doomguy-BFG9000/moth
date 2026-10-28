@@ -2059,4 +2059,47 @@ hold them to agreeing.
   number that isn't whole, a library or function that isn't there, no
   --allow-libraries), and only a program with a library being linked; and
   sqlite.moth's database, written, read back and opened again.
-- **Not yet.** Structs, floats, and C calling back into the program; a Mac.
+- **Then structs, floats and callbacks** (§46).
+
+## 46. Structures, callbacks and floats
+
+- **Why.** Most of a system's own functions take a struct, and much of what
+  makes a program a program, a window above all, needs C to call back into
+  it: Windows calls a window's procedure for everything that happens to it.
+- **Structures.** `structure point with x as a whole number, y as a whole
+  number`, in a library's block, makes `a point` a type its functions can take
+  and give, and its other structures and callbacks hold. A field is any of
+  the types an input can be, but bytes, which are `16 bytes` or as many as the
+  struct has in a row, another structure, held in it, or a callback. They're
+  laid out as C lays them out: each on the boundary its size wants, and the
+  whole rounded up to its largest. A function given one takes where it is, as
+  C passes nearly every struct: the record is made a struct in memory of its
+  own, a field it hasn't made 0, nothing a pointer of 0; and once the function
+  is done, each field is made a value again and set in the record, so what C
+  fills in, the program reads, as `GetCursorPos` and `mktime` want. A
+  structure it gives, from where it is, is a new record, or nothing for none.
+  A mistake in a field says which: "'memcpy' needs input 1's size to be a
+  number, not text".
+- **Callbacks.** `callback compare(a cell, a cell) gives a whole number` makes
+  `a compare` a type an input or a field can be, given a function of the
+  program's that takes as many inputs. C can't call a Moth function, so each
+  kind of callback has 64 entries in the program, small pieces of code C can
+  call, each with a slot that holds the function it calls: a function given
+  for one takes the slot it had, or the first that's empty, and C is given
+  its entry. The entry keeps the registers C wants kept, makes what C gave
+  values, calls the function as an app's handler is called, the first call in
+  progress, and makes what it gives what C wants. The slots are where the
+  collector looks for values, so a function C holds on to stays. A mistake in
+  one ends the program then and there: going on past C's own code, which is
+  in the middle of calling it, would leave the library half done.
+- **Floats.** `a float` is C's float, 4 bytes, for the functions, OpenGL's and
+  the like, that take one; it's a number to Moth.
+- **Tested.** On Windows and Linux: `qsort` sorting with a Moth function as
+  its comparison, given records of structures; `mktime` filling in a struct it
+  was given; a structure of text, bytes, another structure and a number,
+  copied by `memcpy`; floats both ways; and each mistake. On Windows, a window
+  class registered with a structure that holds a callback, its window made
+  and destroyed, its procedure a Moth function Windows calls with each of its
+  messages, and `EnumWindows` calling one for every window.
+- **Not yet.** A struct passed or given by its value, whole numbers of 8 or 16
+  bits, a callback called from another thread, and a Mac.

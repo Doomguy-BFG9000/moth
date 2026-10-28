@@ -973,6 +973,94 @@ say ${call}`, allow).stderr.split("\n")[0];
   assert.equal(wrong("abs(1)", []), "p.moth:3:5: can't use the library 'msvcrt' or 'c': this program isn't allowed to use libraries (start it with --allow-libraries)");
 });
 
+test("a library's structures are records, its callbacks the program's functions, and a float is a float", { skip }, () => {
+  const ran = libraryRun(`use the library "msvcrt" or "c"
+    structure cell with v as a whole number
+    callback compare(a cell, a cell) gives a whole number
+    qsort(bytes, a long whole number, a long whole number, a compare)
+    structure tm with second as a whole number, minute as a whole number, hour as a whole number,
+        day as a whole number, month as a whole number, year as a whole number, weekday as a whole number,
+        yearday as a whole number, dst as a whole number
+    mktime(a tm) gives a long whole number
+    "_mktime64" as mktime64(a tm) gives a long whole number
+    structure named with label as text, code as 4 bytes, at as a cell, size as a number
+    memcpy(a named, a named, a long whole number) gives a pointer
+end
+use the library "ucrtbase" or "m"
+    sinf(a float) gives a float
+    sqrtf(a float) gives a float
+end
+to by_size with x, y
+    return v of x - v of y
+end
+set b to (list of 5, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0) as bytes
+qsort(b, 4, 4, by_size)
+say b
+set noon to record with second 0, minute 0, hour 12, day 32, month 0, year 126, dst -1
+set t to 0
+try
+    set t to mktime64(noon)
+if it fails
+    set t to mktime(noon)
+end
+say (t is greater than 0) " " day of noon " " month of noon " " year of noon " " weekday of noon " " yearday of noon
+say sqrtf(2) " " sinf(0) " " sqrtf(16)
+set from to record with label "héllo", code (list of 1, 2, 3, 4, 5) as bytes, at (record with v 7), size 2.5
+set copied to record with label nothing
+memcpy(copied, from, 24)
+say label of copied " " code of copied " " v of at of copied " " size of copied
+try
+    qsort(b, 4, 4, sqrtf)
+if it fails with why
+    say why
+end
+try
+    memcpy((record with size "big"), from, 24)
+if it fails with why
+    say why
+end`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [
+    "(16 bytes: 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0)\nyes 1 1 126 0 31\n1.41421353816986 0 4\n"
+    + "héllo (4 bytes: 1, 2, 3, 4) 7 2.5\n'qsort' needs input 4 to be a function that takes 2 inputs, not one that takes 1\n"
+    + "'memcpy' needs input 1's size to be a number, not text\n", "", 0]);
+});
+
+test("on Windows a window's procedure is a function of the program's, which Windows calls back", { skip: target === "windows" ? skip : "Windows only" }, () => {
+  const ran = libraryRun(`use the library "user32"
+    callback window_proc(a pointer, a whole number, a pointer, a pointer) gives a pointer
+    structure window_class with size as a whole number, style as a whole number, procedure as a window_proc,
+        class_extra as a whole number, window_extra as a whole number, instance as a pointer, icon as a pointer,
+        cursor as a pointer, background as a pointer, menu_name as a pointer, class_name as wide text,
+        small_icon as a pointer
+    RegisterClassExW(a window_class) gives a whole number
+    CreateWindowExW(a whole number, wide text, wide text, a whole number, a whole number, a whole number,
+        a whole number, a whole number, a pointer, a pointer, a pointer, a pointer) gives a pointer
+    DefWindowProcW(a pointer, a whole number, a pointer, a pointer) gives a pointer
+    DestroyWindow(a pointer) gives yes or no
+    callback enumer(a pointer, a pointer) gives yes or no
+    EnumWindows(a enumer, a pointer) gives yes or no
+end
+use the library "kernel32"
+    GetModuleHandleW(a pointer) gives a pointer
+end
+set messages to empty list
+set seen to 0
+to on_message with window, message, w, l
+    add message to messages
+    return DefWindowProcW(window, message, w, l)
+end
+to count_window with window, extra
+    add 1 to seen
+    return yes
+end
+set instance to GetModuleHandleW(nothing)
+say RegisterClassExW(record with size 80, procedure on_message, instance instance, class_name "MothTest") is not 0
+set window to CreateWindowExW(0, "MothTest", "Moth", 0, 0, 0, 200, 100, nothing, nothing, instance, nothing)
+say DestroyWindow(window) " " (1 is in messages) " " (2 is in messages)
+say EnumWindows(count_window, nothing) " " (seen is greater than 0)`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\nyes yes yes\nyes yes\n", "", 0]);
+});
+
 test("only a program that uses a library is linked by Linux's dynamic linker, or imports what loads one on Windows", { skip }, () => {
   for (const t of ["windows", "linux"]) {
     const plain = Buffer.from(machine('say "hello"', { target: t, name: "p.moth" }));

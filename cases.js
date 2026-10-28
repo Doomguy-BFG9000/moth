@@ -155,6 +155,7 @@ export const PROGRAMS = [
     "[1, 2000, -0.005, yes, nothing, (dictionary where \"a\" is (empty dictionary))]\n4\ns\n3"],
   // a library's functions, declared but not called: a program's own, with inputs that say what they are
   ["use the library \"kernel32\" or \"c\" as k\n    GetCurrentProcessId() gives a whole number\n    \"remove\" as remove_file(text) gives a whole number\n    f(a number, a whole number, a long whole number, a pointer, text, wide text, bytes, yes or no) gives yes or no\nend\nuse the library \"msvcrt\" or \"m\"\n    sqrt(a number) gives a number\n    Beep()\nend\nsay \"declared\"", "declared"],
+  ["use the library \"user32\"\n    structure point with x as a whole number, y as a float\n    callback seen(a point, text) gives a whole number\n    structure holder with at as a point, name as 8 bytes, call as a seen, label as wide text\n    Find(a holder, a seen) gives a point\nend\nto f with p, t\n    return 1\nend\nsay \"declared\"", "declared"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -477,13 +478,18 @@ export const ERRORS = [
   // a library's function, called where only a program moth build makes can call it, or with the wrong inputs
   ["use the library \"kernel32\" or \"c\"\n    abs(a whole number) gives a whole number\nend\nsay abs(0 - 1)", "line 2: can't use the library 'kernel32' here: only a program made by moth build can"],
   ["use the library \"msvcrt\" or \"c\" as c\n    strlen(text) gives a long whole number\nend\nsay c's strlen(5)", "line 4: 'c's strlen' needs input 1 to be text, not a number"],
-  ["use the library \"c\"\n    abs(a whole number, a thing) gives a whole number\nend", "line 2: expected what it takes or gives ('a number', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no') but found 'a'"],
+  ["use the library \"c\"\n    abs(a whole number, a thing) gives a whole number\nend", "line 2: expected what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no', or a structure or callback) but found 'a'"],
   ["use the library \"c\"\n    malloc(a long whole number) gives bytes\nend", "line 2: a library's function can't give bytes: it can give a pointer to them"],
   ["use the library \"c\"\n    remove(text) gives a whole number\nend", "line 2: 'remove' is a Moth word, so it can't be used as the name of one of the library's functions"],
   ["use the library \"c\"\n    abs(a whole number) gives a whole number", "line 2: 'use' from line 1 is missing its 'end'"],
   ["if yes\n    use the library \"c\"\n    end\nend", "line 2: 'use the library' only works at the top level of a program"],
   ["use the library c\n    abs(a whole number)\nend", "line 1: expected a library's name in quotes, like \"sqlite3\" but found 'c'"],
   ["use the library \"c\"\n    abs a whole number\nend", "line 2: expected '(' and what the function takes but found 'a'"],
+  ["use the library \"x\"\n    structure p with a as bytes\nend", "line 2: a structure's field can't be bytes: say how many, as in '16 bytes', or take a pointer"],
+  ["use the library \"x\"\n    callback c() gives text\nend", "line 2: a callback can't give text"],
+  ["use the library \"x\"\n    callback c()\n    f() gives a c\nend", "line 3: only a function's input or a structure's field can be a callback"],
+  ["use the library \"x\"\n    structure p with a as a whole number, a as a number\nend", "line 2: 'a' is already one of its fields"],
+  ["use the library \"x\"\n    callback c(a pointer)\n    f(a c)\nend\nsay f(5)", "line 5: 'f' needs input 1 to be a function, not a number"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

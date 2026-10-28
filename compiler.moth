@@ -310,8 +310,9 @@ set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of 
 set as_words to list of "bytes", "text", "hex", "binary", "json" # `block as text`
 # what a library's function can take and give, in the order of LIBRARY_TYPES in moth.js, and what Moth
 # checks each input is, as kind_phrases numbers them (-1 for anything)
-set library_types to list of "a number", "a whole number", "a long whole number", "a pointer", "text", "wide text", "bytes", "yes or no"
-set library_kinds to list of 0, 0, 0, -1, 1, 1, 6, 2
+set library_types to list of "a number", "a float", "a whole number", "a long whole number", "a pointer", "text", "wide text", "bytes",
+    "yes or no"
+set library_kinds to list of 0, 0, 0, 0, -1, 1, 1, 6, 2
 # buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
 # "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
@@ -700,12 +701,27 @@ to parse with tokens, reading
         end
         set nesting to nesting + 1
         set made to empty list
+        set declared to record with structures empty dictionary, callbacks empty dictionary
         repeat while not is_word("end")
             if check("eof")
                 fail with problem(peek(), "'use' from line " + line of t + " is missing its 'end'")
             end
             lay(peek())
-            add library_function(item 1 of library_names) to made
+            set line_kind to "function"
+            if (is_word("structure") or is_word("callback")) and type of item (pos + 1) of tokens is "word"
+                if is_word("structure") and word_at(pos + 2, "with")
+                    set line_kind to "structure"
+                else if is_word("callback") and type of item (pos + 2) of tokens is "("
+                    set line_kind to "callback"
+                end
+            end
+            if line_kind is "structure"
+                library_structure(declared)
+            else if line_kind is "callback"
+                library_callback(declared)
+            else
+                add library_function(item 1 of library_names, declared) to made
+            end
             if not nl of peek()
                 expected("a new line")
             end
@@ -715,6 +731,8 @@ to parse with tokens, reading
         set pos to pos + 1
         for each d in made
             set libraries of (native of d) to library_names
+            set structures of (native of d) to structures of declared
+            set callbacks of (native of d) to callbacks of declared
         end
         if alias is not nothing
             set made to prefixed(made, alias)
@@ -730,9 +748,69 @@ to parse with tokens, reading
         return value of name_token
     end
 
+    # `structure point with x as a whole number, y as a whole number`, as moth.js's libraryStructure reads it
+    to library_structure with declared
+        set pos to pos + 1
+        set structure_name to library_type_name("a name for the structure", declared)
+        expect_word("with")
+        set fields to empty list
+        set field_names to empty list
+        set another_field to yes
+        repeat while another_field
+            set field_at to peek()
+            set field_name to take_name("a field's name")
+            if contains(field_names, field_name)
+                fail with problem(field_at, "'" + field_name + "' is already one of its fields")
+            end
+            add field_name to field_names
+            expect_word("as")
+            add (record with name field_name, type library_type(declared, "field")) to fields
+            set another_field to match(",")
+        end
+        set item structure_name of (structures of declared) to fields
+    end
+
+    # `callback compare(a pointer, a pointer) gives a whole number`
+    to library_callback with declared
+        set pos to pos + 1
+        set callback_name to library_type_name("a name for the callback", declared)
+        tight(match("("))
+        set callback_types to empty list
+        if not match(")")
+            add library_type(declared, "callback input") to callback_types
+            repeat while match(",")
+                add library_type(declared, "callback input") to callback_types
+            end
+            if not match(")")
+                expected("')'")
+            end
+        end
+        if length of callback_types is greater than 16
+            fail with problem(peek(), "a callback can be given at most 16 inputs")
+        end
+        set callback_gives to nothing
+        if not nl of peek() and word("gives")
+            set callback_gives to library_type(declared, "callback result")
+        end
+        set item callback_name of (callbacks of declared) to record with types callback_types, gives callback_gives
+    end
+
+    # a structure's or callback's name: neither a Moth word nor one of the words for C's types, nor one before
+    to library_type_name with what, declared
+        set name_at to peek()
+        set named to take_name(what)
+        if contains((list of "number", "whole", "long", "pointer", "float"), named)
+            fail with problem(name_at, "'" + named + "' is one of the words for what C takes, so it can't be used as " + what)
+        end
+        if named is in structures of declared or named is in callbacks of declared
+            fail with problem(name_at, "'" + named + "' is already a structure or callback here")
+        end
+        return named
+    end
+
     # `MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number`, or with the name the
     # library has for it in quotes: `"remove" as remove_file(text) gives a whole number`
-    to library_function with first
+    to library_function with first, declared
         set t to peek()
         set symbol to nothing
         if check("string")
@@ -747,9 +825,9 @@ to parse with tokens, reading
         end
         set types to empty list
         if not match(")")
-            add library_type() to types
+            add library_type(declared, "input") to types
             repeat while match(",")
-                add library_type() to types
+                add library_type(declared, "input") to types
             end
             if not match(")")
                 expected("')'")
@@ -760,48 +838,104 @@ to parse with tokens, reading
         end
         set gives to nothing
         if not nl of peek() and word("gives")
-            set gives_at to peek()
-            set gives to library_type()
-            if gives is "bytes"
-                fail with problem(gives_at, "a library's function can't give bytes: it can give a pointer to them")
-            end
+            set gives to library_type(declared, "result")
         end
         set params to empty list
         set kinds to empty list
         for each type_name in types
             add "input " + (length of params + 1) to params
+            set type_kind to -1
             set n to 1
-            repeat while item n of library_types is not type_name
+            repeat while n is at most length of library_types
+                if item n of library_types is type_name
+                    set type_kind to item n of library_kinds
+                end
                 add 1 to n
             end
-            add item n of library_kinds to kinds
+            if library_named(type_name, callbacks of declared)
+                set type_kind to 7
+            end
+            add type_kind to kinds
         end
         add 1 to functions_made
         set first_node to record with kind "value", type "string", value first, at t
         set call to record with kind "builtin", name "library call", args (list of first_node), at t
         set body to list of (record with kind "return", value call, at t)
-        set native to record with symbol symbol, types types, gives gives, libraries (list of first)
+        set native to record with symbol symbol, types types, gives gives, libraries (list of first), structures nothing, callbacks nothing
         return record with kind "define", name fn_name, params params, kinds kinds, body body, at t, order functions_made, native native
     end
 
-    # what a library's function takes or gives, as C has it
-    to library_type
+    # whether a type is `a ` and one of these names
+    to library_named with type_name, names
+        set type_text to "" + type_name
+        if length of type_text is less than 3 or item 1 of type_text is not "a" or item 2 of type_text is not " "
+            return no
+        end
+        set rest to ""
+        for each k from 3 to length of type_text
+            add item k of type_text to rest
+        end
+        return rest is in names
+    end
+
+    # what a library's function takes or gives (`where` it is), as C has it, as moth.js's libraryType reads it
+    to library_type with declared, where
+        set type_at to peek()
+        set found to nothing
         for each type_name in library_types
-            set type_words to split type_name by " "
-            set fits to yes
-            set i to 0
-            for each w in type_words
-                if fits and not word_at(pos + i, w)
-                    set fits to no
+            if found is nothing
+                set type_words to split type_name by " "
+                set fits to yes
+                set i to 0
+                for each w in type_words
+                    if fits and not word_at(pos + i, w)
+                        set fits to no
+                    end
+                    add 1 to i
                 end
-                add 1 to i
-            end
-            if fits
-                set pos to pos + length of type_words
-                return type_name
+                if fits
+                    set pos to pos + length of type_words
+                    set found to type_name
+                end
             end
         end
-        expected("what it takes or gives ('a number', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no')")
+        if found is nothing
+            if where is "field" and check("number") and word_at(pos + 1, "bytes")
+                set count_text to value of peek()
+                set count to number of count_text
+                if position of "." in count_text is greater than 0 or count is less than 1 or count is greater than 65536
+                    fail with problem(type_at, "a structure's bytes are a whole number of them, from 1 to 65536")
+                end
+                set found to "" + count + " bytes"
+                set pos to pos + 2
+            else if is_word("a") and library_named("a " + value of item (pos + 1) of tokens, structures of declared) or is_word("a") and library_named("a " + value of item (pos + 1) of tokens, callbacks of declared)
+                set found to "a " + value of item (pos + 1) of tokens
+                set pos to pos + 2
+            else
+                expected("what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no', or a structure or callback)")
+            end
+        end
+        set is_structure to library_named(found, structures of declared)
+        set is_callback to library_named(found, callbacks of declared)
+        if found is "bytes" and where is "result"
+            fail with problem(type_at, "a library's function can't give bytes: it can give a pointer to them")
+        end
+        if found is "bytes" and where is "field"
+            fail with problem(type_at, "a structure's field can't be bytes: say how many, as in '16 bytes', or take a pointer")
+        end
+        if found is "bytes" and where is not "input"
+            fail with problem(type_at, "a callback can't be bytes: it can take a pointer")
+        end
+        if is_callback and where is not "input" and where is not "field"
+            fail with problem(type_at, "only a function's input or a structure's field can be a callback")
+        end
+        if where is "callback result" and (found is "text" or found is "wide text")
+            fail with problem(type_at, "a callback can't give " + found)
+        end
+        if where is "callback result" and is_structure
+            fail with problem(type_at, "a callback can't give a structure")
+        end
+        return found
     end
 
     # `math's sine`: a name the file used `as math` makes

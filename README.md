@@ -587,9 +587,13 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   program calls, with what it takes and `gives`, as C has it: `a number` is a
   double, `a whole number` an int, `a long whole number` 64 bits, `a pointer` a
   whole number, nothing or bytes, `text` UTF-8, `wide text` wchar_t's, `bytes`
-  the program's own memory, for C to fill, and `yes or no` an int. A function
-  whose name Moth has for its own goes in quotes: `"remove" as
-  remove_file(text)`. Only a program `moth build` makes can call one.
+  the program's own memory, for C to fill, `yes or no` an int, and `a float` a
+  float. A function whose name Moth has for its own goes in quotes: `"remove"
+  as remove_file(text)`. `structure point with x as a whole number, y as a
+  whole number` makes `a point` a record C sees as its struct, filled in
+  where C changes it; `callback compare(a cell, a cell) gives a whole number`
+  makes `a compare` a function of the program's that C calls back, such as a
+  window's procedure. Only a program `moth build` makes can call one.
 - **Comparisons:** `is`, `is not`, `is less than`, `is greater than`,
   `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
   `or`, `not`.
@@ -964,11 +968,15 @@ unboxed numbers were all caught, some only by the fuzzer.
   program's time. It has no limit on its steps, so a loop that never ends runs
   until it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
-- A library's function takes and gives numbers, whole numbers, pointers and
-  text: not a struct, a float (only doubles), or a function of the program's
-  to call back, so one that needs those can't be declared. Its whole numbers
-  are signed, and exact up to 2^53. A mistake in a library can crash the
-  program. On Linux a program that uses one needs glibc's dynamic linker, as
+- A library's function takes a structure by where it is, not by its value,
+  and gives one the same way; a structure's fields are whole numbers of 32 or
+  64 bits, not 8 or 16 (but `2 bytes` and the like), numbers, floats,
+  pointers, text, other structures and callbacks. Its whole numbers are
+  signed, and exact up to 2^53. C can call a callback only on the program's
+  own thread, while the program is in one of a library's functions, and there
+  can be 64 functions of each kind of callback at once; a mistake in one ends the
+  program, as a mistake in an app's handler does. A mistake in a library can
+  crash the program. On Linux a program that uses one needs glibc's dynamic linker, as
   nearly every Linux has, and finds a library by its name as the system's
   linker does: `"sqlite3"` is libsqlite3.so, or .so.0 to .so.9. On Windows
   `"user32"` is user32.dll, from System32, or else the program's folder.

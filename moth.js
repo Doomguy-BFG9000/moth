@@ -254,22 +254,66 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (!peek().nl) expected("a new line");
     nesting++;
     const body = [];
+    const made = { structures: {}, callbacks: {} }; // the block's own, which its lines after them can use
     while (!isWord("end")) {
       if (check("eof")) fail(peek(), `'use' from line ${t.line} is missing its 'end'`);
       lay(peek());
-      body.push(libraryFunction(names[0]));
+      if (isWord("structure") && tokens[pos + 1].type === "word" && wordAt(pos + 2, "with")) libraryStructure(made);
+      else if (isWord("callback") && tokens[pos + 1].type === "word" && tokens[pos + 2].type === "(") libraryCallback(made);
+      else body.push(libraryFunction(names[0], made));
       if (!peek().nl) expected("a new line");
     }
     nesting--;
     lay(peek());
     pos++;
-    for (const d of body) d.native.libraries = names;
+    for (const d of body) Object.assign(d.native, { libraries: names, ...made });
     return { kind: "use", body: alias ? prefixed(body, alias) : body, at: t };
+  }
+
+  // `structure point with x as a whole number, y as a whole number`: a C struct, whose fields are a record's,
+  // laid out as C lays them out; one of its fields can be another, `N bytes`, or a callback
+  function libraryStructure(made) {
+    pos++;
+    const structure = libraryTypeName("a name for the structure", made);
+    expectWord("with");
+    const fields = [];
+    do {
+      const at = peek();
+      const field = name("a field's name");
+      if (fields.some((f) => f.name === field)) fail(at, `'${field}' is already one of its fields`);
+      expectWord("as");
+      fields.push({ name: field, type: libraryType(made, "field") });
+    } while (match(","));
+    made.structures[structure] = fields;
+  }
+
+  // `callback compare(a pointer, a pointer) gives a whole number`: a function of the program's, given for an
+  // input of this kind, which C calls back
+  function libraryCallback(made) {
+    pos++;
+    const callback = libraryTypeName("a name for the callback", made);
+    tight(match("("));
+    const types = [];
+    if (!match(")")) {
+      do types.push(libraryType(made, "callback input")); while (match(","));
+      match(")") || expected("')'");
+    }
+    if (types.length > 16) fail(peek(), "a callback can be given at most 16 inputs");
+    made.callbacks[callback] = { types, gives: !peek().nl && word("gives") ? libraryType(made, "callback result") : null };
+  }
+
+  // a structure's or callback's name: neither a Moth word nor one of the words for C's types, nor one before
+  function libraryTypeName(what, made) {
+    const t = peek();
+    const named = name(what);
+    if (["number", "whole", "long", "pointer", "float"].includes(named)) fail(t, `'${named}' is one of the words for what C takes, so it can't be used as ${what}`);
+    if (Object.hasOwn(made.structures, named) || Object.hasOwn(made.callbacks, named)) fail(t,`'${named}' is already a structure or callback here`);
+    return named;
   }
 
   // `MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number`, or with the name the
   // library has for it in quotes, for one Moth can't use: `"remove" as remove_file(text) gives a whole number`
-  function libraryFunction(first) {
+  function libraryFunction(first, made) {
     const t = peek();
     let symbol;
     if (check("string")) {
@@ -280,29 +324,42 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     tight(match("(")) || expected("'(' and what the function takes");
     const types = [];
     if (!match(")")) {
-      do types.push(libraryType()); while (match(","));
+      do types.push(libraryType(made, "input")); while (match(","));
       match(")") || expected("')'");
     }
     if (types.length > 16) fail(t, "a library's function can take at most 16 inputs");
-    let gives = null;
-    if (!peek().nl && word("gives")) {
-      const at = peek();
-      gives = libraryType();
-      if (gives === "bytes") fail(at, "a library's function can't give bytes: it can give a pointer to them");
-    }
+    const gives = !peek().nl && word("gives") ? libraryType(made, "result") : null;
     const call = { kind: "builtin", name: "library call", args: [{ kind: "value", value: first, at: t }], at: t };
     return {
       kind: "define", name: fnName, params: types.map((_, i) => `input ${i + 1}`), body: [{ kind: "return", value: call, at: t }], at: t,
-      kinds: types.map((type) => LIBRARY_TYPES[type]), native: { symbol, types, gives, libraries: [first] },
+      kinds: types.map((type) => LIBRARY_TYPES[type] ?? (type.startsWith("a ") && Object.hasOwn(made.callbacks, type.slice(2)) ? 7 : -1)),
+      native: { symbol, types, gives, libraries: [first] },
     };
   }
 
-  // what a library's function takes or gives, as C has it: `a whole number` is an int, `wide text` wchar_t*
-  function libraryType() {
-    const at = Object.keys(LIBRARY_TYPES).find((type) => type.split(" ").every((w, i) => wordAt(pos + i, w)));
-    if (at === undefined) expected(`what it takes or gives (${Object.keys(LIBRARY_TYPES).map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")})`);
-    pos += at.split(" ").length;
-    return at;
+  // what a library's function takes or gives (`where` it is), as C has it: `a whole number` is an int, `wide
+  // text` wchar_t*; or a structure or callback the block has, `a point`, or in a structure, `32 bytes`
+  function libraryType(made, where) {
+    const t = peek();
+    let type = Object.keys(LIBRARY_TYPES).find((k) => k.split(" ").every((w, i) => wordAt(pos + i, w)));
+    if (type !== undefined) pos += type.split(" ").length;
+    else if (where === "field" && check("number") && wordAt(pos + 1, "bytes")) {
+      const n = tokens[pos].value;
+      if (!Number.isInteger(n) || n < 1 || n > 65536) fail(t, "a structure's bytes are a whole number of them, from 1 to 65536");
+      type = `${n} bytes`;
+      pos += 2;
+    } else if (isWord("a") && tokens[pos + 1].type === "word" && (Object.hasOwn(made.structures, tokens[pos + 1].value) || Object.hasOwn(made.callbacks, tokens[pos + 1].value))) {
+      type = `a ${tokens[pos + 1].value}`;
+      pos += 2;
+    } else expected(`what it takes or gives (${Object.keys(LIBRARY_TYPES).map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")}, or a structure or callback)`);
+    const structure = type.startsWith("a ") && Object.hasOwn(made.structures, type.slice(2));
+    const callback = type.startsWith("a ") && Object.hasOwn(made.callbacks, type.slice(2));
+    const wrong = (why) => fail(t, why);
+    if (type === "bytes" && where === "result") wrong("a library's function can't give bytes: it can give a pointer to them");
+    if (type === "bytes" && where !== "input") wrong(`${where === "field" ? "a structure's field" : "a callback"} can't be bytes: ${where === "field" ? "say how many, as in '16 bytes', or" : "it can"} take a pointer`);
+    if (callback && where !== "input" && where !== "field") wrong("only a function's input or a structure's field can be a callback");
+    if ((type === "text" || type === "wide text" || structure) && where === "callback result") wrong(`a callback can't give ${type === "text" || type === "wide text" ? type : "a structure"}`);
+    return type;
   }
 
   // `math's sine`: a name the file used `as math` makes
@@ -982,9 +1039,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 // since nothing outside the function can reach them; every other name is renamed, so a variable only a
 // function in the file sets stays that function's own, and a name the file never makes isn't the program's.
 // What a library's function can take and give, and what Moth checks each input is (see KINDS in vm.js, and -1
-// for anything): a number is a double, a whole number an int, a long whole number 64 bits, and a pointer a
-// whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows)
-const LIBRARY_TYPES = { "a number": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2 };
+// for anything): a number is a double, a float a float, a whole number an int, a long whole number 64 bits,
+// and a pointer a whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows). A
+// structure is a record, or nothing, and a callback a function.
+const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2 };
 
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {
