@@ -457,7 +457,8 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   mistake in one says `math.moth, line 40`, and the CLI shows that file's
   line. Files that use each other in a circle are a mistake, found by keeping
   the files being read on a stack. The cost of splicing is a shared top level:
-  a library's helper variables can collide with a program's.
+  a library's helper variables can collide with a program's, which `use ...
+  as` (section 18) fixes without giving splicing up.
 - **The compiler written in Moth keeps up.** Each feature went into
   `compiler.moth` too (with `stop`, `join`, `lowercase` and `position` now
   Moth words, its own names for them changed), and it still compiles itself to
@@ -485,3 +486,50 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   test draws ten digits differently (other proportions, a sloppy 8, off to one
   side) and it reads all ten, but it has never seen a person's handwriting, so
   unusual ways of writing a digit can fool it.
+
+## 18. For real programs: try, dictionaries, bytes, files and modules
+
+- **`try` in three engines.** The VM keeps a stack of handlers: where each
+  `if it fails` starts, and how deep the calls and the value stack were, so a
+  mistake deep inside calls unwinds to the right place. The JIT writes a
+  JavaScript `try`/`catch` and puts its call-depth counter back. WebAssembly
+  uses its own exception handling, but only JavaScript can tell a Moth mistake
+  from going too deep, so a `catch_all` asks it, and passes on what isn't
+  ours. Running past `maxSteps` is never caught: a loop that never ends must
+  stop, `try` or not.
+- **Dictionaries are JavaScript Maps,** with text or numbers for keys, so
+  `"1"` and `1` are different keys and the order things were added is kept.
+  In WebAssembly, a dictionary is a struct holding the Map, and the Map holds
+  the module's own values, so a list put in a dictionary and changed later is
+  the same list. A missing key gets a "did you mean" from the keys there.
+- **Bytes are a Uint8Array,** checked on every write: a byte is a whole
+  number from 0 to 255, or a mistake. Bits work on whole numbers up to 2^53 −
+  1, the most a double holds exactly: JavaScript's own bit operators only take
+  32 bits, so the high and low parts go through them separately, and `shift`
+  is multiplying or dividing by a power of two. Nothing wraps around or rounds
+  without saying so.
+- **Files without losing replay.** The JIT and WebAssembly hand a program
+  that goes too deep to the VM by running it again from the start, which only
+  works if the second run sees the same world. `run()` already kept every
+  answer to `ask`; now it keeps a log of everything from outside, in order:
+  each answer, each file read, and how each write went. The second run is
+  served from the log until it catches up, so it reads what the first run
+  read, even if a write changed the file since, and writes nothing twice. Where
+  the files are is the caller's choice: the folder `moth run` runs in, or files
+  in memory that last one run in the playground.
+- **Modules are renaming.** `use "math.moth" as math` still splices the file
+  in, so no engine changed. But first, every name the file's top level makes
+  becomes `math's sine`, which no name in a program can be. Renaming is
+  careful about scope: inside the file, a function's inputs and the functions
+  it makes itself hide the top level's names, so those are left alone. Using
+  the same file as two names gives two separate copies. The JavaScript
+  version walks the syntax tree generically; the compiler written in Moth,
+  which can't list a record's fields, walks it kind by kind, and the tests
+  check both rename alike.
+- **One rule for messages.** The checker warns by running the real checks on
+  sample values, so a message may only depend on what the checker knows: the
+  kind of a value, not the value. The fuzzer found a message that showed a
+  wrong value (`'bytes' needs a whole number in front of it, not (5 bytes:
+  ...)`) and the checker's sample showed a different one, so wrong kinds are
+  now named by kind (`not bytes`), and only a number that's wrong as itself
+  is shown.

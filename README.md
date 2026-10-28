@@ -12,7 +12,7 @@ Written from scratch in JavaScript, with no dependencies.</p>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
-<a href="https://github.com/samyyy2423/moth/releases/tag/v1.0.0">Release 1.0</a>
+<a href="https://github.com/samyyy2423/moth/releases/tag/v1.1.0">Release 1.1</a>
 </p>
 
 <p>
@@ -102,17 +102,17 @@ fastest:
 | 200,000 records | 86 ms | 14 ms | **7.7 ms** |
 | the neural network below | 3.1 s | 0.58 s | **0.33 s** |
 
-**A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 1,100
+**A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 1,500
 lines of Moth that compile any Moth program, itself included, to exactly the
 JavaScript the JIT writes, byte for byte. Compiled by itself, it compiles itself
 again, and again, to the same result:
 
 ```text
 $ moth bootstrap
-compiler.moth: 1098 lines of Moth, which the JIT compiles to 93952 characters of JavaScript
-stage 1, made by the JIT, compiles compiler.moth: the same JavaScript (76 ms)
-stage 2, made by stage 1, compiles compiler.moth: the same JavaScript (56 ms)
-stage 3, made by stage 2, compiles compiler.moth: the same JavaScript (61 ms)
+compiler.moth: 1561 lines of Moth, which the JIT compiles to 140766 characters of JavaScript
+stage 1, made by the JIT, compiles compiler.moth: the same JavaScript (104 ms)
+stage 2, made by stage 1, compiles compiler.moth: the same JavaScript (86 ms)
+stage 3, made by stage 2, compiles compiler.moth: the same JavaScript (90 ms)
 fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it
 ```
 
@@ -236,10 +236,47 @@ pen up                              # move without drawing
 pen down
 ```
 
-- **Values:** numbers, `"text"`, `yes`, `no`, `nothing`, lists and records.
-  Only `no` and `nothing` count as false.
+For real programs: catching mistakes, dictionaries, modules, files, and bytes.
+
+```
+try                                         # catch a mistake and carry on
+    set age to number of ask "Age?"
+if it fails with why
+    say "That's not a number: " why
+end
+
+set ages to dictionary where "Sam" is 20, "Ana" is 31   # look things up by key
+set item "Bo" of ages to 7
+remove "Ana" from ages
+if "Sam" is in ages                         # is in: a list's items, a dictionary's keys, or text
+    say item "Sam" of ages
+end
+for each person in ages                     # a dictionary's keys, in the order they were added
+    say person ": " item person of ages
+end
+
+use "math.moth" as math                     # another file, its names kept apart as math's ...
+say math's sqrt(2)
+
+set notes to read "notes.txt"               # files: read, read bytes, write ... to
+write uppercase of notes to "loud.txt"
+for each word in arguments                  # moth run tool.moth a b c
+    say word
+end
+
+set block to 4 bytes                        # memory: bytes from 0 to 255
+set byte 1 of block to 0xFF                 # numbers in hex and binary: 0xFF, 0b1010
+say block                                   # (4 bytes: 255, 0, 0, 0)
+say "hi" as bytes                           # (2 bytes: 104, 105); back again with: as text
+say 12 bit and 10 " " shift 1 left by 4     # 8 16; also bit or, bit xor, shift right
+say 255 as hex " " 5 as binary              # ff 101
+```
+
+- **Values:** numbers, `"text"`, `yes`, `no`, `nothing`, lists, records,
+  dictionaries and bytes. Only `no` and `nothing` count as false.
 - **Comparisons:** `is`, `is not`, `is less than`, `is greater than`,
-  `is at least`, `is at most`, `is divisible by`, joined with `and`, `or`, `not`.
+  `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
+  `or`, `not`.
 - **Maths:** `+ - * /`. Adding text to anything joins them into text.
 - **Variables:** inside a function, `set` changes a variable the top level (or
   an enclosing function) also sets; otherwise it stays inside the function.
@@ -296,6 +333,7 @@ npm install -g github:samyyy2423/moth
 moth                               start the Moth shell
 moth run hello.moth                run it, saving any drawing as hello.svg
 moth run hello.moth --engine wasm  the same, on WebAssembly (or vm)
+moth run tool.moth a b c           run it with arguments; its files are read and written here
 moth check hello.moth              find mistakes without running it
 moth build hello.moth              compile it to hello.mjs, which runs with plain node
 moth bytecode hello.moth           show the bytecode the VM runs
@@ -409,6 +447,9 @@ output, the same drawing, the same error at the same spot.
 - the neural network and the handwriting reader, on all three engines
 - `stop`, the text helpers, `ask` and `use`, including that `ask` never asks
   twice when a run is handed over, and that a mistake in a used file names it
+- `try`, dictionaries, bytes and bits, files and arguments (a run handed over
+  reads the same files and writes nothing twice), and modules, whose names stay
+  apart even where a function's own names hide them
 - the WebAssembly encoder against the spec's examples, the playground's script,
   and every `moth` command as a real process
 
@@ -420,10 +461,10 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 ## Limits
 
-- No dictionaries, and no reading files, the network or the clock: a program
-  learns about the world only through `ask`.
-- A used file's top level is the program's, so a library's helper names and a
-  program's can collide.
+- No network and no clock: a program learns about the world through `ask`, its
+  files and its arguments. In the playground, files last for one run.
+- `use` without `as` puts a file's names in with the program's, where they can
+  collide; `use ... as` keeps them apart.
 - The handwriting reader learned from shapes, not people, so unusual ways of
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
@@ -434,8 +475,11 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 - These words are part of the language and can't be variable names: `set add
   say if else end repeat while for to return and or not is yes no nothing list
-  empty length item move turn pen record fail stop ask use uppercase lowercase
-  split join number position`.
+  empty length item move turn pen record fail stop ask use try uppercase
+  lowercase split join number position dictionary remove keys in byte bytes as
+  shift read write arguments`.
+- Bits work on whole numbers from 0 to 2^53 − 1, the most a Moth number holds
+  exactly.
 - Recursion goes up to 100,000 calls deep.
 - The checker only warns when it is sure, so it misses some mistakes: the length
   of a list, and a name used before the line that sets it.
@@ -451,7 +495,7 @@ unboxed numbers were all caught, some only by the fuzzer.
 ## Run it from the source
 
 ```bash
-npm test                     # everything above, in about 20 seconds
+npm test                     # everything above, in about 25 seconds
 npm run bench                # the three engines, timed
 node cli.js run hello.moth   # the moth command, without installing it
 python -m http.server        # then open http://localhost:8000 for the playground
