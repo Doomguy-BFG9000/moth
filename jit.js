@@ -238,8 +238,9 @@ export function jit(program) {
 }
 
 // Runs JavaScript made for these helpers, whoever made it: jit() above, or the compiler written in Moth.
+// `ats` are the tokens the code's positions point at.
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, run: (print, draw, maxSteps) => compiled(helpers(ats, print, draw, maxSteps)) };
+  return { source, names, ats, run: (print, draw, maxSteps) => compiled(helpers(ats, print, draw, maxSteps)) };
 }

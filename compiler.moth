@@ -1,0 +1,1098 @@
+# Moth's compiler, written in Moth. It reads a Moth program and writes the same JavaScript as jit.js,
+# byte for byte, and stops at the same mistakes with the same messages. mothCompiler() in moth.js runs
+# it, and the tests check that it compiles itself into a compiler that does exactly the same.
+#
+# It has the parts the JavaScript compiler has: tokenize turns text into tokens, parse turns tokens into
+# a syntax tree of records, the scope rules give every variable a slot, and the code writer turns the
+# tree into JavaScript. A name a function sets belongs to the top level when the top level sets it too,
+# so the names set out here at the top are never set anywhere else.
+
+# ---------- small helpers ----------
+
+to letters with text
+    set found to empty list
+    for each one in text
+        add one to found
+    end
+    return found
+end
+
+to contains with things, wanted
+    for each thing in things
+        if thing is wanted
+            return yes
+        end
+    end
+    return no
+end
+
+to join with things, separator
+    set out to ""
+    set first to yes
+    for each thing in things
+        if not first
+            add separator to out
+        end
+        add thing to out
+        set first to no
+    end
+    return out
+end
+
+# the item of `values` at the place `key` has in `keys`, or nothing
+to look_up with key, keys, values
+    for each n from 1 to length of keys
+        if item n of keys is key
+            return item n of values
+        end
+    end
+    return nothing
+end
+
+# A mistake in the program being compiled, at a token or at a spot made by place().
+to problem with at, reason
+    return record with at at, reason reason
+end
+
+to place with line, col
+    return record with type "", line line, col col
+end
+
+# ---------- characters ----------
+
+set capitals to letters("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+set smalls to letters("abcdefghijklmnopqrstuvwxyz")
+set symbols to letters("-+*/(),")
+# symbols people type out of habit from other languages, and what Moth says instead
+set hint_symbols to list of "=", "!", "<", ">", "%", "[", "]", "{", "}", "'", "."
+set hint_texts to list of "to store a value write 'set x to 5', to compare write 'x is 5'", "write 'is not'",
+    "write 'is less than'", "write 'is greater than'", "write 'is divisible by'",
+    "make a list with 'list of 1, 2, 3'", "make a list with 'list of 1, 2, 3'",
+    "blocks finish with 'end', not braces", "blocks finish with 'end', not braces",
+    "put text in double quotes", "to get a field write 'name of person'"
+
+to is_digit with c
+    return c is at least "0" and c is at most "9"
+end
+
+to starts_word with c
+    return (c is at least "a" and c is at most "z") or (c is at least "A" and c is at most "Z") or c is "_"
+end
+
+to in_word with c
+    return starts_word(c) or is_digit(c)
+end
+
+to lowercase with c
+    if c is at least "A" and c is at most "Z"
+        return look_up(c, capitals, smalls)
+    end
+    return c
+end
+
+# what text can hold: any character but a control character, except tab
+to fits_text with c
+    return c is "\t" or c is at least " "
+end
+
+# How many columns a character takes, counted as JavaScript counts them: 2 for the characters past the
+# first 65,536, which run from the first character below to the second.
+to width with c
+    if c is at least "𐀀" and c is at most "􏿿"
+        return 2
+    end
+    return 1
+end
+
+# ---------- tokens ----------
+
+to tokenize with source
+    set chars to letters(source)
+    add "" to chars # the end, so looking one past the last character is safe
+    set tokens to empty list
+    set line to 1
+    set col to 1
+    set nl to yes # does the next token start a new line?
+    set k to 1
+    repeat while item k of chars is not ""
+        set c to item k of chars
+        set start to col
+        if c is at most " " # every control character counts as a space
+            if c is "\n"
+                add 1 to line
+                set col to 1
+                set nl to yes
+            else
+                add 1 to col
+            end
+            add 1 to k
+        else if c is "#"
+            repeat while item k of chars is not "\n" and item k of chars is not ""
+                add width(item k of chars) to col
+                add 1 to k
+            end
+        else if is_digit(c)
+            set text to ""
+            repeat while is_digit(item k of chars)
+                add item k of chars to text
+                add 1 to k
+            end
+            if item k of chars is "." and is_digit(item (k + 1) of chars)
+                add "." to text
+                add 1 to k
+                repeat while is_digit(item k of chars)
+                    add item k of chars to text
+                    add 1 to k
+                end
+            end
+            add record with type "number", value text, line line, col start, nl nl to tokens # kept as written
+            set col to start + length of text
+            set nl to no
+        else if starts_word(c)
+            set text to ""
+            repeat while in_word(item k of chars)
+                add lowercase(item k of chars) to text
+                add 1 to k
+            end
+            add record with type "word", value text, line line, col start, nl nl to tokens
+            set col to start + length of text
+            set nl to no
+        else if c is "\""
+            set text to ""
+            add 1 to k
+            add 1 to col
+            repeat while item k of chars is not "\""
+                set d to item k of chars
+                if d is "\\" and fits_text(item (k + 1) of chars)
+                    add 1 to k
+                    add 1 to col
+                    set d to item k of chars
+                    if d is "n"
+                        set d to "\n"
+                    else if d is "t"
+                        set d to "\t"
+                    end
+                else if d is "\\" or not fits_text(d)
+                    fail with problem(place(line, start), "this text is missing its closing quote")
+                end
+                add d to text
+                add width(item k of chars) to col
+                add 1 to k
+            end
+            add 1 to k
+            add 1 to col
+            add record with type "string", value text, line line, col start, nl nl to tokens
+            set nl to no
+        else if contains(symbols, c)
+            add record with type c, value c, line line, col start, nl nl to tokens
+            add 1 to k
+            add 1 to col
+            set nl to no
+        else
+            set hint to look_up(c, hint_symbols, hint_texts)
+            if hint is nothing
+                set hint to ""
+            else
+                set hint to " (" + hint + ")"
+            end
+            fail with problem(place(line, start), "I don't understand '" + c + "'" + hint)
+        end
+    end
+    add record with type "eof", value "", line line, col col, nl yes to tokens
+    return tokens
+end
+
+# ---------- syntax tree ----------
+
+# words that start a statement or a value, so they can't name a variable
+set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
+    "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"
+set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
+
+# Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
+to parse with tokens
+    set pos to 1
+    set fn_depth to 0
+    set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
+
+    to peek
+        return item pos of tokens
+    end
+
+    to check with type
+        return type of item pos of tokens is type
+    end
+
+    to match with type
+        if check(type)
+            set pos to pos + 1
+            return item (pos - 1) of tokens
+        end
+        return no
+    end
+
+    to is_word with w
+        return check("word") and value of peek() is w
+    end
+
+    to word with w
+        if is_word(w)
+            set pos to pos + 1
+            return item (pos - 1) of tokens
+        end
+        return no
+    end
+
+    to describe with t
+        if type of t is "eof"
+            return "the end of the code"
+        end
+        if type of t is "string"
+            return "\"" + value of t + "\""
+        end
+        return "'" + value of t + "'"
+    end
+
+    to expected with what
+        fail with problem(peek(), "expected " + what + " but found " + describe(peek()))
+    end
+
+    to expect_word with w
+        set t to word(w)
+        if not t
+            expected("'" + w + "'")
+        end
+        return t
+    end
+
+    to take_name with what
+        set t to peek()
+        if type of t is not "word"
+            expected(what)
+        end
+        if contains(reserved, value of t)
+            fail with problem(t, "'" + value of t + "' is a Moth word, so it can't be used as " + what)
+        end
+        set pos to pos + 1
+        return value of t
+    end
+
+    to more with opener
+        if opener is nothing
+            return not check("eof")
+        end
+        return not is_word("end") and not is_word("else")
+    end
+
+    to statements with opener
+        set body to empty list
+        repeat while more(opener)
+            if check("eof")
+                fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
+            end
+            add statement() to body
+            if not nl of peek()
+                expected("a new line")
+            end
+        end
+        return body
+    end
+
+    to block with opener
+        if not nl of peek()
+            expected("a new line")
+        end
+        return statements(opener)
+    end
+
+    to block_end with opener
+        set body to block(opener)
+        expect_word("end")
+        return body
+    end
+
+    # drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
+    to turtle_words with t
+        if type of t is not "word"
+            return nothing
+        end
+        if value of t is "move"
+            return list of "forward", "back"
+        end
+        if value of t is "turn"
+            return list of "left", "right"
+        end
+        if value of t is "pen"
+            return list of "up", "down", "color", "width"
+        end
+        return nothing
+    end
+
+    to statement
+        set t to peek()
+        if word("set")
+            if is_word("item")
+                set target to primary()
+                expect_word("to")
+                return record with kind "setItem", target target, value expression(), at t
+            end
+            set variable to take_name("a variable name")
+            if word("of") # `set name of person to ...` changes a field
+                set target to unary()
+                expect_word("to")
+                return record with kind "setField", name variable, target target, value expression(), at t
+            end
+            expect_word("to")
+            return record with kind "set", name variable, value expression(), at t
+        end
+        if word("add")
+            set value to expression()
+            expect_word("to")
+            return record with kind "add", value value, name take_name("a variable name"), at t
+        end
+        if word("say")
+            set parts to empty list
+            add expression() to parts
+            repeat while not nl of peek()
+                add expression() to parts
+            end
+            return record with kind "say", parts parts, at t
+        end
+        if word("if")
+            return if_rest(t)
+        end
+        if word("repeat")
+            if word("while")
+                return record with kind "while", cond expression(), body block_end(t), at t
+            end
+            set count to expression()
+            expect_word("times")
+            return record with kind "repeat", count count, body block_end(t), at t
+        end
+        if word("for")
+            expect_word("each")
+            set variable to take_name("a variable name")
+            if word("from")
+                set start to expression()
+                expect_word("to")
+                return record with kind "count", name variable, start start, stop expression(), body block_end(t), at t
+            end
+            if not word("in")
+                expected("'in' or 'from'")
+            end
+            return record with kind "each", name variable, over expression(), body block_end(t), at t
+        end
+        if word("to")
+            set fn_name to take_name("a function name")
+            set params to empty list
+            if word("with")
+                add take_name("an input name") to params
+                repeat while match(",") or word("and")
+                    add take_name("an input name") to params
+                end
+            end
+            set fn_depth to fn_depth + 1
+            set body to block_end(t)
+            set fn_depth to fn_depth - 1
+            return record with kind "define", name fn_name, params params, body body, at t
+        end
+        if word("return")
+            if fn_depth is 0
+                fail with problem(t, "'return' only works inside a function (one made with 'to')")
+            end
+            if nl of peek()
+                return record with kind "return", value nothing, at t
+            end
+            return record with kind "return", value expression(), at t
+        end
+        if word("fail")
+            expect_word("with")
+            return record with kind "fail", value expression(), at t
+        end
+        set actions to turtle_words(t)
+        if actions is not nothing
+            set pos to pos + 1
+            set action to ""
+            for each a in actions
+                if action is "" and is_word(a)
+                    set action to a
+                end
+            end
+            if action is ""
+                set choices to empty list
+                for each a in actions
+                    add "'" + a + "'" to choices
+                end
+                expected(join(choices, " or "))
+            end
+            set pos to pos + 1
+            if action is "up" or action is "down"
+                return record with kind "turtle", action action, value nothing, at t
+            end
+            return record with kind "turtle", action action, value expression(), at t
+        end
+        if type of t is "word" and not contains(reserved, value of t)
+            # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
+            set pos to pos + 1
+            if is_word("is")
+                fail with problem(t, "to give '" + value of t + "' a value write 'set " + value of t + " to ...'")
+            end
+            set args to empty list
+            if match("(")
+                set args to arg_list()
+            else if not nl of peek()
+                add expression() to args
+                repeat while match(",")
+                    add expression() to args
+                end
+            end
+            return record with kind "call", name value of t, args args, at t
+        end
+        fail with problem(t, "a line can't start with " + describe(t))
+    end
+
+    to if_rest with t
+        set cond to expression()
+        set then to block(t)
+        set otherwise to empty list
+        if word("else")
+            set else_if to word("if")
+            if else_if
+                set nested to list of if_rest(else_if)
+                return record with kind "if", cond cond, then then, otherwise nested, at t
+            end
+            set otherwise to block(t)
+        end
+        expect_word("end")
+        return record with kind "if", cond cond, then then, otherwise otherwise, at t
+    end
+
+    to expression
+        set left to and_part()
+        set t to word("or")
+        repeat while t
+            set left to record with kind "or", left left, right and_part(), at t
+            set t to word("or")
+        end
+        return left
+    end
+
+    to and_part
+        set left to not_part()
+        set t to word("and")
+        repeat while t
+            set left to record with kind "and", left left, right not_part(), at t
+            set t to word("and")
+        end
+        return left
+    end
+
+    to not_part
+        set t to word("not")
+        if t
+            return record with kind "not", operand not_part(), at t
+        end
+        return comparison()
+    end
+
+    to comparison
+        set left to additive()
+        set t to word("is")
+        if not t
+            return left
+        end
+        set negated to no
+        if word("not")
+            set negated to yes
+        end
+        set phrase to ""
+        if check("word") and type of item (pos + 1) of tokens is "word"
+            set phrase to value of peek() + " " + value of item (pos + 1) of tokens
+        end
+        set op to "is"
+        if contains(comparison_phrases, phrase)
+            set pos to pos + 2
+            set op to phrase
+        end
+        return record with kind "compare", op op, negate negated, left left, right additive(), at t
+    end
+
+    to additive
+        set left to multiplicative()
+        set t to match("+") or match("-")
+        repeat while t
+            set left to record with kind "math", op type of t, left left, right multiplicative(), at t
+            set t to match("+") or match("-")
+        end
+        return left
+    end
+
+    to multiplicative
+        set left to unary()
+        set t to match("*") or match("/")
+        repeat while t
+            set left to record with kind "math", op type of t, left left, right unary(), at t
+            set t to match("*") or match("/")
+        end
+        return left
+    end
+
+    to unary
+        set t to match("-")
+        if t
+            return record with kind "negate", operand unary(), at t
+        end
+        return primary()
+    end
+
+    to primary
+        set t to peek()
+        if match("number") or match("string")
+            return record with kind "value", type type of t, value value of t, at t
+        end
+        if word("yes") or word("no")
+            return record with kind "value", type value of t, value value of t is "yes", at t
+        end
+        if word("nothing")
+            return record with kind "value", type "nothing", value nothing, at t
+        end
+        if word("list")
+            expect_word("of")
+            set items to empty list
+            add expression() to items
+            repeat while match(",")
+                add expression() to items
+            end
+            return record with kind "list", items items, at t
+        end
+        if word("record")
+            expect_word("with")
+            set fields to empty list
+            set values to empty list
+            add take_name("a field name") to fields
+            add expression() to values
+            repeat while match(",")
+                add take_name("a field name") to fields
+                add expression() to values
+            end
+            return record with kind "record", fields fields, values values, at t
+        end
+        if word("empty")
+            if word("record")
+                return record with kind "record", fields empty list, values empty list, at t
+            end
+            if not word("list")
+                expected("'list' or 'record'")
+            end
+            return record with kind "list", items empty list, at t
+        end
+        if word("length")
+            expect_word("of")
+            return record with kind "length", subject unary(), at t
+        end
+        if word("item")
+            set outside to indexing
+            set indexing to yes
+            set index to additive()
+            set indexing to outside
+            expect_word("of")
+            return record with kind "item", index index, subject unary(), at t
+        end
+        if match("(")
+            set outside to indexing
+            set indexing to no
+            set inner to expression()
+            set indexing to outside
+            if not match(")")
+                expected("')'")
+            end
+            return inner
+        end
+        if type of t is "word" and not contains(reserved, value of t)
+            set pos to pos + 1
+            if match("(")
+                return record with kind "call", name value of t, args arg_list(), at t
+            end
+            if not indexing and word("of") # `name of person`
+                return record with kind "field", name value of t, subject unary(), at t
+            end
+            return record with kind "name", name value of t, at t
+        end
+        expected("a value")
+    end
+
+    to arg_list
+        set outside to indexing
+        set indexing to no
+        set args to empty list
+        set going to not check(")")
+        repeat while going
+            add expression() to args
+            set going to match(",") and not check(")")
+        end
+        if not match(")")
+            expected("')'")
+        end
+        set indexing to outside
+        return args
+    end
+
+    return statements(nothing)
+end
+
+# ---------- which variable each name means ----------
+
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail"
+
+# Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
+# name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
+to declarations with body, own, shared
+    for each s in body
+        set what to kind of s
+        if what is "define"
+            add name of s to own
+        end
+        if what is "set" or what is "count" or what is "each"
+            add name of s to shared
+        end
+        if what is "if"
+            declarations(then of s, own, shared)
+            declarations(otherwise of s, own, shared)
+        end
+        if what is "while" or what is "repeat" or what is "count" or what is "each"
+            declarations(body of s, own, shared)
+        end
+    end
+end
+
+# A scope is one function (or the whole program): item n of its names is the name in slot n. The last
+# slot with a name wins, as when a function has two inputs with the same name.
+to slot_of with names, wanted
+    set found to 0
+    set n to 0
+    for each candidate in names
+        add 1 to n
+        if candidate is wanted
+            set found to n
+        end
+    end
+    return found
+end
+
+to new_scope with parent, params, body
+    set names to empty list
+    for each p in params
+        add p to names
+    end
+    set own to empty list
+    set shared to empty list
+    declarations(body, own, shared)
+    for each n in own
+        if slot_of(names, n) is 0
+            add n to names
+        end
+    end
+    for each n in shared
+        if slot_of(names, n) is 0 and (parent is nothing or resolve(parent, n) is nothing)
+            add n to names
+        end
+    end
+    set level to 0
+    if parent is not nothing
+        set level to level of parent + 1
+    end
+    return record with parent parent, names names, level level, temps 0
+end
+
+# how many functions out a name lives, and which of that function's slots it is; nothing if it isn't anywhere
+to resolve with scope, wanted
+    set depth to 0
+    set here to scope
+    repeat while here is not nothing
+        set slot to slot_of(names of here, wanted)
+        if slot is not 0
+            return record with depth depth, slot slot
+        end
+        set here to parent of here
+        add 1 to depth
+    end
+    return nothing
+end
+
+# Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
+to distance with a, b
+    set xs to letters(a)
+    set ys to letters(b)
+    set n to length of xs
+    set m to length of ys
+    set d to empty list # row i + 1 holds the distances from the first i letters of a
+    for each i from 0 to n
+        set row to empty list
+        for each j from 0 to m
+            if i is 0
+                add j to row
+            else if j is 0
+                add i to row
+            else
+                add 0 to row
+            end
+        end
+        add row to d
+    end
+    for each i from 1 to n
+        set above to item i of d
+        set row to item (i + 1) of d
+        for each j from 1 to m
+            set cost to 1
+            if item i of xs is item j of ys
+                set cost to 0
+            end
+            set best to item (j + 1) of above + 1
+            if item j of row + 1 is less than best
+                set best to item j of row + 1
+            end
+            if item j of above + cost is less than best
+                set best to item j of above + cost
+            end
+            if i is greater than 1 and j is greater than 1 and item i of xs is item (j - 1) of ys and item (i - 1) of xs is item j of ys
+                if item (j - 1) of item (i - 1) of d + 1 is less than best
+                    set best to item (j - 1) of item (i - 1) of d + 1
+                end
+            end
+            set item (j + 1) of row to best
+        end
+    end
+    return item (m + 1) of item (n + 1) of d
+end
+
+# The candidate a misspelled name most likely meant, or nothing if none is close: 1 edit for short names, 2 otherwise.
+to closest with wanted, candidates
+    set best to nothing
+    set best_distance to 3
+    if length of wanted is at most 3
+        set best_distance to 2
+    end
+    for each candidate in candidates
+        set gap to distance(wanted, candidate)
+        if gap is less than best_distance
+            set best to candidate
+            set best_distance to gap
+        end
+    end
+    return best
+end
+
+to no_value with wanted
+    return "'" + wanted + "' has no value yet (give it one with 'set " + wanted + " to ...')"
+end
+
+# What to say when a name nothing ever sets is used. A line that starts with an unknown name may be a
+# misspelled Moth word instead, like `sya "hi"`.
+to undefined_message with scope, wanted, call, statement
+    set known to empty list
+    set here to scope
+    repeat while here is not nothing
+        for each n in names of here
+            add n to known
+        end
+        set here to parent of here
+    end
+    if statement
+        for each w in statement_words
+            add w to known
+        end
+    end
+    set guess to closest(wanted, known)
+    set message to no_value(wanted)
+    if call
+        set message to "there is no function called '" + wanted + "'"
+    else if guess is not nothing
+        set message to "'" + wanted + "' has no value yet"
+    end
+    if guess is not nothing
+        return message + ". Did you mean '" + guess + "'?"
+    end
+    return message
+end
+
+# ---------- JavaScript ----------
+
+set ats to empty list # every token an error can point at; a position in the code is its number here
+set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width"
+set math_signs to list of "+", "-", "*", "/"
+set math_helpers to list of "add", "sub", "mul", "div"
+set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by"
+set compare_helpers to list of "eq", "lt", "gt", "ge", "le", "dv"
+
+to position with at
+    add at to ats
+    return length of ats - 1
+end
+
+# a JavaScript string, as JSON.stringify writes it (text holds no control characters but tab and new line)
+to quote with text
+    set out to "\""
+    for each c in text
+        if c is "\""
+            add "\\\"" to out
+        else if c is "\\"
+            add "\\\\" to out
+        else if c is "\n"
+            add "\\n" to out
+        else if c is "\t"
+            add "\\t" to out
+        else
+            add c to out
+        end
+    end
+    return out + "\""
+end
+
+to quote_list with things
+    set quoted to empty list
+    for each thing in things
+        add quote(thing) to quoted
+    end
+    return "[" + join(quoted, ",") + "]"
+end
+
+# a number as written, less leading zeros (JavaScript reads 07 as octal)
+to strip_zeros with text
+    set out to ""
+    for each c in text
+        if out is "0" and is_digit(c)
+            set out to c
+        else
+            add c to out
+        end
+    end
+    return out
+end
+
+# Each variable is a JavaScript `let` named after its slot, v<level>_<slot>.
+to v with slot, level
+    return "v" + level + "_" + slot
+end
+
+to ref with scope, wanted
+    set found to resolve(scope, wanted)
+    return v(slot of found, level of scope - depth of found)
+end
+
+to temp with scope
+    set temps of scope to temps of scope + 1
+    return "$t" + temps of scope
+end
+
+to undefined_name with scope, wanted, at, call, statement
+    set message to undefined_message(scope, wanted, call, statement)
+    return "fail(" + quote(message) + ", " + position(at) + ")"
+end
+
+to js_block with scope, body
+    set lines to empty list
+    for each s in body
+        add js_statement(scope, s) to lines
+    end
+    return join(lines, "\n")
+end
+
+to js_list with scope, nodes
+    set parts to empty list
+    for each node in nodes
+        add js_expr(scope, node) to parts
+    end
+    return join(parts, ", ")
+end
+
+# Loops count a step at the end of each round, so `maxSteps` stops both engines at the same place.
+to js_statement with scope, s
+    set what to kind of s
+    if what is "set"
+        return ref(scope, name of s) + " = " + js_expr(scope, value of s) + ";"
+    end
+    if what is "setItem"
+        set target to target of s
+        set head to "{ const $r = itemRef(" + js_expr(scope, subject of target) + ", " + js_expr(scope, index of target) + ", " + position(at of target)
+        return head + "); $r[0][$r[1]] = " + js_expr(scope, value of s) + "; }"
+    end
+    if what is "add"
+        set value to js_expr(scope, value of s)
+        if resolve(scope, name of s) is nothing
+            return value + ";\n" + undefined_name(scope, name of s, at of s, no, no) + ";"
+        end
+        set variable to ref(scope, name of s)
+        return "{ const $v = " + value + "; " + variable + " = addInto(" + variable + ", $v, " + quote(name of s) + ", " + position(at of s) + "); }"
+    end
+    if what is "say"
+        return "say([" + js_list(scope, parts of s) + "]);"
+    end
+    if what is "if"
+        return "if (truthy(" + js_expr(scope, cond of s) + ")) {\n" + js_block(scope, then of s) + "\n} else {\n" + js_block(scope, otherwise of s) + "\n}"
+    end
+    if what is "while"
+        return "for (;;) {\nif (!truthy(" + js_expr(scope, cond of s) + ")) break;\n" + js_block(scope, body of s) + "\ntick(" + position(at of s) + ");\n}"
+    end
+    if what is "repeat"
+        set k to position(at of s)
+        return "for (let $n = checkRepeat(" + js_expr(scope, count of s) + ", " + k + "); $n > 0; $n--) {\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
+    end
+    if what is "count"
+        set k to position(at of s)
+        set range to "checkRange(" + js_expr(scope, start of s) + ", " + js_expr(scope, stop of s) + ", " + k + ")"
+        return "for (let [$i, $last] = " + range + "; $i <= $last; $i++) {\n" + ref(scope, name of s) + " = $i;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
+    end
+    if what is "each"
+        set k to position(at of s)
+        return "for (const $x of itemsOf(" + js_expr(scope, over of s) + ", " + k + ")) {\n" + ref(scope, name of s) + " = $x;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
+    end
+    if what is "define"
+        set inner to function_code(scope, params of s, body of s)
+        set inputs to empty list
+        for each n from 1 to length of params of s
+            add v(n, level of scope of inner) to inputs
+        end
+        set head to ref(scope, name of s) + " = fn(" + quote(name of s) + ", " + quote_list(params of s) + ", function (" + join(inputs, ", ") + ") {\n"
+        return head + code of inner + "\nreturn null;\n});"
+    end
+    if what is "return"
+        if value of s is nothing
+            return "return null;"
+        end
+        return "return " + js_expr(scope, value of s) + ";"
+    end
+    if what is "call"
+        return js_call(scope, s, yes) + ";"
+    end
+    if what is "turtle"
+        set value to "null"
+        if value of s is not nothing
+            set value to js_expr(scope, value of s)
+        end
+        return "turtle(" + (slot_of(turtle_actions, action of s) - 1) + ", " + value + ", " + position(at of s) + ");"
+    end
+    if what is "setField"
+        set head to "{ const $o = recordFor(" + js_expr(scope, target of s) + ", " + quote(name of s) + ", " + position(at of s) + "); $o["
+        return head + quote(name of s) + "] = " + js_expr(scope, value of s) + "; }"
+    end
+    if what is "fail"
+        return "failWith(" + js_expr(scope, value of s) + ", " + position(at of s) + ");"
+    end
+end
+
+# The function is looked up before its inputs are worked out, and checked after, as in the VM.
+to js_call with scope, e, statement
+    if resolve(scope, name of e) is nothing
+        return undefined_name(scope, name of e, at of e, yes, statement)
+    end
+    set k to position(at of e)
+    set f to "callable(" + ref(scope, name of e) + ", " + quote(name of e) + ", " + k + ")"
+    set args to js_list(scope, args of e)
+    if length of args of e is greater than 3
+        return "callN(" + f + ", [" + args + "], " + quote(name of e) + ", " + k + ")"
+    end
+    if args is not ""
+        set f to f + ", " + args
+    end
+    return "call" + length of args of e + "(" + f + ", " + quote(name of e) + ", " + k + ")"
+end
+
+to js_expr with scope, e
+    set what to kind of e
+    if what is "value"
+        if type of e is "number"
+            return strip_zeros(value of e)
+        end
+        if type of e is "string"
+            return quote(value of e)
+        end
+        if type of e is "yes"
+            return "true"
+        end
+        if type of e is "no"
+            return "false"
+        end
+        return "null"
+    end
+    if what is "name"
+        if resolve(scope, name of e) is nothing
+            return undefined_name(scope, name of e, at of e, no, no)
+        end
+        set variable to ref(scope, name of e)
+        return "(" + variable + " === UNSET ? unset(" + quote(name of e) + ", " + position(at of e) + ") : " + variable + ")"
+    end
+    if what is "call"
+        return js_call(scope, e, no)
+    end
+    if what is "math"
+        set helper to look_up(op of e, math_signs, math_helpers)
+        return helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + position(at of e) + ")"
+    end
+    if what is "compare"
+        set helper to look_up(op of e, comparisons, compare_helpers)
+        set test to helper + "(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + position(at of e) + ")"
+        if negate of e
+            return "!" + test
+        end
+        return test
+    end
+    if what is "and"
+        set t to temp(scope)
+        return "(truthy(" + t + " = " + js_expr(scope, left of e) + ") ? " + js_expr(scope, right of e) + " : " + t + ")"
+    end
+    if what is "or"
+        set t to temp(scope)
+        return "(truthy(" + t + " = " + js_expr(scope, left of e) + ") ? " + t + " : " + js_expr(scope, right of e) + ")"
+    end
+    if what is "not"
+        return "!truthy(" + js_expr(scope, operand of e) + ")"
+    end
+    if what is "negate"
+        return "neg(" + js_expr(scope, operand of e) + ", " + position(at of e) + ")"
+    end
+    if what is "list"
+        return "[" + js_list(scope, items of e) + "]"
+    end
+    if what is "length"
+        return "lengthOf(" + js_expr(scope, subject of e) + ", " + position(at of e) + ")"
+    end
+    if what is "item"
+        return "item(" + js_expr(scope, subject of e) + ", " + js_expr(scope, index of e) + ", " + position(at of e) + ")"
+    end
+    if what is "record"
+        return "record(" + quote_list(fields of e) + ", [" + js_list(scope, values of e) + "])"
+    end
+    if what is "field"
+        return "field(" + js_expr(scope, subject of e) + ", " + quote(name of e) + ", " + position(at of e) + ")"
+    end
+end
+
+# One function (or the whole program) as the body of a JavaScript function: its variables, the
+# temporaries `and` and `or` used, then its statements.
+to function_code with parent, params, body
+    set scope to new_scope(parent, params, body)
+    set statements to js_block(scope, body)
+    set locals to empty list
+    for each slot from length of params + 1 to length of names of scope # the inputs are the parameters
+        add v(slot, level of scope) + " = UNSET" to locals
+    end
+    for each n from 1 to temps of scope
+        add "$t" + n to locals
+    end
+    if length of locals is 0
+        return record with scope scope, code statements
+    end
+    return record with scope scope, code "let " + join(locals, ", ") + ";\n" + statements
+end
+
+# Moth source in; out come the JavaScript (for fromJs() in jit.js), the tokens its positions point at,
+# and the names of the top-level variables, whose values the JavaScript returns.
+to compile with source
+    set ats to empty list
+    set main to function_code(nothing, empty list, parse(tokenize(source)))
+    set slots to empty list
+    for each slot from 1 to length of names of scope of main
+        add v(slot, 0) to slots
+    end
+    return record with js code of main + "\nreturn [" + join(slots, ", ") + "];", ats ats, names names of scope of main
+end

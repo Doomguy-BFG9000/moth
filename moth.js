@@ -1,9 +1,9 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute } from "./vm.js";
+import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
-import { jit, TooDeep } from "./jit.js";
+import { jit, fromJs, TooDeep } from "./jit.js";
 import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt } from "./vm.js";
@@ -667,7 +667,10 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
 // Runs a program and hands back what it made at the top level, by name; a Moth function comes back as a
 // JavaScript function. This is how JavaScript drives code written in Moth, like Moth's own compiler.
 export function load(source, print = console.log) {
-  const program = compileToJs(source);
+  return loadProgram(compileToJs(source), print);
+}
+
+function loadProgram(program, print = console.log) {
   const values = program.run(print, undefined, Infinity);
   const made = Object.create(null); // a variable could be called __proto__
   program.names.forEach((name, slot) => {
@@ -675,6 +678,27 @@ export function load(source, print = console.log) {
     if (value !== UNSET) made[name] = value instanceof Closure ? (...args) => value.fn.run(...args) : value;
   });
   return made;
+}
+
+// Moth's compiler written in Moth (compiler.moth): give it that file's text and get back a compiler that
+// works like compileToJs(). `using` compiles compiler.moth itself: compileToJs() by default, or a compiler
+// made by this function, which is how the tests show the compiler compiling itself.
+export function mothCompiler(compilerSource, using = compileToJs) {
+  const { compile } = loadProgram(using(compilerSource));
+  return (source) => {
+    let made;
+    try {
+      made = compile(source);
+    } catch (err) {
+      // a mistake in the program it compiles comes back as `fail with` a record of where and why
+      if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
+      if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");
+      throw err;
+    }
+    const names = [];
+    made.names.forEach((name, i) => (names[i + 1] = name)); // slot 1 is the first name, as in jit()
+    return fromJs(made.js, made.ats, names);
+  };
 }
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and

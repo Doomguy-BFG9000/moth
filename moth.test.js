@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, debug, timeline, check, compile, load, excerpt, MothError } from "./moth.js";
+import { readFileSync } from "node:fs";
+import { run, debug, timeline, check, compile, compileToJs, load, mothCompiler, excerpt, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -398,11 +399,9 @@ function outcome(source, engine) {
   }
 }
 
-// Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points inside
-// the code, never with a JavaScript crash, and the JIT must do exactly what the VM does with every one of
-// them: same output, same drawing, same mistake at the same spot. The seed is fixed, so a failure always reproduces.
-test("randomly broken programs fail cleanly, and the JIT matches the VM on all of them", () => {
-  let seed = 42;
+// The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a
+// failure always reproduces.
+function brokenPrograms(seed, count) {
   const random = (n) => {
     seed = (seed * 1103515245 + 12345) % 2 ** 31;
     return Math.floor((seed / 2 ** 31) * n);
@@ -415,9 +414,65 @@ test("randomly broken programs fail cleanly, and the JIT matches the VM on all o
     (s) => { const lines = s.split("\n"); lines.splice(random(lines.length), 0, pick(lines)); return lines.join("\n"); }, // repeat a line
     (s) => { const words = s.match(/\w+|\S/g); return s.replace(pick(words), pick(words)); }, // swap a word for another
   ];
-  for (let i = 0; i < 5000; i++) {
+  const programs = [];
+  for (let i = 0; i < count; i++) {
     let source = pick(sources);
     for (let n = random(4); n > 0; n--) source = pick(mutations)(source);
-    assert.deepEqual(outcome(source, "jit"), outcome(source, "vm"), source);
+    programs.push(source);
   }
+  return programs;
+}
+
+// Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points inside
+// the code, never with a JavaScript crash, and the JIT must do exactly what the VM does with every one of
+// them: same output, same drawing, same mistake at the same spot.
+test("randomly broken programs fail cleanly, and the JIT matches the VM on all of them", () => {
+  for (const source of brokenPrograms(42, 5000)) assert.deepEqual(outcome(source, "jit"), outcome(source, "vm"), source);
+});
+
+// ---------- the compiler written in Moth ----------
+
+const COMPILER = readFileSync(new URL("./compiler.moth", import.meta.url), "utf8");
+
+// What a compiler makes of a program: its JavaScript and the spot each position in it points at, or the
+// mistake it stops at.
+function compiled(compiler, source) {
+  try {
+    const { source: js, ats } = compiler(source);
+    return { js, ats: ats.map(({ line, col }) => [line, col]) };
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    return { error: [err.message, err.col, err.incomplete] };
+  }
+}
+
+test("the compiler written in Moth writes the JIT's JavaScript, byte for byte, and stops at the same mistakes", () => {
+  const moth = mothCompiler(COMPILER);
+  const deep = `say ${"(".repeat(3000)}1${")".repeat(3000)}`; // too deep for both
+  for (const source of [...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s), deep, COMPILER])
+    assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+});
+
+// The one known difference: Moth sees text as whole characters, so it can't tell half of an emoji (a lone
+// UTF-16 surrogate, which no file can hold) from a whole one. The fuzzer cuts emoji in half, so those are left out.
+test("the compiler written in Moth matches the JIT on randomly broken programs", () => {
+  const moth = mothCompiler(COMPILER);
+  for (const source of brokenPrograms(1, 3000)) {
+    if (/[\ud800-\udfff]/u.test(source)) continue;
+    assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+  }
+});
+
+// Bootstrapping: compiler.moth compiled by the JIT compiles itself; the compiler that makes compiles it
+// again, and so on. Each one writes exactly the JIT's JavaScript, so the compiler has reached a fixed point.
+test("the compiler written in Moth compiles itself, and what it makes does the same", () => {
+  const js = compileToJs(COMPILER).source;
+  let compiler = compileToJs;
+  for (let stage = 1; stage <= 3; stage++) {
+    compiler = mothCompiler(COMPILER, compiler);
+    assert.equal(compiler(COMPILER).source, js, `stage ${stage}`);
+  }
+  const said = [];
+  compiler(examples.Functions).run((line) => said.push(line), undefined, Infinity); // and what it compiles runs
+  assert.deepEqual(said, ["Hello, Sam!", "fib(20) is 6765"]);
 });
