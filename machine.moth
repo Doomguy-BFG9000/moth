@@ -2345,10 +2345,15 @@ to emit_mistakes with a
     movi(a, r14, 0)
     storei(a, rip("t_prev_fn"), 0)
     mark(a, walk)
-    load(a, rax, mem(rbx, -8)) # where it was called from
+    load(a, rcx, mem(rbx, 8)) # where it was called from: the number after where it goes back to
+    movi(a, rax, -1)
+    load8(a, rdx, mem(rcx, 0))
+    alui(a, "cmp", rdx, 0xA9)
+    jcc(a, cc_ne, walked)
+    load32s(a, rax, mem(rcx, 1))
     alui(a, "cmp", rax, -1)
     jcc(a, cc_e, walked)
-    load(a, rcx, mem(rbx, -16)) # and the function's name
+    load(a, rcx, mem(rbx, -8)) # and the function's name
     shifti(a, "shl", rcx, 3)
     lea(a, rdx, rip("fn_names"))
     alu(a, "add", rdx, rcx)
@@ -12715,6 +12720,7 @@ to emit_gui_common with a
     load(a, rcx, mem(rax, 0))
     movi(a, rax, -1)
     call_r(a, rcx)
+    call_mark(a, -1)
     mov_rr(a, rsp, r12)
     call_to(a, "rt_flush_out") # what it said, shown now
     for each r in list of r15, r14, r13, r12, rbp, rbx
@@ -26582,6 +26588,7 @@ to emit_runtime with st
     store(a, rip("stack_top"), rsp)
     movi(a, r15, 0)
     call_to(a, "moth_main")
+    call_mark(a, -1)
     movi(a, rcx, 0)
     mark(a, "rt_finish") # rcx: the number the program ends with, once what it said and drew has gone out
     push_r(a, rcx)
@@ -34511,6 +34518,7 @@ to emit_callback with a, job, target
     load(a, rcx, mem(rax, 0))
     movi(a, rax, -1)
     call_r(a, rcx)
+    call_mark(a, -1)
     mov_rr(a, rsp, r14)
     pop_r(a, rcx)
     store(a, rip("try_top"), rcx)
@@ -35143,7 +35151,8 @@ to new_state with a, program_name, files, source, target
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
-        uses_controls no, uses_choose no, uses_files no
+        uses_controls no, uses_choose no, uses_files no, sigs nothing, seen_inputs empty dictionary,
+        seen_gives empty dictionary, escaped empty dictionary, live no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -35369,7 +35378,7 @@ to hidden_place with fc
     if hidden of fc is greater than most_hidden of fc
         set most_hidden of fc to hidden of fc
     end
-    return mem(rbp, -24 - 8 * (own of fc + h))
+    return mem(rbp, -16 - 8 * (own of fc + h))
 end
 
 # where a variable resolve() found lives
@@ -35389,7 +35398,7 @@ to place_of with fc, found
             if k is at most inputs of fc
                 return mem(rbp, 16 + 8 * (inputs of fc - k))
             end
-            return mem(rbp, -24 - 8 * (k - inputs of fc - 1))
+            return mem(rbp, -16 - 8 * (k - inputs of fc - 1))
         end
         load(a, r11, env_slot of fc)
         return mem(r11, 8 * k)
@@ -35473,11 +35482,26 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
     set st to new_state(a, program_name, files, source, target)
     set allowed of st to allowing
     gen_program(st, body)
+    set rounds to 0
+    repeat while not sigs_hold(st) # a guess was wrong: written again with what was found, then with none
+        add 1 to rounds
+        set guess to empty dictionary
+        if rounds is 1
+            set guess to sigs_met(sigs of st, st)
+        end
+        set a to new_asm()
+        set st to new_state(a, program_name, files, source, target)
+        set allowed of st to allowing
+        set sigs of st to guess
+        gen_program(st, body)
+    end
     if uses_units of st # it has amounts in it: written again, so the slow paths of its arithmetic look for them
+        set settled to sigs of st
         set a to new_asm()
         set units of a to yes
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
+        set sigs of st to settled
         gen_program(st, body)
     end
     emit_runtime(st)
@@ -35608,6 +35632,9 @@ to gen_program with st, body
             set item (slot of front's resolve(scope, fn_name)) of slots to f
         end
     end
+    if sigs of st is nothing
+        set sigs of st to guess_sigs(st, body)
+    end
     data_here(a, "globals")
     for each n in names of scope
         put_all(data of a, bits_unset)
@@ -35616,8 +35643,7 @@ to gen_program with st, body
     mark(a, "moth_main")
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
-    raw(a, list of 0x6A, 0xFF) # push -1: main, where the calls stop
-    raw(a, list of 0x6A, 0x00)
+    raw(a, list of 0x6A, 0x00) # main's number
     set sized to frame_size(a, nothing)
     set fc to new_fc(st, scope, yes, "main", 0, 0)
     gen_block(fc, body)
@@ -35649,13 +35675,12 @@ to gen_function with st, f
     mark(a, label of f)
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
-    push_r(a, rax) # the number of the call
     push_i32(a, id of f)
     set sized to frame_size(a, nothing)
     if own is greater than 0
         movi64(a, rax, bits_unset)
         for each j from 0 to own - 1
-            store(a, mem(rbp, -24 - 8 * j), rax)
+            store(a, mem(rbp, -16 - 8 * j), rax)
         end
     end
     set fc to new_fc(st, scope, no, name of f, n, own)
@@ -35667,7 +35692,7 @@ to gen_function with st, f
             if i is at most length of kinds of f and item i of kinds of f is 0
                 set what to "number"
             end
-            set_fact(fc, 0 - i, what)
+            set_fact(fc, 0 - i, kind_join(what, sig_input(st, f, i)))
         end
     end
     set done of fc to new_label(a)
@@ -35695,6 +35720,9 @@ to gen_function with st, f
         store(a, saved_try of fc, rax)
     end
     gen_block(fc, body of f)
+    if not always_leaves(body of f)
+        note_gives(st, f, "value")
+    end
     load_bits(a, xmm0, bits_nothing)
     mark(a, done of fc)
     if saved_try of fc is not nothing
@@ -35705,7 +35733,7 @@ to gen_function with st, f
     pop_r(a, rbp)
     ret(a)
     patch_frame(hot of a, sized, 8 * (own + most_hidden of fc))
-    if 8 * (4 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
+    if 8 * (3 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
         not_yet(at of f, "a function this big")
     end
 end
@@ -35798,10 +35826,14 @@ to gen_statement with fc, s
         var_store(fc, found, xmm0)
         set_fact(fc, fact_key(fc, found), "value")
     else if what is "return"
+        set given to "value"
         if value of s is nothing
             load_bits(a, xmm0, bits_nothing)
         else
-            gen_expr(fc, value of s)
+            set given to gen_expr(fc, value of s)
+        end
+        if fn of fc is not nothing
+            note_gives(st of fc, fn of fc, given)
         end
         if saved_try of fc is nothing # straight back, as the end of the function goes
             mov_rr(a, rsp, rbp)
@@ -36567,7 +36599,526 @@ to expr_kind with fc, e, known
     if what is "length"
         return "whole"
     end
+    if what is "call"
+        return call_kind(fc, e)
+    end
     return "value"
+end
+
+# ---------- what each function is given, and gives ----------
+# A function only ever called by its name (see function_at), and never used as a value, can know more about
+# its inputs than that they have values: if every call gives input 1 a whole number, it's one in there. And a
+# call to it can know what it gives back. For each such function, `sigs` says what kind of value each input
+# is, and what kind it gives (see the facts, above). They're worked out before the code is written
+# (guess_sigs), going through the program as gen_* will, with each first guessed to be as good as it could be,
+# whole numbers, then made less until nothing contradicts them: a recursive function's guess must hold up
+# against its own calls. As the code is written, what each call gives each input, what each return gives,
+# and a function used as a value are noted too (note_inputs, note_gives, gen_name_into), and if any of it is
+# less than the guess, the guess was wrong, and the program is written again (see compile_allowing). So what
+# the code relies on always holds: each call gives what was assumed, so each function's code, written
+# assuming it, gives what was assumed.
+
+# what a call to the program's function `e` names gives when it works
+to call_kind with fc, e
+    set f to function_at(fc, front's resolve(scope of fc, name of e))
+    if f is nothing or length of args of e is not length of params of f
+        return "value"
+    end
+    return sig_gives(st of fc, f)
+end
+
+to sig_of with st, f
+    set sigs to sigs of st
+    if sigs is nothing or not (id of f is in sigs)
+        return nothing
+    end
+    return item (id of f) of sigs
+end
+
+to sig_gives with st, f
+    set sig to sig_of(st, f)
+    if sig is nothing
+        return "value"
+    end
+    return gives of sig
+end
+
+to sig_input with st, f, i
+    set sig to sig_of(st, f)
+    if sig is nothing
+        return "value"
+    end
+    return item i of inputs of sig
+end
+
+# the more that's known of two things both known about the same value
+to kind_join with x, y
+    if x is "whole" or y is "whole"
+        return "whole"
+    end
+    if x is "number" or y is "number"
+        return "number"
+    end
+    return "value"
+end
+
+# what a call gives f's inputs, kept with what other calls gave them, in `seen_inputs` of `held` (the state);
+# guess_sigs's own record (`live`) makes its guess less there and then instead, so the next call in the same
+# round already goes by it
+to note_inputs with held, f, kinds
+    if live of held
+        ga_called(held, f)
+        set sig to sig_of(st of held, f)
+        if sig is not nothing
+            set ins to inputs of sig
+            for each i from 1 to length of kinds
+                set met to kind_meet(item i of ins, item i of kinds)
+                if met is not item i of ins
+                    set item i of ins to met
+                    set item (id of f) of dirty of held to yes
+                end
+            end
+        end
+        return nothing
+    end
+    set seen to seen_inputs of held
+    if not (id of f is in seen)
+        set item (id of f) of seen to kinds
+        return nothing
+    end
+    set was to item (id of f) of seen
+    set made to empty list
+    for each i from 1 to length of kinds
+        add kind_meet(item i of was, item i of kinds) to made
+    end
+    set item (id of f) of seen to made
+end
+
+# f used as a value: anything may call it, with anything
+to note_escaped with held, f
+    if not live of held
+        set item (id of f) of escaped of held to yes
+        return nothing
+    end
+    set sig to sig_of(st of held, f)
+    if sig is not nothing
+        set ins to inputs of sig
+        for each i from 1 to length of ins
+            if item i of ins is not "value"
+                set item i of ins to "value"
+                set item (id of f) of dirty of held to yes
+            end
+        end
+    end
+end
+
+to note_gives with held, f, given
+    if live of held
+        set sig to sig_of(st of held, f)
+        if sig is not nothing and kind_meet(gives of sig, given) is not gives of sig
+            set gives of sig to kind_meet(gives of sig, given)
+            set callers to callers of held
+            if id of f is in callers
+                for each key in keys of item (id of f) of callers
+                    set item key of dirty of held to yes
+                end
+            end
+        end
+        return nothing
+    end
+    set seen to seen_gives of held
+    if id of f is in seen
+        set item (id of f) of seen to kind_meet(item (id of f) of seen, given)
+    else
+        set item (id of f) of seen to given
+    end
+end
+
+# that the code being gone through (`walking` of held: a function's number, or -1 for the top level) calls f,
+# so it's gone through again if what f gives changes
+to ga_called with held, f
+    set callers to callers of held
+    if not (id of f is in callers)
+        set item (id of f) of callers to empty dictionary
+    end
+    set item (walking of held) of item (id of f) of callers to yes
+end
+
+# `sigs` with what `held` saw made part of them: each the less of the two
+to sigs_met with sigs, held
+    set made to empty dictionary
+    for each id in keys of sigs
+        set sig to item id of sigs
+        set ins to empty list
+        for each i from 1 to length of inputs of sig
+            set k to item i of inputs of sig
+            if id is in escaped of held
+                set k to "value"
+            else if id is in seen_inputs of held
+                set k to kind_meet(k, item i of item id of seen_inputs of held)
+            end
+            add k to ins
+        end
+        set gives to gives of sig
+        if id is in seen_gives of held
+            set gives to kind_meet(gives, item id of seen_gives of held)
+        end
+        set item id of made to record with inputs ins, gives gives
+    end
+    return made
+end
+
+to sigs_same with x, y
+    for each id in keys of x
+        set one to item id of x
+        set other to item id of y
+        if gives of one is not gives of other
+            return no
+        end
+        for each i from 1 to length of inputs of one
+            if item i of inputs of one is not item i of inputs of other
+                return no
+            end
+        end
+    end
+    return yes
+end
+
+# whether the code just written gave every function what its sig says, and every function gave it
+to sigs_hold with st
+    return sigs_same(sigs_met(sigs of st, st), sigs of st)
+end
+
+# whether code always leaves before its end: by a return, a mistake or the program stopping
+to always_leaves with body
+    if length of body is 0
+        return no
+    end
+    set s to item (length of body) of body
+    set what to kind of s
+    if what is "return" or what is "fail" or what is "exit"
+        return yes
+    end
+    if what is "if"
+        return always_leaves(then of s) and always_leaves(otherwise of s)
+    end
+    if what is "try"
+        return always_leaves(body of s) and always_leaves(handler of s)
+    end
+    return no
+end
+
+# The sigs of the functions only ever called by name, but for a library's: each input a whole number and
+# each giving one, then less, as going through the program finds, until it settles
+to guess_sigs with st, body
+    set sigs to empty dictionary
+    set slots to fn_slots of st
+    for each slot in keys of slots
+        set f to item slot of slots
+        if native of f is nothing
+            set ins to empty list
+            for each p in params of f
+                add "whole" to ins
+            end
+            set item (id of f) of sigs to record with inputs ins, gives "whole"
+        end
+    end
+    set sigs of st to sigs
+    set held to record with st st, live yes, dirty empty dictionary, callers empty dictionary, walking -1,
+        scopes empty dictionary, by_id empty dictionary, body body
+    set records to fn_records of st
+    set item -1 of dirty of held to yes
+    for each key in keys of records
+        set f to item key of records
+        set item (id of f) of by_id of held to f
+        set item (id of f) of dirty of held to yes
+    end
+    set walks to 0
+    set most to 20 * (length of keys of records + 1)
+    repeat while length of keys of dirty of held is greater than 0 and walks is less than most
+        set todo to keys of dirty of held
+        set dirty of held to empty dictionary
+        for each key in todo
+            add 1 to walks
+            set walking of held to key
+            if key is -1
+                ga_block(held, ga_fc(st, main_scope of st, 0, no, nothing), body of held, empty dictionary)
+            else
+                ga_function(held, item key of by_id of held)
+            end
+        end
+    end
+    return sigs
+end
+
+# what going through a function's code needs of the `fc` that writing it has
+to ga_fc with st, scope, level, with_env, f
+    set env to nothing
+    if with_env
+        set env to 1
+    end
+    return record with st st, scope scope, level level, env_slot env, fn f
+end
+
+to ga_function with held, f
+    set st to st of held
+    set scopes to scopes of held
+    set key to "f" + id of f
+    if not (key is in scopes)
+        set item key of scopes to front's new_scope(parent of f, params of f, body of f, order of f)
+    end
+    set with_env to makes_functions(body of f)
+    set fc to ga_fc(st, item key of scopes, level of f, with_env, f)
+    set known to empty dictionary
+    if not with_env
+        for each i from 1 to length of params of f
+            set what to "value"
+            if i is at most length of kinds of f and item i of kinds of f is 0
+                set what to "number"
+            end
+            set item (0 - i) of known to kind_join(what, sig_input(st, f, i))
+        end
+    end
+    ga_block(held, fc, body of f, known)
+    if not always_leaves(body of f)
+        note_gives(held, f, "value")
+    end
+end
+
+# a function made inside another, or a handler: what it's given isn't known, but the calls in it count
+to ga_inner with held, fc, s
+    set scopes to scopes of held
+    set key to "i" + order of s
+    if not (key is in scopes)
+        set item key of scopes to front's new_scope(scope of fc, params of s, body of s, order of s)
+    end
+    set with_env to makes_functions(body of s)
+    set inner to ga_fc(st of held, item key of scopes, level of fc + 1, with_env, nothing)
+    set known to empty dictionary
+    if not with_env
+        for each i from 1 to length of params of s
+            set item (0 - i) of known to "value"
+        end
+    end
+    ga_block(held, inner, body of s, known)
+end
+
+to set_known with known, key, what
+    if key is not nothing
+        set item key of known to what
+    end
+end
+
+# a call may change any of main's variables
+to ga_forget_main with known
+    for each key in keys of known
+        if key is greater than 0
+            remove key from known
+        end
+    end
+end
+
+to ga_block with held, fc, body, known
+    set now to known
+    for each s in body
+        set now to ga_statement(held, fc, s, now)
+    end
+    return now
+end
+
+# what's known after a statement, as gen_statement would find it, noting what it calls with
+to ga_statement with held, fc, s, known
+    set what to kind of s
+    if what is "say"
+        for each part in parts of s
+            ga_expr(held, fc, part, known)
+        end
+    else if what is "set"
+        set made to ga_expr(held, fc, value of s, known)
+        set_known(known, name_key(fc, name of s), made)
+    else if what is "add"
+        set added to ga_expr(held, fc, value of s, known)
+        set key to name_key(fc, name of s)
+        set had to nothing
+        if key is not nothing and key is in known
+            set had to item key of known
+        end
+        set_known(known, key, add_kind(had, added))
+    else if what is "if"
+        ga_expr(held, fc, cond of s, known)
+        set after_then to ga_block(held, fc, then of s, facts_copy(known))
+        set after_else to ga_block(held, fc, otherwise of s, facts_copy(known))
+        return facts_meet(after_then, after_else)
+    else if what is "while" or what is "repeat"
+        set info to new_region()
+        if what is "while"
+            scan_expr(fc, info, cond of s, 8)
+        else
+            ga_expr(held, fc, count of s, known)
+        end
+        scan_block(fc, info, body of s, 8)
+        set stable to region_facts(fc, known, info, nothing, nothing)
+        if what is "while"
+            ga_expr(held, fc, cond of s, facts_copy(stable))
+        end
+        ga_block(held, fc, body of s, facts_copy(stable))
+        return stable
+    else if what is "count" or what is "each"
+        set seed_kind to "value"
+        set info to new_region()
+        if what is "count"
+            set first to ga_expr(held, fc, start of s, known)
+            ga_expr(held, fc, limit of s, known)
+            set seed_kind to "number"
+            if first is "whole"
+                set seed_kind to "whole"
+            end
+            region_set(fc, info, name of s, "count", start of s, 8)
+        else
+            ga_expr(held, fc, over of s, known)
+            region_set(fc, info, name of s, "value", nothing, 8)
+        end
+        scan_block(fc, info, body of s, 8)
+        set before to facts_copy(known)
+        set key to name_key(fc, name of s)
+        set stable to region_facts(fc, before, info, key, seed_kind)
+        set inside to facts_copy(stable)
+        set_known(inside, key, seed_kind)
+        ga_block(held, fc, body of s, inside)
+        return loop_after(stable, before, key)
+    else if what is "try"
+        set info to new_region()
+        scan_block(fc, info, body of s, 1)
+        set stable to region_facts(fc, known, info, nothing, nothing)
+        set after_body to ga_block(held, fc, body of s, facts_copy(known))
+        set caught to facts_copy(stable)
+        if name of s is not nothing
+            set_known(caught, name_key(fc, name of s), "value")
+        end
+        return facts_meet(after_body, ga_block(held, fc, handler of s, caught))
+    else if what is "define"
+        if level of fc is not 0 # made inside a function (one made at the top level has its own turn)
+            ga_inner(held, fc, s)
+        end
+        set_known(known, name_key(fc, name of s), "value")
+    else if what is "when" or what is "every"
+        if what is "when"
+            ga_expr(held, fc, label of s, known)
+        else
+            ga_expr(held, fc, interval of s, known)
+        end
+        ga_inner(held, fc, fn of s)
+    else if what is "return"
+        set given to "value"
+        if value of s is not nothing
+            set given to ga_expr(held, fc, value of s, known)
+        end
+        if fn of fc is not nothing
+            note_gives(held, fn of fc, given)
+        end
+    else if what is "call"
+        ga_expr(held, fc, s, known)
+    else if what is "fail" or what is "exit" or what is "turtle"
+        ga_expr(held, fc, value of s, known)
+    else if what is "setItem" or what is "setField" or what is "write"
+        ga_expr(held, fc, target of s, known)
+        ga_expr(held, fc, value of s, known)
+    else if what is "remove"
+        ga_expr(held, fc, key of s, known)
+        ga_expr(held, fc, target of s, known)
+    else if what is "removeFile"
+        ga_expr(held, fc, target of s, known)
+    else if what is "expect"
+        ga_expr(held, fc, cond of s, known)
+    end
+    if not (what is in known_statements)
+        return empty dictionary
+    end
+    return known
+end
+
+# what kind of value `e` gives, as expr_kind says, noting the calls in it and the functions used as values
+to ga_expr with held, fc, e, known
+    if e is nothing
+        return "value"
+    end
+    set what to kind of e
+    if what is "value"
+        if type of e is "number"
+            return literal_kind(st of fc, value of e)
+        end
+        return "value"
+    end
+    if what is "name"
+        set found to front's resolve(scope of fc, name of e)
+        set named_fn to function_at(fc, found)
+        if named_fn is not nothing
+            note_escaped(held, named_fn)
+        end
+        set key to fact_key(fc, found)
+        if key is not nothing and key is in known
+            return item key of known
+        end
+        return "value"
+    end
+    if what is "call"
+        set kinds to empty list
+        for each arg in args of e
+            add ga_expr(held, fc, arg, known) to kinds
+        end
+        set f to function_at(fc, front's resolve(scope of fc, name of e))
+        set made to "value"
+        if f is not nothing and length of kinds is length of params of f
+            note_inputs(held, f, kinds)
+            set made to sig_gives(st of held, f)
+        end
+        ga_forget_main(known)
+        return made
+    end
+    set made to "value"
+    if what is "math"
+        set kl to ga_expr(held, fc, left of e, known)
+        set made to math_kind(op of e, kl, ga_expr(held, fc, right of e, known))
+    else if what is "compare" or what is "and" or what is "or" or what is "random"
+        ga_expr(held, fc, left of e, known)
+        ga_expr(held, fc, right of e, known)
+        if what is "random"
+            set made to "whole"
+        end
+    else if what is "negate"
+        set made to "number"
+        if ga_expr(held, fc, operand of e, known) is "whole"
+            set made to "whole"
+        end
+    else if what is "not"
+        ga_expr(held, fc, operand of e, known)
+    else if what is "list" or what is "dictionary"
+        for each part in items of e
+            ga_expr(held, fc, part, known)
+        end
+    else if what is "record"
+        for each part in values of e
+            ga_expr(held, fc, part, known)
+        end
+    else if what is "length"
+        ga_expr(held, fc, subject of e, known)
+        set made to "whole"
+    else if what is "field" or what is "read" or what is "readFolder"
+        ga_expr(held, fc, subject of e, known)
+    else if what is "item"
+        ga_expr(held, fc, subject of e, known)
+        ga_expr(held, fc, index of e, known)
+    else if what is "builtin"
+        for each part in args of e
+            ga_expr(held, fc, part, known)
+        end
+    else if what is "ask"
+        ga_expr(held, fc, question of e, known)
+    end
+    if not (what is in plain_values)
+        ga_forget_main(known)
+    end
+    return made
 end
 
 # What a stretch of code does with variables, found without writing its code: each place that sets one
@@ -36792,7 +37343,7 @@ to key_place with fc, key
     if k is at most inputs of fc
         return mem(rbp, 16 + 8 * (inputs of fc - k))
     end
-    return mem(rbp, -24 - 8 * (k - inputs of fc - 1))
+    return mem(rbp, -16 - 8 * (k - inputs of fc - 1))
 end
 
 # the xmm register the variable with this key is kept in, or nothing
@@ -37604,7 +38155,21 @@ to gen_compare_jump with fc, e, label, jump_when
         end
         return nothing
     end
-    set kinds to gen_pair(fc, left of e, right of e)
+    set written to nothing # a whole number the program wrote on the right, compared with a whole one where it is
+    set right to right of e
+    if test is not "div" and kind of right is "value" and type of right is "number"
+        set kl to gen_expr(fc, left of e)
+        set kr to literal_kind(st of fc, value of right)
+        set bits to literal_bytes(value of right, at of right)
+        if kl is "whole" and kr is "whole"
+            set written to rip(number_place(a, bits))
+        else
+            load_bits(a, xmm1, bits)
+        end
+        set kinds to list of kl, kr
+    else
+        set kinds to gen_pair(fc, left of e, right)
+    end
     set kl to item 1 of kinds
     set kr to item 2 of kinds
     if test is not "is" # past this, both are numbers, or it was a mistake (see learn_numbers)
@@ -37618,6 +38183,14 @@ to gen_compare_jump with fc, e, label, jump_when
             jcc(a, cc_e, label)
         else
             jcc(a, cc_ne, label)
+        end
+    else if written is not nothing
+        ucomisd(a, xmm0, written)
+        jcc(a, cc_p, slow)
+        if jump_when
+            jcc(a, item test of holds_codes, label)
+        else
+            jcc(a, item test of fails_codes, label)
         end
     else
         ucomisd(a, xmm0, reg_at(xmm1))
@@ -37652,6 +38225,9 @@ to gen_compare_jump with fc, e, label, jump_when
     mark(a, back)
     set was to enter_cold(a)
     mark(a, slow)
+    if written is not nothing
+        movsd_load(a, xmm1, written)
+    end
     call_to(a, "rt_cmp_" + test)
     set wrong to new_label(a)
     alui(a, "cmp", rax, 1)
@@ -37804,7 +38380,7 @@ to gen_expr with fc, e
     else if what is "name"
         set made to gen_name_into(fc, e, xmm0)
     else if what is "call"
-        gen_call(fc, e, no)
+        set made to gen_call(fc, e, no)
     else if what is "math"
         set made to gen_math(fc, e)
     else if what is "compare"
@@ -38113,6 +38689,10 @@ to gen_name_into with fc, e, x
         jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, name of e, no, no)))
         return "value"
     end
+    set named_fn to function_at(fc, found)
+    if named_fn is not nothing # used as a value: anything may call it, with anything
+        note_escaped(st of fc, named_fn)
+    end
     set key to fact_key(fc, found)
     set known to fact_of(fc, key)
     if known is not nothing
@@ -38138,10 +38718,73 @@ to gen_name_into with fc, e, x
     return "value"
 end
 
+# `x op y`. Two numbers need nothing looked at, and then a number the program wrote, or a variable sure to be
+# a number, on the right is used where it is, and + and * of a left side that waited on the stack take it
+# from there: one instruction each, where loading them first took two or three. Anything else goes as
+# gen_pair puts it, left in xmm0 and right in xmm1 (see gen_math_pair).
 to gen_math with fc, e
     set a to a of fc
     set op to op of e
-    set kinds to gen_pair(fc, left of e, right of e)
+    set left to left of e
+    set right to right of e
+    set left_number to kind of left is "value" and type of left is not "string"
+    if kind of right is "value" and type of right is "number"
+        set bits to literal_bytes(value of right, at of right)
+        set kl to gen_expr(fc, left)
+        set kr to literal_kind(st of fc, value of right)
+        if is_number_kind(kl) and not (op is "/" and zero_bits(bits))
+            sse_math(a, op, xmm0, rip(number_place(a, bits)))
+            return math_kind(op, kl, kr)
+        end
+        load_bits(a, xmm1, bits)
+        return gen_math_pair(fc, e, kl, kr)
+    end
+    if kind of right is "name" and not left_number
+        set kl to gen_expr(fc, left)
+        set found to front's resolve(scope of fc, name of right)
+        if found is not nothing and is_number_kind(kl) and op is not "/"
+            set key to fact_key(fc, found)
+            set kr to fact_of(fc, key)
+            if is_number_kind(kr) and reg_of(fc, key) is nothing
+                sse_math(a, op, xmm0, place_of(fc, found))
+                return math_kind(op, kl, kr)
+            end
+        end
+        return gen_math_pair(fc, e, kl, gen_name_into(fc, right, xmm1))
+    end
+    if (op is "+" or op is "*") and not left_number and kind of right is not "value"
+        set kl to gen_expr(fc, left)
+        push_value(fc)
+        set kr to gen_expr(fc, right)
+        if is_number_kind(kl) and is_number_kind(kr) # the same either way round, for two numbers
+            sse_math(a, op, xmm0, mem(rsp, 0))
+            alui(a, "add", rsp, 8)
+            set pushed of fc to pushed of fc - 1
+            return math_kind(op, kl, kr)
+        end
+        movapd(a, xmm1, xmm0)
+        pop_value(fc, xmm0)
+        return gen_math_pair(fc, e, kl, kr)
+    end
+    set kinds to gen_pair(fc, left, right)
+    return gen_math_pair(fc, e, item 1 of kinds, item 2 of kinds)
+end
+
+# whether a double's 8 bytes, lowest first, are 0 or -0
+to zero_bits with eight
+    for each k from 1 to 7
+        if item k of eight is not 0
+            return no
+        end
+    end
+    return (item 8 of eight bit and 127) is 0
+end
+
+# `x op y` with x in xmm0 and y in xmm1, of kinds kl and kr
+to gen_math_pair with fc, e, kl, kr
+    set a to a of fc
+    set op to op of e
+    set kinds to list of kl, kr
     set made to math_kind(op, item 1 of kinds, item 2 of kinds)
     if is_number_kind(item 1 of kinds) and is_number_kind(item 2 of kinds) # two numbers: nothing to look at, but 0 to divide by
         if op is "/"
@@ -38261,12 +38904,12 @@ to gen_call with fc, e, statement
     set found to front's resolve(scope of fc, callee)
     if found is nothing
         jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, callee, yes, statement)))
-        return nothing
+        return "value"
     end
     set f to function_at(fc, found)
     if f is nothing
         gen_value_call(fc, e, found)
-        return nothing
+        return "value"
     end
     if fn of fc is nothing or id of fn of fc is not id of f # a function running has been made
         set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
@@ -38274,8 +38917,9 @@ to gen_call with fc, e, statement
         alu_load(a, "cmp", rcx, place_of(fc, found))
         jcc(a, cc_e, made_yet)
     end
+    set given to empty list
     for each arg in args of e
-        gen_expr(fc, arg)
+        add gen_expr(fc, arg) to given
         push_value(fc)
     end
     set n to length of args of e
@@ -38283,6 +38927,7 @@ to gen_call with fc, e, statement
     if n is not wanted
         jmp_to(a, fail_stub(fc, at of e, "'" + callee + "' needs " + plural_of(wanted, "input") + " but got " + n))
     else
+        note_inputs(st of fc, f, given)
         for each i from 1 to n
             set k to item i of kinds of f
             if k is not -1
@@ -38294,14 +38939,18 @@ to gen_call with fc, e, statement
     alui(a, "cmp", r15, deepest)
     jcc(a, cc_ae, deep)
     inc_r(a, r15)
-    movi(a, rax, call_site(fc, at of e))
     call_to(a, label of f)
+    note_return(fc, at of e)
     dec_r(a, r15)
     forget_main(fc)
     if n is greater than 0
         alui(a, "add", rsp, 8 * n)
         set pushed of fc to pushed of fc - n
     end
+    if n is not wanted
+        return "value"
+    end
+    return sig_gives(st of fc, f)
 end
 
 to check_kind with fc, e, f, i, k, n
@@ -38341,6 +38990,18 @@ to check_kind with fc, e, f, i, k, n
     stub_kind(a, "err_a")
     jmp_to(a, "rt_e_end")
     leave_cold(a, was)
+end
+
+# The number of the call just made, where it goes back to: `test eax, number`, which changes nothing that's
+# used, and which a mistake's trail reads (see emit_mistakes). Every call into the program's functions has
+# one, -1 for one the runtime makes, as for a handler's, where the trail stops.
+to note_return with fc, at
+    call_mark(a of fc, call_site(fc, at))
+end
+
+to call_mark with a, n
+    raw(a, list of 0xA9)
+    put32(code of a, n)
 end
 
 # a number for this call, which a mistake's trail turns into "in 'f', called from line 3"; calls from the same
@@ -38418,8 +39079,8 @@ to gen_value_call with fc, e, found
     untag(a, rax)
     load(a, rdx, mem(rax, 8))
     load(a, rcx, mem(rax, 0))
-    movi(a, rax, call_site(fc, at of e))
     call_r(a, rcx)
+    note_return(fc, at of e)
     dec_r(a, r15)
     forget_main(fc)
     alui(a, "add", rsp, 8 * (n + 1))

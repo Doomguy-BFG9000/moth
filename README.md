@@ -197,15 +197,15 @@ $ ./fib.exe
 Against C, Rust and Python, with the same four programs written in each
 ([`versus/`](versus)), every one timed from start to finish, it's about as fast
 as C and Rust on primes and decimal maths, as fast as C on a plain loop (which
-Rust does twice as fast again), 1.5 times as slow as both on function calls,
-and 12 to 230 times as fast as Python:
+Rust does three times as fast again), 1.35 times as slow as C on function calls
+and 1.5 times as slow as Rust, and 19 to 290 times as fast as Python:
 
 | `npm run versus` | C | Rust | Moth, machine code | JavaScript engine | Python |
 |:--|--:|--:|--:|--:|--:|
-| fib(32): 7 million calls | 27 ms | 25 ms | 40 ms | 274 ms | 508 ms |
-| adding 1 to 100,000,000 | 43 ms | 19 ms | 41 ms | 700 ms | 9.3 s |
-| primes up to 300,000 | 78 ms | 79 ms | 77 ms | 258 ms | 2.0 s |
-| 30,000,000 steps of decimal maths | 56 ms | 56 ms | 53 ms | 336 ms | 4.3 s |
+| fib(32): 7 million calls | 20 ms | 18 ms | 27 ms | 265 ms | 517 ms |
+| adding 1 to 100,000,000 | 36 ms | 11 ms | 35 ms | 720 ms | 10.1 s |
+| primes up to 300,000 | 71 ms | 72 ms | 71 ms | 250 ms | 2.1 s |
+| 30,000,000 steps of decimal maths | 48 ms | 48 ms | 48 ms | 342 ms | 4.3 s |
 
 On Windows 11, with MSVC's `cl /O2`, `rustc -O` (Rust 1.89) and Python 3.13,
 each program run once to warm up, which Windows' virus checker would otherwise
@@ -213,7 +213,9 @@ be timed looking it over. Moth still keeps its
 promises in these: numbers are decimals compared to 15 digits, and every step
 that could go wrong is checked. machine.moth gets there by knowing, as it
 writes the code, what each variable is sure to hold, and leaving out the
-checks that can't fail; by keeping a loop's busiest variables in the
+checks that can't fail; by working out, across the whole program, what each
+function is always given and always gives back, so a call needs no checks
+either; by keeping a loop's busiest variables in the
 processor's registers; and by running a loop that only works out whole
 numbers as 64-bit whole numbers, which goes back to decimals the moment a sum
 gets too big to be exact.

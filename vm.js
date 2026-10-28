@@ -225,14 +225,17 @@ export const isDictionary = (v) => v instanceof Map;
 export const isBytes = (v) => v instanceof Uint8Array;
 export const truthy = (v) => v !== null && v !== false;
 // `comparing` holds the pairs being compared further up: a list that holds itself comes round to the same
-// pair again, which counts as equal so far, instead of going round for ever.
-export function equal(a, b, comparing = new Map()) {
+// pair again, which counts as equal so far, instead of going round for ever. It's made only for lists,
+// dictionaries and records: two texts, the comparison programs make most, need none.
+export function equal(a, b, comparing) {
   if (a === b) return true;
+  if (typeof a === "string" || typeof b === "string" || a === null || b === null || typeof a === "boolean") return false;
   if (typeof a === "number" && typeof b === "number") return numberOrder(a, b) === 0;
   if (isQuantity(a) || isQuantity(b)) return sameMeasure(a, b) && numberOrder(a.amount, amountIn(b, a.unit)) === 0; // 1 km is 1000 m
   if (isBytes(a) && isBytes(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
   const both = (test) => test(a) && test(b);
   if (!both(isList) && !both(isDictionary) && !both(isRecord)) return false;
+  comparing ??= new Map();
   if (comparing.get(a)?.has(b)) return true;
   if (!comparing.has(a)) comparing.set(a, new Set());
   comparing.get(a).add(b);

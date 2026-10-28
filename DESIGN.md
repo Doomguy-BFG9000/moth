@@ -2165,3 +2165,61 @@ hold them to agreeing.
 - **Not yet.** Linux's own controls, which would mean GTK; pictures and
   drawing in a window of its own; more than one window's Tab order; and
   windows.moth on the JavaScript engines, which can't call a library.
+
+## 48. Faster calls
+
+- **Where the time went.** fib(32) took 33 ms against C's 20. In each call, a
+  function knew nothing about what it was given, so `n is less than 2` first
+  checked that n was a whole number (three instructions and two jumps), and a
+  call knew nothing about what came back, so `fib(n - 1) + fib(n - 2)` checked
+  the sum for a NaN that might mean text. The frame kept the number of the
+  call that made it, for a mistake's trail, which took an instruction at the
+  call and another in the function. And a number the program wrote, `n - 1`,
+  was loaded into a register before it was used.
+- **What each function is given and gives.** For a function only ever called
+  by its name, and never used as a value, machine.moth works out what kind of
+  value each input always gets and what it always gives back: a whole number,
+  a number, or anything (the kinds of §32). Each input is first taken to be a
+  whole number and the function to give one, then each guess is made less
+  wherever the program says otherwise, until nothing does: so fib, given 32
+  and then n - 1 and n - 2 of a whole n, is given whole numbers and gives
+  them, which only a guess that holds up against its own calls finds. Going
+  through the program for this is quick: each finding changes the guess there
+  and then, and only the functions whose inputs changed, or that call one
+  whose result did, are gone through again.
+- **Checked as it's written.** That's a guess, made by going through the
+  program as writing its code does, but not by writing it. So writing it
+  checks it: every call notes the kinds it gives each input, every return
+  the kind it gives, and every use of a function as a value. If any of it is
+  less than the guess, the program is written again with what was found, and
+  if that doesn't hold either, with no guess at all, which can't be wrong. So
+  the code relies only on what's true: each call gives what was assumed, and
+  each function, written assuming it, gives what was assumed.
+- **Smaller pieces.** A number the program wrote on the right of `+`, `-`,
+  `*`, `/` or a comparison of two whole numbers is used where it is in
+  memory, and so is a variable sure to be a number, and `a + b` and `a * b`
+  of two numbers add or multiply from the stack when the left side had to
+  wait there. A frame no longer keeps its call's number: the call is followed
+  by `test eax, number`, which changes nothing that's used, and the trail
+  reads the number from where the frame goes back to; the runtime's own calls
+  into a handler or a callback, and main's, are followed by -1, where the
+  trail stops. A table of every call's return place did it first, but cost
+  16 bytes a call, 589 KB of moth.exe.
+- **The JavaScript engine's `is`** made a new Map every time it compared two
+  values, for lists that hold themselves, even for two texts. It makes one
+  only for lists, dictionaries and records now, which took a third off
+  compiling moth.moth with Node.js (21 s to 14.5 s), more than going through
+  the program costs.
+- **What it gave.** fib(32) in 27 ms, against C's 20 and Rust's 18; the
+  other three are as they were. Each of fib's calls is about 25 instructions,
+  from about 35. moth.exe is 0.9% bigger.
+- **Tested.** Programs written to break it, which machine code must say,
+  fail and exit on exactly as the JavaScript engine does: a function given a
+  whole number in one call, a fraction in another and text in a third, one
+  used as a value and called with text, fib given 10.5 and text, a function
+  that gives a number, text or nothing by the path it takes, infinities and
+  sums past 2^53, two functions that call each other, a loop's variable
+  passed on, an input changed to text, and `is divisible by` of inputs.
+- **Not yet.** Inputs in registers instead of on the stack, a function's
+  variables kept in registers through the calls it makes, and functions put
+  in line where they're called.
