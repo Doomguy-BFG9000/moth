@@ -208,7 +208,7 @@ end
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use"
+    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try"
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position" # in the order of BUILTINS in vm.js
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
@@ -291,11 +291,22 @@ to parse with tokens, reading
         return not is_word("end") and not is_word("else")
     end
 
-    to statements with opener
+    # the line that starts a `try`'s handler: `if it fails`
+    to is_if_it_fails
+        if not is_word("if") or pos + 2 is greater than length of tokens
+            return no
+        end
+        set next to item (pos + 1) of tokens
+        set after to item (pos + 2) of tokens
+        return type of next is "word" and value of next is "it" and type of after is "word" and value of after is "fails"
+    end
+
+    # `in_try`: the statements of a `try`, which also end at its `if it fails`
+    to statements with opener, in_try
         set body to empty list
         set outside_top to at_top
         set at_top to opener is nothing
-        repeat while more(opener)
+        repeat while more(opener) and not (in_try and is_if_it_fails())
             if check("eof")
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
@@ -350,7 +361,7 @@ to parse with tokens, reading
         if not nl of peek()
             expected("a new line")
         end
-        return statements(opener)
+        return statements(opener, no)
     end
 
     to loop_body with opener
@@ -487,6 +498,21 @@ to parse with tokens, reading
         if word("fail")
             expect_word("with")
             return record with kind "fail", value expression(), at t
+        end
+        if word("try")
+            if not nl of peek()
+                expected("a new line")
+            end
+            set body to statements(t, yes)
+            if not is_if_it_fails()
+                expected("'if it fails'")
+            end
+            set pos to pos + 3
+            set caught_name to nothing
+            if word("with")
+                set caught_name to take_name("a variable name")
+            end
+            return record with kind "try", body body, name caught_name, handler block_end(t), at t
         end
         if word("use")
             set name_token to match("string")
@@ -751,12 +777,12 @@ to parse with tokens, reading
         return args
     end
 
-    return statements(nothing)
+    return statements(nothing, no)
 end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -766,15 +792,18 @@ to declarations with body, own, shared
         if what is "define"
             add name of s to own
         end
-        if what is "set" or what is "count" or what is "each"
+        if what is "set" or what is "count" or what is "each" or (what is "try" and name of s is not nothing)
             add name of s to shared
         end
         if what is "if"
             declarations(then of s, own, shared)
             declarations(otherwise of s, own, shared)
         end
-        if what is "while" or what is "repeat" or what is "count" or what is "each"
+        if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "try"
             declarations(body of s, own, shared)
+        end
+        if what is "try"
+            declarations(handler of s, own, shared)
         end
     end
 end
@@ -1094,6 +1123,15 @@ to js_statement with scope, s
     end
     if what is "stop"
         return "break;"
+    end
+    if what is "try" # the call depth when it began, so catching a mistake deep in calls can put it back
+        set t to temp(scope)
+        set body to js_block(scope, body of s)
+        set keep to ""
+        if name of s is not nothing
+            set keep to ref(scope, name of s) + " = "
+        end
+        return t + " = depthNow();\ntry {\n" + body + "\n} catch ($e) {\n" + keep + "caught($e, " + t + ");\n" + js_block(scope, handler of s) + "\n}"
     end
 end
 

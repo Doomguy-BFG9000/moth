@@ -14,8 +14,16 @@ export class MothError extends Error {
   }
 }
 
-export const fail = (at, message, value) => {
-  throw new MothError(at, message, value);
+// What `try` catches: any mistake but one that ends the program on purpose, like running past maxSteps
+// (a loop that never ends must stop, try or not). `if it fails with x` gets the value of a `fail with`,
+// or a mistake's message.
+export const catchable = (err) => err instanceof MothError && !err.final;
+export const caughtValue = (err) => (err.value !== undefined ? err.value : err.reason);
+
+export const fail = (at, message, value, final = false) => {
+  const err = new MothError(at, message, value);
+  if (final) err.final = true;
+  throw err;
 };
 
 // Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
@@ -75,11 +83,13 @@ export const OPCODES = [
   ["FAIL", 0],
   ["BUILTIN", 1], // one of BUILTINS, which takes its inputs off the stack
   ["ASK", 0],
+  ["TRY", 1], // where its `if it fails` starts
+  ["END_TRY", 0], ["CAUGHT", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -343,15 +353,18 @@ export class Turtle {
 
 // Thrown inside the run loop; the loop's catch block turns it into a MothError at the instruction that was running.
 class Failure {
-  constructor(message, value) {
+  constructor(message, value, final = false) {
     this.message = message;
     this.value = value;
+    this.final = final;
   }
 }
 const oops = (message, value) => {
   throw new Failure(message, value);
 };
-const stopped = (steps) => oops(stoppedMessage(steps));
+const stopped = (steps) => {
+  throw new Failure(stoppedMessage(steps), undefined, true);
+};
 
 const MAX_DEPTH = 100_000; // function calls in progress at once; the VM keeps its own stack, so this is a choice, not a JS limit
 
@@ -366,6 +379,8 @@ export class Machine {
   // `draw` gets each line the turtle draws (see Turtle), and `ask` answers questions (see askFor).
   constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask } = {}) {
     Object.assign(this, { main, print, maxSteps, ask, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+    this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
+    this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = new Turtle(draw);
   }
 
@@ -382,6 +397,7 @@ export class Machine {
     let pc = ip; // instruction being run, for error positions
     let why; // why the loop below stopped
 
+    for (;;) {
     try {
       loop: for (;;) {
         pc = ip;
@@ -469,6 +485,7 @@ export class Machine {
             break;
           }
           case RETURN: {
+            while (this.handlers.length && this.handlers.at(-1).frames === frames.length) this.handlers.pop(); // its tries end with it
             const value = stack.pop();
             while (stack.length > base) stack.pop(); // drops anything a loop left behind
             stack.push(value);
@@ -604,6 +621,15 @@ export class Machine {
           case ASK:
             stack.push(askFor(stack.pop(), this.ask, oops));
             break;
+          case TRY:
+            this.handlers.push({ ip: code[ip++], frames: frames.length, stack: stack.length, fn, env, base });
+            break;
+          case END_TRY:
+            this.handlers.pop();
+            break;
+          case CAUGHT:
+            stack.push(this.caught);
+            break;
           case BUILTIN: {
             const builtin = BUILTINS[code[ip++]];
             stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops));
@@ -630,11 +656,22 @@ export class Machine {
             break loop;
         }
       }
+      break;
     } catch (err) {
-      if (err instanceof Failure) fail(fn.at[pc], err.message, err.value);
       // with no recursion in the VM, a RangeError here means a string or list grew past what JavaScript allows
-      if (err instanceof RangeError) fail(fn.at[pc], "a value got too big to fit in memory");
-      throw err;
+      const failure = err instanceof RangeError ? new Failure("a value got too big to fit in memory") : err;
+      if (!(failure instanceof Failure)) throw err;
+      const handler = failure.final ? undefined : this.handlers.pop();
+      if (!handler) fail(fn.at[pc], failure.message, failure.value, failure.final);
+      // back to where the `try` began: its function, its stack, then on to its `if it fails`
+      frames.length = handler.frames;
+      ({ fn, env, base } = handler);
+      code = fn.code;
+      consts = fn.consts;
+      stack.length = handler.stack;
+      ip = handler.ip;
+      this.caught = failure.value !== undefined ? failure.value : failure.message;
+    }
     }
     Object.assign(this, { fn, env, ip, base, steps, stack });
     return why;

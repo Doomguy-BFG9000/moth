@@ -2,7 +2,7 @@
 // to machine code. The VM (vm.js) stays the reference: both engines call the same checks, and the tests
 // run thousands of random programs through both and require the same output, drawings and errors.
 import { Scope } from "./scope.js";
-import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
+import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith, BUILTINS, askFor } from "./vm.js";
 
@@ -101,6 +101,12 @@ class JsCompiler extends Scope {
         return `failWith(${this.expr(s.value)}, ${this.pos(s.at)});`;
       case "stop":
         return "break;"; // every Moth loop is a JavaScript loop, and nothing else is
+      case "try": { // the call depth when it began, so catching a mistake deep in calls can put it back
+        const t = this.temp();
+        const body = this.block(s.body);
+        const keep = s.name ? `${this.ref(s.name)} = ` : "";
+        return `${t} = depthNow();\ntry {\n${body}\n} catch ($e) {\n${keep}caught($e, ${t});\n${this.block(s.handler)}\n}`;
+      }
     }
   }
 
@@ -177,7 +183,10 @@ function helpers(ats, print, draw, maxSteps, answer) {
   let steps = 0;
   let depth = 0; // a failed call needs no undoing: any error ends the run
   const tick = (k) => {
-    if (++steps > maxSteps) errors[k](stoppedMessage(maxSteps));
+    if (++steps > maxSteps) {
+      depth = 0;
+      fail(ats[k], stoppedMessage(maxSteps), undefined, true); // final: no try catches it
+    }
   };
   const enter = (f, argc, name, k) => {
     checkInputs(f, argc, name, errors[k]);
@@ -234,6 +243,13 @@ function helpers(ats, print, draw, maxSteps, answer) {
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
     builtin: (i, args, k) => BUILTINS[i].run(args, errors[k]),
+    depthNow: () => depth,
+    // a mistake an `if it fails` handles; anything else (going too deep, a value too big) goes on to run()
+    caught: (err, at) => {
+      if (!catchable(err)) throw err;
+      depth = at;
+      return caughtValue(err);
+    },
     ask: (question, k) => askFor(question, answer, errors[k]),
   };
 }

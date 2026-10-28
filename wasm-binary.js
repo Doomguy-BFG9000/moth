@@ -68,7 +68,7 @@ function compositeType(t) {
 // ---------- instructions ----------
 
 const OPS = {
-  unreachable: [0x00], block: [0x02], loop: [0x03], if: [0x04], else: [0x05], end: [0x0b], br: [0x0c], br_if: [0x0d],
+  unreachable: [0x00], try: [0x06], catch_all: [0x19], rethrow: [0x09], block: [0x02], loop: [0x03], if: [0x04], else: [0x05], end: [0x0b], br: [0x0c], br_if: [0x0d],
   return: [0x0f], call: [0x10], call_ref: [0x14], drop: [0x1a],
   "local.get": [0x20], "local.set": [0x21], "local.tee": [0x22], "global.get": [0x23], "global.set": [0x24],
   "i32.const": [0x41], "f64.const": [0x44],
@@ -87,7 +87,7 @@ const OPS = {
 
 function immediates(op, args) {
   switch (op) {
-    case "block": case "loop": case "if": {
+    case "block": case "loop": case "if": case "try": {
       const [type] = args;
       if (type === undefined) return [0x40];
       return typeof type === "object" && type.func !== undefined ? sleb(type.func) : valueType(type);
@@ -119,9 +119,9 @@ export class Code {
     if (!OPS[op]) throw new Error(`no such instruction: ${op}`);
     append(this.bytes, OPS[op]);
     append(this.bytes, immediates(op, args));
-    if (op === "end" || op === "else") this.depth--;
+    if (op === "end" || op === "else" || op === "catch_all") this.depth--;
     this.entries.push({ depth: this.depth, op, args, note: "" });
-    if (op === "block" || op === "loop" || op === "if" || op === "else") this.depth++;
+    if (op === "block" || op === "loop" || op === "if" || op === "else" || op === "try" || op === "catch_all") this.depth++;
     return this;
   }
 

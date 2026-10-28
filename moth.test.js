@@ -106,6 +106,13 @@ const PROGRAMS = [
   ["say number of \" 42 \" + 1 \" \" number of \"-2.5\" * 2 \" \" number of 7", "43 -5 7"],
   ["set line to \"the quick brown fox\"\nsay position of \"brown\" in line \" \" position of \"cat\" in line \" \" position of \"x\" in \"😀x\"", "11 0 2"],
   ["say split \"héllo\" by \"\" \" \" join list of 1, yes, nothing with \", \"", "[\"h\", \"é\", \"l\", \"l\", \"o\"] 1, yes, nothing"],
+  // try ... if it fails: a mistake, or a fail with, is caught and the program goes on
+  ["to risky with n\n    if n is 3\n        fail with record with code 3, reason \"three is bad\"\n    end\n    return 10 / n\nend\nfor each n from 0 to 4\n    try\n        say n \": \" risky(n)\n    if it fails with problem\n        say n \": caught \" problem\n    end\nend", "0: caught can't divide by zero\n1: 10\n2: 5\n3: caught (record with code 3, reason \"three is bad\")\n4: 2.5"],
+  ["try\n    fail with \"x\"\n    say \"never\"\nif it fails with e\n    say \"got \" e\nend\nsay \"after\"", "got x\nafter"],
+  ["try\n    try\n        say 1 / 0\n    if it fails with e\n        fail with \"again: \" + e\n    end\nif it fails with e\n    say e\nend", "again: can't divide by zero"],
+  ["to safe_div with a, b\n    try\n        return a / b\n    if it fails\n        return 0\n    end\nend\nsay safe_div(6, 3) \" \" safe_div(1, 0)", "2 0"],
+  ["set total to 0\nfor each k from 1 to 10\n    try\n        if k is 4\n            stop\n        end\n        add k to total\n    if it fails\n        say \"never\"\n    end\nend\nsay total", "6"],
+  ["to deep with n\n    if n is 0\n        say 1 / 0\n    end\n    return deep(n - 1)\nend\ntry\n    deep(3000)\nif it fails with why\n    say \"deep: \" why\nend", "deep: can't divide by zero"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -186,6 +193,11 @@ const ERRORS = [
   // ask needs someone to answer
   ["say ask \"x\"", "line 1: this program asks a question, but nothing can answer it here"],
   ["set ask to 1", "line 1: 'ask' is a Moth word, so it can't be used as a variable name"],
+  // try ... if it fails: a mistake, or a fail with, is caught and the program goes on
+  ["try\n    say 1\nend", "line 3: expected 'if it fails' but found 'end'"],
+  ["try say 1\nif it fails\nend", "line 1: expected a new line but found 'say'"],
+  ["set try to 1", "line 1: 'try' is a Moth word, so it can't be used as a variable name"],
+  ["try\n    say 1\nif it fails\n    say 2", "line 4: 'try' from line 1 is missing its 'end'"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -376,9 +388,12 @@ test("load() hands JavaScript what a program made, and fail with's value", () =>
 });
 
 // A "fails" warning on a line that never runs is still true (like `return 1 / 0` in a function nobody
-// calls), so the rule for working programs is: no warned line actually runs.
+// calls), so the rule for working programs is: no warned line actually runs. A program with a `try` can
+// run a failing line and still finish, so those are left out.
+const catches = (source) => /\btry\b/i.test(source);
 test("the checker raises no false alarms on working programs", () => {
   for (const source of [...Object.values(examples), ...PROGRAMS.map(([source]) => source)]) {
+    if (catches(source)) continue;
     const { lines } = trace(source);
     for (const p of check(source)) if (p.kind !== "unused") assert.ok(!lines.has(p.line), `${p.line}: ${p.message} in:\n${source}`);
   }
@@ -428,7 +443,7 @@ test("the checker's claims hold on randomly broken programs", () => {
         if (error.reason !== p.message) assert.match(error.reason, /has no value yet|there is no function called/, source);
         predicted++;
       }
-      if (!error) assert.ok(!lines.has(p.line), `said line ${p.line} fails, but it ran fine:\n${source}`);
+      if (!error && !catches(source)) assert.ok(!lines.has(p.line), `said line ${p.line} fails, but it ran fine:\n${source}`);
     }
   }
   assert.ok(predicted > 100, `only ${predicted} runtime errors were predicted`); // the checker isn't silent either
@@ -670,4 +685,15 @@ test("digits-train.moth writes the model as Moth", () => {
   const out = [];
   run(`${model}\nsay length of hidden_weights of model " " length of output_bias of model`, (line) => out.push(line));
   assert.deepEqual(out, ["8192 10"]);
+});
+
+// ---------- try ----------
+
+// A loop that never ends must still stop: running past maxSteps isn't a mistake a `try` catches. And the
+// checker doesn't warn about a mistake inside a `try`, which is there to catch it.
+test("try can't catch running out of steps, and the checker trusts it", () => {
+  const forever = 'repeat while yes\n    try\n        set x to 1\n    if it fails\n        say "caught"\n    end\nend';
+  for (const engine of ENGINES) assert.equal(error(forever, { engine, maxSteps: 100 }).message, "line 1: stopped after 100 steps (is there a loop that never ends?)", engine);
+  assert.deepEqual(problems('try\n    say 1 / 0\nif it fails\n    say "zero"\nend'), []);
+  assert.deepEqual(problems('try\n    say 1\nif it fails with e\n    say 1 / 0\nend'), ["4:11 fails: can't divide by zero"]);
 });

@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, makeRecord, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -78,7 +78,7 @@ function tokenize(src, file) {
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use"]);
+  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -112,11 +112,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return t.value;
   }
 
-  function statements(opener) {
+  // the line that starts a `try`'s handler: `if it fails`
+  const isIfItFails = () => isWord("if") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "it"
+    && tokens[pos + 2]?.type === "word" && tokens[pos + 2].value === "fails";
+
+  // `inTry`: the statements of a `try`, which also end at its `if it fails`
+  function statements(opener, inTry = false) {
     const body = [];
     const outside = atTop;
     atTop = !opener;
-    while (opener ? !isWord("end") && !isWord("else") : !check("eof")) {
+    while (opener ? !isWord("end") && !isWord("else") && !(inTry && isIfItFails()) : !check("eof")) {
       if (check("eof")) fail(peek(), `'${opener.value}' from line ${opener.line} is missing its 'end'`);
       const s = statement();
       if (s.kind === "use") body.push(...s.body); // the file's code, in its place
@@ -223,6 +228,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (word("fail")) {
       expectWord("with");
       return { kind: "fail", value: expression(), at: t };
+    }
+    if (word("try")) {
+      if (!peek().nl) expected("a new line");
+      const body = statements(t, true);
+      if (!isIfItFails()) expected("'if it fails'");
+      pos += 3;
+      const caught = word("with") ? name("a variable name") : null;
+      return { kind: "try", body, name: caught, handler: blockEnd(t), at: t };
     }
     if (word("use")) {
       const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
@@ -394,7 +407,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -405,6 +418,7 @@ class Compiler extends Scope {
     super(parent, name, params, body, options);
     Object.assign(this.fn, { code: [], consts: [], at: [] });
     this.loops = []; // the loops being compiled, innermost last: how much each keeps on the stack, and its stops
+    this.tries = 0; // `try`s around the code being compiled, in this function
     for (const s of body) this.statement(s);
     if (parent) this.emit(null, CONST, this.constant(null), RETURN);
     else this.emit(null, HALT);
@@ -465,7 +479,7 @@ class Compiler extends Scope {
   }
 
   body(statements, state) {
-    this.loops.push({ state, stops: [] });
+    this.loops.push({ state, stops: [], tries: this.tries });
     for (const inner of statements) this.statement(inner);
   }
 
@@ -572,8 +586,24 @@ class Compiler extends Scope {
         this.expr(s.value);
         this.emit(s.at, FAIL);
         return;
-      case "stop": { // take the loop's own values off the stack, then jump to where it ends
+      case "try": {
+        const handler = this.jump(s.at, TRY);
+        this.tries++;
+        for (const inner of s.body) this.statement(inner);
+        this.tries--;
+        this.emit(s.at, END_TRY);
+        const end = this.jump(s.at, JUMP);
+        this.patch(handler);
+        this.emit(s.at, CAUGHT);
+        if (s.name) this.store(s.name, s.at);
+        else this.emit(s.at, POP);
+        for (const inner of s.handler) this.statement(inner);
+        this.patch(end);
+        return;
+      }
+      case "stop": { // leave the tries inside the loop, take its own values off the stack, and jump to its end
         const loop = this.loops.at(-1);
+        for (let i = loop.tries; i < this.tries; i++) this.emit(s.at, END_TRY);
         for (let i = 0; i < loop.state; i++) this.emit(s.at, POP);
         loop.stops.push(this.jump(s.at, JUMP));
         return;

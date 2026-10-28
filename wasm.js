@@ -10,7 +10,7 @@
 import { Scope } from "./scope.js";
 import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
-import { UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
+import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor } from "./vm.js";
 
@@ -51,6 +51,9 @@ const IMPORTS = {
   failWith: [[EQ, I32], []],
   builtin: [[I32, EQ, I32], [EQ]], // which one, its inputs as a list, and a position
   ask: [[EQ, I32], [EQ]],
+  tryStart: [[], []], // a `try` begins: forget the last mistake
+  caught: [[], [I32]], // 1 if what was thrown is a mistake a `try` catches
+  caughtValue: [[], [EQ]],
 };
 
 // ---------- the module's types and runtime ----------
@@ -341,14 +344,14 @@ function findCaptured(program) {
       for (const child of [e.left, e.right, e.operand, e.of, e.index, ...(e.args ?? []), ...(e.items ?? []), ...(e.values ?? [])]) if (child) expr(child);
     };
     const statement = (s) => {
-      if (["set", "add", "count", "each", "call"].includes(s.kind)) use(s.name);
+      if (["set", "add", "count", "each", "call"].includes(s.kind) || (s.kind === "try" && s.name)) use(s.name);
       for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
       if (s.kind === "define") {
         const inner = new Scope(scope, s.name, s.params, s.body);
         inner.body = s.body;
         return visit(inner, s.body);
       }
-      for (const block of [s.then, s.otherwise, s.body]) if (block) block.forEach(statement);
+      for (const block of [s.then, s.otherwise, s.body, s.handler]) if (block) block.forEach(statement);
     };
     body.forEach(statement);
   }
@@ -358,7 +361,7 @@ function findCaptured(program) {
   return captured;
 }
 
-const makesFunctions = (body) => body.some((s) => s.kind === "define" || [s.then, s.otherwise, s.body].some((b) => b && makesFunctions(b)));
+const makesFunctions = (body) => body.some((s) => s.kind === "define" || [s.then, s.otherwise, s.body, s.handler].some((b) => b && makesFunctions(b)));
 
 // ---------- compiling Moth ----------
 
@@ -423,8 +426,8 @@ class WasmCompiler extends Scope {
         if (s.kind === "set") note(s.name, s.value);
         else if (s.kind === "add") note(s.name, "adds");
         else if (s.kind === "count") note(s.name, "counts");
-        else if (s.kind === "each" || s.kind === "define") note(s.name, null);
-        if (s.kind !== "define") for (const block of [s.then, s.otherwise, s.body]) if (block) walk(block);
+        else if (s.kind === "each" || s.kind === "define" || (s.kind === "try" && s.name)) note(s.name, null);
+        if (s.kind !== "define") for (const block of [s.then, s.otherwise, s.body, s.handler]) if (block) walk(block);
       }
     };
     walk(body);
@@ -503,7 +506,7 @@ class WasmCompiler extends Scope {
   e(op, ...args) {
     if (op === "end") this.labels--;
     this.c.emit(op, ...args);
-    if (op === "block" || op === "loop" || op === "if") this.labels++;
+    if (op === "block" || op === "loop" || op === "if" || op === "try") this.labels++;
     return this;
   }
 
@@ -726,6 +729,20 @@ class WasmCompiler extends Scope {
       case "stop":
         this.e("br", this.labels - 1 - this.stops.at(-1)).note("stop");
         return;
+      case "try": { // what JavaScript throws is caught here; JavaScript says whether it was a mistake to handle
+        const depth = this.temp(I32);
+        this.e("global.get", this.ctx.depth).e("local.set", depth).e("call", im.tryStart);
+        this.e("try");
+        this.block(s.body);
+        this.e("catch_all");
+        this.e("call", im.caught).e("i32.eqz").e("if").e("rethrow", 1).e("end"); // going too deep, say: not ours
+        this.e("local.get", depth).e("global.set", this.ctx.depth);
+        if (s.name) this.store(s.name, () => this.e("call", im.caughtValue));
+        else this.e("call", im.caughtValue).e("drop");
+        this.block(s.handler);
+        this.e("end");
+        return;
+      }
     }
   }
 
@@ -946,7 +963,21 @@ export function wasm(program) {
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
 function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer) {
-  const errors = ats.map((at) => (message, value) => fail(at, message, value));
+  // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
+  // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
+  let lastError = null;
+  let caughtError = null;
+  let failing;
+  const throwing = (err) => {
+    lastError = err;
+    throw err;
+  };
+  const errors = ats.map((at) => (message, value) => {
+    const err = new MothError(at, message, value);
+    err.wasm = failing;
+    failing = undefined;
+    throwing(err);
+  });
   const turtle = new Turtle(draw);
   let x = null; // the module's exports, once it exists
 
@@ -1013,14 +1044,29 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     itemsOf: (v, k) => toWasm(itemsOf(toJs(v), errors[k])),
     callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),
     checkInputs: (f, argc, name, k) => checkInputs(toJs(f), argc, names[name], errors[k]),
-    stopped: (k) => errors[k](stoppedMessage(maxSteps)),
+    stopped: (k) => {
+      const err = new MothError(ats[k], stoppedMessage(maxSteps));
+      err.final = true; // no try catches it
+      throwing(err);
+    },
     tooDeep: () => {
       throw new TooDeep();
     },
     turtle: (action, value, k) => turtle.act(action, toJs(value), errors[k]),
     field: (r, name, k) => fieldOf(toJs(r), names[name], errors[k]),
     recordFor: (r, name, k) => recordFor(toJs(r), names[name], errors[k]),
-    failWith: (value, k) => failWith(toJs(value), errors[k]),
+    failWith: (value, k) => {
+      failing = value;
+      failWith(toJs(value), errors[k]);
+    },
+    tryStart: () => {
+      lastError = null;
+    },
+    caught: () => {
+      [caughtError, lastError] = [lastError, null];
+      return catchable(caughtError) ? 1 : 0;
+    },
+    caughtValue: () => (caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError))),
     builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k])),
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
   };

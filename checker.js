@@ -212,6 +212,13 @@ class Checker extends Scope {
         return;
       case "stop":
         return;
+      case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program
+        this.maybeSkipped++;
+        this.block(s.body);
+        this.maybeSkipped--;
+        if (s.name) this.source(s.name, () => null); // a message, or whatever `fail with` gave
+        this.block(s.handler);
+        return;
       case "setField": {
         this.expr(s.target);
         this.expr(s.value);
