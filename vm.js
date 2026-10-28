@@ -88,11 +88,13 @@ export const OPCODES = [
   ["END_TRY", 0], ["CAUGHT", 0],
   ["DICT", 1], // the keys and values on the stack, one after the other, become a dictionary; the operand counts both
   ["REMOVE", 0],
+  ["READ", 1], // the operand is 1 to read bytes, 0 to read text
+  ["WRITE", 0], ["ARGUMENTS", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -345,8 +347,10 @@ const needText = (what, v, error) => {
 };
 // Bits work on whole numbers from 0 to the biggest a Moth number holds exactly, so they never round.
 const MAX_BITS = 2 ** 53 - 1;
+// a number that's wrong as itself; anything else as what kind it is (as the checker knows only that)
+const described = (v) => (typeof v === "number" ? show(v) : kindOf(v));
 const bits = (what, v, error) => {
-  if (!Number.isInteger(v) || v < 0) error(`${what} needs whole numbers of 0 or more, not ${show(v, true)}`);
+  if (!Number.isInteger(v) || v < 0) error(`${what} needs whole numbers of 0 or more, not ${described(v)}`);
   if (v > MAX_BITS) error(`${what} works on numbers up to ${MAX_BITS}, not ${show(v)}`);
   return v;
 };
@@ -419,7 +423,7 @@ export const BUILTINS = [
   {
     name: "bytes", needs: [["number"]], gives: "bytes", // `100 bytes`, all 0
     run: ([n], error) => {
-      if (!Number.isInteger(n) || n < 0) error(`'bytes' needs a whole number in front of it, not ${show(n, true)}`);
+      if (!Number.isInteger(n) || n < 0) error(`'bytes' needs a whole number in front of it, not ${described(n)}`);
       return new Uint8Array(n);
     },
   },
@@ -447,6 +451,33 @@ export function askFor(question, answer, error) {
   const reply = answer(show(question));
   if (reply === null || reply === undefined) error("there was no answer to this question: the input ended");
   return String(reply);
+}
+
+// `read "notes.txt"` (as text) and `read bytes "photo.png"`. `disk` is whatever holds the files: it has
+// read(name, asBytes), which gives the file's text or bytes, or null if there is no such file, and
+// write(name, data), where data is text or bytes. Either may throw an Error, whose message is passed on.
+export function readFile(name, asBytes, disk, error) {
+  if (typeof name !== "string") error(`a file name is text, not ${kindOf(name)}`);
+  if (!disk) error("this program reads a file, but there are no files here");
+  let data;
+  try {
+    data = disk.read(name, asBytes);
+  } catch (err) {
+    error(`can't read '${name}': ${err.message}`);
+  }
+  if (data === null || data === undefined) error(`there is no file called '${name}'`);
+  return data;
+}
+
+// `write value to "out.txt"`: bytes as they are, anything else as `say` would show it
+export function writeFile(value, name, disk, error) {
+  if (typeof name !== "string") error(`a file name is text, not ${kindOf(name)}`);
+  if (!disk) error("this program writes a file, but there are no files here");
+  try {
+    disk.write(name, isBytes(value) ? value.slice() : show(value)); // a copy, so changing the bytes later can't change the file
+  } catch (err) {
+    error(`can't write '${name}': ${err.message}`);
+  }
 }
 
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
@@ -513,9 +544,10 @@ export function newEnv(fn, parent) {
 
 // Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
 export class Machine {
-  // `draw` gets each line the turtle draws (see Turtle), and `ask` answers questions (see askFor).
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask } = {}) {
-    Object.assign(this, { main, print, maxSteps, ask, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // `draw` gets each line the turtle draws (see Turtle), `ask` answers questions (see askFor), `disk` holds
+  // the files `read` and `write` use (see readFile), and `args` is what `arguments` gives: a list of text.
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [] } = {}) {
+    Object.assign(this, { main, print, maxSteps, ask, disk, args, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = new Turtle(draw);
@@ -769,6 +801,17 @@ export class Machine {
           case ASK:
             stack.push(askFor(stack.pop(), this.ask, oops));
             break;
+          case READ:
+            stack.push(readFile(stack.pop(), code[ip++] === 1, this.disk, oops));
+            break;
+          case WRITE: {
+            const name = stack.pop();
+            writeFile(stack.pop(), name, this.disk, oops);
+            break;
+          }
+          case ARGUMENTS:
+            stack.push([...this.args]); // a new list each time, so changing one can't change the next
+            break;
           case TRY:
             this.handlers.push({ ip: code[ip++], frames: frames.length, stack: stack.length, fn, env, base });
             break;
@@ -837,6 +880,6 @@ export class Machine {
   }
 }
 
-export function execute(main, print, maxSteps, env, ask) {
-  new Machine(main, print, { maxSteps, env, ask }).run();
+export function execute(main, print, maxSteps, env, ask, disk, args) {
+  new Machine(main, print, { maxSteps, env, ask, disk, args }).run();
 }

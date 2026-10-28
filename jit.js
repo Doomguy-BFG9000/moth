@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -106,6 +106,8 @@ class JsCompiler extends Scope {
         return "break;"; // every Moth loop is a JavaScript loop, and nothing else is
       case "remove":
         return `removeKey(${this.expr(s.key)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
+      case "write":
+        return `write(${this.expr(s.value)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "try": { // the call depth when it began, so catching a mistake deep in calls can put it back
         const t = this.temp();
         const body = this.block(s.body);
@@ -166,6 +168,10 @@ class JsCompiler extends Scope {
         return `field(${this.expr(e.of)}, ${q(e.name)}, ${this.pos(e.at)})`;
       case "ask":
         return `ask(${this.expr(e.question)}, ${this.pos(e.at)})`;
+      case "read":
+        return `read(${this.expr(e.of)}, ${e.bytes}, ${this.pos(e.at)})`;
+      case "arguments":
+        return "args()";
       case "builtin":
         return `builtin(${BUILTINS.findIndex((b) => b.name === e.name)}, [${e.args.map((a) => this.expr(a)).join(", ")}], ${this.pos(e.at)})`;
     }
@@ -180,7 +186,7 @@ const MAX_DEPTH = 2000;
 
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
-function helpers(ats, print, draw, maxSteps, answer) {
+function helpers(ats, print, draw, maxSteps, answer, disk, args = []) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
     depth = 0;
@@ -262,6 +268,9 @@ function helpers(ats, print, draw, maxSteps, answer) {
       return caughtValue(err);
     },
     ask: (question, k) => askFor(question, answer, errors[k]),
+    read: (name, asBytes, k) => readFile(name, asBytes, disk, errors[k]),
+    write: (value, name, k) => writeFile(value, name, disk, errors[k]),
+    args: () => [...args],
   };
 }
 export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));
@@ -280,5 +289,5 @@ export function jit(program) {
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, ats, run: (print, draw, maxSteps, ask) => compiled(helpers(ats, print, draw, maxSteps, ask)) };
+  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args)) };
 }

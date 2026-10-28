@@ -7,8 +7,10 @@ import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, dis
 
 const USAGE = `usage:
   moth                        start the Moth shell
-  moth run <file.moth>        run a program; if it draws, the drawing goes to <file>.svg
-                              (add --engine wasm or --engine vm to pick the engine; the JIT is the default)
+  moth run <file.moth> [arguments...]
+                              run a program; if it draws, the drawing goes to <file>.svg; what follows
+                              the file is the program's arguments (put --engine wasm or --engine vm
+                              first to pick the engine; the JIT is the default)
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
@@ -69,6 +71,18 @@ const besides = (program) => (name) => {
 };
 const reading = (file) => ({ files: besides(file), file: basename(file) });
 
+// What `read` and `write` use: the files in the folder moth runs in. A built program has this function too.
+function readDisk(name, asBytes) {
+  try {
+    const data = readFileSync(name);
+    return asBytes ? new Uint8Array(data) : data.toString("utf8"); // a copy: a Buffer's slice() wouldn't copy
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+const disk = { read: readDisk, write: (name, data) => writeFileSync(name, data) };
+
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
   const problems = check(source, reading(file));
@@ -110,13 +124,15 @@ function build(file, source) {
   const vm = readFileSync(new URL("./vm.js", import.meta.url), "utf8");
   writeFileSync(out, `#!/usr/bin/env node
 // Compiled by Moth from ${basename(file)}: the program's bytecode plus the Moth virtual machine.
-// Run it with: node ${basename(out)}
+// Run it with: node ${basename(out)} [arguments...]
+import { readFileSync, writeFileSync } from "node:fs";
 
 ${vm}
+${readDisk}
 {
   const source = ${JSON.stringify(source)};
   try {
-    execute(${program});
+    execute(${program}, console.log, Infinity, undefined, undefined, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2));
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
     console.error(${JSON.stringify(basename(file))} + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(source, err));
@@ -128,7 +144,7 @@ ${vm}
 }
 
 function shell() {
-  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")) }); // `use` reads from the folder it runs in
+  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")), disk }); // `use` reads from the folder it runs in
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "moth> " });
   const rawMode = (on) => process.stdin.isTTY && process.stdin.setRawMode(on);
   let pending = ""; // the lines of a block that hasn't reached its `end` yet
@@ -183,6 +199,7 @@ function bootstrap() {
 function main([command, file, ...extra]) {
   let engine = "jit";
   if (command === "run" && extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
+  const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
   if (["help", "--help", "-h"].includes(command)) return console.log(USAGE);
@@ -200,7 +217,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, ...reading(file) });
+      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, ...reading(file) });
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -130,6 +130,8 @@ const PROGRAMS = [
   ["set total to 0\nfor each b in \"héllo\" as bytes\n    add b to total\nend\nsay total\nsay length of (\"héllo\" as bytes)\nsay (\"héllo\" as bytes) as text\nsay 0 bytes\nsay 1 bytes", "795\n6\nhéllo\n(0 bytes)\n(1 byte: 0)"],
   ["set check to 0\nfor each b in \"abc\" as bytes\n    set check to check bit xor b\nend\nsay check\nsay check as hex\nsay 5 as text + \"!\"\nsay (list of 1, 2) as text", "96\n60\n5!\n[1, 2]"],
   ["set b to 2 bytes\ntry\n    set byte 1 of b to 256\nif it fails with why\n    say why\nend\nsay b\nset c to b as bytes\nset byte 2 of c to 9\nsay b \" \" c", "a byte is a whole number from 0 to 255, not 256\n(2 bytes: 0, 0)\n(2 bytes: 0, 0) (2 bytes: 0, 9)"],
+  // files and arguments, where a run has none
+  ["say arguments\nsay length of arguments\nset a to arguments\nadd 1 to a\nsay arguments", "[]\n0\n[]"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -236,7 +238,7 @@ const ERRORS = [
   ["set b to 3 bytes\nsay byte 4 of b", "line 2: there is no item 4, there are only 3 bytes"],
   ["say -1 bytes", "line 1: 'bytes' needs a whole number in front of it, not -1"],
   ["say 1.5 bit and 1", "line 1: 'bit and' needs whole numbers of 0 or more, not 1.5"],
-  ["say \"a\" bit or 1", "line 1: 'bit or' needs whole numbers of 0 or more, not \"a\""],
+  ["say \"a\" bit or 1", "line 1: 'bit or' needs whole numbers of 0 or more, not text"],
   ["say 10000000000000000 bit xor 1", "line 1: 'bit xor' works on numbers up to 9007199254740991, not 10000000000000000"],
   ["say shift 1 left by 53", "line 1: 1 shifted left by 53 is too big: bits work on numbers up to 9007199254740991"],
   ["say shift 1 right by -1", "line 1: 'shift ... by' needs whole numbers of 0 or more, not -1"],
@@ -248,6 +250,14 @@ const ERRORS = [
   ["set as to 1", "line 1: 'as' is a Moth word, so it can't be used as a variable name"],
   ["say (5 bytes) + 1", "line 1: can't use '+' on bytes and a number"],
   ["set b to 2 bytes\nadd 1 to b", "line 2: can't add a number to bytes"],
+  // files and arguments, where a run has none
+  ["say read \"x.txt\"", "line 1: this program reads a file, but there are no files here"],
+  ["write \"a\" to \"x.txt\"", "line 1: this program writes a file, but there are no files here"],
+  ["say read 5", "line 1: a file name is text, not a number"],
+  ["write \"a\" to 5", "line 1: a file name is text, not a number"],
+  ["say read bytes list of 1", "line 1: a file name is text, not a list"],
+  ["set arguments to 1", "line 1: 'arguments' is a Moth word, so it can't be used as a variable name"],
+  ["write \"a\" \"b\"", "line 1: expected 'to' but found \"b\""],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -746,4 +756,66 @@ test("try can't catch running out of steps, and the checker trusts it", () => {
   for (const engine of ENGINES) assert.equal(error(forever, { engine, maxSteps: 100 }).message, "line 1: stopped after 100 steps (is there a loop that never ends?)", engine);
   assert.deepEqual(problems('try\n    say 1 / 0\nif it fails\n    say "zero"\nend'), []);
   assert.deepEqual(problems('try\n    say 1\nif it fails with e\n    say 1 / 0\nend'), ["4:11 fails: can't divide by zero"]);
+});
+
+// ---------- files and arguments ----------
+
+// Files in memory that keep a log of what was done to them.
+function loggedDisk(start) {
+  const disk = memoryDisk(start);
+  const { read, write } = disk;
+  disk.log = [];
+  disk.read = (name, asBytes) => (disk.log.push(`read ${name}`), read(name, asBytes));
+  disk.write = (name, data) => (disk.log.push(`write ${name}`), write(name, data));
+  return disk;
+}
+
+test("programs read and write files, and get their arguments, on all three engines", () => {
+  const source = [
+    'write "one\\ntwo" to "notes.txt"',
+    'set lines to split read "notes.txt" by "\\n"',
+    'say length of lines " lines, the last is " item 2 of lines',
+    'set data to read bytes "photo.bin"',
+    "set byte 1 of data to 255",
+    'write data to "copy.bin"',
+    'say read bytes "copy.bin"',
+    'say read bytes "photo.bin"',
+    "try",
+    '    say read "missing.txt"',
+    "if it fails with why",
+    "    say why",
+    "end",
+    "for each a in arguments",
+    '    say "argument: " a',
+    "end",
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const disk = loggedDisk({ "photo.bin": new Uint8Array([1, 2, 3]) });
+    const said = output(source, { engine, disk, args: ["-v", "x.txt"] });
+    assert.equal(said, "2 lines, the last is two\n(3 bytes: 255, 2, 3)\n(3 bytes: 1, 2, 3)\nthere is no file called 'missing.txt'\nargument: -v\nargument: x.txt", engine);
+    assert.equal(disk.files.get("notes.txt"), "one\ntwo", engine);
+  }
+});
+
+// The JIT and the WebAssembly engine hand a program that goes too deep to the VM, which runs it again from
+// the start: it must read what the first run read, and not write again what the first run wrote.
+test("a hand-over to the VM reads the same files and writes nothing twice", () => {
+  const source = [
+    'set n to number of read "count.txt"',
+    'write n + 1 to "count.txt"',
+    'say "count was " n',
+    "to deep with k",
+    "    if k is 0",
+    "        return 0",
+    "    end",
+    "    return deep(k - 1)",
+    "end",
+    "say deep(3000)",
+    'say read "count.txt"',
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const disk = loggedDisk({ "count.txt": "41" });
+    assert.equal(output(source, { engine, disk }), "count was 41\n0\n42", engine);
+    assert.deepEqual(disk.log, ["read count.txt", "write count.txt", "read count.txt"], engine);
+  }
 });

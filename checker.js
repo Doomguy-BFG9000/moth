@@ -3,7 +3,7 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey } from "./vm.js";
+  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -99,6 +99,9 @@ class Checker extends Scope {
       }
       case "ask":
         return () => "text";
+      case "read":
+        return () => (e.bytes ? "bytes" : "text");
+      case "arguments":
       case "list":
         return () => "list";
       case "record":
@@ -221,6 +224,13 @@ class Checker extends Scope {
         this.willFail(s.at, () => this.known(type()) && type() !== "dictionary" && removeKey("a", SAMPLES[type()], found));
         return;
       }
+      case "write": { // whether the file can be written isn't known, so only a name that isn't text is certain to fail
+        this.expr(s.value);
+        this.expr(s.target);
+        const type = this.type(s.target);
+        this.willFail(s.at, () => this.known(type()) && type() !== "text" && writeFile(null, SAMPLES[type()], null, found));
+        return;
+      }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program
         this.maybeSkipped++;
         this.block(s.body);
@@ -333,6 +343,12 @@ class Checker extends Scope {
       case "ask":
         this.expr(e.question);
         return;
+      case "read": { // as with `write`, only a name that isn't text is certain to fail
+        this.expr(e.of);
+        const type = this.type(e.of);
+        this.willFail(e.at, () => this.known(type()) && type() !== "text" && readFile(SAMPLES[type()], e.bytes, null, found));
+        return;
+      }
       case "builtin": { // fails when an input is known to be the wrong kind; what the values are is left to run time
         for (const arg of e.args) this.expr(arg);
         const builtin = BUILTINS.find((b) => b.name === e.name);

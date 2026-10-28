@@ -79,7 +79,7 @@ const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
   "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-  "byte", "bytes", "as", "shift"]);
+  "byte", "bytes", "as", "shift", "read", "write", "arguments"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -256,6 +256,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("from");
       return { kind: "remove", key, target: unary(), at: t };
     }
+    if (word("write")) { // `write "hello" to "notes.txt"`: the file's name is its target
+      const value = expression();
+      expectWord("to");
+      return { kind: "write", value, target: expression(), at: t };
+    }
     const turtle = t.type === "word" && TURTLE_WORDS.get(t.value);
     if (turtle) {
       pos++;
@@ -398,6 +403,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "length", of: unary(), at: t };
     }
     if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
+    if (word("read")) { // `read "notes.txt"`, `read bytes "photo.png"`: `of` is the file's name
+      const bytes = Boolean(word("bytes"));
+      return { kind: "read", bytes, of: additive(), at: t };
+    }
+    if (word("arguments")) return { kind: "arguments", at: t }; // what the program was started with: `moth run tool.moth a b`
     const syntax = t.type === "word" && BUILTIN_SYNTAX.get(t.value);
     if (syntax) {
       pos++;
@@ -459,7 +469,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -643,6 +653,11 @@ class Compiler extends Scope {
         this.expr(s.target);
         this.emit(s.at, REMOVE);
         return;
+      case "write":
+        this.expr(s.value);
+        this.expr(s.target);
+        this.emit(s.at, WRITE);
+        return;
       case "try": {
         const handler = this.jump(s.at, TRY);
         this.tries++;
@@ -734,6 +749,13 @@ class Compiler extends Scope {
       case "ask":
         this.expr(e.question);
         this.emit(e.at, ASK);
+        return;
+      case "read":
+        this.expr(e.of);
+        this.emit(e.at, READ, e.bytes ? 1 : 0);
+        return;
+      case "arguments":
+        this.emit(e.at, ARGUMENTS);
         return;
       case "builtin":
         for (const arg of e.args) this.expr(arg);
@@ -830,15 +852,25 @@ export function check(source, options) {
 // `ask` to `ask`, which returns the answer (see askFor in vm.js); mistakes in the program throw MothError.
 // `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
 // `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
-// for `use` (see build).
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file } = {}) {
+// for `use` (see build). `disk` holds the files `read` and `write` use (see readFile in vm.js, and memoryDisk
+// below), and `args` is what `arguments` gives.
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [] } = {}) {
   const reading = { files, file };
-  const answers = []; // kept, so that running the program again (below) gets the same ones
-  const answer = ask && ((question) => {
-    const reply = ask(question);
-    answers.push(reply);
-    return reply;
-  });
+  // What the program got from outside, in order: each answer, each file it read, and how each write went.
+  // Kept, so that running it again (below) gets the same, and writes nothing twice.
+  const outside = [];
+  const kept = (f) => (...inputs) => {
+    try {
+      const got = f(...inputs);
+      outside.push({ got: copy(got) });
+      return got;
+    } catch (err) {
+      outside.push({ err });
+      throw err;
+    }
+  };
+  const answer = ask && kept(ask);
+  const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)) };
   let program = null;
   if (engine !== "vm") {
     try {
@@ -847,22 +879,45 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
   }
-  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer }).run();
+  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer, disk: drive, args }).run();
   let said = 0;
   let drawn = 0;
   try {
     // counted once passed on, so a hand-over in the middle of passing one on can't lose it
-    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer);
+    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args);
   } catch (err) {
     if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
     // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value outgrew what
-    // JavaScript allows. Moth programs can't read the clock, and get the same answers to their questions
-    // again, so a second run says and draws exactly the same things: run it again on the VM, which keeps its
-    // own stack and reports a too-big value at the right line, and pass on only what the first run hadn't already.
-    let asked = 0;
-    const again = answer && ((question) => (asked < answers.length ? answers[asked++] : answer(question)));
-    new Machine(compile(source, reading), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again }).run();
+    // JavaScript allows. Moth programs can't read the clock, and get the same answers and files again, so a
+    // second run says and draws exactly the same things: run it again on the VM, which keeps its own stack and
+    // reports a too-big value at the right line, and pass on only what the first run hadn't already.
+    let next = 0;
+    const again = (f) => f && ((...inputs) => {
+      if (next >= outside.length) return f(...inputs);
+      const before = outside[next++];
+      if ("err" in before) throw before.err;
+      return copy(before.got);
+    });
+    new Machine(compile(source, reading), (line) => said-- > 0 || print(line), {
+      maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again(answer), disk: drive && { read: again(drive.read), write: again(drive.write) }, args,
+    }).run();
   }
+}
+const copy = (v) => (v instanceof Uint8Array ? v.slice() : v); // bytes a program read could be changed after
+
+// Files kept in memory, for a page or a test: `start` gives the first ones, by name, as text or bytes.
+export function memoryDisk(start = {}) {
+  const files = new Map(Object.entries(start));
+  return {
+    files,
+    read: (name, asBytes) => {
+      if (!files.has(name)) return null;
+      const data = files.get(name);
+      if (asBytes) return typeof data === "string" ? new TextEncoder().encode(data) : data.slice();
+      return typeof data === "string" ? data : new TextDecoder().decode(data);
+    },
+    write: (name, data) => void files.set(name, data),
+  };
 }
 
 // Runs a program and hands back what it made at the top level, by name; a Moth function comes back as a
@@ -904,15 +959,15 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file } = {}) {
-  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask });
+export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args } = {}) {
+  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
 // variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
 // (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
 // `answers` answer its questions, in order, each shown after its question as a line of output.
-export function timeline(source, { limit = 10_000, answers = [], files, file } = {}) {
+export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args } = {}) {
   const said = [];
   const drawn = [];
   let asked = 0;
@@ -921,7 +976,7 @@ export function timeline(source, { limit = 10_000, answers = [], files, file } =
     said.push(`${question} ${answers[asked]}`);
     return answers[asked++];
   };
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file });
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args });
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;
@@ -942,12 +997,12 @@ export function timeline(source, { limit = 10_000, answers = [], files, file } =
 }
 
 // A shell session: each entry runs with the variables and functions made by the entries before it.
-export function session(print = console.log, { files } = {}) {
+export function session(print = console.log, { files, disk } = {}) {
   const slots = new Map();
   const env = [null];
   return (source) => {
     const main = compile(source, { slots, files });
     while (env.length <= main.nslots) env.push(UNSET); // room for the variables this entry adds
-    execute(main, print, Infinity, env);
+    execute(main, print, Infinity, env, undefined, disk);
   };
 }

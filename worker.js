@@ -1,6 +1,6 @@
 // Runs one Moth program off the page's main thread, so a loop that never ends can't freeze the page:
 // the page just ends this worker when Stop is pressed.
-import { run, excerpt, MothError } from "./moth.js";
+import { run, memoryDisk, excerpt, MothError } from "./moth.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more
 const MAX_LINES = 10_000;
@@ -49,6 +49,7 @@ onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
       engine,
       ask,
       files: (name) => files[name],
+      disk: memoryDisk(), // a page has no files of its own: `write` makes them, for this run
     });
     flush();
     postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });

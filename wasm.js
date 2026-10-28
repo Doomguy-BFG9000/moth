@@ -12,7 +12,7 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -54,6 +54,9 @@ const IMPORTS = {
   failWith: [[EQ, I32], []],
   builtin: [[I32, EQ, I32], [EQ]], // which one, its inputs as a list, and a position
   ask: [[EQ, I32], [EQ]],
+  read: [[EQ, I32, I32], [EQ]], // the file's name, 1 for bytes or 0 for text, and a position
+  write: [[EQ, EQ, I32], []],
+  args: [[], [EQ]],
   tryStart: [[], []], // a `try` begins: forget the last mistake
   caught: [[], [I32]], // 1 if what was thrown is a mistake a `try` catches
   caughtValue: [[], [EQ]],
@@ -748,6 +751,11 @@ class WasmCompiler extends Scope {
         this.expr(s.target);
         this.e("i32.const", this.pos(s.at)).e("call", im.remove);
         return;
+      case "write":
+        this.expr(s.value);
+        this.expr(s.target);
+        this.e("i32.const", this.pos(s.at)).e("call", im.write);
+        return;
       case "try": { // what JavaScript throws is caught here; JavaScript says whether it was a mistake to handle
         const depth = this.temp(I32);
         this.e("global.get", this.ctx.depth).e("local.set", depth).e("call", im.tryStart);
@@ -929,6 +937,13 @@ class WasmCompiler extends Scope {
         this.expr(e.question);
         this.e("i32.const", this.pos(e.at)).e("call", im.ask);
         return;
+      case "read":
+        this.expr(e.of);
+        this.e("i32.const", e.bytes ? 1 : 0).e("i32.const", this.pos(e.at)).e("call", im.read);
+        return;
+      case "arguments":
+        this.e("call", im.args);
+        return;
       case "builtin":
         this.e("i32.const", BUILTINS.findIndex((b) => b.name === e.name)).note(e.name);
         for (const arg of e.args) this.expr(arg);
@@ -991,11 +1006,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask) => instantiate(module, made, print, draw, maxSteps, ask).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args) => instantiate(module, made, print, draw, maxSteps, ask, disk, args).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer) {
+function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = []) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1124,6 +1139,9 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     caughtValue: () => (caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError))),
     builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k])),
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
+    read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
+    write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
+    args: () => toWasm(args),
   };
   x = new WebAssembly.Instance(module, { moth: imports }).exports;
   return x;

@@ -172,7 +172,7 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, excerpt, MothError } from "./moth.js";
+    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -184,7 +184,7 @@
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
-      + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
+      + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
     // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
@@ -489,7 +489,7 @@
       output.classList.remove("error");
       render((drawing = []));
       try {
-        trace = timeline(code.value, { answers: answers.map((a) => a.text), files }); // the answers given when it last ran
+        trace = timeline(code.value, { answers: answers.map((a) => a.text), files, disk: memoryDisk() }); // the answers given when it last ran
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
         output.classList.add("error");

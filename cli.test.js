@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import examples from "./examples.js";
 
@@ -127,4 +127,25 @@ test("bad usage and missing files get a clear message", () => {
   const missing = moth(["run", "no-such-file.moth"]);
   assert.equal(missing.status, 1);
   assert.equal(missing.stderr.trim(), "moth: can't read no-such-file.moth (no such file)");
+});
+
+// ---------- files and arguments ----------
+
+test("moth run passes on arguments, and the program reads and writes files where it runs; so does a built one", (t) => {
+  const file = tempFile(t, "shout.moth", 'set text to read item 1 of arguments\nwrite uppercase of text to item 2 of arguments\nsay "wrote " item 2 of arguments');
+  const dir = dirname(file);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  const inDir = (args) => spawnSync(process.execPath, args, { cwd: dir, encoding: "utf8" });
+  for (const [engine, out] of [["jit", "a.txt"], ["wasm", "b.txt"], ["vm", "c.txt"]]) {
+    const result = inDir([CLI, "run", file, "--engine", engine, "in.txt", out]);
+    assert.equal(result.stdout, `wrote ${out}\n`, engine);
+    assert.equal(readFileSync(join(dir, out), "utf8"), "HELLO", engine);
+  }
+  assert.equal(moth(["build", file]).status, 0);
+  const built = inDir([file.replace(/\.moth$/, ".mjs"), "in.txt", "d.txt"]);
+  assert.equal(built.stdout, "wrote d.txt\n");
+  assert.equal(readFileSync(join(dir, "d.txt"), "utf8"), "HELLO");
+  const missing = inDir([CLI, "run", file, "nowhere.txt", "e.txt"]);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /shout\.moth:1:13: there is no file called 'nowhere\.txt'/);
 });

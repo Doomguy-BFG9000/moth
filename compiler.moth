@@ -234,7 +234,7 @@ end
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
     "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-    "byte", "bytes", "as", "shift"
+    "byte", "bytes", "as", "shift", "read", "write", "arguments"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
@@ -565,6 +565,11 @@ to parse with tokens, reading
             expect_word("from")
             return record with kind "remove", key key, target unary(), at t
         end
+        if word("write") # `write "hello" to "notes.txt"`
+            set value to expression()
+            expect_word("to")
+            return record with kind "write", value value, target expression(), at t
+        end
         set actions to turtle_words(t)
         if actions is not nothing
             set pos to pos + 1
@@ -806,6 +811,16 @@ to parse with tokens, reading
         if word("ask") # `ask "How old are you? "`
             return record with kind "ask", question additive(), at t
         end
+        if word("read") # `read "notes.txt"`, `read bytes "photo.png"`
+            set as_bytes to no
+            if word("bytes")
+                set as_bytes to yes
+            end
+            return record with kind "read", binary as_bytes, subject additive(), at t
+        end
+        if word("arguments")
+            return record with kind "arguments", at t
+        end
         set syntax to builtin_syntax(t)
         if syntax is not nothing
             set pos to pos + 1
@@ -885,7 +900,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -1231,6 +1246,9 @@ to js_statement with scope, s
     if what is "remove"
         return "removeKey(" + js_expr(scope, key of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
     end
+    if what is "write"
+        return "write(" + js_expr(scope, value of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
+    end
     if what is "try" # the call depth when it began, so catching a mistake deep in calls can put it back
         set t to temp(scope)
         set body to js_block(scope, body of s)
@@ -1332,6 +1350,16 @@ to js_expr with scope, e
     end
     if what is "ask"
         return "ask(" + js_expr(scope, question of e) + ", " + remember(at of e) + ")"
+    end
+    if what is "read"
+        set flag to "false"
+        if binary of e
+            set flag to "true"
+        end
+        return "read(" + js_expr(scope, subject of e) + ", " + flag + ", " + remember(at of e) + ")"
+    end
+    if what is "arguments"
+        return "args()"
     end
     if what is "builtin"
         return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"
