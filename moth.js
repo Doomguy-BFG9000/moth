@@ -3,6 +3,7 @@
 
 import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
 import { Scope } from "./scope.js";
+import { jit } from "./jit.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -542,11 +543,10 @@ export function disassemble(fn, scopes = [fn], out = []) {
 
 // ---------- running ----------
 
-// Compiles Moth source to bytecode for vm.js. Options: `slots` carries over the top-level variables of
-// earlier shell entries; `debug` adds LINE markers so a debugger can pause at each statement.
-export function compile(source, options) {
+// Parses the source and hands the syntax tree to a back end.
+function build(source, backEnd) {
   try {
-    return new Compiler(null, "main", [], parse(tokenize(source)), options).fn;
+    return backEnd(parse(tokenize(source)));
   } catch (err) {
     // shortcut: points at line 1, since the overflow hides where the nesting was; only ~1,000 levels of brackets get here
     if (err instanceof RangeError) fail({ line: 1, col: 1 }, "the code is nested too deeply");
@@ -554,11 +554,42 @@ export function compile(source, options) {
   }
 }
 
+// Compiles Moth source to bytecode for vm.js. Options: `slots` carries over the top-level variables of
+// earlier shell entries; `debug` adds LINE markers so a debugger can pause at each statement.
+export function compile(source, options) {
+  return build(source, (program) => new Compiler(null, "main", [], program, options).fn);
+}
+
+// Compiles Moth source to JavaScript (jit.js): { source, run(print, draw, maxSteps) }.
+export function compileToJs(source) {
+  return build(source, jit);
+}
+
 // Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`; mistakes in
 // the program throw MothError. `maxSteps` stops loops and calls after that many rounds, for running
-// untrusted code without a Stop button.
-export function run(source, print = console.log, { maxSteps = Infinity, draw } = {}) {
-  new Machine(compile(source), print, { maxSteps, draw }).run();
+// untrusted code without a Stop button. `engine` is "jit" (compile to JavaScript) or "vm" (bytecode).
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit" } = {}) {
+  let program = null;
+  if (engine === "jit") {
+    try {
+      program = compileToJs(source);
+    } catch (err) {
+      if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
+    }
+  }
+  if (!program) return new Machine(compile(source), print, { maxSteps, draw }).run();
+  let said = 0;
+  let drawn = 0;
+  try {
+    program.run((line) => (said++, print(line)), (line) => (drawn++, draw?.(line)), maxSteps);
+  } catch (err) {
+    if (!(err instanceof RangeError || err?.name === "InternalError")) throw err;
+    // JavaScript's own stack ran out (the JIT's Moth calls are JavaScript calls), or a value outgrew what
+    // JavaScript allows. Moth programs can't read input or the clock, so a second run says and draws exactly
+    // the same things: run it again on the VM, which keeps its own stack and reports a too-big value at the
+    // right line, and pass on only what the first run hadn't already.
+    new Machine(compile(source), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line) }).run();
+  }
 }
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and

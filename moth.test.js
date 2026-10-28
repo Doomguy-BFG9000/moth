@@ -68,8 +68,8 @@ const PROGRAMS = [
   ["set n to 0\nrepeat while n is less than 3\n    add 1 to n\nend\nsay n", "3"],
 ];
 
-test("programs print what they should", () => {
-  for (const [source, expected] of PROGRAMS) assert.equal(output(source), expected, source);
+test("programs print what they should, on both engines", () => {
+  for (const engine of ["jit", "vm"]) for (const [source, expected] of PROGRAMS) assert.equal(output(source, { engine }), expected, `${engine}: ${source}`);
 });
 
 const ERRORS = [
@@ -117,8 +117,8 @@ const ERRORS = [
   ["set pen to 1", "line 1: 'pen' is a Moth word, so it can't be used as a variable name"],
 ];
 
-test("mistakes give a clear message", () => {
-  for (const [source, message] of ERRORS) assert.equal(error(source).message, message, source);
+test("mistakes give a clear message, on both engines", () => {
+  for (const engine of ["jit", "vm"]) for (const [source, message] of ERRORS) assert.equal(error(source, { engine }).message, message, `${engine}: ${source}`);
 });
 
 test("errors point at the exact spot", () => {
@@ -231,9 +231,33 @@ test("a timeline ends with the mistake, or is cut short if the program never end
   assert.equal(forever.cut, true);
 });
 
-// Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points
-// inside the code, never with a JavaScript crash. The seed is fixed, so a failure always reproduces.
-test("randomly broken programs fail cleanly", () => {
+test("when JavaScript's stack runs out, the JIT hands over to the VM without repeating anything", () => {
+  const said = [];
+  let drawn = 0;
+  const source = 'say "start"\nmove forward 10\nto sum with n\n    if n is 0\n        return 0\n    end\n    return n + sum(n - 1)\nend\nsay sum(20000)';
+  run(source, (line) => said.push(line), { draw: () => drawn++ }); // 20,000 calls deep is past JavaScript's stack
+  assert.deepEqual(said, ["start", "200010000"]);
+  assert.equal(drawn, 1);
+});
+
+// Everything one engine does with a program: what it said and drew, and the mistake it stopped at.
+function outcome(source, engine) {
+  const said = [];
+  const drawn = [];
+  try {
+    run(source, (line) => said.push(line), { engine, maxSteps: 10_000, draw: (line) => drawn.push(line) });
+    return { said, drawn };
+  } catch (err) {
+    if (!(err instanceof MothError)) assert.fail(`the ${engine} crashed with ${err.stack}\non this program:\n${source}`);
+    assert.ok(err.line >= 1 && err.line <= source.split("\n").length && err.col >= 1, `bad position ${err.line}:${err.col} in:\n${source}`);
+    return { said, drawn, error: [err.message, err.col] };
+  }
+}
+
+// Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points inside
+// the code, never with a JavaScript crash, and the JIT must do exactly what the VM does with every one of
+// them: same output, same drawing, same mistake at the same spot. The seed is fixed, so a failure always reproduces.
+test("randomly broken programs fail cleanly, and the JIT matches the VM on all of them", () => {
   let seed = 42;
   const random = (n) => {
     seed = (seed * 1103515245 + 12345) % 2 ** 31;
@@ -249,12 +273,7 @@ test("randomly broken programs fail cleanly", () => {
   ];
   for (let i = 0; i < 5000; i++) {
     let source = pick(sources);
-    for (let n = 1 + random(3); n > 0; n--) source = pick(mutations)(source);
-    try {
-      run(source, () => {}, { maxSteps: 10_000 });
-    } catch (err) {
-      if (!(err instanceof MothError)) assert.fail(`crashed with ${err.stack}\non this program:\n${source}`);
-      assert.ok(err.line >= 1 && err.line <= source.split("\n").length && err.col >= 1, `bad position ${err.line}:${err.col} in:\n${source}`);
-    }
+    for (let n = random(4); n > 0; n--) source = pick(mutations)(source);
+    assert.deepEqual(outcome(source, "jit"), outcome(source, "vm"), source);
   }
 });

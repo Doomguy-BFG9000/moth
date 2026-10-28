@@ -41,17 +41,27 @@ end
 say sum(10000)`,
 };
 
-for (const [name, source] of Object.entries(PROGRAMS)) {
+// best of 5 runs on one engine
+function time(source, engine) {
   let best = Infinity;
   let result;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     const start = performance.now();
     try {
-      run(source, (line) => (result = line));
+      run(source, (line) => (result = line), { engine });
     } catch (err) {
       result = `error: ${err.message}`;
     }
     best = Math.min(best, performance.now() - start);
   }
-  console.log(`${name.padEnd(28)} ${`${best.toFixed(0)} ms`.padStart(8)}   ${result}`);
+  return { ms: best, result };
+}
+
+const ms = (n) => `${n < 10 ? n.toFixed(1) : n.toFixed(0)} ms`.padStart(9);
+console.log(`${"".padEnd(28)} ${"VM".padStart(9)} ${"JIT".padStart(9)}   speed-up`);
+for (const [name, source] of Object.entries(PROGRAMS)) {
+  const vm = time(source, "vm");
+  const jit = time(source, "jit");
+  const same = vm.result === jit.result ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result}`;
+  console.log(`${name.padEnd(28)} ${ms(vm.ms)} ${ms(jit.ms)}   ${(vm.ms / jit.ms).toFixed(1)}x${same}`);
 }
