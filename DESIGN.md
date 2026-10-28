@@ -2557,3 +2557,35 @@ hold them to agreeing.
   with and without brackets, fields read, set and chained, a list's items, a
   number's own function); three mistakes; and compiler.moth held to moth.js,
   byte for byte, on every case.
+
+## 58. Values in text
+
+- **Why.** `say` joins its pieces, `say "Hi, " name "!"`, but text made to
+  keep, a label or a line for a file, took `"Hi, " + name + "!"`, quotes
+  opened and shut around every value.
+- **What it means.** `"Hi, {name}!"` is `"Hi, " + name + "!"`: any value, as
+  `say` would show it, since `+` with text on one side shows the other. The
+  joining starts from text, so `"{a}{b}"` is text even when both are numbers.
+  Inside the braces is any value: `{age + 1}`, `{rex's name}`, `{length of
+  fruits}`.
+- **What stays as it was.** Moth's own code is full of `{`: the JavaScript
+  compiler.moth writes (`") {\n"`), patterns (`"\\d{3}"`), JSON (`"{\"a\":
+  1}"`). So only a `{` right before a letter or `_` starts a value, and it
+  ends at the next `}`; any other `{` is itself, and so is `\{`, which already
+  meant `{` (a `\` before any other character is that character). Of every
+  string in the repository's Moth, one changed: machine.moth's curl format,
+  `%{http_code}`, now `%\{http_code}`.
+- **In the tokenizer and the parser.** A text's token keeps its parts: text,
+  and each value's own tokens, read from where they are in the line, so a
+  mistake in one points at it, ending with a `}`. The parser reads each the way
+  it reads a bracket and builds the `+`s, so the VM, the JIT, WebAssembly and
+  machine code have nothing new to do. A mistake inside one says how to write
+  a `{` itself. compiler.moth does the same, with each part a record of its
+  text or its tokens, since Moth can't ask what kind a value is.
+- **Not yet.** Text inside a value (`{join words with ", "}`), since the
+  first `"` ends the text; and a value that starts with a number.
+- **Tested.** A program of values in text, on the three engines and in machine
+  code on Windows and Linux: numbers, a sum, a call, `'s` and `of`, a list,
+  nothing and yes, text as an item's key, and every `{` that stays as it was;
+  four mistakes; compiler.moth held to moth.js on all of them; and the
+  playground colours a value in text as code.

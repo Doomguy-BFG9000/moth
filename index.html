@@ -403,13 +403,16 @@ Did you mean 'total'?</pre></div>
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
+    // text, with each value in it ("Hi {name}": a '{' right before a letter or '_') coloured as code
+    const filledIn = (str) => str.replace(/(\\.?)|\{([A-Za-z_][^}]*)\}|[^\\{]+|\{/g, (all, esc, inside) =>
+      inside === undefined ? escape(all) : `</span>{${highlight(inside)}}<span class="s">`);
     // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
     function highlight(source, marks = new Map()) {
       return source.split("\n").map((text, i) => {
         const flagged = marks.get(i + 1);
         return text.replace(new RegExp(String.raw`(#.*)|("(?:\\.|[^"\\])*"?)|\b(\d+(?:\.\d+)?\b${UNIT})|([A-Za-z_]\w*)|([^#"\w])`, "g"), (all, comment, str, number, word, other, offset) => {
           const html = comment ? `<span class="c">${escape(comment)}</span>`
-            : str ? `<span class="s">${escape(str)}</span>`
+            : str ? `<span class="s">${filledIn(str)}</span>`
             : number ? `<span class="n">${number}</span>`
             : word ? (WORDS.has(word.toLowerCase()) ? `<span class="k">${word}</span>` : word)
             : escape(other);

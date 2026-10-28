@@ -4,6 +4,8 @@
 import examples from "./examples.js";
 
 export const PROGRAMS = [
+  // text with values in it: "Hi {name}" is "Hi " + name; a '{' before anything but a letter or '_' is itself, as is '\{'
+  ["set name to \"Sam\"\nset age to 20\nset sam to record with name \"Ana\", pets (list of \"cat\", \"dog\")\nto twice with n\n    return n * 2\nend\nsay \"Hello {name}, you are {age}\"\nsay \"{age}{age} {age + 1} {twice(age)} {sam's name} {name of sam} {uppercase of name} {age + 1.5}\"\nsay \"{sam's pets} {nothing} {yes} {length of sam's pets}\"\nsay \"\\{name} { name } {} {3} \\\\d{3} %\\{x} {\"\nset greeting to \"Hi {name}\"\nsay length of \"{name}\" \" \" greeting\nset k to \"a\"\nset d to dictionary where \"a\" is 1\nsay item \"{k}\" of d\nfor each i from 1 to 2\n    say \"{i}: {item i of sam's pets}\"\nend", "Hello Sam, you are 20\n2020 21 40 Ana Ana SAM 21.5\n[\"cat\", \"dog\"] nothing yes 2\n{name} { name } {} {3} \\d{3} %{x} {\n3 Hi Sam\n1\n1: cat\n2: dog"],
   // a value's own functions and fields: `rex's bark()` is bark(rex), and `rex's name` is name of rex
   ["to bark with dog\n    say name of dog + \" says woof\"\nend\nto rename with dog, new_name\n    set name of dog to new_name\nend\nto older with dog, years\n    return age of dog + years\nend\nset rex to record with name \"Rex\", age 3, owner (record with name \"Sam\")\nrex's bark()\nrex's rename(\"Max\")\nrex's bark\nrex's rename \"Rex\"\nsay rex's name + \" is \" + rex's age + \", owned by \" + rex's owner's name\nsay rex's older(2) + 1\nset rex's age to 4\nset rex's owner's name to \"Ana\"\nsay rex\nset dogs to list of rex, (record with name \"Bo\", age 1, owner nothing)\nfor each d in dogs\n    d's bark()\nend\nsay (item 2 of dogs)'s name", "Rex says woof\nMax says woof\nRex is 3, owned by Sam\n6\n(record with name \"Rex\", age 4, owner (record with name \"Ana\"))\nRex says woof\nBo says woof\nBo"],
   ["to twice with n\n    return n * 2\nend\nset value to 21\nsay value's twice()\nsay (value + 1)'s twice() + 0", "42\n44"],
@@ -228,6 +230,10 @@ export const SAVING = [
 ];
 
 export const ERRORS = [
+  ["set name to \"Sam\"\nsay \"Hi {name\"", "line 2: this '{' has no '}' to end it (to write a '{' itself, put '\\' before it)"],
+  ["say \"body {color: red}\"", "line 1: I don't understand ':' (to write a '{' itself, put '\\' before it)"],
+  ["set a to 1\nsay \"{a b}\"", "line 2: expected '}' but found 'b' (to write a '{' itself, put '\\' before it)"],
+  ["say \"x {nope} y\"", "line 1: 'nope' has no value yet (give it one with 'set nope to ...')"],
   ["set rex to record with name \"Rex\"\nset rex's bark() to 1", "line 2: a call can't be given a value: set a field, as in 'set rex's name to ...'"],
   ["set rex to record with name \"Rex\"\nrex's fly()", "line 2: there is no function called 'fly'"],
   ["set rex to record with name \"Rex\"\nsay rex's age", "line 2: this record has no 'age'"],

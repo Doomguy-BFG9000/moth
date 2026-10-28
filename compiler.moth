@@ -114,14 +114,28 @@ end
 
 # ---------- tokens ----------
 
+# what a mistake in a value inside text adds, for text written before there were values in it
+set brace_hint to "to write a '{' itself, put '\\' before it"
+
 # `file` names a file the program uses, for errors in it ("" for the program's own)
 to tokenize with source, file
+    return tokens_from(source, file, nothing)
+end
+
+# `begins`, for a value inside text ("Hi {name}"), is where it starts, as place gives it: its tokens are
+# counted from there, and end with a '}'
+to tokens_from with source, file, begins
     set chars to letters(source)
     add "" to chars # the end, so looking one past the last character is safe
     set tokens to empty list
     set line to 1
     set col to 1
     set nl to yes # does the next token start a new line?
+    if begins is not nothing
+        set line to line of begins
+        set col to col of begins
+        set nl to no
+    end
     set k to 1
     repeat while item k of chars is not ""
         set c to item k of chars
@@ -187,14 +201,17 @@ to tokenize with source, file
             set nl to no
         else if c is "\""
             set text to ""
+            set written to empty list # as written, for the values in it
             add 1 to k
             add 1 to col
             repeat while item k of chars is not "\""
                 set d to item k of chars
                 if d is "\\" and fits_text(item (k + 1) of chars)
+                    add d to written
                     add 1 to k
                     add 1 to col
                     set d to item k of chars
+                    add d to written
                     if d is "n"
                         set d to "\n"
                     else if d is "t"
@@ -202,6 +219,8 @@ to tokenize with source, file
                     end
                 else if d is "\\" or not fits_text(d)
                     fail with problem(place(line, start, file), "this text is missing its closing quote")
+                else
+                    add d to written
                 end
                 add d to text
                 add width(item k of chars) to col
@@ -209,7 +228,8 @@ to tokenize with source, file
             end
             add 1 to k
             add 1 to col
-            add record with type "string", value text, line line, col start, nl nl, file file to tokens
+            set parts to text_parts(written, line, start + 1, file)
+            add record with type "string", value text, line line, col start, nl nl, file file, parts parts to tokens
             set nl to no
         else if contains(symbols, c)
             add record with type c, value c, line line, col start, nl nl, file file to tokens
@@ -223,6 +243,9 @@ to tokenize with source, file
             set nl to no
         else
             set hint to look_up(c, hint_symbols, hint_texts)
+            if begins is not nothing
+                set hint to brace_hint
+            end
             if hint is nothing
                 set hint to ""
             else
@@ -231,8 +254,65 @@ to tokenize with source, file
             fail with problem(place(line, start, file), "I don't understand '" + c + "'" + hint)
         end
     end
+    if begins is not nothing
+        add record with type "}", value "}", line line, col col, nl yes, file file to tokens
+    end
     add record with type "eof", value "", line line, col col, nl yes, file file to tokens
     return tokens
+end
+
+# "Hi {name}!": text with values in it. A '{' right before a letter or '_' starts a value, which ends at the
+# next '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, or
+# nothing for text with no value in it: each a record of its text, or its tokens. `written` is the text's characters as written, from column `col` of
+# `line`.
+to text_parts with written, line, col, file
+    set parts to empty list
+    set piece to "" # the text since the last value, as it reads
+    set i to 1
+    repeat while i is at most length of written
+        set c to item i of written
+        if c is "\\"
+            set c to item (i + 1) of written
+            if c is "n"
+                set c to "\n"
+            else if c is "t"
+                set c to "\t"
+            end
+            add c to piece
+            add width(item i of written) + width(item (i + 1) of written) to col
+            set i to i + 2
+        else if c is "{" and i is less than length of written and starts_word(item (i + 1) of written)
+            set j to i + 1
+            set inside to ""
+            set inside_width to 0
+            repeat while j is at most length of written and item j of written is not "}"
+                add item j of written to inside
+                add width(item j of written) to inside_width
+                add 1 to j
+            end
+            if j is greater than length of written
+                fail with problem(place(line, col, file), "this '{' has no '}' to end it (" + brace_hint + ")")
+            end
+            if piece is not ""
+                add (record with text piece, tokens nothing) to parts
+                set piece to ""
+            end
+            add (record with text nothing, tokens tokens_from(inside, file, place(line, col + 1, file))) to parts
+            set col to col + inside_width + 2
+            set i to j + 1
+        else
+            add c to piece
+            add width(c) to col
+            add 1 to i
+        end
+    end
+    if length of parts is 0
+        return nothing
+    end
+    if piece is not ""
+        add (record with text piece, tokens nothing) to parts
+    end
+    return parts
 end
 
 # ---------- syntax tree ----------
@@ -1822,6 +1902,9 @@ to parse with tokens, reading
             return record with kind "builtin", name "unit", args unit_args, at t
         end
         if match("string")
+            if parts of t is not nothing
+                return filled_in(t)
+            end
             return record with kind "value", type type of t, value value of t, at t
         end
         if word("yes") or word("no")
@@ -2096,6 +2179,48 @@ to parse with tokens, reading
             add expression() to made
         end
         return record with kind "list", items made, at t
+    end
+
+    # "Hi {name}!" is "Hi " + name + "!", which joins them as `say` does; text comes first, so "{a}{b}" is
+    # text too. Each value is read from its own tokens, as if it were in brackets.
+    to filled_in with t
+        set fill_outside to list of tokens, pos, indexing, converting
+        set filled to nothing
+        if text of item 1 of parts of t is nothing
+            set filled to record with kind "value", type "string", value "", at t
+        end
+        try
+            for each fill_part in parts of t
+                if text of fill_part is nothing
+                    set tokens to tokens of fill_part
+                    set pos to 1
+                    set indexing to no
+                    set converting to yes
+                    set fill_piece to expression()
+                    if not check("}")
+                        fail with problem(peek(), "expected '}' but found " + describe(peek()) + " (" + brace_hint + ")")
+                    end
+                else
+                    set fill_piece to record with kind "value", type "string", value text of fill_part, at t
+                end
+                if filled is nothing
+                    set filled to fill_piece
+                else
+                    set filled to record with kind "math", op "+", left filled, right fill_piece, at t
+                end
+            end
+        if it fails with why
+            set tokens to item 1 of fill_outside
+            set pos to item 2 of fill_outside
+            set indexing to item 3 of fill_outside
+            set converting to item 4 of fill_outside
+            fail with why
+        end
+        set tokens to item 1 of fill_outside
+        set pos to item 2 of fill_outside
+        set indexing to item 3 of fill_outside
+        set converting to item 4 of fill_outside
+        return filled
     end
 
     to arg_list

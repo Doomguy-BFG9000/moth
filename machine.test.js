@@ -213,11 +213,12 @@ test("machine.moth in machine code compiles itself into the same bytes", { skip 
   const sources = { "machine.moth": here("machine.moth").replace(/\r/g, ""), "compiler.moth": here("compiler.moth").replace(/\r/g, "") };
   const want = machine(sources["machine.moth"], { files: { "compiler.moth": sources["compiler.moth"] }, target, name: "machine.moth" });
   let sum = 0, mix = 0;
+  const text = (code) => JSON.stringify(code).replaceAll("{", "\\{"); // as Moth text: a { is itself
   want.forEach((x, i) => { sum += x; mix += x * ((i + 1) & 1023); });
   const driver = `set total to 0
 set k to 0
 use "machine.moth" as m
-set made to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
+set made to m's compile_machine(${text(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${text(sources["compiler.moth"])}), "${target}", "machine.moth")
 say length of made
 set mix to 0
 for each k from 1 to length of made

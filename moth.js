@@ -16,6 +16,9 @@ export { MothError, excerpt, describeTrail, seeded, soundSamples, soundWav, SOUN
 // which has no character codes, follow them exactly.
 const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),]|'s(?!\w))/y;
 const ESCAPES = { n: "\n", t: "\t" };
+const unescape = (raw) => raw.replace(/\\(.)/gs, (_, c) => ESCAPES[c] ?? c);
+// what a mistake in a value inside text adds, for text written before there were values in it
+const BRACE_HINT = "to write a '{' itself, put '\\' before it";
 // symbols people type out of habit from other languages, and what Moth says instead
 const HINTS = {
   "=": "to store a value write 'set x to 5', to compare write 'x is 5'",
@@ -31,12 +34,13 @@ const HINTS = {
   ".": "to get a field write 'name of person'",
 };
 
-// `file` names a file the program uses, for errors in it; the program's own file has none
-function tokenize(src, file) {
+// `file` names a file the program uses, for errors in it; the program's own file has none. `start`, for a
+// value inside text ("Hi {name}"), is where it starts: its tokens are counted from there, and end with a '}'.
+function tokenize(src, file, start) {
   const tokens = [];
-  let line = 1;
-  let lineStart = 0;
-  let nl = true; // does the next token start a new line?
+  let line = start ? start.line : 1;
+  let lineStart = start ? 1 - start.col : 0;
+  let nl = !start; // does the next token start a new line?
   for (let at = 0; at < src.length; at = TOKEN.lastIndex) {
     TOKEN.lastIndex = at;
     const m = TOKEN.exec(src);
@@ -44,7 +48,8 @@ function tokenize(src, file) {
     if (!m) {
       const c = String.fromCodePoint(src.codePointAt(at)); // a whole emoji, not half of one
       if (c === '"') fail(where, "this text is missing its closing quote");
-      fail(where, `I don't understand '${c}'${Object.hasOwn(HINTS, c) ? ` (${HINTS[c]})` : ""}`);
+      const hint = start ? BRACE_HINT : HINTS[c];
+      fail(where, `I don't understand '${c}'${start || Object.hasOwn(HINTS, c) ? ` (${hint})` : ""}`);
     }
     const [text, space, comment, number, word, string] = m;
     if (space || comment) {
@@ -61,16 +66,44 @@ function tokenize(src, file) {
       : word
         ? ["word", word.toLowerCase()]
         : string
-          ? ["string", string.slice(1, -1).replace(/\\(.)/gs, (_, c) => ESCAPES[c] ?? c)]
+          ? ["string", unescape(string.slice(1, -1))]
           : [text, text];
     const token = { type, value, ...where, nl };
     if (word) token.raw = word; // as written: a library's function is named in its own case (see library)
     if (number) token.text = number; // as written, for messages and the JIT
+    if (string) {
+      const parts = textParts(string.slice(1, -1), line, where.col + 1, file);
+      if (parts) token.parts = parts;
+      TOKEN.lastIndex = at + text.length; // which reading a value in it moved
+    }
     tokens.push(token);
     nl = false;
   }
+  if (start) tokens.push({ type: "}", value: "}", line, col: src.length - lineStart + 1, nl: true, ...(file && { file }) });
   tokens.push({ type: "eof", value: "", line, col: src.length - lineStart + 1, nl: true, ...(file && { file }) });
   return tokens;
+}
+
+// "Hi {name}!": text with values in it. A '{' right before a letter or '_' starts a value, which ends at the
+// next '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, or
+// nothing for text with no value in it. `raw` is the text as written, from column `col` of `line`.
+function textParts(raw, line, col, file) {
+  const parts = [];
+  let last = 0; // where the text not yet in parts starts
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === "\\") i++;
+    else if (raw[i] === "{" && /[A-Za-z_]/.test(raw[i + 1] ?? "")) {
+      const end = raw.indexOf("}", i);
+      if (end < 0) fail({ line, col: col + i, ...(file && { file }) }, `this '{' has no '}' to end it (${BRACE_HINT})`);
+      if (i > last) parts.push(unescape(raw.slice(last, i)));
+      parts.push(tokenize(raw.slice(i + 1, end), file, { line, col: col + i + 1 }));
+      last = end + 1;
+      i = end;
+    }
+  }
+  if (!parts.length) return null;
+  if (last < raw.length) parts.push(unescape(raw.slice(last)));
+  return parts;
 }
 
 // ---------- syntax tree ----------
@@ -864,7 +897,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const unit = tokens[pos++]; // `5 km`: an amount of a unit
       return { kind: "builtin", name: "unit", args: [n, { kind: "value", value: unit.value, at: unit }], at: t };
     }
-    if (match("string")) return { kind: "value", value: t.value, at: t };
+    if (match("string")) return t.parts ? filledIn(t) : { kind: "value", value: t.value, at: t };
     if (word("yes") || word("no")) return { kind: "value", value: t.value === "yes", at: t };
     if (word("nothing")) return { kind: "value", value: null, at: t };
     if (word("list")) {
@@ -1043,6 +1076,27 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       items.push(expression());
     }
     return { kind: "list", items, at: t };
+  }
+
+  // "Hi {name}!" is "Hi " + name + "!", which joins them as `say` does; text comes first, so "{a}{b}" is
+  // text too. Each value is read from its own tokens, as if it were in brackets.
+  function filledIn(t) {
+    const outside = [tokens, pos, indexing, converting];
+    let node = typeof t.parts[0] === "string" ? null : { kind: "value", value: "", at: t };
+    try {
+      for (const part of t.parts) {
+        let piece = { kind: "value", value: part, at: t };
+        if (typeof part !== "string") {
+          [tokens, pos, indexing, converting] = [part, 0, false, true];
+          piece = expression();
+          if (!check("}")) fail(peek(), `expected '}' but found ${describe(peek())} (${BRACE_HINT})`);
+        }
+        node = node ? { kind: "math", op: "+", left: node, right: piece, at: t } : piece;
+      }
+    } finally {
+      [tokens, pos, indexing, converting] = outside;
+    }
+    return node;
   }
 
   function argList() {

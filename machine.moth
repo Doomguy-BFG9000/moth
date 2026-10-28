@@ -29673,7 +29673,7 @@ set net_time_limit to 60000 # how long a site gets, in milliseconds
 # address as it is (no [] or {} patterns), only http and https, 60 seconds at most, and after the page a
 # line with the answer's number and where the site sends the program on to, if anywhere
 set curl_args to list of "curl", "-q", "-sS", "-g", "-A", "moth", "--max-time", "60", "--proto", "=http,https", "-w",
-    "\n%{http_code} %{redirect_url}"
+    "\n%\{http_code} %\{redirect_url}"
 # what can go wrong, in curl's words, then which of curl's exit codes and which of WinHTTP's errors say it;
 # the first two name the host, and the second its port too
 set net_whys to list of (list of "Could not resolve host: ", (list of 6), (list of 12007)),
