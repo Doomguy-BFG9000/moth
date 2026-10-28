@@ -75,6 +75,14 @@ to is_digit with c
     return c is at least "0" and c is at most "9"
 end
 
+to is_hex with c
+    return is_digit(c) or (c is at least "a" and c is at most "f") or (c is at least "A" and c is at most "F")
+end
+
+to is_bit with c
+    return c is "0" or c is "1"
+end
+
 to starts_word with c
     return (c is at least "a" and c is at most "z") or (c is at least "A" and c is at most "Z") or c is "_"
 end
@@ -134,16 +142,33 @@ to tokenize with source, file
             end
         else if is_digit(c)
             set text to ""
-            repeat while is_digit(item k of chars)
-                add item k of chars to text
-                add 1 to k
-            end
-            if item k of chars is "." and is_digit(item (k + 1) of chars)
-                add "." to text
-                add 1 to k
+            set next to item (k + 1) of chars
+            if c is "0" and next is "x" and is_hex(item (k + 2) of chars) # 0xFF
+                set text to "0x"
+                set k to k + 2
+                repeat while is_hex(item k of chars)
+                    add item k of chars to text
+                    add 1 to k
+                end
+            else if c is "0" and next is "b" and is_bit(item (k + 2) of chars) # 0b1010
+                set text to "0b"
+                set k to k + 2
+                repeat while is_bit(item k of chars)
+                    add item k of chars to text
+                    add 1 to k
+                end
+            else
                 repeat while is_digit(item k of chars)
                     add item k of chars to text
                     add 1 to k
+                end
+                if item k of chars is "." and is_digit(item (k + 1) of chars)
+                    add "." to text
+                    add 1 to k
+                    repeat while is_digit(item k of chars)
+                        add item k of chars to text
+                        add 1 to k
+                    end
                 end
             end
             add record with type "number", value text, line line, col start, nl nl, file file to tokens # kept as written
@@ -208,8 +233,13 @@ end
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in"
-set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys" # in the order of BUILTINS in vm.js
+    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
+    "byte", "bytes", "as", "shift"
+# in the order of BUILTINS in vm.js
+set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
+    "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
+set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is still a name
+set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
@@ -418,7 +448,7 @@ to parse with tokens, reading
     to statement
         set t to peek()
         if word("set")
-            if is_word("item")
+            if is_word("item") or is_word("byte")
                 set target to primary()
                 expect_word("to")
                 return record with kind "setItem", target target, value expression(), at t
@@ -622,7 +652,7 @@ to parse with tokens, reading
     end
 
     to comparison
-        set left to additive()
+        set left to bitwise()
         set t to word("is")
         if not t
             return left
@@ -642,7 +672,19 @@ to parse with tokens, reading
         else if word("in")
             set op to "in"
         end
-        return record with kind "compare", op op, negate negated, left left, right additive(), at t
+        return record with kind "compare", op op, negate negated, left left, right bitwise(), at t
+    end
+
+    to bitwise
+        set left to additive()
+        repeat while is_word("bit") and type of item (pos + 1) of tokens is "word" and contains(bit_words, value of item (pos + 1) of tokens)
+            set t to peek()
+            set op_name to "bit " + value of item (pos + 1) of tokens
+            set pos to pos + 2
+            set inputs to list of left, additive()
+            set left to record with kind "builtin", name op_name, args inputs, at t
+        end
+        return left
     end
 
     to additive
@@ -656,13 +698,41 @@ to parse with tokens, reading
     end
 
     to multiplicative
-        set left to unary()
+        set left to postfix(unary())
         set t to match("*") or match("/")
         repeat while t
-            set left to record with kind "math", op type of t, left left, right unary(), at t
+            set left to record with kind "math", op type of t, left left, right postfix(unary()), at t
             set t to match("*") or match("/")
         end
         return left
+    end
+
+    # `100 bytes`, `block as text`
+    to postfix with e
+        set going to yes
+        repeat while going
+            set t to peek()
+            if word("bytes")
+                set inputs to list of e
+                set e to record with kind "builtin", name "bytes", args inputs, at t
+            else if word("as")
+                set to_word to ""
+                for each w in as_words
+                    if to_word is "" and is_word(w)
+                        set to_word to w
+                    end
+                end
+                if to_word is ""
+                    expected("'bytes' or 'text' or 'hex' or 'binary'")
+                end
+                set pos to pos + 1
+                set inputs to list of e
+                set e to record with kind "builtin", name "as " + to_word, args inputs, at t
+            else
+                set going to no
+            end
+        end
+        return e
     end
 
     to unary
@@ -752,7 +822,18 @@ to parse with tokens, reading
             add additive() to inputs
             return record with kind "builtin", name value of t, args inputs, at t
         end
-        if word("item")
+        if word("shift") # `shift x left by 2`
+            set shifted to additive()
+            if not is_word("left") and not is_word("right")
+                expected("'left' or 'right'")
+            end
+            set way to value of peek()
+            set pos to pos + 1
+            expect_word("by")
+            set inputs to list of shifted, additive()
+            return record with kind "builtin", name "shift " + way, args inputs, at t
+        end
+        if word("item") or word("byte") # `byte 5 of block` is another way to say `item 5 of block`
             set outside to indexing
             set indexing to yes
             set index to additive()

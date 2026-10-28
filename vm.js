@@ -117,10 +117,13 @@ Record.prototype = Object.create(null);
 export const isRecord = (v) => v instanceof Record;
 // A dictionary is a Map whose keys are text or numbers. It keeps them in the order they were added.
 export const isDictionary = (v) => v instanceof Map;
+// Bytes are a block of memory: a fixed number of whole numbers from 0 to 255.
+export const isBytes = (v) => v instanceof Uint8Array;
 export const truthy = (v) => v !== null && v !== false;
 export function equal(a, b) {
   if (a === b) return true;
   if (isList(a) && isList(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
+  if (isBytes(a) && isBytes(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
   if (isDictionary(a) && isDictionary(b)) return a.size === b.size && [...a].every(([key, value]) => b.has(key) && equal(value, b.get(key)));
   if (isRecord(a) && isRecord(b)) {
     const fields = Object.keys(a);
@@ -140,6 +143,7 @@ export function kindOf(v) {
   if (v instanceof Closure) return "a function";
   if (isRecord(v)) return "a record";
   if (isDictionary(v)) return "a dictionary";
+  if (isBytes(v)) return "bytes";
   return "a number";
 }
 
@@ -157,6 +161,7 @@ export function show(v, nested = false) {
     const entries = [...v].map(([key, value]) => `${show(key, true)} is ${show(value, true)}`);
     return entries.length ? `(dictionary where ${entries.join(", ")})` : "(empty dictionary)";
   }
+  if (isBytes(v)) return `(${plural(v.length, "byte")}${v.length ? `: ${v.join(", ")}` : ""})`;
   return String(v);
 }
 
@@ -165,27 +170,36 @@ export function show(v, nested = false) {
 // `error`, which throws: the VM's version positions the error at the instruction it was running, the JIT's
 // at the spot in the source the code came from.
 
-// Where `item n of target` is: [the list (or the text's letters, or the dictionary), the place in it].
-// Any key of a dictionary can be set, but one that is read must be there.
+// Where `item n of target` is: [the list (or the text's letters, the bytes or the dictionary), the place in
+// it]. Any key of a dictionary can be set, but one that is read must be there.
 export function item(target, n, writing, error = oops) {
   if (isDictionary(target)) {
     dictionaryKey(n, error);
     if (!writing && !target.has(n)) error(notIn(target, n));
     return [target, n];
   }
-  if (writing && !isList(target)) error(`can only change items of a list or dictionary, not ${kindOf(target)}`);
-  if (!isList(target) && typeof target !== "string") error(`can only take an item of a list, text or dictionary, not ${kindOf(target)}`);
+  if (writing && !isList(target) && !isBytes(target)) error(`can only change items of a list, dictionary or bytes, not ${kindOf(target)}`);
+  if (!isList(target) && !isBytes(target) && typeof target !== "string") error(`can only take an item of a list, text, dictionary or bytes, not ${kindOf(target)}`);
   const seq = typeof target === "string" ? [...target] : target; // by character, so "é" and emoji count as one
   if (!Number.isInteger(n)) error(`item numbers must be whole numbers, not ${show(n, true)}`);
   if (n < 1) error(`there is no item ${n}, items are counted from 1`);
-  if (n > seq.length) error(`there is no item ${n}, the ${isList(target) ? "list" : "text"} only has ${plural(seq.length, isList(target) ? "item" : "letter")}`);
+  if (n > seq.length) {
+    if (isBytes(target)) error(`there is no item ${n}, there are only ${plural(seq.length, "byte")}`);
+    error(`there is no item ${n}, the ${isList(target) ? "list" : "text"} only has ${plural(seq.length, isList(target) ? "item" : "letter")}`);
+  }
   return [seq, n - 1];
 }
 
+const byte = (v, error) => {
+  if (!Number.isInteger(v) || v < 0 || v > 255) error(`a byte is a whole number from 0 to 255, not ${show(v, true)}`);
+  return v;
+};
+
 // the value at the place item() found, and putting one there
 export const itemAt = (seq, i) => (isDictionary(seq) ? seq.get(i) : seq[i]);
-export function putItem(seq, i, value) {
+export function putItem(seq, i, value, error = oops) {
   if (isDictionary(seq)) seq.set(i, value);
+  else if (isBytes(seq)) seq[i] = byte(value, error);
   else seq[i] = value;
 }
 
@@ -216,9 +230,10 @@ export function removeKey(key, dictionary, error) {
   dictionary.delete(key);
 }
 
-// `x is in y`: an item of a list, a key of a dictionary, or a piece of a text
+// `x is in y`: an item of a list or bytes, a key of a dictionary, or a piece of a text
 function isIn(a, b, error = oops) {
   if (isList(b)) return b.some((x) => equal(a, x));
+  if (isBytes(b)) return b.includes(a);
   if (isDictionary(b)) return b.has(a);
   if (typeof a !== "string" || typeof b !== "string") error(`can't check if ${kindOf(a)} is in ${kindOf(b)}`);
   return b.includes(a);
@@ -256,7 +271,7 @@ export function negate(v, error) {
 export function lengthOf(v, error) {
   if (typeof v === "string") return [...v].length;
   if (isDictionary(v)) return v.size;
-  if (!isList(v)) error(`'length of' needs a list, text or dictionary, not ${kindOf(v)}`);
+  if (!isList(v) && !isBytes(v)) error(`'length of' needs a list, text, dictionary or bytes, not ${kindOf(v)}`);
   return v.length;
 }
 
@@ -284,7 +299,7 @@ export function checkRange(from, to, error) {
 // dictionary, its keys
 export function itemsOf(v, error) {
   if (isDictionary(v)) return [...v.keys()];
-  if (!isList(v) && typeof v !== "string") error(`can only go through a list, text or dictionary, not ${kindOf(v)}`);
+  if (!isList(v) && !isBytes(v) && typeof v !== "string") error(`can only go through a list, text, dictionary or bytes, not ${kindOf(v)}`);
   return [...v];
 }
 
@@ -328,6 +343,15 @@ const needText = (what, v, error) => {
   if (typeof v !== "string") error(`${what} needs text, not ${kindOf(v)}`);
   return v;
 };
+// Bits work on whole numbers from 0 to the biggest a Moth number holds exactly, so they never round.
+const MAX_BITS = 2 ** 53 - 1;
+const bits = (what, v, error) => {
+  if (!Number.isInteger(v) || v < 0) error(`${what} needs whole numbers of 0 or more, not ${show(v, true)}`);
+  if (v > MAX_BITS) error(`${what} works on numbers up to ${MAX_BITS}, not ${show(v)}`);
+  return v;
+};
+// JavaScript's own bit operators take 32 bits, so the high bits and the low 32 go through them apart
+const bitwise = (op, a, b) => (op(Math.floor(a / 2 ** 32), Math.floor(b / 2 ** 32)) >>> 0) * 2 ** 32 + (op(a >>> 0, b >>> 0) >>> 0);
 export const BUILTINS = [
   { name: "uppercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'uppercase of'", t, error).toUpperCase() },
   { name: "lowercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'lowercase of'", t, error).toLowerCase() },
@@ -372,6 +396,48 @@ export const BUILTINS = [
       return [...dictionary.keys()];
     },
   },
+  // `a bit and b`, `a bit or b`, `a bit xor b`
+  ...[(a, b) => a & b, (a, b) => a | b, (a, b) => a ^ b].map((op, i) => {
+    const name = `bit ${["and", "or", "xor"][i]}`;
+    return { name, needs: [["number"], ["number"]], gives: "number", run: ([a, b], error) => bitwise(op, bits(`'${name}'`, a, error), bits(`'${name}'`, b, error)) };
+  }),
+  // `shift x left by 2` is x * 2 * 2; `shift x right by 2` is x / 2 / 2, rounded down
+  {
+    name: "shift left", needs: [["number"], ["number"]], gives: "number",
+    run: ([x, n], error) => {
+      bits("'shift'", x, error);
+      bits("'shift ... by'", n, error);
+      const shifted = x === 0 ? 0 : x * 2 ** n; // 0 * 2 ** 2000 would be 0 * Infinity
+      if (shifted > MAX_BITS) error(`${show(x)} shifted left by ${show(n)} is too big: bits work on numbers up to ${MAX_BITS}`);
+      return shifted;
+    },
+  },
+  {
+    name: "shift right", needs: [["number"], ["number"]], gives: "number",
+    run: ([x, n], error) => Math.floor(bits("'shift'", x, error) / 2 ** bits("'shift ... by'", n, error)),
+  },
+  {
+    name: "bytes", needs: [["number"]], gives: "bytes", // `100 bytes`, all 0
+    run: ([n], error) => {
+      if (!Number.isInteger(n) || n < 0) error(`'bytes' needs a whole number in front of it, not ${show(n, true)}`);
+      return new Uint8Array(n);
+    },
+  },
+  {
+    name: "as bytes", needs: [["text", "list", "bytes"]], gives: "bytes", // text as UTF-8, or a list of numbers
+    run: ([v], error) => {
+      if (typeof v === "string") return new TextEncoder().encode(v);
+      if (isBytes(v)) return v.slice();
+      if (!isList(v)) error(`'as bytes' needs text, a list or bytes, not ${kindOf(v)}`);
+      return Uint8Array.from(v, (x) => byte(x, error));
+    },
+  },
+  {
+    name: "as text", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes"]], gives: "text",
+    run: ([v]) => (isBytes(v) ? new TextDecoder().decode(v) : show(v)), // bytes are read as UTF-8; anything else as `say` shows it
+  },
+  { name: "as hex", needs: [["number"]], gives: "text", run: ([n], error) => bits("'as hex'", n, error).toString(16) },
+  { name: "as binary", needs: [["number"]], gives: "text", run: ([n], error) => bits("'as binary'", n, error).toString(2) },
 ];
 
 // `ask question`: the answer, as text. `answer` is whoever can answer (a person at a terminal, a page): it gets
@@ -609,7 +675,7 @@ export class Machine {
           case SET_ITEM: {
             const v = stack.pop();
             const i = stack.pop();
-            putItem(stack.pop(), i, v);
+            putItem(stack.pop(), i, v, oops);
             break;
           }
           case DICT: {

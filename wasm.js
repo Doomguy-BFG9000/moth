@@ -19,7 +19,7 @@ const I32 = "i32";
 const F64 = "f64";
 const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has its own stack
 const MATH = ["+", "-", "*", "/"];
-const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7 };
+const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8 };
 
 // What the module imports: the checks and actions it leaves to JavaScript. Most only ever throw.
 const IMPORTS = {
@@ -73,15 +73,15 @@ function declareTypes(m) {
   m.type({ kind: "struct", fields: [{ type: refNull(T.env) }, { type: ref(T.items) }] });
   T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }] });
   T.unset = m.type({ kind: "struct", fields: [] });
-  // A dictionary holds a JavaScript Map, from keys as JavaScript values to the module's own values. Its field
-  // is mutable only so that the type differs from text's: struct types with the same fields are the same type.
-  T.dict = m.type({ kind: "struct", fields: [{ type: "externref", mutable: true }] });
+  // A value JavaScript keeps, and its tag: a dictionary is a Map, from keys as JavaScript values to the
+  // module's own values, and bytes are a Uint8Array.
+  T.host = m.type({ kind: "struct", fields: [{ type: "externref" }, { type: I32 }] });
   T.fn = (n) => { // a Moth function with n inputs
     const index = m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]);
     m.typeNames[index] = `fn${n}`;
     return index;
   };
-  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "dict"]) m.typeNames[T[name]] = name;
+  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "host"]) m.typeNames[T[name]] = name;
   return T;
 }
 
@@ -146,7 +146,7 @@ function declareRuntime(m, T, im) {
     both(T.list);
     both(T.record);
     c.emit("i32.or");
-    both(T.dict);
+    both(T.host);
     c.emit("i32.or").emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", im.equal).emit("return").emit("end");
     c.emit("i32.const", 0);
   });
@@ -313,8 +313,9 @@ function declareExports(m, T, R) {
     m.export(label, f.index);
   };
   fn("tag", [EQ], [I32], (c) => {
-    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function], [T.dict, TAGS.dictionary]])
+    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function]])
       c.emit("local.get", 0).emit("ref.test", type).emit("if").emit("i32.const", tag).emit("return").emit("end");
+    c.emit("local.get", 0).emit("ref.test", T.host).emit("if").emit("local.get", 0).emit("ref.cast", T.host).emit("struct.get", T.host, 1).emit("return").emit("end");
     c.emit("i32.const", TAGS.unset);
   });
   fn("num", [EQ], [F64], (c) => numOf(c, T, 0));
@@ -330,8 +331,8 @@ function declareExports(m, T, R) {
   fn("makeText", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.text));
   fn("newList", [], [EQ], (c) => c.emit("i32.const", 0).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.list));
   fn("listPush", [EQ, EQ], [], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("call", R.push));
-  fn("dictValue", [EQ], ["externref"], (c) => c.emit("local.get", 0).emit("ref.cast", T.dict).emit("struct.get", T.dict, 0));
-  fn("makeDict", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.dict));
+  fn("hostValue", [EQ], ["externref"], (c) => c.emit("local.get", 0).emit("ref.cast", T.host).emit("struct.get", T.host, 0));
+  fn("makeHost", ["externref", I32], [EQ], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("struct.new", T.host));
 }
 
 // ---------- which variables need the heap ----------
@@ -1039,9 +1040,11 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
       case TAGS.dictionary: {
         const dictionary = new Map();
         seen.set(v, dictionary);
-        for (const [key, value] of x.dictValue(v)) dictionary.set(key, toJs(value, seen));
+        for (const [key, value] of x.hostValue(v)) dictionary.set(key, toJs(value, seen));
         return dictionary;
       }
+      case TAGS.bytes: // only numbers in it, so it is already JavaScript's
+        return x.hostValue(v);
       default:
         return UNSET;
     }
@@ -1049,7 +1052,7 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
 
   // A dictionary's own Map, whose values stay the module's, so changing it changes the dictionary; any other
   // value as JavaScript. For checks that only need to see the dictionary, not what is in it.
-  const rawOf = (v) => (v !== null && typeof v !== "number" && x.tag(v) === TAGS.dictionary ? x.dictValue(v) : toJs(v));
+  const rawOf = (v) => (v !== null && typeof v !== "number" && x.tag(v) === TAGS.dictionary ? x.hostValue(v) : toJs(v));
 
   // only new values come back from JavaScript (text, and the letters of a text), never a list it changed
   function toWasm(v) {
@@ -1057,7 +1060,8 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     if (typeof v === "boolean") return v ? 1 : 0;
     if (typeof v === "number") return x.makeNum(v);
     if (typeof v === "string") return x.makeText(v);
-    if (v instanceof Map) return x.makeDict(new Map([...v].map(([key, value]) => [key, toWasm(value)])));
+    if (v instanceof Map) return x.makeHost(new Map([...v].map(([key, value]) => [key, toWasm(value)])), TAGS.dictionary);
+    if (v instanceof Uint8Array) return x.makeHost(v, TAGS.bytes);
     const list = x.newList();
     for (const item of v) x.listPush(list, toWasm(item));
     return list;
@@ -1083,8 +1087,11 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     itemRef: (target, n, k) => {
       item(rawOf(target), toJs(n), true, errors[k]);
     },
-    put: (target, key, value, k) => putItem(x.dictValue(target), toJs(key), value, errors[k]),
-    dict: (list, k) => x.makeDict(makeDictionary(Array.from({ length: x.listLength(list) }, (_, i) => x.listItem(list, i)), errors[k], toJs)),
+    put: (target, n, value, k) => { // a dictionary keeps the module's value; bytes keep numbers
+      const [seq, i] = item(rawOf(target), toJs(n), true, errors[k]);
+      putItem(seq, i, seq instanceof Map ? value : toJs(value), errors[k]);
+    },
+    dict: (list, k) => x.makeHost(makeDictionary(Array.from({ length: x.listLength(list) }, (_, i) => x.listItem(list, i)), errors[k], toJs), TAGS.dictionary),
     remove: (key, target, k) => removeKey(toJs(key), rawOf(target), errors[k]),
     addInto: (current, value, name, k) => toWasm(addInto(toJs(current), toJs(value), names[name], errors[k])),
     checkRepeat: (n, k) => checkRepeat(toJs(n), errors[k]),

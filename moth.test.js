@@ -123,6 +123,13 @@ const PROGRAMS = [
   ["to total with prices\n    set sum to 0\n    for each name in prices\n        add item name of prices to sum\n    end\n    return sum\nend\nsay total(dictionary where \"tea\" is 2, \"cake\" is 3.5)", "5.5"],
   ["set d to dictionary where \"a\" is 1, \"b\" is 2, \"a\" is 3\nsay d\nset item \"b\" of d to nothing\nsay d is dictionary where \"a\" is 3, \"b\" is nothing\nsay (dictionary where 1 is 2) is (dictionary where \"1\" is 2)", "(dictionary where \"a\" is 3, \"b\" is 2)\nyes\nno"],
   ["set grid to dictionary where \"row\" is list of 0, 0\nset item 2 of item \"row\" of grid to 5\nset item \"next\" of grid to grid\nsay item 2 of item \"row\" of item \"next\" of grid", "5"],
+  // bytes, bits, and numbers in hex and binary
+  ["say 0xFF\nsay 0b1010\nsay 0x10 + 1\nsay 255 as hex\nsay 10 as binary\nsay 0 as binary", "255\n10\n17\nff\n1010\n0"],
+  ["say 12 bit and 10\nsay 12 bit or 10\nsay 12 bit xor 10\nsay shift 1 left by 10\nsay shift 1024 right by 3\nsay shift 5 right by 1\nsay (0xF0 bit or 0x0F) is 0xFF\nsay 0x1FFFFFFFFFFFFF bit and 0xF0000000F\nsay 0x100000000 bit or 1\nsay shift 0 left by 2000", "8\n14\n6\n1024\n128\n2\nyes\n64424509455\n4294967297\n0"],
+  ["set block to 5 bytes\nset byte 1 of block to 72\nset byte 2 of block to 105\nsay block\nsay length of block\nsay byte 2 of block\nset greeting to \"Hi!\" as bytes\nsay greeting\nsay greeting as text\nsay (list of 1, 2, 255) as bytes\nsay 105 is in block\nsay block is (list of 72, 105, 0, 0, 0) as bytes", "(5 bytes: 72, 105, 0, 0, 0)\n5\n105\n(3 bytes: 72, 105, 33)\nHi!\n(3 bytes: 1, 2, 255)\nyes\nyes"],
+  ["set total to 0\nfor each b in \"héllo\" as bytes\n    add b to total\nend\nsay total\nsay length of (\"héllo\" as bytes)\nsay (\"héllo\" as bytes) as text\nsay 0 bytes\nsay 1 bytes", "795\n6\nhéllo\n(0 bytes)\n(1 byte: 0)"],
+  ["set check to 0\nfor each b in \"abc\" as bytes\n    set check to check bit xor b\nend\nsay check\nsay check as hex\nsay 5 as text + \"!\"\nsay (list of 1, 2) as text", "96\n60\n5!\n[1, 2]"],
+  ["set b to 2 bytes\ntry\n    set byte 1 of b to 256\nif it fails with why\n    say why\nend\nsay b\nset c to b as bytes\nset byte 2 of c to 9\nsay b \" \" c", "a byte is a whole number from 0 to 255, not 256\n(2 bytes: 0, 0)\n(2 bytes: 0, 0) (2 bytes: 0, 9)"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -150,13 +157,13 @@ const ERRORS = [
   ['say "a" is less than 5', "line 1: can't check if text is less than a number"],
   ['say item 0 of "abc"', "line 1: there is no item 0, items are counted from 1"],
   ['say item 4 of "abc"', "line 1: there is no item 4, the text only has 3 letters"],
-  ['set s to "ab"\nset item 1 of s to "x"', "line 2: can only change items of a list or dictionary, not text"],
+  ['set s to "ab"\nset item 1 of s to "x"', "line 2: can only change items of a list, dictionary or bytes, not text"],
   ["set n to 5\nadd list of 1 to n", "line 2: can't add a list to a number"],
   ["to f with a\nend\nf", "line 3: 'f' needs 1 input but got 0"],
   ['greet "x"', "line 1: there is no function called 'greet'"],
   ["constructor 1", "line 1: there is no function called 'constructor'"], // a name JavaScript objects already have
   ["set n to 5\nn", "line 2: 'n' is a number, not a function"],
-  ["for each x in 5\nend", "line 1: can only go through a list, text or dictionary, not a number"],
+  ["for each x in 5\nend", "line 1: can only go through a list, text, dictionary or bytes, not a number"],
   ['repeat "a" times\nend', 'line 1: repeat needs a whole number of times, not "a"'],
   ['say "hi', "line 1: this text is missing its closing quote"],
   ['if yes\n    say "hi"', "line 2: 'if' from line 1 is missing its 'end'"],
@@ -223,6 +230,24 @@ const ERRORS = [
   ["set keys to 1", "line 1: 'keys' is a Moth word, so it can't be used as a variable name"],
   ["remove \"a\" of d", "line 1: expected 'from' but found 'of'"],
   ["set d to empty dictionary\nadd 1 to d", "line 2: can't add a number to a dictionary"],
+  // bytes, bits, and numbers in hex and binary
+  ["set b to 3 bytes\nset byte 1 of b to 300", "line 2: a byte is a whole number from 0 to 255, not 300"],
+  ["set b to 3 bytes\nset item 1 of b to \"a\"", "line 2: a byte is a whole number from 0 to 255, not \"a\""],
+  ["set b to 3 bytes\nsay byte 4 of b", "line 2: there is no item 4, there are only 3 bytes"],
+  ["say -1 bytes", "line 1: 'bytes' needs a whole number in front of it, not -1"],
+  ["say 1.5 bit and 1", "line 1: 'bit and' needs whole numbers of 0 or more, not 1.5"],
+  ["say \"a\" bit or 1", "line 1: 'bit or' needs whole numbers of 0 or more, not \"a\""],
+  ["say 10000000000000000 bit xor 1", "line 1: 'bit xor' works on numbers up to 9007199254740991, not 10000000000000000"],
+  ["say shift 1 left by 53", "line 1: 1 shifted left by 53 is too big: bits work on numbers up to 9007199254740991"],
+  ["say shift 1 right by -1", "line 1: 'shift ... by' needs whole numbers of 0 or more, not -1"],
+  ["say shift 1 up by 2", "line 1: expected 'left' or 'right' but found 'up'"],
+  ["say 5 as words", "line 1: expected 'bytes' or 'text' or 'hex' or 'binary' but found 'words'"],
+  ["say 5 as bytes", "line 1: 'as bytes' needs text, a list or bytes, not a number"],
+  ["say (list of 1, 300) as bytes", "line 1: a byte is a whole number from 0 to 255, not 300"],
+  ["say -5 as hex", "line 1: 'as hex' needs whole numbers of 0 or more, not -5"],
+  ["set as to 1", "line 1: 'as' is a Moth word, so it can't be used as a variable name"],
+  ["say (5 bytes) + 1", "line 1: can't use '+' on bytes and a number"],
+  ["set b to 2 bytes\nadd 1 to b", "line 2: can't add a number to bytes"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -389,8 +414,8 @@ test("the checker finds mistakes without running the program", () => {
     "14:1 fails: 'count' is a number, not a function",
     '15:1 fails: repeat needs a whole number of times, not "x"',
     "17:5 fails: there is no item 0, items are counted from 1",
-    "18:5 fails: 'length of' needs a list, text or dictionary, not a number",
-    "19:1 fails: can only go through a list, text or dictionary, not a number",
+    "18:5 fails: 'length of' needs a list, text, dictionary or bytes, not a number",
+    "19:1 fails: can only go through a list, text, dictionary or bytes, not a number",
     "21:1 fails: 'move forward' needs a number, not text",
     "22:7 fails: can't divide by zero",
   ]);

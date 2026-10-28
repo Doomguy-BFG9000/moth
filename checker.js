@@ -7,7 +7,7 @@ import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, c
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
-const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map() };
+const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0) };
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
 
 class Found {
@@ -146,7 +146,7 @@ class Checker extends Scope {
         this.expr(s.target.index);
         this.expr(s.value);
         const type = this.type(target);
-        this.willFail(s.target.at, () => this.known(type()) && type() !== "list" && item(SAMPLES[type()], 1, true, found));
+        this.willFail(s.target.at, () => this.known(type()) && type() !== "list" && type() !== "bytes" && item(SAMPLES[type()], 1, true, found));
         return;
       }
       case "add": {
@@ -348,10 +348,10 @@ class Checker extends Scope {
         this.willFail(e.at, () => {
           const t = type();
           if (!this.known(t) || t === "dictionary") return; // which keys a dictionary has isn't known
-          if (t !== "list" && t !== "text") return item(SAMPLES[t], 1, false, found); // can't take an item of this
+          if (t !== "list" && t !== "text" && t !== "bytes") return item(SAMPLES[t], 1, false, found); // can't take an item of this
           // the index is only certain when it is written out; the length of the list never is
           const n = e.index.kind === "value" ? e.index.value : undefined;
-          if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) item(t === "list" ? ["x"] : "x", n, false, found);
+          if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) item(t === "text" ? "x" : ["x"], n, false, found);
         });
         return;
       }

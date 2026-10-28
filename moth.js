@@ -14,7 +14,7 @@ export { MothError, excerpt } from "./vm.js";
 // Every control character counts as a space (as in Wirth's compilers), and text holds any character but a
 // control character other than tab (\n makes a new line). Rules this small let the compiler written in Moth,
 // which has no character codes, follow them exactly.
-const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),])/y;
+const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),])/y;
 const ESCAPES = { n: "\n", t: "\t" };
 // symbols people type out of habit from other languages, and what Moth says instead
 const HINTS = {
@@ -78,11 +78,16 @@ function tokenize(src, file) {
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in"]);
+  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
+  "byte", "bytes", "as", "shift"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
   ["join", [null, "with"]], ["position", ["of", "in"]], ["keys", ["of"]]]);
+// `a bit and b`, `a bit or b`, `a bit xor b`; `bit` alone is still a name
+const BIT_WORDS = ["and", "or", "xor"];
+// what `as` turns a value into: `block as text`, `"hi" as bytes`, `255 as hex`
+const AS_WORDS = ["bytes", "text", "hex", "binary"];
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -167,7 +172,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   function statement() {
     const t = peek();
     if (word("set")) {
-      if (isWord("item")) {
+      if (isWord("item") || isWord("byte")) {
         const target = primary();
         expectWord("to");
         return { kind: "setItem", target, value: expression(), at: t };
@@ -302,13 +307,24 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   function comparison() {
-    const left = additive();
+    const left = bitwise();
     const t = word("is");
     if (!t) return left;
     const negate = Boolean(word("not"));
     const phrase = check("word") && tokens[pos + 1].type === "word" ? `${peek().value} ${tokens[pos + 1].value}` : "";
     const op = Object.hasOwn(COMPARISONS, phrase) ? ((pos += 2), phrase) : word("in") ? "in" : "is";
-    return { kind: "compare", op, negate, left, right: additive(), at: t };
+    return { kind: "compare", op, negate, left, right: bitwise(), at: t };
+  }
+
+  function bitwise() {
+    let left = additive();
+    while (isWord("bit") && tokens[pos + 1].type === "word" && BIT_WORDS.includes(tokens[pos + 1].value)) {
+      const t = peek();
+      const name = `bit ${tokens[pos + 1].value}`;
+      pos += 2;
+      left = { kind: "builtin", name, args: [left, additive()], at: t };
+    }
+    return left;
   }
 
   function additive() {
@@ -318,9 +334,22 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   function multiplicative() {
-    let left = unary();
-    for (let t; (t = match("*") || match("/")); ) left = { kind: "math", op: t.type, left, right: unary(), at: t };
+    let left = postfix(unary());
+    for (let t; (t = match("*") || match("/")); ) left = { kind: "math", op: t.type, left, right: postfix(unary()), at: t };
     return left;
+  }
+
+  // `100 bytes`, `block as text`
+  function postfix(e) {
+    for (;;) {
+      const t = peek();
+      if (word("bytes")) e = { kind: "builtin", name: "bytes", args: [e], at: t };
+      else if (word("as")) {
+        const to = AS_WORDS.find(isWord) ?? expected(AS_WORDS.map((w) => `'${w}'`).join(" or "));
+        pos++;
+        e = { kind: "builtin", name: `as ${to}`, args: [e], at: t };
+      } else return e;
+    }
   }
 
   function unary() {
@@ -378,7 +407,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord(syntax[1]);
       return { kind: "builtin", name: t.value, args: [first, additive()], at: t };
     }
-    if (word("item")) {
+    if (word("shift")) { // `shift x left by 2`
+      const value = additive();
+      const way = ["left", "right"].find(isWord) ?? expected("'left' or 'right'");
+      pos++;
+      expectWord("by");
+      return { kind: "builtin", name: `shift ${way}`, args: [value, additive()], at: t };
+    }
+    if (word("item") || word("byte")) { // `byte 5 of block` is another way to say `item 5 of block`
       const outside = indexing;
       indexing = true;
       const index = additive();
@@ -523,7 +559,7 @@ class Compiler extends Scope {
         this.expr(s.target.index);
         this.emit(s.target.at, ITEM_REF);
         this.expr(s.value);
-        this.emit(s.at, SET_ITEM);
+        this.emit(s.target.at, SET_ITEM); // fails if the value can't go there, like 300 in a byte
         return;
       case "add": {
         this.expr(s.value);
