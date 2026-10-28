@@ -12,8 +12,9 @@ in time, and a `moth` command with its own shell.
 
 Moth's compiler is also written in Moth: [`compiler.moth`](compiler.moth),
 1,100 lines that compile any Moth program, itself included, to exactly the
-JavaScript the JIT writes, byte for byte. And a neural network written in Moth
-learns to sort dots, with backpropagation and every bit of maths done in Moth.
+JavaScript the JIT writes, byte for byte. And neural networks written in Moth
+learn to sort dots and to read your handwriting, with every bit of maths done in
+Moth.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 <p>
@@ -81,6 +82,27 @@ end
 It trains in about 0.6 seconds on the JIT. Open **Neural network** in the
 playground to watch it learn.
 
+## Reading handwriting, in Moth
+
+Draw a digit on the pad in the playground's **Handwriting** example, and a
+network written in Moth says which it is. There's no dataset: the pictures it
+learned from were drawn by Moth too.
+
+![Drawing digits on the pad in the playground: a 2, a 7 and a 5, and the network written in Moth reads each one](docs/handwriting.gif)
+
+[`digit-shapes.moth`](digit-shapes.moth) has each digit as pen strokes, the
+ways people write them, and bends them at random (tilted, slanted, stretched,
+shaky). [`digits.moth`](digits.moth) turns strokes into a 16×16 picture, the
+same way for those shapes and for what you draw, and runs the network: 256
+pixels, 32 hidden neurons, 10 chances. [`digits-train.moth`](digits-train.moth)
+trains it on 3,000 pictures in about 7 seconds on WebAssembly, and prints the
+result as a Moth file, [`digits-model.moth`](digits-model.moth): 99% right on
+drawings it hadn't seen.
+
+```bash
+moth run digits-train.moth --engine wasm > digits-model.moth
+```
+
 ## The language
 
 ```
@@ -116,6 +138,11 @@ end
 for each i from 1 to 3
     say i
 end
+for each n from 1 to 100
+    if n is divisible by 7
+        stop                        # leave the loop
+    end
+end
 
 to area with width and height       # make a function
     return width * height
@@ -136,6 +163,13 @@ to check_age with age
         fail with "an age can't be below 0"  # stop with your own message
     end
 end
+
+set words to split "the quick fox" by " "   # text: split, join, uppercase, lowercase
+say uppercase of item 2 of words " " join words with "-"
+say position of "fox" in "the quick fox"    # 11: where it starts, or 0
+set age to number of ask "How old are you?" # ask: the answer typed in, as text
+
+use "math.moth"                     # another file's code: random numbers, sine, exp, sqrt
 
 # drawing: the turtle starts in the middle, facing up, with its pen down
 move forward 100                    # or: move back 50
@@ -208,6 +242,11 @@ nothing to install.
   JavaScript the JIT made, the JavaScript from the compiler written in Moth
   (checked against the JIT's), or the WebAssembly module, as text.
 - **Neural network** trains the network and draws it learning.
+- **Handwriting** asks you to draw a digit, and reads it. A question that
+  starts with "Draw" gets a drawing pad; any other gets a box to type in, as in
+  **Guess**, a number-guessing game. Each answer runs the program again from
+  the start with all the answers so far, which works because a Moth program
+  does the same things every time, and only what's new is shown.
 - The last example, **Moth's own compiler**, is `compiler.moth` itself, with
   a line at the end that uses it to compile some Moth.
 
@@ -222,7 +261,7 @@ npm install -g github:samyyy2423/moth
 | Command | What it does |
 |---|---|
 | `moth` | Starts the Moth shell |
-| `moth run hello.moth` | Runs a program. If it draws, the drawing is saved as `hello.svg` |
+| `moth run hello.moth` | Runs a program. If it draws, the drawing is saved as `hello.svg`. `ask` reads what you type. Add `--engine wasm` or `--engine vm` to pick the engine |
 | `moth check hello.moth` | Finds mistakes without running it |
 | `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
 | `moth bytecode hello.moth` | Shows the bytecode the compiler made for the VM |
@@ -307,7 +346,9 @@ say item 5 of fruits
 | [`wasm.js`](wasm.js) | The third engine: Moth to WebAssembly, with escape analysis and unboxed numbers |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler written in Moth: tokenizer, parser, scope rules and JavaScript writer |
-| [`neural.moth`](neural.moth) | A neural network written in Moth, with its own random numbers, sine, and backpropagation |
+| [`neural.moth`](neural.moth) | A neural network written in Moth, with backpropagation through records that remember how each number was made |
+| [`math.moth`](math.moth) | Maths Moth doesn't have built in, in Moth: random numbers, sine, cosine, exp, sqrt, rounding |
+| [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`cli.js`](cli.js) | The `moth` command and shell |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground. Each run gets its own Web Worker, so **Stop** works even on a loop that never ends |
 
@@ -372,6 +413,13 @@ are in **[DESIGN.md](DESIGN.md)**.
 - the neural network, trained on all three engines: the same output and the
   same drawing, line for line, and every dot on the right side at the end
 - the WebAssembly encoder against the spec's examples
+- `stop`, the text helpers, `ask` and `use`, on all three engines: `ask` mustn't
+  ask twice when a run is handed to the VM, and a mistake in a used file must
+  name that file
+- the handwriting reader, on ten digits drawn differently from the shapes it
+  learned, on all three engines, and a short training run that must write a
+  model Moth can read
+- the playground's script, which must at least parse
 - every `moth` command, run as a real process
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT and the
@@ -382,10 +430,17 @@ planted in WebAssembly's unboxed numbers failed five tests.
 
 ## Limits
 
-- No dictionaries, `break`, text functions (like upper case or split), or imports.
+- No dictionaries, and no way to read files, the network or the clock: a
+  program learns about the world only through `ask`.
 - These words are part of the language and can't be variable names:
   `set add say if else end repeat while for to return and or not is yes no
-  nothing list empty length item move turn pen record fail`.
+  nothing list empty length item move turn pen record fail stop ask use
+  uppercase lowercase split join number position`.
+- A name a function sets belongs to the top level if the top level sets it
+  too, and a used file's top level is the program's, so a library's helper
+  variables and a program's can collide. Give them different names.
+- The handwriting reader learned from shapes, not people: it reads ordinary
+  digits well, and odd ways of writing them less so.
 - Recursion goes up to 100,000 calls deep.
 - The checker only warns when it is sure, so it misses some mistakes: the length
   of a list, and a name used before the line that sets it.

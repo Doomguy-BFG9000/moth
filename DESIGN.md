@@ -424,3 +424,64 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   thread without waiting, so runs compile it in the Web Worker, and the
   Compiled view only builds the bytes and the listing. It needs WebAssembly GC
   (Node 22, Chrome 119, Firefox 120, Safari 18.2).
+
+## 16. stop, text helpers, ask and use
+
+- **`stop`** leaves the innermost loop. The VM pops the loop's own values off
+  its stack (one for `repeat`, two for `for each ... from`) and jumps to its
+  end, the JIT writes `break` (every Moth loop is a JavaScript loop, and
+  nothing else is), and WebAssembly branches out of the loop's block, counting
+  how many blocks are open to know how far. A `stop` outside a loop, or in a
+  function inside one, is a mistake the parser points at.
+- **One table of built-in operations.** `uppercase of`, `lowercase of`,
+  `split ... by`, `join ... with`, `number of` and `position of ... in` are
+  rows in `BUILTINS` in vm.js: a name, what each input must be, and what to
+  do. Each checks its inputs' kinds before anything depends on their values,
+  and every engine runs the same table (the VM with one instruction, the JIT
+  with one helper, WebAssembly with one import), so results and mistakes match
+  by construction. The checker reads the same `needs` to warn about an input
+  of the wrong kind before the program runs, and stays quiet about values,
+  like `number of "abc"`, which only running can tell.
+- **`ask` without giving up replay.** The JIT and WebAssembly hand deep
+  recursion to the VM by running the program again, which only works if a
+  second run does the same things. `ask` is the one way a program can learn
+  something new, so `run()` keeps every answer, and a second run gets them
+  again instead of asking. The playground uses the same idea: a Web Worker
+  can't stop and wait for the page, so a question ends the run, and once it's
+  answered the program runs again from the start with every answer so far,
+  and the page shows only what's new. The debugger replays the last run's
+  answers.
+- **`use` is splicing, not modules.** A used file's statements join the
+  program's top level, once, however many files use it. That keeps every back
+  end unchanged: they still see one program. Tokens remember their file, so a
+  mistake in one says `math.moth, line 40`, and the CLI shows that file's
+  line. Files that use each other in a circle are a mistake, found by keeping
+  the files being read on a stack. The cost of splicing is a shared top level:
+  a library's helper variables can collide with a program's.
+- **The compiler written in Moth keeps up.** Each feature went into
+  `compiler.moth` too (with `stop`, `join`, `lowercase` and `position` now
+  Moth words, its own names for them changed), and it still compiles itself to
+  exactly the JIT's JavaScript.
+
+## 17. Reading handwriting
+
+- **No dataset.** The network learns from digits Moth draws: each digit as
+  pen strokes, in a few of the ways people write it, bent at random each time
+  (tilted, slanted, stretched, shaky, strokes not quite meeting). Mouse
+  drawings are strokes too, which is why this works at all.
+- **One road to a picture.** A drawing travels as text (`"x,y x,y;x,y"`), the
+  same format the shapes are written in, and both become a 16×16 picture the
+  same way: scaled to fill the middle 12×12 pixels keeping their shape (so a 1
+  stays thin), then drawn with a pen whose ink fades over its last pixel.
+- **Speed where it counts.** Only inked pixels take part, forwards and
+  backwards, which is most of the speed: 3,000 pictures, 10 rounds, about 7
+  seconds on WebAssembly. Training starts from a fixed seed, so running it
+  again writes the same model file.
+- **Train once, read instantly.** The trained weights are printed as Moth
+  (`set model_hidden_weights to list of ...`), with the training progress as
+  comments, so the model is a file the reader can `use`, and each guess is
+  just one pass through the network.
+- **Honest limits.** It reads 99% of new drawings of the shapes it knows. The
+  test draws ten digits differently (other proportions, a sloppy 8, off to one
+  side) and it reads all ten, but it has never seen a person's handwriting, so
+  unusual ways of writing a digit can fool it.
