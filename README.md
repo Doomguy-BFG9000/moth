@@ -326,7 +326,7 @@ bytes and dictionaries:
   itself, the library Windows and most Linux systems come with: `open`, `run`
   and `query`, each row a dictionary, with `?`s for values.
 - [`text.moth`](tools/text.moth) finds, checks and replaces patterns (regular
-  expressions, with groups, `|`, counts and ``), writes numbers with so many
+  expressions, with groups, `|`, counts and `\b`), writes numbers with so many
   decimals (`number_text(3.14159, 2)`) or with commas (`grouped(1234567)`),
   pads text to a width, and reads and writes CSV; and
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:

@@ -2428,7 +2428,7 @@ hold them to agreeing.
   [`tools/dates.moth`](tools/dates.moth) are Moth alone, and work on every
   engine, machine code and the playground's three.
 - **Patterns** are regular expressions as most languages have them: classes,
-  `\d \w \s` and their opposites, `.`, `^ $ `, groups kept and not, `|`,
+  `\d \w \s` and their opposites, `.`, `^ $ \b`, groups kept and not, `|`,
   `* + ?` and `{n,m}`, each greedy or not, and `(?i)`. A pattern is read by
   recursive descent into a program of steps (a character, a set of ranges, a
   split between two places to go on from, a jump, a group's edge saved, and
