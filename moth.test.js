@@ -104,6 +104,7 @@ const ERRORS = [
   ["set n to 5\nadd list of 1 to n", "line 2: can't add a list to a number"],
   ["to f with a\nend\nf", "line 3: 'f' needs 1 input but got 0"],
   ['greet "x"', "line 1: there is no function called 'greet'"],
+  ["constructor 1", "line 1: there is no function called 'constructor'"], // a name JavaScript objects already have
   ["set n to 5\nn", "line 2: 'n' is a number, not a function"],
   ["for each x in 5\nend", "line 1: can only go through a list or text, not a number"],
   ['repeat "a" times\nend', 'line 1: repeat needs a whole number of times, not "a"'],
@@ -309,6 +310,7 @@ test("load() hands JavaScript what a program made, and fail with's value", () =>
   const made = load('to greet with who\n    return "Hello, " + who\nend\nset version to 3\nto check with n\n    fail with record with problem "bad", value n\nend');
   assert.equal(made.greet("JavaScript"), "Hello, JavaScript");
   assert.equal(made.version, 3);
+  assert.equal(load("set __proto__ to 5").__proto__, 5);
   assert.throws(() => made.check(7), (err) => err instanceof MothError && err.value.problem === "bad" && err.value.value === 7);
 });
 

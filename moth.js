@@ -68,7 +68,11 @@ function tokenize(src) {
 // ---------- syntax tree ----------
 
 // words that start a statement or a value, so they can't name a variable
-const RESERVED = new Set(["set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"]);
+const RESERVED = new Set([
+  "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
+  "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail"]);
+// drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
+const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
 // Every node keeps the token it came from (`at`), so errors can point at it.
 function parse(tokens) {
@@ -175,9 +179,8 @@ function parse(tokens) {
       expectWord("with");
       return { kind: "fail", value: expression(), at: t };
     }
-    // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
-    const turtle = { move: ["forward", "back"], turn: ["left", "right"], pen: ["up", "down", "color", "width"] }[t.value];
-    if (t.type === "word" && turtle) {
+    const turtle = t.type === "word" && TURTLE_WORDS.get(t.value);
+    if (turtle) {
       pos++;
       const action = turtle.find(isWord);
       if (!action) expected(turtle.map((w) => `'${w}'`).join(" or "));
@@ -661,7 +664,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
 export function load(source, print = console.log) {
   const program = compileToJs(source);
   const values = program.run(print, undefined, Infinity);
-  const made = {};
+  const made = Object.create(null); // a variable could be called __proto__
   program.names.forEach((name, slot) => {
     const value = values[slot - 1];
     if (value !== UNSET) made[name] = value instanceof Closure ? (...args) => value.fn.run(...args) : value;
