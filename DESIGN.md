@@ -2419,3 +2419,46 @@ hold them to agreeing.
   that isn't built in; on Windows, its RT_ICON, RT_GROUP_ICON and RT_VERSION,
   and the version as Windows' own `VersionInfo` reads it; and the three
   mistakes. On Linux, the files.
+
+## 54. Patterns, numbers, CSV and dates
+
+- **Why.** Programs check what's typed, pull numbers out of text, show money
+  with two decimals, read and write spreadsheets' CSV, and count days. None of
+  it needs the system, so [`tools/text.moth`](tools/text.moth) and
+  [`tools/dates.moth`](tools/dates.moth) are Moth alone, and work on every
+  engine, machine code and the playground's three.
+- **Patterns** are regular expressions as most languages have them: classes,
+  `\d \w \s` and their opposites, `.`, `^ $ `, groups kept and not, `|`,
+  `* + ?` and `{n,m}`, each greedy or not, and `(?i)`. A pattern is read by
+  recursive descent into a program of steps (a character, a set of ranges, a
+  split between two places to go on from, a jump, a group's edge saved, and
+  the tests for the start, the end and a word's edge), and run by
+  backtracking, with its own stack, not Moth's calls, so a long text can't run
+  out of them. A split is tried in its order, so the first match is the one
+  other languages find. A step at a place in the text that has been tried
+  before is not tried again: it can't do better the second time, so `(a*)*b`
+  can't go round for ever and `(a|aa)*c` isn't exponential, as RE2's
+  bit-state backtracker does it. Repeats are copies of the steps: `{2,4}` is
+  two, then two that may be skipped.
+- **Numbers.** `number_text` rounds as a person does, half away from 0, on the
+  digits Moth shows (15 of them), so `number_text(2.675, 2)` is `2.68`, where
+  arithmetic on the double, 2.67499..., would give 2.67. `grouped` puts a
+  comma (or `grouped_with`'s separator) between each three digits.
+- **CSV** as RFC 4180 has it: commas, a value in quotes when it has a comma, a
+  quote or a new line, `""` for a quote, and a line ending with a new line or
+  a return and one; `read table` still reads a CSV file as records.
+- **Dates** are records of a year, month and day, checked when they're made.
+  A date's number of days from 1 January 1970, and back, is Howard Hinnant's
+  days-from-civil, which counts from March, so February's leap day is last,
+  in eras of 400 years. Moth has no floor, so it's the digits before the
+  point, one less for a fraction below 0. Weekdays come from 1 January 1970
+  being a Thursday; months are added keeping the day, or the month's last.
+  `format_date` takes the tokens from the longest, `[ ]` for words as they
+  are; `today` and `now` are Moth's own `the year`, `the hour` and the rest.
+- **Tested.** text.test.moth's 8 tests and dates.test.moth's 6, on all three
+  engines and in machine code, through moth.exe's test runner: patterns
+  matching and not, groups and the rest, finding every match and empty ones,
+  replacing with `$1` and `$$`, splitting, the two that would never end, bad
+  patterns' mistakes, rounding at the edges, CSV both ways and back, and
+  every week of 400 years, counted as a person counts them, against both of
+  the date's directions.

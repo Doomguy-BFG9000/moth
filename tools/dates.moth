@@ -1,0 +1,305 @@
+# Dates on the calendar: today's, one read from "2026-11-03", days added and counted between, weekdays, and a
+# date written as a person wants it. In Moth alone, so it works everywhere.
+#
+#   use "dates.moth" as dates
+#   set start to dates's read_date("2026-11-03")
+#   set due to dates's add_days(start, 30)
+#   say dates's format_date(due, "dddd D MMMM YYYY")       # Thursday 3 December 2026
+#   say dates's days_between(start, due)                    # 30
+#   say dates's format_date(dates's now(), "YYYY-MM-DD hh:mm:ss")
+#
+# A date is a record with its year, month and day; now() is one with its hour, minute and second too.
+# format_date writes YYYY (2026), YY (26), MMMM (November), MMM (Nov), MM (11), M, DD (03), D (3), dddd
+# (Tuesday), ddd (Tue), hh (09, from 0 to 23), h, mm (05, minutes), m, ss and s; anything else is as it is,
+# and anything in [ ] is as it is without the brackets: "D [of] MMMM".
+
+set dates_months to list of "January", "February", "March", "April", "May", "June", "July", "August", "September",
+    "October", "November", "December"
+set dates_weekdays to list of "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+set dates_tokens to list of "YYYY", "YY", "MMMM", "MMM", "MM", "M", "DD", "D", "dddd", "ddd", "hh", "h", "mm", "m", "ss", "s"
+
+# a date, after checking there is one: date(2024, 2, 29) is, date(2023, 2, 29) isn't
+to date with year, month, day
+    for each part in list of year, month, day
+        if not (part is divisible by 1)
+            fail with "a date's year, month and day are whole numbers"
+        end
+    end
+    if month is less than 1 or month is greater than 12
+        fail with "there's no month " + month + ": months go from 1 to 12"
+    end
+    if day is less than 1 or day is greater than days_in_month(year, month)
+        fail with "there's no " + item month of dates_months + " " + day + " in " + year
+    end
+    return record with year year, month month, day day
+end
+
+to today
+    return date(the year, the month, the day)
+end
+
+# today, and the time: its hour (0 to 23), minute and second
+to now
+    set made to today()
+    set hour of made to the hour
+    set minute of made to the minute
+    set second of made to the second
+    return made
+end
+
+# "2026-11-03", maybe with a time after it, "2026-11-03 14:05" or "2026-11-03T14:05:09"
+to read_date with written
+    set cut to split join (split written by "T") with " " by " "
+    set parts to split item 1 of cut by "-"
+    if length of parts is not 3
+        fail with "a date is written 2026-11-03, not '" + written + "'"
+    end
+    set numbers to empty list
+    for each part in parts
+        try
+            add number of part to numbers
+        if it fails
+            fail with "a date is written 2026-11-03, not '" + written + "'"
+        end
+    end
+    set made to date(item 1 of numbers, item 2 of numbers, item 3 of numbers)
+    if length of cut is at least 2 and item 2 of cut is not ""
+        set times to split item 2 of cut by ":"
+        set hour of made to number of item 1 of times
+        set minute of made to 0
+        set second of made to 0
+        if length of times is at least 2
+            set minute of made to number of item 2 of times
+        end
+        if length of times is at least 3
+            set second of made to number of item 3 of times
+        end
+    end
+    return made
+end
+
+to is_leap_year with year
+    return (year is divisible by 4 and not (year is divisible by 100)) or year is divisible by 400
+end
+
+to days_in_month with year, month
+    if month is 2
+        if is_leap_year(year)
+            return 29
+        end
+        return 28
+    end
+    if month is 4 or month is 6 or month is 9 or month is 11
+        return 30
+    end
+    return 31
+end
+
+# the largest whole number not past x
+to dates_floor with x
+    set shown to "" + x
+    if position of "e" in shown is greater than 0
+        return x
+    end
+    set parts to split shown by "."
+    set made to number of item 1 of parts
+    if length of parts is 2 and x is less than 0
+        set made to made - 1
+    end
+    return made
+end
+
+# how many days a date is after 1 January 1970 (before it, below 0)
+to day_number with d
+    set y to year of d
+    set m to month of d
+    if m is at most 2
+        set y to y - 1
+    end
+    set era to dates_floor(y / 400)
+    set year_of_era to y - era * 400
+    set shifted to m - 3 # March first, so February's leap day is last
+    if m is at most 2
+        set shifted to m + 9
+    end
+    set day_of_year to dates_floor((153 * shifted + 2) / 5) + day of d - 1
+    set day_of_era to year_of_era * 365 + dates_floor(year_of_era / 4) - dates_floor(year_of_era / 100) + day_of_year
+    return era * 146097 + day_of_era - 719468
+end
+
+# the date `n` days after 1 January 1970
+to date_of_day with n
+    set z to n + 719468
+    set era to dates_floor(z / 146097)
+    set day_of_era to z - era * 146097
+    set year_of_era to dates_floor((day_of_era - dates_floor(day_of_era / 1460) + dates_floor(day_of_era / 36524)
+        - dates_floor(day_of_era / 146096)) / 365)
+    set y to year_of_era + era * 400
+    set day_of_year to day_of_era - (365 * year_of_era + dates_floor(year_of_era / 4) - dates_floor(year_of_era / 100))
+    set shifted to dates_floor((5 * day_of_year + 2) / 153)
+    set d to day_of_year - dates_floor((153 * shifted + 2) / 5) + 1
+    set m to shifted + 3
+    if shifted is at least 10
+        set m to shifted - 9
+    end
+    if m is at most 2
+        set y to y + 1
+    end
+    return date(y, m, d)
+end
+
+to add_days with d, n
+    return date_of_day(day_number(d) + n)
+end
+
+# the same day so many months on (or back, below 0), or the month's last day if it has fewer
+to add_months with d, n
+    set count to (year of d) * 12 + month of d - 1 + n
+    set y to dates_floor(count / 12)
+    set m to count - y * 12 + 1
+    set last to days_in_month(y, m)
+    set day to day of d
+    if day is greater than last
+        set day to last
+    end
+    return date(y, m, day)
+end
+
+# how many days from `first` to `second`: below 0 if second is first
+to days_between with first, second
+    return day_number(second) - day_number(first)
+end
+
+# 1 for Monday, to 7 for Sunday
+to weekday_number with d
+    set n to day_number(d) + 3 # 1 January 1970 was a Thursday
+    return n - dates_floor(n / 7) * 7 + 1
+end
+
+to weekday_name with d
+    return item weekday_number(d) of dates_weekdays
+end
+
+to month_name with d
+    return item (month of d) of dates_months
+end
+
+to date_text with d
+    return format_date(d, "YYYY-MM-DD")
+end
+
+to dates_two with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+to dates_time_part with d, name
+    try
+        if name is "hour"
+            return hour of d
+        else if name is "minute"
+            return minute of d
+        end
+        return second of d
+    if it fails
+        return 0
+    end
+end
+
+# what a token stands for in this date
+to dates_token with d, token
+    if token is "YYYY"
+        return "" + year of d
+    else if token is "YY"
+        set shown to dates_two(year of d - dates_floor(year of d / 100) * 100)
+        return shown
+    else if token is "MMMM"
+        return month_name(d)
+    else if token is "MMM"
+        return dates_first(month_name(d), 3)
+    else if token is "MM"
+        return dates_two(month of d)
+    else if token is "M"
+        return "" + month of d
+    else if token is "DD"
+        return dates_two(day of d)
+    else if token is "D"
+        return "" + day of d
+    else if token is "dddd"
+        return weekday_name(d)
+    else if token is "ddd"
+        return dates_first(weekday_name(d), 3)
+    else if token is "hh"
+        return dates_two(dates_time_part(d, "hour"))
+    else if token is "h"
+        return "" + dates_time_part(d, "hour")
+    else if token is "mm"
+        return dates_two(dates_time_part(d, "minute"))
+    else if token is "m"
+        return "" + dates_time_part(d, "minute")
+    else if token is "ss"
+        return dates_two(dates_time_part(d, "second"))
+    end
+    return "" + dates_time_part(d, "second")
+end
+
+to dates_first with words, count
+    set made to ""
+    set k to 0
+    for each c in words
+        add 1 to k
+        if k is at most count
+            add c to made
+        end
+    end
+    return made
+end
+
+to format_date with d, pattern
+    set chars to empty list
+    for each c in pattern
+        add c to chars
+    end
+    set made to ""
+    set k to 1
+    repeat while k is at most length of chars
+        set c to item k of chars
+        if c is "["
+            set k to k + 1
+            repeat while k is at most length of chars and item k of chars is not "]"
+                add item k of chars to made
+                add 1 to k
+            end
+            add 1 to k
+        else
+            set found to nothing
+            for each token in dates_tokens
+                if found is nothing and dates_starts(chars, k, token)
+                    set found to token
+                end
+            end
+            if found is nothing
+                add c to made
+                add 1 to k
+            else
+                set made to made + dates_token(d, found)
+                set k to k + length of found
+            end
+        end
+    end
+    return made
+end
+
+# whether `token` is in `chars` from place k
+to dates_starts with chars, k, token
+    set at to 0
+    for each c in token
+        if k + at is greater than length of chars or item (k + at) of chars is not c
+            return no
+        end
+        add 1 to at
+    end
+    return yes
+end

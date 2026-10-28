@@ -1,0 +1,98 @@
+# text.moth's tests: patterns, numbers, widths and CSV, which moth.test.js runs on every engine
+
+use "text.moth" as text
+
+to test_whole_matches
+    expect text's matches("^[a-z]+@[a-z]+\\.com$", "sam@moth.com")
+    expect not text's matches("[a-z]+", "abc1")
+    expect text's matches("a|b|c", "b")
+    expect not text's matches("a|b|c", "ab")
+    expect text's matches("(ab)+", "ababab")
+    expect text's matches("colou?r", "color") and text's matches("colou?r", "colour")
+    expect text's matches("\\d{3}-\\d{4}", "555-1234")
+    expect not text's matches("\\d{3}-\\d{4}", "55-1234")
+    expect text's matches("a{2,}", "aaaa") and not text's matches("a{2,}", "a")
+    expect text's matches("a{1,2}b", "aab") and not text's matches("a{1,2}b", "aaab")
+    expect text's matches("[^0-9 ]+", "héllo😀")
+    expect text's matches("(?i)hello", "HeLLo")
+    expect text's matches(".*", "") and not text's matches(".", "")
+    expect text's matches("\\w+\\s\\w+", "two words")
+    expect text's matches("x{", "x{") # a { that isn't a count is itself
+end
+
+to test_finding
+    set found to text's find("(\\d+)-(\\d+)", "pages 12-40, then 50-60")
+    expect text of found is "12-40"
+    expect at of found is 7
+    expect size of found is 5
+    expect groups of found is list of "12", "40"
+    expect text's find("z", "abc") is nothing
+    set all to text's find_all("\\d+", "a1 b22 c333")
+    expect length of all is 3
+    expect text of item 3 of all is "333"
+    expect at of item 2 of all is 5
+    expect groups of text's find("(a)|(b)", "b") is list of nothing, "b"
+    expect text of text's find("<.+?>", "<b>bold</b>") is "<b>"
+    expect text of text's find("<.+>", "<b>bold</b>") is "<b>bold</b>"
+    expect text of text's find("\\bcat\\b", "concat cat") is "cat"
+    expect at of text's find("\\bcat\\b", "concat cat") is 8
+    expect text's contains_pattern("^\\s*$", "   ")
+    expect length of text's find_all("x*", "ab") is 3 # empty matches, one at each place
+end
+
+to test_replacing_and_splitting
+    expect text's replace_all("\\s+", "a   lot  of space", " ") is "a lot of space"
+    expect text's replace_all("(\\w+)@(\\w+)", "sam@moth ana@web", "$2:$1") is "moth:sam web:ana"
+    expect text's replace_all("o", "foo", "$$") is "f$$"
+    expect text's replace_all("a", "banana", "[$0]") is "b[a]n[a]n[a]"
+    expect text's split_by(",\\s*", "a, b,c,   d") is list of "a", "b", "c", "d"
+    expect text's split_by("x", "axbxc") is list of "a", "b", "c"
+end
+
+to test_no_endless_loops
+    expect text's matches("(a*)*b", "aaab")
+    expect not text's matches("(a*)*b", "aaaa")
+    expect not text's matches("(a|aa)*c", "aaaaaaaaaaaaaaaaaaaaaaaa")
+end
+
+to test_bad_patterns
+    try
+        text's find("(abc", "abc")
+        expect no
+    if it fails with why
+        expect why is "the pattern '(abc' has a ( with no ) after it"
+    end
+    try
+        text's find("*a", "a")
+        expect no
+    if it fails with why
+        expect why is "the pattern '*a' has a * + or ? with nothing before it"
+    end
+end
+
+to test_numbers
+    expect text's number_text(3.14159, 2) is "3.14"
+    expect text's number_text(2.5, 0) is "3"
+    expect text's number_text(2.675, 2) is "2.68"
+    expect text's number_text(9.999, 2) is "10.00"
+    expect text's number_text(5, 3) is "5.000"
+    expect text's number_text(-1.005, 1) is "-1.0"
+    expect text's number_text(-0.004, 2) is "0.00"
+    expect text's grouped(1234567.5) is "1,234,567.5"
+    expect text's grouped(-1000) is "-1,000"
+    expect text's grouped(999) is "999"
+    expect text's grouped_with(1234567, " ") is "1 234 567"
+end
+
+to test_widths
+    expect text's padded_left(42, 5) is "   42"
+    expect text's padded_right("ab", 4) is "ab  "
+    expect text's padded_left("longer", 3) is "longer"
+end
+
+to test_csv
+    set rows to text's csv_rows("name,age\nSam,20\n\"Lee, Ana\",31\n\"say \"\"hi\"\"\",\n")
+    expect rows is list of (list of "name", "age"), (list of "Sam", "20"), (list of "Lee, Ana", "31"), (list of "say \"hi\"", "")
+    expect text's csv_text(list of (list of "a", 1), (list of "b, c", "x\"y")) is "a,1\n\"b, c\",\"x\"\"y\"\n"
+    expect text's csv_rows(text's csv_text(rows)) is rows
+end

@@ -325,6 +325,13 @@ bytes and dictionaries:
 - [`sqlite.moth`](tools/sqlite.moth) keeps a database in a file through SQLite
   itself, the library Windows and most Linux systems come with: `open`, `run`
   and `query`, each row a dictionary, with `?`s for values.
+- [`text.moth`](tools/text.moth) finds, checks and replaces patterns (regular
+  expressions, with groups, `|`, counts and ``), writes numbers with so many
+  decimals (`number_text(3.14159, 2)`) or with commas (`grouped(1234567)`),
+  pads text to a width, and reads and writes CSV; and
+  [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
+  `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
+  on every engine, the playground's too, and test themselves.
 - [`windows.moth`](tools/windows.moth) makes Windows' own windows and controls,
   written in Moth on user32.dll: buttons, labels, text boxes and areas,
   checkboxes, lists, dropdowns, menus with their keys (`"Save\tCtrl+S"`),
@@ -917,7 +924,9 @@ calls that led there.
   another Moth program's reads and sends, on both; and `tools/tasks.moth`
   starting, asking about and stopping programs in the background, on both; and
   `moth build --icon --version --include`, a program moved away from its files
-  reading them from inside itself, on both, and Windows' resources read back
+  reading them from inside itself, on both, and Windows' resources read back;
+  and `tools/text.test.moth` and `tools/dates.test.moth` on all three engines
+  and in machine code, 400 years of the calendar among them
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

@@ -1,0 +1,879 @@
+# Text: patterns to find, check and replace (regular expressions), numbers written with so many decimals or
+# with commas, text padded to a width, and CSV, read and written. In Moth alone, so it works everywhere.
+#
+#   use "text.moth" as text
+#   say text's matches("^[a-z]+@[a-z]+\\.com$", "sam@moth.com")     # yes
+#   set found to text's find("(\\d+)-(\\d+)", "pages 12-40")
+#   say text of found " " item 2 of groups of found                  # 12-40 40
+#   say text's replace_all("\\s+", "a   lot  of space", " ")          # a lot of space
+#   say text's number_text(3.14159, 2) " " text's grouped(1234567.5)  # 3.14 1,234,567.5
+#   say text's csv_rows("name,age\nSam,20\n\"Lee, Ana\",31")          # [["name", "age"], ...]
+#
+# A pattern has: letters and digits for themselves; . any character but a new line; [abc], [a-z], [^0-9] a
+# character of a set or not; \d a digit, \w a letter, digit or _, \s a space, tab or new line (\D, \W and \S
+# none of those); \b where a word starts or ends; ^ and $ the start and the end; ( ) a group, which is kept,
+# (?: ) one that isn't; | either side; * any number, + one or more, ? one or none, {2}, {2,} and {2,5} so
+# many, each taking as many as it can, or as few with a ? after it. \ before any other character is that
+# character. (?i) at the very start makes it not mind capitals. In Moth's own text, a \ is written \\.
+#
+# A match is a record: its text, at (where it starts, from 1), size (how many characters), and groups (each group's text, or
+# nothing for a group that took no part).
+
+# ---------- patterns ----------
+
+# whether the whole of `words` is the pattern
+to matches with pattern, words
+    set compiled to text_compile("^(?:" + text_body(pattern) + ")$", text_ignores(pattern))
+    return text_run(compiled, text_points(words), 1) is not nothing
+end
+
+# whether the pattern is anywhere in `words`
+to contains_pattern with pattern, words
+    return find(pattern, words) is not nothing
+end
+
+# the first match, or nothing
+to find with pattern, words
+    set found to find_all_from(pattern, words, yes)
+    if length of found is 0
+        return nothing
+    end
+    return item 1 of found
+end
+
+# every match, one after another, none overlapping
+to find_all with pattern, words
+    return find_all_from(pattern, words, no)
+end
+
+to find_all_from with pattern, words, first_only
+    set compiled to text_compile(text_body(pattern), text_ignores(pattern))
+    set points to text_points(words)
+    set chars to text_chars(words)
+    set made to empty list
+    set at to 1
+    repeat while at is at most length of points + 1
+        set got to text_run(compiled, points, at)
+        if got is nothing
+            add 1 to at
+        else
+            add text_match(chars, got, groups of compiled) to made
+            if first_only
+                return made
+            end
+            if item 2 of got is greater than item 1 of got
+                set at to item 2 of got
+            else
+                set at to at + 1
+            end
+        end
+    end
+    return made
+end
+
+# `words` with every match replaced: $1 to $9 in `with` are its groups, $0 all of it, and $$ a $
+to replace_all with pattern, words, replacement
+    set chars to text_chars(words)
+    set made to ""
+    set at to 1
+    for each one in find_all(pattern, words)
+        set made to made + text_slice(chars, at, at of one - 1) + text_filled(replacement, one)
+        set at to at of one + size of one
+    end
+    return made + text_slice(chars, at, length of chars)
+end
+
+# `words` cut wherever the pattern is
+to split_by with pattern, words
+    set chars to text_chars(words)
+    set made to empty list
+    set at to 1
+    for each one in find_all(pattern, words)
+        if size of one is greater than 0 or at of one is greater than at
+            add text_slice(chars, at, at of one - 1) to made
+            set at to at of one + size of one
+        end
+    end
+    add text_slice(chars, at, length of chars) to made
+    return made
+end
+
+to text_filled with replacement, one
+    set chars to text_chars(replacement)
+    set made to ""
+    set k to 1
+    repeat while k is at most length of chars
+        set c to item k of chars
+        if c is "$" and k is less than length of chars
+            set after to item (k + 1) of chars
+            set digit to position of after in "0123456789"
+            if after is "$"
+                add "$" to made
+                set k to k + 2
+            else if digit is greater than 0
+                set n to digit - 1
+                if n is 0
+                    set made to made + text of one
+                else if n is at most length of groups of one and item n of groups of one is not nothing
+                    set made to made + item n of groups of one
+                end
+                set k to k + 2
+            else
+                add c to made
+                add 1 to k
+            end
+        else
+            add c to made
+            add 1 to k
+        end
+    end
+    return made
+end
+
+# a match record from where the run found it: its start, its end, and each group's start and end
+to text_match with chars, got, group_count
+    set groups to empty list
+    for each g from 1 to group_count
+        set from to item (2 * g + 1) of got
+        set upto to item (2 * g + 2) of got
+        if from is nothing or upto is nothing
+            add nothing to groups
+        else
+            add text_slice(chars, from, upto - 1) to groups
+        end
+    end
+    return record with text text_slice(chars, item 1 of got, item 2 of got - 1), at item 1 of got,
+        size item 2 of got - item 1 of got, groups groups
+end
+
+# a text's characters, as a list
+to text_chars with words
+    set made to empty list
+    for each c in words
+        add c to made
+    end
+    return made
+end
+
+# the characters from `from` to `upto`, as text
+to text_slice with chars, from, upto
+    set made to ""
+    for each k from from to upto
+        add item k of chars to made
+    end
+    return made
+end
+
+# each character's number: its code point
+to text_points with words
+    set made to empty list
+    for each c in words
+        add text_point(c) to made
+    end
+    return made
+end
+
+to text_point with c
+    set codes to c as bytes
+    set first to byte 1 of codes
+    if length of codes is 1
+        return first
+    else if length of codes is 2
+        return (first bit and 31) * 64 + (byte 2 of codes bit and 63)
+    else if length of codes is 3
+        return (first bit and 15) * 4096 + (byte 2 of codes bit and 63) * 64 + (byte 3 of codes bit and 63)
+    end
+    return (first bit and 7) * 262144 + (byte 2 of codes bit and 63) * 4096 + (byte 3 of codes bit and 63) * 64
+        + (byte 4 of codes bit and 63)
+end
+
+to text_ignores with pattern
+    return length of pattern is at least 4 and position of "(?i)" in pattern is 1
+end
+
+to text_body with pattern
+    if text_ignores(pattern)
+        return text_slice(text_chars(pattern), 5, length of pattern)
+    end
+    return pattern
+end
+
+# A pattern as a program for text_run: a list of steps, each a record with its `op` and what it needs, and how
+# many groups it keeps. Reading it is by recursive descent: either-or, then one after another, then each part
+# and how many times.
+to text_compile with pattern, ignoring
+    set reading to record with points text_points(pattern), at 1, groups 0, program empty list, pattern pattern,
+        ignoring ignoring
+    text_either(reading)
+    if at of reading is at most length of points of reading
+        fail with "the pattern '" + pattern + "' has a ) with no ( before it"
+    end
+    set program to program of reading
+    add record with op "match" to program
+    return record with program program, groups groups of reading
+end
+
+to text_peek with reading
+    if at of reading is greater than length of points of reading
+        return -1
+    end
+    return item (at of reading) of points of reading
+end
+
+to text_emit with reading, step
+    set program to program of reading
+    add step to program
+    return length of program
+end
+
+# a | b | c
+to text_either with reading
+    set program to program of reading
+    set start to length of program + 1
+    text_sequence(reading)
+    if text_peek(reading) is not 124 # |
+        return nothing
+    end
+    set jumps to empty list
+    repeat while text_peek(reading) is 124
+        set at of reading to at of reading + 1
+        # split before what came, to it or to what comes; then what came jumps past it all
+        set first_part to text_cut(reading, start)
+        set program to program of reading # the cut made it a new list
+        set split_step to record with op "split", first 0, second 0
+        add split_step to program
+        set first of split_step to length of program + 1
+        text_paste(reading, first_part)
+        set jump to record with op "jump", target 0
+        add jump to program
+        add jump to jumps
+        set second of split_step to length of program + 1
+        set start to length of program + 1
+        text_sequence(reading)
+    end
+    for each jump in jumps
+        set target of jump to length of program + 1
+    end
+end
+
+# the steps from `from` on, taken out, for them to be put back after something new before them
+to text_cut with reading, from
+    set program to program of reading
+    set cut to empty list
+    set kept to empty list
+    set k to 0
+    for each step in program
+        add 1 to k
+        if k is less than from
+            add step to kept
+        else
+            add step to cut
+        end
+    end
+    set program of reading to kept
+    return record with steps cut, from from
+end
+
+# steps put back after where they were cut: each step's places moved by how far they've gone
+to text_paste with reading, cut
+    set program to program of reading
+    set moved to length of program + 1 - from of cut
+    for each step in steps of cut
+        if op of step is "split"
+            set first of step to first of step + moved
+            set second of step to second of step + moved
+        else if op of step is "jump"
+            set target of step to target of step + moved
+        end
+        add step to program
+    end
+end
+
+to text_sequence with reading
+    repeat while text_peek(reading) is not -1 and text_peek(reading) is not 124 and text_peek(reading) is not 41
+        text_repeated(reading)
+    end
+end
+
+# one part, then how many times: *, +, ?, {n}, {n,}, {n,m}, each maybe followed by ? to take as few as it can
+to text_repeated with reading
+    set program to program of reading
+    set start to length of program + 1
+    text_atom(reading)
+    set c to text_peek(reading)
+    set least to 1
+    set most to 1
+    if c is 42 # *
+        set least to 0
+        set most to -1
+        set at of reading to at of reading + 1
+    else if c is 43 # +
+        set least to 1
+        set most to -1
+        set at of reading to at of reading + 1
+    else if c is 63 # ?
+        set least to 0
+        set most to 1
+        set at of reading to at of reading + 1
+    else if c is 123 and text_counted(reading) # {
+        set least to least of reading
+        set most to most of reading
+    else
+        return nothing
+    end
+    set greedy to yes
+    if text_peek(reading) is 63
+        set greedy to no
+        set at of reading to at of reading + 1
+    end
+    set part to text_cut(reading, start)
+    repeat least times # the times it must
+        text_paste(reading, text_copy(part))
+    end
+    if most is -1 # then any number more
+        set loop_at to length of program of reading + 1
+        set split_step to text_split(greedy)
+        text_emit(reading, split_step)
+        text_paste(reading, text_copy(part))
+        text_emit(reading, record with op "jump", target loop_at)
+        text_aim(split_step, greedy, loop_at + 1, length of program of reading + 1)
+    else # then as many as it may
+        set splits to empty list
+        repeat most - least times
+            set split_step to text_split(greedy)
+            text_emit(reading, split_step)
+            add split_step to splits
+            set split_at of split_step to length of program of reading + 1
+            text_paste(reading, text_copy(part))
+        end
+        for each split_step in splits
+            text_aim(split_step, greedy, split_at of split_step, length of program of reading + 1)
+        end
+    end
+end
+
+to text_split with greedy
+    return record with op "split", first 0, second 0, split_at 0
+end
+
+# a split to `go_on` (one more time) or `leave`: greedy tries one more time first
+to text_aim with split_step, greedy, go_on, leave
+    if greedy
+        set first of split_step to go_on
+        set second of split_step to leave
+    else
+        set first of split_step to leave
+        set second of split_step to go_on
+    end
+end
+
+to text_copy with part
+    set made to empty list
+    for each step in steps of part
+        if op of step is "split"
+            add record with op "split", first first of step, second second of step, split_at 0 to made
+        else if op of step is "jump"
+            add record with op "jump", target target of step to made
+        else
+            add step to made
+        end
+    end
+    return record with steps made, from from of part
+end
+
+# {n}, {n,} or {n,m}, read into `least` and `most` of reading; no if it isn't one, which leaves { as itself
+to text_counted with reading
+    set points to points of reading
+    set k to at of reading + 1
+    set least to text_digits(points, k)
+    if least is nothing
+        return no
+    end
+    set k to k + length of ("" + least)
+    set most to least
+    if k is at most length of points and item k of points is 44 # ,
+        set k to k + 1
+        set most to text_digits(points, k)
+        if most is nothing
+            set most to -1
+        else
+            set k to k + length of ("" + most)
+        end
+    end
+    if k is greater than length of points or item k of points is not 125 # }
+        return no
+    end
+    set at of reading to k + 1
+    set least of reading to least
+    set most of reading to most
+    return yes
+end
+
+to text_digits with points, from
+    set made to nothing
+    set k to from
+    repeat while k is at most length of points and item k of points is at least 48 and item k of points is at most 57
+        if made is nothing
+            set made to 0
+        end
+        set made to made * 10 + item k of points - 48
+        add 1 to k
+    end
+    return made
+end
+
+# one character, a set, a group, or ^ $ \b
+to text_atom with reading
+    set c to text_peek(reading)
+    set at of reading to at of reading + 1
+    if c is 40 # (
+        set kept to yes
+        set points to points of reading
+        if text_peek(reading) is 63 and at of reading + 1 is at most length of points and item (at of reading + 1) of points is 58
+            set kept to no # (?:
+            set at of reading to at of reading + 2
+        end
+        set group to 0
+        if kept
+            set groups of reading to groups of reading + 1
+            set group to groups of reading
+            text_emit(reading, record with op "save", slot 2 * group + 1)
+        end
+        text_either(reading)
+        if text_peek(reading) is not 41
+            fail with "the pattern '" + pattern of reading + "' has a ( with no ) after it"
+        end
+        set at of reading to at of reading + 1
+        if kept
+            text_emit(reading, record with op "save", slot 2 * group + 2)
+        end
+    else if c is 46 # .
+        text_emit(reading, record with op "set", ranges (list of 10, 10), negated yes)
+    else if c is 94 # ^
+        text_emit(reading, record with op "start")
+    else if c is 36 # $
+        text_emit(reading, record with op "end")
+    else if c is 91 # [
+        text_emit(reading, text_set(reading))
+    else if c is 92 # \
+        set e to text_peek(reading)
+        if e is -1
+            fail with "the pattern '" + pattern of reading + "' ends with a \\ before nothing"
+        end
+        set at of reading to at of reading + 1
+        if e is 98 or e is 66 # \b and \B
+            text_emit(reading, record with op "word", at_edge e is 98)
+        else
+            set ranges to text_escape(e)
+            if ranges is nothing
+                text_emit(reading, text_one(reading, e))
+            else
+                text_emit(reading, record with op "set", ranges ranges, negated e is 68 or e is 87 or e is 83)
+            end
+        end
+    else if c is 42 or c is 43 or c is 63
+        fail with "the pattern '" + pattern of reading + "' has a * + or ? with nothing before it"
+    else
+        text_emit(reading, text_one(reading, c))
+    end
+end
+
+# one character: itself, or either case of it if the pattern doesn't mind capitals
+to text_one with reading, c
+    if ignoring of reading and text_other_case(c) is not c
+        return record with op "set", ranges (list of c, c, text_other_case(c), text_other_case(c)), negated no
+    end
+    return record with op "char", point c
+end
+
+to text_other_case with c
+    if c is at least 65 and c is at most 90
+        return c + 32
+    else if c is at least 97 and c is at most 122
+        return c - 32
+    end
+    return c
+end
+
+# \d \w \s and their opposites, as ranges; nothing for any other character
+to text_escape with e
+    if e is 100 or e is 68 # d
+        return list of 48, 57
+    else if e is 119 or e is 87 # w
+        return list of 48, 57, 65, 90, 95, 95, 97, 122
+    else if e is 115 or e is 83 # s
+        return list of 9, 13, 32, 32
+    else if e is 110 # n
+        return list of 10, 10
+    else if e is 116 # t
+        return list of 9, 9
+    end
+    return nothing
+end
+
+# [...]: its ranges, two numbers each, and whether it's [^...]
+to text_set with reading
+    set ranges to empty list
+    set negated to no
+    if text_peek(reading) is 94
+        set negated to yes
+        set at of reading to at of reading + 1
+    end
+    set first to yes
+    repeat while yes
+        set c to text_peek(reading)
+        if c is -1
+            fail with "the pattern '" + pattern of reading + "' has a [ with no ] after it"
+        end
+        set at of reading to at of reading + 1
+        if c is 93 and not first # ]
+            stop
+        end
+        set first to no
+        set low to c
+        if c is 92
+            set e to text_peek(reading)
+            set at of reading to at of reading + 1
+            set escaped to text_escape(e)
+            if escaped is not nothing and e is not 68 and e is not 87 and e is not 83
+                for each n in escaped
+                    add n to ranges
+                end
+                set low to nothing
+            else
+                set low to e
+            end
+        end
+        if low is not nothing
+            set high to low
+            set points to points of reading
+            if text_peek(reading) is 45 and at of reading + 1 is at most length of points and item (at of reading + 1) of points is not 93
+                set at of reading to at of reading + 1 # a-z
+                set high to text_peek(reading)
+                set at of reading to at of reading + 1
+                if high is 92
+                    set high to text_peek(reading)
+                    set at of reading to at of reading + 1
+                end
+            end
+            add low to ranges
+            add high to ranges
+            if ignoring of reading
+                for each n from low to high
+                    if text_other_case(n) is not n
+                        add text_other_case(n) to ranges
+                        add text_other_case(n) to ranges
+                    end
+                end
+            end
+        end
+    end
+    return record with op "set", ranges ranges, negated negated
+end
+
+to text_in_set with step, point
+    set ranges to ranges of step
+    set k to 1
+    set inside to no
+    repeat while k is less than length of ranges and not inside
+        if point is at least item k of ranges and point is at most item (k + 1) of ranges
+            set inside to yes
+        end
+        set k to k + 2
+    end
+    return inside is not negated of step
+end
+
+to text_is_word with points, k
+    if k is less than 1 or k is greater than length of points
+        return no
+    end
+    set c to item k of points
+    return (c is at least 48 and c is at most 57) or (c is at least 65 and c is at most 90) or (c is at least 97 and c is at most 122) or c is 95
+end
+
+# Runs the program on `points` from `start`, each choice of a split tried in its order, as a stack of where to
+# go back to: the first match, as its start, its end (just past it) and each group's start and end; or
+# nothing. A step at a place that has been tried before can't do better the second time, so it isn't tried
+# again, which keeps it from going round for ever, as (a*)* would.
+to text_run with compiled, points, start
+    set program to program of compiled
+    set slots to 2 * groups of compiled + 2
+    set saved to empty list
+    repeat slots times
+        add nothing to saved
+    end
+    set tried to empty dictionary
+    set waiting to list of (record with pc 1, at start, saved saved)
+    set top to 1 # how many of `waiting` are still to try
+    repeat while top is greater than 0
+        set thread to item top of waiting
+        set top to top - 1
+        set pc to pc of thread
+        set at to at of thread
+        set saved to saved of thread
+        set going to yes
+        repeat while going
+            set key to pc * 1000003 + at
+            if key is in tried
+                set going to no
+            else
+                set item key of tried to yes
+                set step to item pc of program
+                set op to op of step
+                if op is "match"
+                    set made to list of start, at
+                    for each k from 3 to slots
+                        add item k of saved to made
+                    end
+                    return made
+                else if op is "char"
+                    if at is at most length of points and item at of points is point of step
+                        set at to at + 1
+                        add 1 to pc
+                    else
+                        set going to no
+                    end
+                else if op is "set"
+                    if at is at most length of points and text_in_set(step, item at of points)
+                        set at to at + 1
+                        add 1 to pc
+                    else
+                        set going to no
+                    end
+                else if op is "split"
+                    set top to top + 1
+                    set later to record with pc second of step, at at, saved saved
+                    if top is greater than length of waiting
+                        add later to waiting
+                    else
+                        set item top of waiting to later
+                    end
+                    set pc to first of step
+                else if op is "jump"
+                    set pc to target of step
+                else if op is "save"
+                    set copied to empty list
+                    for each one in saved
+                        add one to copied
+                    end
+                    set item (slot of step) of copied to at
+                    set saved to copied
+                    add 1 to pc
+                else if op is "start"
+                    if at is 1
+                        add 1 to pc
+                    else
+                        set going to no
+                    end
+                else if op is "end"
+                    if at is length of points + 1
+                        add 1 to pc
+                    else
+                        set going to no
+                    end
+                else if op is "word"
+                    set edge to text_is_word(points, at - 1) is not text_is_word(points, at)
+                    if edge is at_edge of step
+                        add 1 to pc
+                    else
+                        set going to no
+                    end
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+# ---------- numbers ----------
+
+# a number with exactly `places` decimals, rounded half away from 0: number_text(2.5, 0) is "3"
+to number_text with n, places
+    set shown to "" + n
+    if position of "e" in shown is greater than 0 or shown is "Infinity" or shown is "-Infinity" or shown is "NaN"
+        return shown
+    end
+    set negative to no
+    if n is less than 0
+        set negative to yes
+        set shown to "" + (0 - n)
+    end
+    set parts to split shown by "."
+    set whole to item 1 of parts
+    set fraction to ""
+    if length of parts is 2
+        set fraction to item 2 of parts
+    end
+    repeat while length of fraction is less than places + 1
+        add "0" to fraction
+    end
+    set digits to text_chars(whole + text_slice(text_chars(fraction), 1, places))
+    if position of text_slice(text_chars(fraction), places + 1, places + 1) in "56789" is greater than 0 # up
+        set k to length of digits
+        set carrying to yes
+        repeat while carrying and k is at least 1
+            set d to (position of item k of digits in "0123456789") - 1
+            if d is 9
+                set item k of digits to "0"
+                set k to k - 1
+            else
+                set item k of digits to item (d + 2) of text_chars("0123456789")
+                set carrying to no
+            end
+        end
+        if carrying
+            set digits to text_chars("1" + text_slice(digits, 1, length of digits))
+        end
+    end
+    set whole_count to length of digits - places
+    set made to text_slice(digits, 1, whole_count)
+    if places is greater than 0
+        set made to made + "." + text_slice(digits, whole_count + 1, length of digits)
+    end
+    if negative and text_has_other_than(made, "0.")
+        set made to "-" + made
+    end
+    return made
+end
+
+to text_has_other_than with words, these
+    for each c in words
+        if position of c in these is 0
+            return yes
+        end
+    end
+    return no
+end
+
+# a number with a comma between each three of its whole part's digits: 1,234,567.5
+to grouped with n
+    return grouped_with(n, ",")
+end
+
+to grouped_with with n, separator
+    set shown to "" + n
+    if position of "e" in shown is greater than 0
+        return shown
+    end
+    set sign to ""
+    if position of "-" in shown is 1
+        set sign to "-"
+        set shown to text_slice(text_chars(shown), 2, length of shown)
+    end
+    set parts to split shown by "."
+    set chars to text_chars(item 1 of parts)
+    set made to ""
+    set k to 0
+    for each c in chars
+        add 1 to k
+        set made to made + c
+        set left to length of chars - k
+        if left is greater than 0 and left is divisible by 3
+            set made to made + separator
+        end
+    end
+    if length of parts is 2
+        set made to made + "." + item 2 of parts
+    end
+    return sign + made
+end
+
+# ---------- widths ----------
+
+# text made `width` characters wide with spaces before it (padded_left) or after it (padded_right); longer
+# text stays as it is
+to padded_left with words, width
+    set made to "" + words
+    repeat while length of made is less than width
+        set made to " " + made
+    end
+    return made
+end
+
+to padded_right with words, width
+    set made to "" + words
+    repeat while length of made is less than width
+        add " " to made
+    end
+    return made
+end
+
+# ---------- CSV ----------
+
+# CSV's rows, each a list of texts: commas between, a value with a comma, a quote or a new line in quotes,
+# and "" for a quote inside them; the lines may end with a new line or a return and one
+to csv_rows with words
+    set rows to empty list
+    set row to empty list
+    set value to ""
+    set quoted to no
+    set chars to text_chars(words)
+    set k to 1
+    set started to no
+    repeat while k is at most length of chars
+        set c to item k of chars
+        if quoted
+            if c is "\""
+                if k is less than length of chars and item (k + 1) of chars is "\""
+                    add "\"" to value
+                    add 1 to k
+                else
+                    set quoted to no
+                end
+            else
+                add c to value
+            end
+        else if c is "\""
+            set quoted to yes
+            set started to yes
+        else if c is ","
+            add value to row
+            set value to ""
+            set started to yes
+        else if c is "\n" or text_point(c) is 13
+            if text_point(c) is 13 and k is less than length of chars and item (k + 1) of chars is "\n"
+                add 1 to k
+            end
+            add value to row
+            add row to rows
+            set row to empty list
+            set value to ""
+            set started to no
+        else
+            add c to value
+            set started to yes
+        end
+        add 1 to k
+    end
+    if started or length of row is greater than 0
+        add value to row
+        add row to rows
+    end
+    return rows
+end
+
+# rows, each a list of values, as CSV: each value as `say` shows it, in quotes if it needs them
+to csv_text with rows
+    set made to ""
+    for each row in rows
+        set first to yes
+        for each value in row
+            if not first
+                add "," to made
+            end
+            set first to no
+            set made to made + csv_value(value)
+        end
+        add "\n" to made
+    end
+    return made
+end
+
+to csv_value with value
+    set shown to "" + value
+    if position of "," in shown is 0 and position of "\"" in shown is 0 and position of "\n" in shown is 0
+        return shown
+    end
+    return "\"" + (join (split shown by "\"") with "\"\"") + "\""
+end

@@ -1,0 +1,89 @@
+# dates.moth's tests, which moth.test.js runs on every engine
+
+use "dates.moth" as dates
+
+to test_days
+    expect dates's day_number(dates's date(1970, 1, 1)) is 0
+    expect dates's day_number(dates's date(2000, 3, 1)) is 11017
+    expect dates's day_number(dates's date(1969, 12, 31)) is -1
+    expect dates's date_of_day(20395) is dates's date(2025, 11, 3)
+    expect dates's add_days(dates's date(2024, 2, 28), 1) is dates's date(2024, 2, 29)
+    expect dates's add_days(dates's date(2023, 2, 28), 1) is dates's date(2023, 3, 1)
+    expect dates's add_days(dates's date(2026, 12, 31), 1) is dates's date(2027, 1, 1)
+    expect dates's add_days(dates's date(2026, 1, 1), -1) is dates's date(2025, 12, 31)
+    expect dates's days_between(dates's date(2026, 1, 1), dates's date(2027, 1, 1)) is 365
+    expect dates's days_between(dates's date(2024, 1, 1), dates's date(2025, 1, 1)) is 366
+    expect dates's days_between(dates's date(2026, 11, 3), dates's date(1999, 12, 31)) is -9804
+end
+
+# a week at a time through 400 years, counted on the calendar as a person would: each date's number, and back
+to test_four_hundred_years
+    set n to dates's day_number(dates's date(1900, 1, 1))
+    set y to 1900
+    set m to 1
+    set d to 1
+    repeat 20871 times
+        expect dates's day_number(dates's date(y, m, d)) is n
+        expect dates's date_of_day(n) is dates's date(y, m, d)
+        set n to n + 7
+        set d to d + 7
+        repeat while d is greater than dates's days_in_month(y, m)
+            set d to d - dates's days_in_month(y, m)
+            add 1 to m
+            if m is 13
+                set m to 1
+                add 1 to y
+            end
+        end
+    end
+    expect dates's date(y, m, d) is dates's date(2300, 1, 1) # 146,097 days: 400 years exactly
+end
+
+to test_months_and_weekdays
+    expect dates's add_months(dates's date(2026, 1, 31), 1) is dates's date(2026, 2, 28)
+    expect dates's add_months(dates's date(2024, 1, 31), 1) is dates's date(2024, 2, 29)
+    expect dates's add_months(dates's date(2026, 11, 3), -11) is dates's date(2025, 12, 3)
+    expect dates's add_months(dates's date(2026, 11, 3), 14) is dates's date(2028, 1, 3)
+    expect dates's weekday_name(dates's date(2026, 11, 3)) is "Tuesday"
+    expect dates's weekday_number(dates's date(1970, 1, 1)) is 4
+    expect dates's weekday_name(dates's date(2000, 1, 1)) is "Saturday"
+    expect dates's is_leap_year(2000) and not dates's is_leap_year(1900) and dates's is_leap_year(2024)
+    expect dates's days_in_month(2026, 4) is 30
+end
+
+to test_reading_and_writing
+    set d to dates's read_date("2026-11-03")
+    expect dates's date_text(d) is "2026-11-03"
+    expect dates's format_date(d, "dddd D MMMM YYYY") is "Tuesday 3 November 2026"
+    expect dates's format_date(d, "ddd, D MMM YY") is "Tue, 3 Nov 26"
+    expect dates's format_date(d, "D [of] MMMM") is "3 of November"
+    set t to dates's read_date("2026-11-03T09:05:07")
+    expect dates's format_date(t, "YYYY-MM-DD hh:mm:ss") is "2026-11-03 09:05:07"
+    expect dates's format_date(dates's read_date("2026-01-02 14:30"), "h:mm, M/D") is "14:30, 1/2"
+    expect dates's format_date(d, "hh:mm") is "00:00"
+end
+
+to test_today
+    set d to dates's today()
+    expect year of d is at least 2025
+    expect dates's date_text(d) is the date
+    set t to dates's now()
+    expect hour of t is at least 0 and hour of t is at most 23
+end
+
+to test_mistakes
+    for each pair in list of (list of 2023, 2, 29, "there's no February 29 in 2023"), (list of 2026, 13, 1, "there's no month 13: months go from 1 to 12"), (list of 2026, 4, 31, "there's no April 31 in 2026")
+        try
+            dates's date(item 1 of pair, item 2 of pair, item 3 of pair)
+            expect no
+        if it fails with why
+            expect why is item 4 of pair
+        end
+    end
+    try
+        dates's read_date("3 November")
+        expect no
+    if it fails with why
+        expect why is "a date is written 2026-11-03, not '3 November'"
+    end
+end

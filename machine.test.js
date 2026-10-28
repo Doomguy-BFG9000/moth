@@ -1144,6 +1144,19 @@ say length of sqlite's query(again, "select * from people")`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ['1\n1\nSam is 20, 1.8 m, nothing\nAna Lee 😀 is 31, 1.65 m, hé\n[(dictionary where "n" is 1)]\nSQLite: no such table: nowhere\n2\n', "", 0]);
 });
 
+// text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
+test("text.moth and dates.moth pass their own tests in machine code", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "text-and-dates");
+  mkdirSync(sub);
+  for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth"]) {
+    writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  }
+  const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
+  assert.equal(ran.stdout.split("\n").at(-2), "14 passed");
+});
+
 // tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote
 // and Linux's must not, asked while it runs, waited for, stopped, and a program that isn't there
 test("tools/tasks.moth runs programs in the background, and says what they said and ended with", { skip }, () => {
