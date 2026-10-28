@@ -4,7 +4,7 @@
 
 A programming language that reads like plain English. It's written from scratch
 in JavaScript with no libraries: a parser, a bytecode compiler, a virtual
-machine, and a `moth` command with its own shell.
+machine, a step-by-step debugger, and a `moth` command with its own shell.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
 ```
@@ -77,8 +77,9 @@ greet "Sam"                         # or call it on its own line
   function. Functions remember the variables around them (closures).
 - Only `no` and `nothing` count as false. Upper or lower case doesn't matter.
 
-Mistakes get a plain-words message that points at the exact spot, and Moth
-suggests the right word when you type a symbol from another language:
+Mistakes get a plain-words message that points at the exact spot. Moth
+suggests the right name when you misspell one, and the right word when you type
+a symbol from another language:
 
 ```text
 line 3: there is no item 5, the list only has 2 items
@@ -86,10 +87,34 @@ say item 5 of fruits
     ^
 ```
 ```text
+line 2: 'totl' has no value yet. Did you mean 'total'?
+say "Total: " totl
+              ^
+```
+```text
+line 1: there is no function called 'sya'. Did you mean 'say'?
+sya "hi"
+^
+```
+```text
 line 1: I don't understand '>' (write 'is greater than')
 if x > 5
      ^
 ```
+
+## The playground
+
+[The playground](https://samyyy2423.github.io/moth/) runs in any browser, with
+nothing to install.
+
+- **Run** runs the code in a background thread, so **Stop** works even on a
+  loop that never ends.
+- **Debug** goes through the code one statement at a time. **Step** highlights
+  the line about to run and shows the calls in progress and every variable in
+  view, including the ones a closure remembers from the function it was made
+  in. **Continue** runs to the end.
+- **Share** puts the code into the link, so opening the link opens the program.
+- **Show bytecode** shows what the compiler turned the code into.
 
 ## Command line
 
@@ -156,7 +181,7 @@ The source goes through four stages:
    text, and symbols, each with its line and column.
 2. **Parser**: recursive descent builds a syntax tree. Every node keeps the token
    it came from, so errors can point at it.
-3. **Compiler**: turns each function into bytecode (34 opcodes). Each variable
+3. **Compiler**: turns each function into bytecode (35 opcodes). Each variable
    is resolved here, once, to a fixed slot.
 4. **Virtual machine**: one loop with its own value stack and call stack, so
    recursion isn't limited by JavaScript's stack.

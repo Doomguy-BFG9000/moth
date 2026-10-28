@@ -21,7 +21,11 @@ Why Moth is built the way it is, what each choice costs, and what I measured.
   mean in English.
 - **Errors teach.** A symbol from another language gets the Moth word back
   (`>` → "write 'is greater than'"), and `x is 5` on its own line suggests
-  `set x to ...`.
+  `set x to ...`. A misspelled name gets the closest real one ("Did you mean
+  'total'?"). The compiler already knows every name a line can see, so it works
+  this out once, using edit distance where swapping two letters counts as one
+  edit. A line that starts with an unknown name also checks Moth's own words, so
+  `sya "hi"` suggests `say`.
 
 ## 2. Variables are resolved when the program is read
 
@@ -63,7 +67,7 @@ but it had three problems:
 - A running program couldn't be stopped, so v1 cut every program off after 10
   million steps.
 
-v2 compiles each function to a flat array of numbers (34 opcodes) and runs it in
+v2 compiles each function to a flat array of numbers (35 opcodes, one of them only in debug builds) and runs it in
 one loop with its own value stack and call stack. Best of 5 runs on a Ryzen 5
 4600H with Node 24 (`npm run bench`):
 
@@ -101,6 +105,10 @@ however busy the program is, so the playground needs no step limit. The worker
 sends output every 50 ms while the program runs and shows at most 10,000 lines.
 The step limit is still in `run(source, print, { maxSteps })`, because tests and
 fuzzing need to run untrusted programs without a Stop button.
+
+Share links keep the code in the URL's `#fragment`, which browsers never send to
+a server. The page sets all output as text, never as HTML, so a shared program
+can't inject anything into the page.
 
 ## 6. How it's tested
 
@@ -144,3 +152,30 @@ fuzzing need to run untrusted programs without a Stop button.
   mode during each run, so Ctrl+C ends a stuck program by ending the shell.
   Running each entry in a worker thread, like the playground does, would stop
   just the program. That isn't built yet.
+
+## 8. The debugger
+
+- **Pausing costs nothing when you're not debugging.** `compile(source, { debug:
+  true })` adds a `LINE` instruction before each statement and at the top of
+  each loop round. Normal builds don't contain it at all.
+- **A machine that can stop and carry on.** The run loop lives in a `Machine`
+  that keeps its state (stacks, current function, instruction pointer) between
+  `run()` calls. `run()` stops when the program ends, at a `LINE` when asked, or
+  after a given number of loop rounds. Step uses the second; Continue uses the
+  third and schedules the next slice with `setTimeout`, so the page keeps
+  responding. The debugger runs on the page rather than in a worker, because a
+  worker can't be paused and asked questions.
+- **Showing what a closure remembers.** Each compiled function keeps a link to
+  the function it was made inside, and each variable array keeps a link to the
+  array of the scope it was made in. The two chains nest the same way, so
+  `inspect()` walks them together: the running function's variables, then those
+  of each function around it, then the top level's. In the Counter example,
+  stepping into `next` shows `count`, which lives in `counter`.
+- **A slowdown, bisected.** Moving the loop's state onto an object made loops
+  1.4× slower (61 → 86 ms). I tested each change on its own: closures over the
+  hot variables, the slice check, the extra `LINE` case, a class method instead
+  of a function, and saving state on exit. None of them mattered. What did was
+  where the value stack was created. V8 makes `push` and `pop` fastest on an
+  array it saw created in the same function. Each `run()` now creates a fresh
+  local stack and copies in whatever a paused run left, and loops are back to
+  60 ms.
