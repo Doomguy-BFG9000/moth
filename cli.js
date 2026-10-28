@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
 import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
@@ -14,6 +14,45 @@ const USAGE = `usage:
   moth js <file.moth>         show the JavaScript the JIT makes
   moth wasm <file.moth>       show the WebAssembly module the third engine makes
   moth bootstrap              compile Moth's compiler written in Moth with itself, three times over`;
+
+// A line of standard input, read without waiting for an event (a program's `ask` can't wait): from a terminal it
+// waits for Enter, from a pipe it takes the next line. null at the end of the input.
+let pending = Buffer.alloc(0);
+function readLine() {
+  for (;;) {
+    const end = pending.indexOf(10);
+    if (end >= 0) {
+      const line = pending.subarray(0, end).toString("utf8").replace(/\r$/, "");
+      pending = pending.subarray(end + 1);
+      return line;
+    }
+    const chunk = Buffer.alloc(4096);
+    let n;
+    try {
+      n = readSync(0, chunk, 0, chunk.length, null);
+    } catch (err) {
+      if (err.code === "EAGAIN") continue; // a pipe with nothing in it yet
+      if (err.code !== "EOF") throw err; // EOF: Windows, at the end of the input
+      n = 0;
+    }
+    if (n === 0) {
+      if (!pending.length) return null;
+      const line = pending.toString("utf8");
+      pending = Buffer.alloc(0);
+      return line;
+    }
+    pending = Buffer.concat([pending, chunk.subarray(0, n)]);
+  }
+}
+
+// `ask` in `moth run`: the question, then what's typed; piped answers are shown, as if typed
+function askAtTerminal(question) {
+  process.stdout.write(`${question} `);
+  const answer = readLine();
+  if (answer === null) process.stdout.write("\n"); // so a mistake starts on its own line
+  else if (!process.stdin.isTTY) process.stdout.write(`${answer}\n`);
+  return answer;
+}
 
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
@@ -143,7 +182,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line) });
+      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal });
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));

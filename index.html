@@ -66,6 +66,8 @@
     /* right pane */
     .side pre { margin: 0; padding: 10px 12px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     #output { min-height: 3em; }
+    .answer { display: flex; align-items: center; gap: 8px; margin: 6px 12px 10px; font: 13px/1.5 var(--mono); }
+    .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #4a4a4f; border-radius: 5px; padding: 3px 8px; }
     #output.error { color: #f48771; }
     #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; }
     #bytecode { color: #a9a9a9; }
@@ -180,7 +182,7 @@
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
-      + "move turn pen record fail stop uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
+      + "move turn pen record fail stop ask uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
     // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
@@ -326,21 +328,45 @@
       }
     }
 
-    // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is.
+    // Each run gets a fresh worker (worker.js), so Stop can end it however busy it is. A program that asks a
+    // question stops there; once it's answered, it runs again from the start with every answer so far, and
+    // since it says and draws the same things up to there, only what's new is shown.
+    let answers = [];
+    let shownLines = 0;
     function runCode() {
       stopDebugging("");
       showCompiled();
-      finish("Running…");
       output.textContent = "";
       output.classList.remove("error");
       drawing = [];
       render();
+      answers = [];
+      shownLines = 0;
+      startRun();
+    }
+
+    function startRun() {
+      document.querySelector(".answer")?.remove();
+      finish("Running…");
       stopButton.disabled = false;
+      let [skipLines, skipDrawn] = [shownLines, drawing.length]; // shown by the runs before this one
       const current = (worker = new Worker("./worker.js", { type: "module" }));
       current.onmessage = ({ data }) => {
         if (worker !== current) return; // a message from a run that was already replaced
-        if (data.lines?.length) output.append(data.lines.join("\n") + "\n");
-        if (data.drawn?.length) render((drawing = drawing.concat(data.drawn)));
+        if (data.lines?.length) {
+          const skip = Math.min(skipLines, data.lines.length);
+          skipLines -= skip;
+          if (data.lines.length > skip) {
+            output.append(data.lines.slice(skip).join("\n") + "\n");
+            shownLines += data.lines.length - skip;
+          }
+        }
+        if (data.drawn?.length) {
+          const skip = Math.min(skipDrawn, data.drawn.length);
+          skipDrawn -= skip;
+          if (data.drawn.length > skip) render((drawing = drawing.concat(data.drawn.slice(skip))));
+        }
+        if (data.question !== undefined) return waitForAnswer(data.question);
         if (data.error) fail(data.error);
         if (data.done) {
           if (data.empty) output.append("(no output)");
@@ -349,7 +375,23 @@
         }
       };
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
-      current.postMessage({ source: code.value, engine: $("engine").value });
+      current.postMessage({ source: code.value, engine: $("engine").value, answers });
+    }
+
+    function waitForAnswer(question) {
+      finish("Waiting for an answer");
+      const form = Object.assign(document.createElement("form"), { className: "answer" });
+      const input = Object.assign(document.createElement("input"), { autocomplete: "off" });
+      input.setAttribute("aria-label", question);
+      form.append(Object.assign(document.createElement("span"), { textContent: question }), input,
+        Object.assign(document.createElement("button"), { textContent: "Answer" }));
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        answers.push(input.value);
+        startRun();
+      };
+      output.after(form);
+      input.focus();
     }
 
     // The time-travel debugger: Debug records the whole run first (timeline() in moth.js), then Back, Step,
@@ -362,7 +404,7 @@
       output.classList.remove("error");
       render((drawing = []));
       try {
-        trace = timeline(code.value);
+        trace = timeline(code.value, { answers }); // the answers given when it last ran
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
         output.classList.add("error");

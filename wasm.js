@@ -12,7 +12,7 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -50,6 +50,7 @@ const IMPORTS = {
   recordFor: [[EQ, I32, I32], []],
   failWith: [[EQ, I32], []],
   builtin: [[I32, EQ, I32], [EQ]], // which one, its inputs as a list, and a position
+  ask: [[EQ, I32], [EQ]],
 };
 
 // ---------- the module's types and runtime ----------
@@ -874,6 +875,10 @@ class WasmCompiler extends Scope {
         this.expr(e.of);
         this.e("i32.const", this.id(e.name)).e("i32.const", this.pos(e.at)).e("call", R.field);
         return;
+      case "ask":
+        this.expr(e.question);
+        this.e("i32.const", this.pos(e.at)).e("call", im.ask);
+        return;
       case "builtin":
         this.e("i32.const", BUILTINS.findIndex((b) => b.name === e.name)).note(e.name);
         for (const arg of e.args) this.expr(arg);
@@ -936,11 +941,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps) => instantiate(module, made, print, draw, maxSteps).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask) => instantiate(module, made, print, draw, maxSteps, ask).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps) {
+function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer) {
   const errors = ats.map((at) => (message, value) => fail(at, message, value));
   const turtle = new Turtle(draw);
   let x = null; // the module's exports, once it exists
@@ -1017,6 +1022,7 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     recordFor: (r, name, k) => recordFor(toJs(r), names[name], errors[k]),
     failWith: (value, k) => failWith(toJs(value), errors[k]),
     builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k])),
+    ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
   };
   x = new WebAssembly.Instance(module, { moth: imports }).exports;
   return x;

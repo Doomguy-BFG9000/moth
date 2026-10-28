@@ -207,7 +207,7 @@ end
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-    "uppercase", "lowercase", "split", "join", "number", "position"
+    "uppercase", "lowercase", "split", "join", "number", "position", "ask"
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position" # in the order of BUILTINS in vm.js
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
@@ -629,6 +629,9 @@ to parse with tokens
         if word("length")
             expect_word("of")
             return record with kind "length", subject unary(), at t
+        end
+        if word("ask") # `ask "How old are you? "`
+            return record with kind "ask", question additive(), at t
         end
         set syntax to builtin_syntax(t)
         if syntax is not nothing
@@ -1123,6 +1126,9 @@ to js_expr with scope, e
     end
     if what is "field"
         return "field(" + js_expr(scope, subject of e) + ", " + quote(name of e) + ", " + remember(at of e) + ")"
+    end
+    if what is "ask"
+        return "ask(" + js_expr(scope, question of e) + ", " + remember(at of e) + ")"
     end
     if what is "builtin"
         return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"

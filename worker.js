@@ -6,7 +6,11 @@ import { run, excerpt, MothError } from "./moth.js";
 const MAX_LINES = 10_000;
 const MAX_DRAWN = 100_000;
 
-onmessage = ({ data: { source, engine } }) => {
+// Thrown by `ask` when the page hasn't answered yet: this run stops, the page asks the person, and runs the
+// program again from the start with every answer so far. It says and draws the same things up to there.
+class Waiting {}
+
+onmessage = ({ data: { source, engine, answers = [] } }) => {
   let lines = [];
   let drawn = [];
   let said = 0;
@@ -19,22 +23,35 @@ onmessage = ({ data: { source, engine } }) => {
     sent = performance.now();
   };
   const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
+  const say = (line) => {
+    if (++said <= MAX_LINES) lines.push(line);
+    else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
+    due();
+  };
+  let asked = 0;
+  const ask = (question) => {
+    if (asked < answers.length) {
+      say(`${question} ${answers[asked]}`); // the question and its answer, as a line of output
+      return answers[asked++];
+    }
+    flush();
+    postMessage({ question });
+    throw new Waiting();
+  };
   const start = performance.now();
   try {
-    run(source, (line) => {
-      if (++said <= MAX_LINES) lines.push(line);
-      else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
-      due();
-    }, {
+    run(source, say, {
       draw: (line) => {
         if (++total <= MAX_DRAWN) drawn.push(line);
         due();
       },
       engine,
+      ask,
     });
     flush();
     postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });
   } catch (err) {
+    if (err instanceof Waiting) return; // the page asks, and runs it again
     flush();
     postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(source, err)}` : `Moth itself crashed: ${err.message}` });
   }

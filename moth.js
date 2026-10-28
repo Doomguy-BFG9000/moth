@@ -77,7 +77,7 @@ function tokenize(src) {
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-  "uppercase", "lowercase", "split", "join", "number", "position"]);
+  "uppercase", "lowercase", "split", "join", "number", "position", "ask"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -311,6 +311,7 @@ function parse(tokens) {
       expectWord("of");
       return { kind: "length", of: unary(), at: t };
     }
+    if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
     const syntax = t.type === "word" && BUILTIN_SYNTAX.get(t.value);
     if (syntax) {
       pos++;
@@ -365,7 +366,7 @@ function parse(tokens) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -611,6 +612,10 @@ class Compiler extends Scope {
         this.expr(e.of);
         this.emit(e.at, FIELD, this.constant(e.name));
         return;
+      case "ask":
+        this.expr(e.question);
+        this.emit(e.at, ASK);
+        return;
       case "builtin":
         for (const arg of e.args) this.expr(arg);
         this.emit(e.at, BUILTIN, BUILTINS.findIndex((b) => b.name === e.name));
@@ -701,10 +706,17 @@ export function check(source) {
   }
 }
 
-// Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`; mistakes in
-// the program throw MothError. `maxSteps` stops loops and calls after that many rounds, for running
-// untrusted code without a Stop button. `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode).
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit" } = {}) {
+// Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`, and each
+// `ask` to `ask`, which returns the answer (see askFor in vm.js); mistakes in the program throw MothError.
+// `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
+// `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode).
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask } = {}) {
+  const answers = []; // kept, so that running the program again (below) gets the same ones
+  const answer = ask && ((question) => {
+    const reply = ask(question);
+    answers.push(reply);
+    return reply;
+  });
   let program = null;
   if (engine !== "vm") {
     try {
@@ -713,19 +725,21 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
   }
-  if (!program) return new Machine(compile(source), print, { maxSteps, draw }).run();
+  if (!program) return new Machine(compile(source), print, { maxSteps, draw, ask: answer }).run();
   let said = 0;
   let drawn = 0;
   try {
     // counted once passed on, so a hand-over in the middle of passing one on can't lose it
-    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps);
+    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer);
   } catch (err) {
     if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
     // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value outgrew what
-    // JavaScript allows. Moth programs can't read input or the clock, so a second run says and draws exactly
-    // the same things: run it again on the VM, which keeps its own stack and reports a too-big value at the
-    // right line, and pass on only what the first run hadn't already.
-    new Machine(compile(source), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line) }).run();
+    // JavaScript allows. Moth programs can't read the clock, and get the same answers to their questions
+    // again, so a second run says and draws exactly the same things: run it again on the VM, which keeps its
+    // own stack and reports a too-big value at the right line, and pass on only what the first run hadn't already.
+    let asked = 0;
+    const again = answer && ((question) => (asked < answers.length ? answers[asked++] : answer(question)));
+    new Machine(compile(source), (line) => said-- > 0 || print(line), { maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again }).run();
   }
 }
 
@@ -768,17 +782,24 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined) {
-  return new Machine(compile(source, { debug: true }), print, { draw });
+export function debug(source, print = console.log, draw = undefined, ask = undefined) {
+  return new Machine(compile(source, { debug: true }), print, { draw, ask });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
 // variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
 // (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
-export function timeline(source, { limit = 10_000 } = {}) {
+// `answers` answer its questions, in order, each shown after its question as a line of output.
+export function timeline(source, { limit = 10_000, answers = [] } = {}) {
   const said = [];
   const drawn = [];
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line));
+  let asked = 0;
+  const ask = (question) => {
+    if (asked >= answers.length) return null;
+    said.push(`${question} ${answers[asked]}`);
+    return answers[asked++];
+  };
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask);
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;

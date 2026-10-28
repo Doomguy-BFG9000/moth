@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS } from "./vm.js";
+  failWith, BUILTINS, askFor } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv" };
@@ -151,6 +151,8 @@ class JsCompiler extends Scope {
         return `record(${q(e.fields)}, [${e.values.map((v) => this.expr(v)).join(", ")}])`;
       case "field":
         return `field(${this.expr(e.of)}, ${q(e.name)}, ${this.pos(e.at)})`;
+      case "ask":
+        return `ask(${this.expr(e.question)}, ${this.pos(e.at)})`;
       case "builtin":
         return `builtin(${BUILTINS.findIndex((b) => b.name === e.name)}, [${e.args.map((a) => this.expr(a)).join(", ")}], ${this.pos(e.at)})`;
     }
@@ -165,7 +167,7 @@ const MAX_DEPTH = 2000;
 
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
-function helpers(ats, print, draw, maxSteps) {
+function helpers(ats, print, draw, maxSteps, answer) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
     depth = 0;
@@ -232,6 +234,7 @@ function helpers(ats, print, draw, maxSteps) {
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
     builtin: (i, args, k) => BUILTINS[i].run(args, errors[k]),
+    ask: (question, k) => askFor(question, answer, errors[k]),
   };
 }
 export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));
@@ -250,5 +253,5 @@ export function jit(program) {
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, ats, run: (print, draw, maxSteps) => compiled(helpers(ats, print, draw, maxSteps)) };
+  return { source, names, ats, run: (print, draw, maxSteps, ask) => compiled(helpers(ats, print, draw, maxSteps, ask)) };
 }

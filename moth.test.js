@@ -34,13 +34,19 @@ const EXAMPLES = {
   "Counter": "Ticked 3 times",
   "Records": 'Sam is 20\nAna is 31\n(record with name "Sam", age 21)',
   "Primes": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]",
+  "Guess": "Guess my number (1 to 100): 50\nLower\nGuess my number (1 to 100): 25\nHigher\nGuess my number (1 to 100): 37\nYes! 37 in 3 tries",
 };
 
 test("every playground example runs, on all three engines", () => {
   for (const engine of ENGINES) {
     for (const [name, source] of Object.entries(examples)) {
       if (name === "Errors") assert.equal(error(source, { engine }).message, "line 3: there is no item 5, the list only has 2 items");
-      else assert.equal(output(source, { engine }), EXAMPLES[name], `${engine}: ${name}`);
+      else {
+        const answers = ["50", "25", "37"]; // for Guess, the one that asks
+        const said = [];
+        run(source, (line) => said.push(line), { engine, ask: (question) => (said.push(`${question} ${answers[0]}`), answers.shift()) });
+        assert.equal(said.join("\n"), EXAMPLES[name], `${engine}: ${name}`);
+      }
     }
   }
 });
@@ -177,6 +183,9 @@ const ERRORS = [
   ["say position of 1 in \"abc\"", "line 1: 'position of' needs text, not a number"],
   ["set number to 5", "line 1: 'number' is a Moth word, so it can't be used as a variable name"],
   ["say split \"a b\" \" \"", "line 1: expected 'by' but found \" \""],
+  // ask needs someone to answer
+  ["say ask \"x\"", "line 1: this program asks a question, but nothing can answer it here"],
+  ["set ask to 1", "line 1: 'ask' is a Moth word, so it can't be used as a variable name"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -265,7 +274,8 @@ test("a debug build prints exactly what a normal run prints", () => {
   for (const [name, source] of Object.entries(examples)) {
     if (name === "Errors") continue;
     const lines = [];
-    const machine = debug(source, (line) => lines.push(line));
+    const answers = ["50", "25", "37"]; // for Guess
+    const machine = debug(source, (line) => lines.push(line), undefined, (question) => (lines.push(`${question} ${answers[0]}`), answers.shift()));
     while (machine.run({ pauseAtLines: true }) !== "done");
     assert.equal(lines.join("\n"), EXAMPLES[name], name);
   }
@@ -555,4 +565,21 @@ test("the WebAssembly encoder writes numbers as the spec does, and modules that 
   assert.equal(instance.exports.answer(), 42);
   assert.throws(() => f.code.emit("local.get", undefined), /needs indices/);
   for (const source of Object.values(examples)) assert.ok(WebAssembly.validate(compileToWasm(source).bytes));
+});
+
+// ---------- ask ----------
+
+// A question goes to whoever can answer, as text, and the answer comes back as text. Running the program
+// again on the VM (after deep recursion here) must reuse the answers already given, not ask twice.
+test("ask gets answers, on all three engines, and a hand-over to the VM doesn't ask again", () => {
+  const source = 'set a to ask "first?"\nto down with n\n    if n is 0\n        return 0\n    end\n    return 1 + down(n - 1)\nend\nsay a " " down(5000)\nsay ask "second " + a + "?"';
+  for (const engine of ENGINES) {
+    const asked = [];
+    const replies = ["x", "y"];
+    assert.equal(output(source, { engine, ask: (question) => (asked.push(question), replies.shift()) }), "x 5000\ny", engine);
+    assert.deepEqual(asked, ["first?", "second x?"], engine);
+  }
+  const { said } = timeline('say ask "name?"\nsay "bye"', { answers: ["Sam"] });
+  assert.deepEqual(said, ["name? Sam", "Sam", "bye"]); // the debugger replays the answers it was given
+  assert.equal(error('say ask "x"', { ask: () => null }).message, "line 1: there was no answer to this question: the input ended");
 });

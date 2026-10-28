@@ -73,11 +73,12 @@ export const OPCODES = [
   ["FIELD", 1], ["RECORD_REF", 1], ["SET_FIELD", 1], // the operand is the field's name, a constant
   ["FAIL", 0],
   ["BUILTIN", 1], // one of BUILTINS, which takes its inputs off the stack
+  ["ASK", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -291,6 +292,15 @@ export const BUILTINS = [
   },
 ];
 
+// `ask question`: the answer, as text. `answer` is whoever can answer (a person at a terminal, a page): it gets
+// the question as text and returns the answer, or null when there is no more input.
+export function askFor(question, answer, error) {
+  if (!answer) error("this program asks a question, but nothing can answer it here");
+  const reply = answer(show(question));
+  if (reply === null || reply === undefined) error("there was no answer to this question: the input ended");
+  return String(reply);
+}
+
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
 export function failWith(value, error) {
   error(show(value), value);
@@ -352,9 +362,9 @@ export function newEnv(fn, parent) {
 
 // Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
 export class Machine {
-  // `draw` gets each line the turtle draws (see Turtle).
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw } = {}) {
-    Object.assign(this, { main, print, maxSteps, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // `draw` gets each line the turtle draws (see Turtle), and `ask` answers questions (see askFor).
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask } = {}) {
+    Object.assign(this, { main, print, maxSteps, ask, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.turtle = new Turtle(draw);
   }
 
@@ -590,6 +600,9 @@ export class Machine {
             stack.pop()[consts[code[ip++]]] = value;
             break;
           }
+          case ASK:
+            stack.push(askFor(stack.pop(), this.ask, oops));
+            break;
           case BUILTIN: {
             const builtin = BUILTINS[code[ip++]];
             stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops));
@@ -638,6 +651,6 @@ export class Machine {
   }
 }
 
-export function execute(main, print, maxSteps, env) {
-  new Machine(main, print, { maxSteps, env }).run();
+export function execute(main, print, maxSteps, env, ask) {
+  new Machine(main, print, { maxSteps, env, ask }).run();
 }

@@ -96,6 +96,8 @@ class Checker extends Scope {
         const { gives } = BUILTINS.find((b) => b.name === e.name);
         return () => gives;
       }
+      case "ask":
+        return () => "text";
       case "list":
         return () => "list";
       case "record":
@@ -308,6 +310,9 @@ class Checker extends Scope {
         this.willFail(e.at, () => this.known(type()) && lengthOf(this.sample(e.of), found));
         return;
       }
+      case "ask":
+        this.expr(e.question);
+        return;
       case "builtin": { // fails when an input is known to be the wrong kind; what the values are is left to run time
         for (const arg of e.args) this.expr(arg);
         const builtin = BUILTINS.find((b) => b.name === e.name);

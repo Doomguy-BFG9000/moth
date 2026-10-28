@@ -108,6 +108,22 @@ end
 set age of sam to 21
 say sam`,
 
+  "Guess": `# a guessing game: answer in the box under the output
+set secret to 37
+set tries to 0
+repeat while yes
+    set guess to number of ask "Guess my number (1 to 100):"
+    add 1 to tries
+    if guess is secret
+        say "Yes! " secret " in " tries " tries"
+        stop
+    else if guess is less than secret
+        say "Higher"
+    else
+        say "Lower"
+    end
+end`,
+
   "Primes": `set primes to empty list
 for each n from 2 to 50
     set prime to yes
