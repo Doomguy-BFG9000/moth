@@ -13,10 +13,14 @@ export { MothError, excerpt, describeTrail, seeded, soundSamples, soundWav, SOUN
 
 // Every control character counts as a space (as in Wirth's compilers), and text holds any character but a
 // control character other than tab (\n makes a new line). Rules this small let the compiler written in Moth,
-// which has no character codes, follow them exactly.
-const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),]|'s(?!\w))/y;
+// which has no character codes, follow them exactly. Of text this finds only the opening quote: textEnd finds
+// where it ends, as text can be inside text.
+const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|(")|([-+*/(),]|'s(?!\w))/y;
 const ESCAPES = { n: "\n", t: "\t" };
 const unescape = (raw) => raw.replace(/\\(.)/gs, (_, c) => ESCAPES[c] ?? c);
+const fitsText = (c) => c !== undefined && !/[\0-\x08\n-\x1f]/.test(c);
+// a '{' right before one of these starts a value in text: a name, or a bracket
+const startsValue = (c) => c !== undefined && /[A-Za-z_(]/.test(c);
 // what a mistake in a value inside text adds, for text written before there were values in it
 const BRACE_HINT = "to write a '{' itself, put '\\' before it";
 // symbols people type out of habit from other languages, and what Moth says instead
@@ -34,6 +38,39 @@ const HINTS = {
   ".": "to get a field write 'name of person'",
 };
 
+// Text that starts with the quote at `at`: `{ end }`, just past its closing quote, or what's missing, `{ quote:
+// true }` if the line ends first, or `{ brace }`, the '{' of a value in it that never ends. A value
+// ("Hi {name}") ends at its own '}', and can have text of its own inside it.
+function textEnd(src, at) {
+  for (let i = at + 1; ; ) {
+    const c = src[i];
+    if (c === '"') return { end: i + 1 };
+    if (c === "\\" && fitsText(src[i + 1])) i += 2;
+    else if (!fitsText(c)) return { quote: true };
+    else if (c === "{" && startsValue(src[i + 1])) {
+      const value = valueEnd(src, i);
+      if (value.brace !== undefined) return value;
+      i = value.end + 1;
+    } else i++;
+  }
+}
+
+// The value in text whose '{' is at `at`: `{ end }`, its '}', or `{ brace: at }` if nothing ends it, the text
+// inside it included.
+function valueEnd(src, at) {
+  for (let i = at + 1; ; ) {
+    const c = src[i];
+    if (c === "}") return { end: i };
+    if (!fitsText(c)) return { brace: at };
+    if (c !== '"') i++;
+    else {
+      const inside = textEnd(src, i);
+      if (inside.end === undefined) return { brace: at };
+      i = inside.end;
+    }
+  }
+}
+
 // `file` names a file the program uses, for errors in it; the program's own file has none. `start`, for a
 // value inside text ("Hi {name}"), is where it starts: its tokens are counted from there, and end with a '}'.
 function tokenize(src, file, start) {
@@ -41,17 +78,23 @@ function tokenize(src, file, start) {
   let line = start ? start.line : 1;
   let lineStart = start ? 1 - start.col : 0;
   let nl = !start; // does the next token start a new line?
+  const place = (i) => (file ? { line, col: i - lineStart + 1, file } : { line, col: i - lineStart + 1 });
   for (let at = 0; at < src.length; at = TOKEN.lastIndex) {
     TOKEN.lastIndex = at;
     const m = TOKEN.exec(src);
-    const where = file ? { line, col: at - lineStart + 1, file } : { line, col: at - lineStart + 1 };
+    const where = place(at);
     if (!m) {
       const c = String.fromCodePoint(src.codePointAt(at)); // a whole emoji, not half of one
-      if (c === '"') fail(where, "this text is missing its closing quote");
       const hint = start ? BRACE_HINT : HINTS[c];
       fail(where, `I don't understand '${c}'${start || Object.hasOwn(HINTS, c) ? ` (${hint})` : ""}`);
     }
-    const [text, space, comment, number, word, string] = m;
+    let [text, space, comment, number, word, string] = m;
+    if (string) {
+      const { end, brace } = textEnd(src, at);
+      if (brace !== undefined) fail(place(brace), `this '{' has no '}' to end it (${BRACE_HINT})`);
+      if (end === undefined) fail(where, "this text is missing its closing quote");
+      text = src.slice(at, end);
+    }
     if (space || comment) {
       const newlines = text.split("\n").length - 1;
       if (newlines) {
@@ -66,15 +109,15 @@ function tokenize(src, file, start) {
       : word
         ? ["word", word.toLowerCase()]
         : string
-          ? ["string", unescape(string.slice(1, -1))]
+          ? ["string", unescape(text.slice(1, -1))]
           : [text, text];
     const token = { type, value, ...where, nl };
     if (word) token.raw = word; // as written: a library's function is named in its own case (see library)
     if (number) token.text = number; // as written, for messages and the JIT
     if (string) {
-      const parts = textParts(string.slice(1, -1), line, where.col + 1, file);
+      const parts = textParts(src, at + 1, at + text.length - 1, place, file);
       if (parts) token.parts = parts;
-      TOKEN.lastIndex = at + text.length; // which reading a value in it moved
+      TOKEN.lastIndex = at + text.length; // past the text, which reading a value in it moved
     }
     tokens.push(token);
     nl = false;
@@ -84,25 +127,25 @@ function tokenize(src, file, start) {
   return tokens;
 }
 
-// "Hi {name}!": text with values in it. A '{' right before a letter or '_' starts a value, which ends at the
-// next '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, or
-// nothing for text with no value in it. `raw` is the text as written, from column `col` of `line`.
-function textParts(raw, line, col, file) {
+// "Hi {name}!": text with values in it. A '{' right before a letter, '_' or '(' starts a value, which ends at
+// its own '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, or
+// nothing for text with no value in it. The text as written is `src` from `from` to just before `upto`.
+function textParts(src, from, upto, place, file) {
   const parts = [];
-  let last = 0; // where the text not yet in parts starts
-  for (let i = 0; i < raw.length; i++) {
-    if (raw[i] === "\\") i++;
-    else if (raw[i] === "{" && /[A-Za-z_]/.test(raw[i + 1] ?? "")) {
-      const end = raw.indexOf("}", i);
-      if (end < 0) fail({ line, col: col + i, ...(file && { file }) }, `this '{' has no '}' to end it (${BRACE_HINT})`);
-      if (i > last) parts.push(unescape(raw.slice(last, i)));
-      parts.push(tokenize(raw.slice(i + 1, end), file, { line, col: col + i + 1 }));
+  let last = from; // where the text not yet in parts starts
+  for (let i = from; i < upto; i++) {
+    if (src[i] === "\\") i++;
+    else if (src[i] === "{" && startsValue(src[i + 1])) {
+      const { end } = valueEnd(src, i);
+      if (i > last) parts.push(unescape(src.slice(last, i)));
+      const { line, col } = place(i + 1);
+      parts.push(tokenize(src.slice(i + 1, end), file, { line, col }));
       last = end + 1;
       i = end;
     }
   }
   if (!parts.length) return null;
-  if (last < raw.length) parts.push(unescape(raw.slice(last)));
+  if (last < upto) parts.push(unescape(src.slice(last, upto)));
   return parts;
 }
 
@@ -1618,9 +1661,13 @@ function piecesOf(line) {
   const pieces = [];
   for (let at = 0; at < line.length; at = TOKEN.lastIndex) {
     TOKEN.lastIndex = at;
-    const [text, space, comment, number, word, string] = TOKEN.exec(line);
+    let [text, space, comment, number, word, string] = TOKEN.exec(line);
     if (comment) return { pieces, comment: text.trimEnd(), commentCol: at };
     if (space) continue;
+    if (string) {
+      text = line.slice(at, textEnd(line, at).end); // the parser read it already, so it ends
+      TOKEN.lastIndex = at + text.length;
+    }
     pieces.push({ type: number ? "number" : word ? "word" : string ? "string" : text, text, col: at + 1, end: at + text.length });
   }
   return { pieces, comment: null };

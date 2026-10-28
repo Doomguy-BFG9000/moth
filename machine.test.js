@@ -519,7 +519,9 @@ test("moth.exe tidies code to the same bytes format() does, and --check only say
     "# a note before else", "else", 'say  "no"', "end", "set l to list of 1 ,2,", " 3", "say - 5", "try", "say 1/0",
     "if it fails with why", " say why", "end", "set r to record with label -1, x (2 + 3)", "move forward (1 + 2)", "", ""].join("\n");
   const wide = 'say  "é😀"   # a comment with 😀 in it\nsay   item  1  of   "héllo"\n'; // columns counted as JavaScript counts them
-  const sources = [messy, wide, ...brokenPrograms(7, 150)];
+  // values in text, with text in them, which a piece of text ends after
+  const values = 'set   words to list of "a","b"\nsay  "{join words with ", "}!"\nto f with x\nreturn x+"!"\nend\nsay "{f("{x} {f("{(1+2)}")}")}"+"x"\n';
+  const sources = [messy, wide, values, ...brokenPrograms(7, 150)];
   const names = [];
   const wanted = [];
   sources.forEach((source, i) => {

@@ -380,8 +380,9 @@ add "mango" to fruits               # add to a list, a number, or text
 set item 1 of fruits to "kiwi"      # items are counted from 1
 
 say "Hi, " name "!"                 # say joins the pieces exactly as written
-set greeting to "Hi, {name}!"       # or put a value in text: a { before a letter starts one
-say "{length of fruits} fruits, \{not a value}"   # \{ is a { itself, and so is one before anything else
+set greeting to "Hi, {name}!"       # or put a value in text: a { before a letter or ( starts one
+say "{length of fruits} fruits: {join fruits with ", "}"   # a value can have text in it too
+say "{(2 * 3)} \{not a value}"      # \{ is a { itself, and so is one before anything else
 say "I have " length of fruits " fruits"
 
 if length of fruits is greater than 2
@@ -1031,10 +1032,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   functions' variables are theirs and the program reaches it only through
   `math's ...`. It only reads files in the program's folder, or folders inside
   it: not `../lib.moth`, and not through a link out.
-- In text, a `{` right before a letter starts a value, so text that means one
-  there as itself, as curl's `%{http_code}` does, needs `\{`. A value in text
-  can't have text of its own inside it, and one that starts with a number,
-  `{3 * n}`, is itself: write `{n * 3}`.
+- In text, a `{` right before a letter or a bracket starts a value, so text
+  that means one there as itself, as curl's `%{http_code}` does, needs `\{`.
+  One right before a number is itself, as in `"\\d{3}"`, so a value that starts
+  with a number goes in brackets: `{(3 * n)}`.
 - The handwriting reader learned from shapes, not people, so unusual ways of
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,

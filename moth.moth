@@ -459,6 +459,42 @@ to cli_spaces with cli_many
     return cli_room
 end
 
+# a '{' right before one of these starts a value in text: a name, or a bracket
+to cli_starts_value with cli_c
+    return cli_starts_word(cli_c) or cli_c is "("
+end
+
+# Where text that starts with the quote at character cli_at ends: the character just past its closing
+# quote. What follows a backslash is the text's own, even a quote, and a value in it ("Hi {name}") ends at
+# its own '}', and can have text of its own inside it.
+to cli_text_end with cli_chars, cli_at
+    set cli_te_k to cli_at + 1
+    repeat while item cli_te_k of cli_chars is not "\""
+        set cli_te_c to item cli_te_k of cli_chars
+        if cli_te_c is "\\"
+            set cli_te_k to cli_te_k + 2
+        else if cli_te_c is "{" and cli_starts_value(item (cli_te_k + 1) of cli_chars)
+            set cli_te_k to cli_value_end(cli_chars, cli_te_k) + 1
+        else
+            add 1 to cli_te_k
+        end
+    end
+    return cli_te_k + 1
+end
+
+# the character that ends the value in text whose '{' is character cli_at: its '}'
+to cli_value_end with cli_chars, cli_at
+    set cli_ve_k to cli_at + 1
+    repeat while item cli_ve_k of cli_chars is not "}"
+        if item cli_ve_k of cli_chars is "\""
+            set cli_ve_k to cli_text_end(cli_chars, cli_ve_k)
+        else
+            add 1 to cli_ve_k
+        end
+    end
+    return cli_ve_k
+end
+
 # One line of code as its pieces, as written: for each, what it is, its text, the column it starts at and
 # the column just past it, counted as the parser counts columns; then the line's comment, or nothing, and
 # the column that starts. Only lines the parser has read already come here, so nothing here is a mistake.
@@ -519,19 +555,11 @@ to cli_pieces_of with cli_line
                 end
             else if cli_c is "\""
                 set cli_what to "string"
-                add "\"" to cli_text
-                add 1 to cli_i
-                repeat while item cli_i of cli_chars is not "\""
-                    set cli_d to item cli_i of cli_chars
-                    add cli_d to cli_text
+                set cli_end to cli_text_end(cli_chars, cli_i)
+                repeat while cli_i is less than cli_end
+                    add item cli_i of cli_chars to cli_text
                     add 1 to cli_i
-                    if cli_d is "\\" # what follows a backslash is the text's own, even a quote
-                        add item cli_i of cli_chars to cli_text
-                        add 1 to cli_i
-                    end
                 end
-                add "\"" to cli_text
-                add 1 to cli_i
             else if cli_c is "'" # `math's sine`
                 set cli_what to "'s"
                 set cli_text to "'s"

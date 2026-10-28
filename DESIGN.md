@@ -2570,9 +2570,11 @@ hold them to agreeing.
   fruits}`.
 - **What stays as it was.** Moth's own code is full of `{`: the JavaScript
   compiler.moth writes (`") {\n"`), patterns (`"\\d{3}"`), JSON (`"{\"a\":
-  1}"`). So only a `{` right before a letter or `_` starts a value, and it
-  ends at the next `}`; any other `{` is itself, and so is `\{`, which already
-  meant `{` (a `\` before any other character is that character). Of every
+  1}"`). So only a `{` right before a letter, `_` or a bracket starts a value,
+  and it ends at its own `}`; any other `{` is itself, and so is `\{`, which
+  already meant `{` (a `\` before any other character is that character). A
+  value that starts with a number goes in brackets, `{(3 * n)}`, as `{3}` in a
+  pattern is a count. Of every
   string in the repository's Moth, one changed: machine.moth's curl format,
   `%{http_code}`, now `%\{http_code}`.
 - **In the tokenizer and the parser.** A text's token keeps its parts: text,
@@ -2582,10 +2584,18 @@ hold them to agreeing.
   machine code have nothing new to do. A mistake inside one says how to write
   a `{` itself. compiler.moth does the same, with each part a record of its
   text or its tokens, since Moth can't ask what kind a value is.
-- **Not yet.** Text inside a value (`{join words with ", "}`), since the
-  first `"` ends the text; and a value that starts with a number.
+- **Text inside a value.** `"{join words with ", "}"`: a `"` inside a value
+  starts text of its own, which can have values in it too, so where text ends
+  is no longer the next quote. The tokenizer's pattern finds only an opening
+  quote, and a scan finds the end: past a `\` and the character after it, and
+  past each value, to its `}`, past any text inside it. Tidying, in moth.js and
+  in moth.moth, and the playground's colouring find the end the same way. If
+  the line ends inside a value, even inside text in it, the mistake is the
+  value's `{`, which nothing ends, not the quote of the text in it.
 - **Tested.** A program of values in text, on the three engines and in machine
   code on Windows and Linux: numbers, a sum, a call, `'s` and `of`, a list,
   nothing and yes, text as an item's key, and every `{` that stays as it was;
-  four mistakes; compiler.moth held to moth.js on all of them; and the
-  playground colours a value in text as code.
+  another of text inside values, inside text inside values, and values in
+  brackets; nine mistakes; compiler.moth held to moth.js on all of them;
+  moth.exe tidying text with text in it as format() does; and the playground
+  colours a value in text as code, the text inside it as text.

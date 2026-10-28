@@ -4,6 +4,8 @@
 import examples from "./examples.js";
 
 export const PROGRAMS = [
+  // text inside a value in text, and values that start with a bracket
+  ["to f with x\n    return x + \"!\"\nend\nset words to list of \"kiwi\", \"pear\"\nset n to 4\nset d to dictionary where \"a b\" is 1\nsay \"I have {join words with \", \"} and {(3 * n)} more\"\nsay \"{uppercase of \"{n} x\"} {item \"a b\" of d} # not a comment\"\nsay \"{f(\"{n} {f(\"{(n - 1)}\")}\")}\"\nsay \"é😀{n}\" \"\\{(n)}\"", "I have kiwi, pear and 12 more\n4 X 1 # not a comment\n4 3!!\né😀4{(n)}"],
   // text with values in it: "Hi {name}" is "Hi " + name; a '{' before anything but a letter or '_' is itself, as is '\{'
   ["set name to \"Sam\"\nset age to 20\nset sam to record with name \"Ana\", pets (list of \"cat\", \"dog\")\nto twice with n\n    return n * 2\nend\nsay \"Hello {name}, you are {age}\"\nsay \"{age}{age} {age + 1} {twice(age)} {sam's name} {name of sam} {uppercase of name} {age + 1.5}\"\nsay \"{sam's pets} {nothing} {yes} {length of sam's pets}\"\nsay \"\\{name} { name } {} {3} \\\\d{3} %\\{x} {\"\nset greeting to \"Hi {name}\"\nsay length of \"{name}\" \" \" greeting\nset k to \"a\"\nset d to dictionary where \"a\" is 1\nsay item \"{k}\" of d\nfor each i from 1 to 2\n    say \"{i}: {item i of sam's pets}\"\nend", "Hello Sam, you are 20\n2020 21 40 Ana Ana SAM 21.5\n[\"cat\", \"dog\"] nothing yes 2\n{name} { name } {} {3} \\d{3} %{x} {\n3 Hi Sam\n1\n1: cat\n2: dog"],
   // a value's own functions and fields: `rex's bark()` is bark(rex), and `rex's name` is name of rex
@@ -230,6 +232,11 @@ export const SAVING = [
 ];
 
 export const ERRORS = [
+  ["say \"{join words with \", \"}", "line 1: this text is missing its closing quote"],
+  ["say \"{f(\"{x\")}\"", "line 1: this '{' has no '}' to end it (to write a '{' itself, put '\\' before it)"],
+  ["say \"é😀{x \"y}\"", "line 1: this '{' has no '}' to end it (to write a '{' itself, put '\\' before it)"],
+  ["set x to 1\nsay \"{x \"a\"}\"", "line 2: expected '}' but found \"a\" (to write a '{' itself, put '\\' before it)"],
+  ["say \"{(1 + )}\"", "line 1: expected a value but found ')'"],
   ["set name to \"Sam\"\nsay \"Hi {name\"", "line 2: this '{' has no '}' to end it (to write a '{' itself, put '\\' before it)"],
   ["say \"body {color: red}\"", "line 1: I don't understand ':' (to write a '{' itself, put '\\' before it)"],
   ["set a to 1\nsay \"{a b}\"", "line 2: expected '}' but found 'b' (to write a '{' itself, put '\\' before it)"],

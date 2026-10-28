@@ -200,36 +200,33 @@ to tokens_from with source, file, begins
             set col to start + length of text
             set nl to no
         else if c is "\""
-            set text to ""
-            set written to empty list # as written, for the values in it
-            add 1 to k
-            add 1 to col
-            repeat while item k of chars is not "\""
-                set d to item k of chars
-                if d is "\\" and fits_text(item (k + 1) of chars)
-                    add d to written
-                    add 1 to k
-                    add 1 to col
-                    set d to item k of chars
-                    add d to written
+            set ends to text_end(chars, k)
+            if brace of ends is not nothing
+                fail with problem(place(line, col_at(chars, k, col, brace of ends), file), "this '{' has no '}' to end it (" + brace_hint + ")")
+            end
+            if k of ends is nothing
+                fail with problem(place(line, start, file), "this text is missing its closing quote")
+            end
+            set text to "" # as it reads: what follows a backslash is the text's own
+            set ti to k + 1
+            repeat while ti is less than k of ends - 1
+                set d to item ti of chars
+                if d is "\\"
+                    add 1 to ti
+                    set d to item ti of chars
                     if d is "n"
                         set d to "\n"
                     else if d is "t"
                         set d to "\t"
                     end
-                else if d is "\\" or not fits_text(d)
-                    fail with problem(place(line, start, file), "this text is missing its closing quote")
-                else
-                    add d to written
                 end
                 add d to text
-                add width(item k of chars) to col
-                add 1 to k
+                add 1 to ti
             end
-            add 1 to k
-            add 1 to col
-            set parts to text_parts(written, line, start + 1, file)
+            set parts to text_parts(chars, k + 1, k of ends - 1, line, col + 1, file)
             add record with type "string", value text, line line, col start, nl nl, file file, parts parts to tokens
+            set col to col_at(chars, k, col, k of ends)
+            set k to k of ends
             set nl to no
         else if contains(symbols, c)
             add record with type c, value c, line line, col start, nl nl, file file to tokens
@@ -261,45 +258,100 @@ to tokens_from with source, file, begins
     return tokens
 end
 
-# "Hi {name}!": text with values in it. A '{' right before a letter or '_' starts a value, which ends at the
-# next '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, or
-# nothing for text with no value in it: each a record of its text, or its tokens. `written` is the text's characters as written, from column `col` of
-# `line`.
-to text_parts with written, line, col, file
+# a '{' right before one of these starts a value in text: a name, or a bracket
+to starts_value with c
+    return starts_word(c) or c is "("
+end
+
+# Text that starts with the quote at character k of chars: a record of `k`, the character just past its
+# closing quote, and `brace`, the character of a value's '{' in it that nothing ends, or nothing; `k` is
+# nothing too if the line ends first. A value ("Hi {name}") ends at its own '}', and can have text of its
+# own inside it.
+to text_end with chars, k
+    set te_k to k + 1
+    repeat while item te_k of chars is not "\""
+        set te_c to item te_k of chars
+        if te_c is "\\" and fits_text(item (te_k + 1) of chars)
+            set te_k to te_k + 2
+        else if not fits_text(te_c)
+            return record with k nothing, brace nothing
+        else if te_c is "{" and starts_value(item (te_k + 1) of chars)
+            set te_value to value_end(chars, te_k)
+            if brace of te_value is not nothing
+                return te_value
+            end
+            set te_k to k of te_value + 1
+        else
+            add 1 to te_k
+        end
+    end
+    return record with k te_k + 1, brace nothing
+end
+
+# The value in text whose '{' is character k of chars: a record of `k`, its '}', or `brace`, k itself, if
+# nothing ends it, the text inside it included
+to value_end with chars, k
+    set ve_k to k + 1
+    repeat while item ve_k of chars is not "}"
+        set ve_c to item ve_k of chars
+        if not fits_text(ve_c)
+            return record with k nothing, brace k
+        end
+        if ve_c is "\""
+            set ve_inside to text_end(chars, ve_k)
+            if k of ve_inside is nothing
+                return record with k nothing, brace k
+            end
+            set ve_k to k of ve_inside
+        else
+            add 1 to ve_k
+        end
+    end
+    return record with k ve_k, brace nothing
+end
+
+# the column of character `there` of chars, on the line where character `here` is at column `here_col`
+to col_at with chars, here, here_col, there
+    set ca_col to here_col
+    for each ca_k from here to there - 1
+        add width(item ca_k of chars) to ca_col
+    end
+    return ca_col
+end
+
+# "Hi {name}!": text with values in it. A '{' right before a letter, '_' or '(' starts a value, which ends at
+# its own '}'; any other '{' is itself, and so is '\{'. Gives the text and each value's tokens, in order, each
+# a record of its text or its tokens, or nothing for text with no value in it. The text as written is chars
+# `first` to just before `upto`, from column `col` of `line`.
+to text_parts with chars, first, upto, line, col, file
     set parts to empty list
     set piece to "" # the text since the last value, as it reads
-    set i to 1
-    repeat while i is at most length of written
-        set c to item i of written
+    set i to first
+    repeat while i is less than upto
+        set c to item i of chars
         if c is "\\"
-            set c to item (i + 1) of written
+            set c to item (i + 1) of chars
             if c is "n"
                 set c to "\n"
             else if c is "t"
                 set c to "\t"
             end
             add c to piece
-            add width(item i of written) + width(item (i + 1) of written) to col
+            add width(item i of chars) + width(item (i + 1) of chars) to col
             set i to i + 2
-        else if c is "{" and i is less than length of written and starts_word(item (i + 1) of written)
-            set j to i + 1
-            set inside to ""
-            set inside_width to 0
-            repeat while j is at most length of written and item j of written is not "}"
-                add item j of written to inside
-                add width(item j of written) to inside_width
-                add 1 to j
-            end
-            if j is greater than length of written
-                fail with problem(place(line, col, file), "this '{' has no '}' to end it (" + brace_hint + ")")
-            end
+        else if c is "{" and starts_value(item (i + 1) of chars)
+            set closing to k of value_end(chars, i)
             if piece is not ""
                 add (record with text piece, tokens nothing) to parts
                 set piece to ""
             end
+            set inside to ""
+            for each j from i + 1 to closing - 1
+                add item j of chars to inside
+            end
             add (record with text nothing, tokens tokens_from(inside, file, place(line, col + 1, file))) to parts
-            set col to col + inside_width + 2
-            set i to j + 1
+            set col to col_at(chars, i, col, closing + 1)
+            set i to closing + 1
         else
             add c to piece
             add width(c) to col
