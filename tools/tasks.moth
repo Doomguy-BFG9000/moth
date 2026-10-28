@@ -1,0 +1,361 @@
+# Work in the background, on Windows and Linux: another program, started and left to run while this one goes
+# on, whose output and the number it ends with are there when it's done. A slow job of this program's own can
+# be one too: start_self starts this same program with other arguments, which it can look at to do the job.
+#
+#   use "tasks.moth" as tasks
+#   if length of arguments is at least 1 and item 1 of arguments is "count"
+#       set total to 0                        # the job, in the program started in the background
+#       for each i from 1 to 100000000
+#           add i to total
+#       end
+#       say total
+#       stop the program with 0
+#   end
+#   set job to tasks's start_self(list of "count")
+#   repeat while not tasks's done(job)          # or ask in a window's timer, so the window goes on
+#       say "working..."
+#       tasks's pause(200)
+#   end
+#   say "the total is " + tasks's output_of(job)
+#
+# done() doesn't wait: it takes what the task has said so far, and says whether it has ended. wait_for() waits.
+# output_of() is all it said, to its output and its error output, as text; code_of() the number it ended with.
+# Built with --allow-libraries.
+
+use the library "kernel32"
+    structure inheritance with size as a whole number, descriptor as a pointer, inherit as yes or no
+    structure starting with size as a whole number, reserved as a pointer, desktop as a pointer, title as a pointer,
+        x as a whole number, y as a whole number, width as a whole number, height as a whole number,
+        columns as a whole number, rows as a whole number, fill as a whole number, flags as a whole number,
+        show as 2 bytes, extra_size as 2 bytes, extra as a pointer, input as a pointer, output as a pointer,
+        errors as a pointer
+    structure process_made with process as a pointer, thread as a pointer, process_id as a whole number,
+        thread_id as a whole number
+    CreatePipe(bytes, bytes, a inheritance, a whole number) gives yes or no
+    SetHandleInformation(a pointer, a whole number, a whole number) gives yes or no
+    CreateProcessW(a pointer, bytes, a pointer, a pointer, yes or no, a whole number, a pointer, a pointer,
+        a starting, a process_made) gives yes or no
+    PeekNamedPipe(a pointer, a pointer, a whole number, a pointer, bytes, a pointer) gives yes or no
+    ReadFile(a pointer, bytes, a whole number, bytes, a pointer) gives yes or no
+    WaitForSingleObject(a pointer, a whole number) gives a whole number
+    GetExitCodeProcess(a pointer, bytes) gives yes or no
+    TerminateProcess(a pointer, a whole number) gives yes or no
+    CloseHandle(a pointer) gives yes or no
+    GetModuleFileNameW(a pointer, bytes, a whole number) gives a whole number
+    "lstrcatW" as wide_in(bytes, wide text) gives wide text
+    "Sleep" as win_sleep(a whole number)
+    GetTickCount() gives a whole number
+end
+use the library "c"
+    "pipe" as unix_pipe(bytes) gives a whole number
+    "fork" as unix_fork() gives a whole number
+    "dup2" as unix_dup2(a whole number, a whole number) gives a whole number
+    "close" as unix_close(a whole number) gives a whole number
+    "execvp" as unix_exec(text, bytes) gives a whole number
+    "_exit" as unix_exit(a whole number)
+    "strdup" as unix_copy(text) gives a pointer
+    "poll" as unix_poll(bytes, a whole number, a whole number) gives a whole number
+    "read" as unix_read(a whole number, bytes, a long whole number) gives a long whole number
+    "waitpid" as unix_wait(a whole number, bytes, a whole number) gives a whole number
+    "kill" as unix_kill(a whole number, a whole number) gives a whole number
+    "readlink" as unix_readlink(text, bytes, a long whole number) gives a long whole number
+    "usleep" as unix_sleep(a whole number) gives a whole number
+end
+
+# which system it is: a library every Windows has, which no Linux has
+set task_windows to yes
+try
+    GetTickCount()
+if it fails
+    set task_windows to no
+end
+
+# another program, started with `inputs`, a list of texts, and left to run
+to start with program, inputs
+    if task_windows
+        return task_start_windows(program, inputs)
+    end
+    return task_start_linux(program, inputs)
+end
+
+# this same program, started again with `inputs` as its arguments
+to start_self with inputs
+    return start(own_program(), inputs)
+end
+
+# where this program is
+to own_program
+    if task_windows
+        set room to 2080 bytes
+        GetModuleFileNameW(nothing, room, 1040)
+        return wide_in(room, "")
+    end
+    set room to 4096 bytes
+    set n to unix_readlink("/proc/self/exe", room, 4096)
+    set made to n bytes
+    for each k from 1 to n
+        set byte k of made to byte k of room
+    end
+    return made as text
+end
+
+# whether the task has ended, taking what it has said so far; it doesn't wait
+to done with task
+    if ended of task
+        return yes
+    end
+    task_take(task)
+    if task_windows
+        if WaitForSingleObject(process of task, 0) is 0 and task_take(task) is 0
+            set code to 4 bytes
+            GetExitCodeProcess(process of task, code)
+            set code of task to task_number(code)
+            CloseHandle(process of task)
+            CloseHandle(reading of task)
+            set ended of task to yes
+        end
+    else
+        if not gone of task
+            set status to 4 bytes
+            if unix_wait(process of task, status, 1) is process of task # WNOHANG
+                set gone of task to yes
+                set code of task to byte 2 of status # WEXITSTATUS: the second byte
+                if (byte 1 of status bit and 127) is not 0 # ended by a signal
+                    set code of task to 128 + (byte 1 of status bit and 127)
+                end
+            end
+        end
+        if gone of task and task_take(task) is 0
+            unix_close(reading of task)
+            set ended of task to yes
+        end
+    end
+    return ended of task
+end
+
+# waits until the task has ended
+to wait_for with task
+    repeat while not done(task)
+        pause(10)
+    end
+end
+
+# all the task has said, to its output and its error output, so far
+to output_of with task
+    if not ended of task
+        task_take(task)
+    end
+    set total to 0
+    for each part in said of task
+        set total to total + length of part
+    end
+    set made to total bytes
+    set at to 0
+    for each part in said of task
+        for each k from 1 to length of part
+            set byte (at + k) of made to byte k of part
+        end
+        set at to at + length of part
+    end
+    return made as text
+end
+
+# the number the task ended with, once it has (see done), or nothing
+to code_of with task
+    return code of task
+end
+
+# the task ended now
+to stop_task with task
+    if ended of task
+        return nothing
+    end
+    if task_windows
+        TerminateProcess(process of task, 1)
+    else
+        unix_kill(process of task, 9)
+    end
+    wait_for(task)
+end
+
+# this program waits so many milliseconds, which a window's timer does better
+to pause with milliseconds
+    if task_windows
+        win_sleep(milliseconds)
+    else
+        unix_sleep(milliseconds * 1000)
+    end
+end
+
+to task_number with four
+    set made to byte 1 of four + byte 2 of four * 256 + byte 3 of four * 65536 + byte 4 of four * 16777216
+    return made
+end
+
+# what the task has said that hasn't been taken yet, kept in `said`: how many bytes there were
+to task_take with task
+    set taken to 0
+    repeat while yes
+        set waiting to 0
+        if task_windows
+            set count to 4 bytes
+            if not PeekNamedPipe(reading of task, nothing, 0, nothing, count, nothing)
+                return taken
+            end
+            set waiting to task_number(count)
+            if waiting is 0
+                return taken
+            end
+            if waiting is greater than 65536
+                set waiting to 65536
+            end
+            set room to waiting bytes
+            set got to 4 bytes
+            ReadFile(reading of task, room, waiting, got, nothing)
+            set waiting to task_number(got)
+        else
+            set asked to 8 bytes # struct pollfd: the pipe, and POLLIN
+            set made to reading of task
+            set byte 1 of asked to made bit and 255
+            set byte 2 of asked to (shift made right by 8) bit and 255
+            set byte 3 of asked to (shift made right by 16) bit and 255
+            set byte 5 of asked to 1
+            if unix_poll(asked, 1, 0) is at most 0
+                return taken
+            end
+            set room to 65536 bytes
+            set waiting to unix_read(reading of task, room, 65536)
+            if waiting is at most 0
+                return taken
+            end
+        end
+        set part to waiting bytes
+        for each k from 1 to waiting
+            set byte k of part to byte k of room
+        end
+        set parts to said of task
+        add part to parts
+        set taken to taken + waiting
+    end
+end
+
+to task_record with process, reading
+    return record with process process, reading reading, said empty list, ended no, gone no, code nothing
+end
+
+# Windows' rules for a command line, which CommandLineToArgvW undoes: an input with a space, a tab or a " in it,
+# or none at all, in quotes, a " in it and the \s before one doubled
+to task_quoted with input
+    if input is not "" and position of " " in input is 0 and position of "\t" in input is 0
+            and position of "\"" in input is 0
+        return input
+    end
+    set made to "\""
+    set slashes to 0
+    for each c in input
+        if c is "\\"
+            add 1 to slashes
+        else
+            if c is "\""
+                repeat slashes + 1 times
+                    add "\\" to made
+                end
+            end
+            set slashes to 0
+        end
+        add c to made
+    end
+    repeat slashes times
+        add "\\" to made
+    end
+    return made + "\""
+end
+
+to task_start_windows with program, inputs
+    set line to task_quoted(program)
+    for each input in inputs
+        set line to line + " " + task_quoted(input)
+    end
+    set reading_end to 8 bytes
+    set writing_end to 8 bytes
+    if not CreatePipe(reading_end, writing_end, (record with size 24, inherit yes), 0)
+        fail with "couldn't start '" + program + "': no pipe for its output"
+    end
+    set reading to task_handle(reading_end)
+    set writing to task_handle(writing_end)
+    SetHandleInformation(reading, 1, 0) # the reading end isn't the task's
+    set made to record with process nothing, thread nothing, process_id 0, thread_id 0
+    set asked to record with size 104, flags 256, input nothing, output writing, errors writing # STARTF_USESTDHANDLES
+    set wide to (line + " ") as bytes # room for it as UTF-16, which CreateProcessW may change
+    set room to (2 * length of wide + 2) bytes
+    wide_in(room, line)
+    if not CreateProcessW(nothing, room, nothing, nothing, yes, 134217728, nothing, nothing, asked, made)
+        CloseHandle(reading)
+        CloseHandle(writing)
+        fail with "couldn't start '" + program + "': there's no such program, or it can't be run"
+    end
+    CloseHandle(writing)
+    CloseHandle(thread of made)
+    return task_record(process of made, reading)
+end
+
+# a handle from the 8 bytes Windows wrote it into
+to task_handle with eight
+    set made to 0
+    for each k from 1 to 6
+        set made to made + byte k of eight * task_power(k - 1)
+    end
+    return made
+end
+
+to task_power with n
+    set made to 1
+    repeat n times
+        set made to made * 256
+    end
+    return made
+end
+
+to task_start_linux with program, inputs
+    set ends to 8 bytes
+    if unix_pipe(ends) is not 0
+        fail with "couldn't start '" + program + "': no pipe for its output"
+    end
+    set reading to task_number(task_part(ends, 1))
+    set writing to task_number(task_part(ends, 5))
+    set all to list of program
+    for each input in inputs
+        add input to all
+    end
+    set pointers to (8 * length of all + 8) bytes # argv: each input as C has it, then NULL
+    set at to 0
+    for each input in all
+        set copied to unix_copy(input)
+        for each k from 1 to 6
+            set byte (at + k) of pointers to (shift copied right by (8 * (k - 1))) bit and 255
+        end
+        set at to at + 8
+    end
+    set made to unix_fork()
+    if made is 0 # the task, until it becomes the program
+        unix_dup2(writing, 1)
+        unix_dup2(writing, 2)
+        unix_close(reading)
+        unix_exec(program, pointers)
+        unix_exit(127)
+    end
+    unix_close(writing)
+    if made is less than 0
+        unix_close(reading)
+        fail with "couldn't start '" + program + "'"
+    end
+    return task_record(made, reading)
+end
+
+to task_part with eight, from
+    set made to 4 bytes
+    for each k from 1 to 4
+        set byte k of made to byte (from + k - 1) of eight
+    end
+    return made
+end

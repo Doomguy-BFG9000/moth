@@ -2350,3 +2350,37 @@ hold them to agreeing.
   going on, and `stop_serving`, on Windows and on Linux.
 - **Not yet.** More than one request at a time, keeping a connection open for
   the next, HTTPS (a proxy in front can do it), and WebSockets.
+
+## 52. Work in the background
+
+- **Why.** A window whose program is busy can't be drawn or clicked: a slow
+  download or a long sum freezes it. Moth's runtime has one stack, one
+  collector and one set of registers it keeps things in, so it can't run two
+  of its functions at once. Two programs can, so
+  [`tools/tasks.moth`](tools/tasks.moth) runs the slow part as another one.
+- **What a program writes.** `tasks's start(program, inputs)` starts another
+  program and gives back at once; `start_self(inputs)` starts this same program
+  again, which looks at its `arguments` to know it's to do the job, and says
+  what it found. `done(task)` takes what the task has said so far and says
+  whether it has ended, without waiting, so a window's timer can ask it;
+  `wait_for` waits; `output_of` is all it said, to its output and its error
+  output; `code_of` the number it ended with; `stop_task` ends it.
+- **On Windows.** CreateProcessW, with an inheritable pipe for the task's
+  output and error output, its reading end kept back, and no console window.
+  Its inputs are made one command line by the rules CommandLineToArgvW
+  undoes: one with a space, a tab or a `"` in it, or none at all, in quotes,
+  with a `"` and the backslashes before it escaped. PeekNamedPipe says what's
+  there without waiting for it.
+- **On Linux.** fork, then in the new process dup2 of the pipe to its output
+  and error output, and execvp, which finds the program on the PATH and keeps
+  the environment; `poll` with no wait says what's there, `waitpid` with
+  WNOHANG whether it has ended. A program that isn't there ends with 127, as
+  the shell's does; on Windows it's a mistake when it's started. The inputs
+  are C's strings from strdup, and argv is built from their addresses.
+- **Tested.** On Windows and Linux: the program started again to sum to a
+  million, asked while it ran, ending with 3; inputs with a space, quotes,
+  backslashes, an empty one, é and an emoji, as they were; a task that never
+  ends, stopped (1 on Windows, 137 for SIGKILL on Linux); and a program that
+  isn't there.
+- **Not yet.** Sending a task its input, threads of the program's own, and
+  telling its output from its error output.

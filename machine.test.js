@@ -904,7 +904,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     const exe = executable(dir, "p");
     const bytes = machine(source, { target, name: "p.moth", allow, files });
@@ -1094,6 +1094,63 @@ sqlite's close(people)
 set again to sqlite's open("people.db")
 say length of sqlite's query(again, "select * from people")`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ['1\n1\nSam is 20, 1.8 m, nothing\nAna Lee 😀 is 31, 1.65 m, hé\n[(dictionary where "n" is 1)]\nSQLite: no such table: nowhere\n2\n', "", 0]);
+});
+
+// tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote
+// and Linux's must not, asked while it runs, waited for, stopped, and a program that isn't there
+test("tools/tasks.moth runs programs in the background, and says what they said and ended with", { skip }, () => {
+  const ran = libraryRun(String.raw`use "tasks.moth" as tasks
+if length of arguments is at least 1
+    set what to item 1 of arguments
+    if what is "count"
+        set total to 0
+        for each i from 1 to 1000000
+            add i to total
+        end
+        say "total " + total
+        stop the program with 3
+    else if what is "echo"
+        set at to 0
+        for each word in arguments
+            add 1 to at
+            if at is greater than 1
+                say "[" + word + "]"
+            end
+        end
+        stop the program with 0
+    else if what is "forever"
+        repeat while yes
+            tasks's pause(50)
+        end
+    end
+end
+set job to tasks's start_self(list of "count")
+set checks to 0
+repeat while not tasks's done(job)
+    add 1 to checks
+    tasks's pause(5)
+end
+say tasks's output_of(job) + "ended with " + tasks's code_of(job) + ", checked " + (checks is greater than 0)
+set echoed to tasks's start_self(list of "echo", "a b", "say \"hi\"", "back\\slash\\", "", "é😀", "\\\"")
+tasks's wait_for(echoed)
+say tasks's output_of(echoed) + "ended with " + tasks's code_of(echoed)
+set endless to tasks's start_self(list of "forever")
+say "done yet: " + tasks's done(endless)
+tasks's stop_task(endless)
+say "stopped: " + tasks's done(endless) + ", " + tasks's code_of(endless)
+try
+    set missing to tasks's start("no-such-program-here", empty list)
+    tasks's wait_for(missing)
+    say "missing ended with " + tasks's code_of(missing)
+if it fails with why
+    say why
+end`);
+  const stopped = target === "windows" ? 1 : 137; // TerminateProcess's 1, or SIGKILL's 128 + 9
+  const missing = target === "windows" ? "couldn't start 'no-such-program-here': there's no such program, or it can't be run"
+    : "missing ended with 127"; // as a shell says for a program it can't find
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["total 500000500000\nended with 3, checked yes\n"
+    + '[a b]\n[say "hi"]\n[back\\slash\\]\n[]\n[é😀]\n[\\"]\nended with 0\n'
+    + `done yet: no\nstopped: yes, ${stopped}\n${missing}\n`, "", 0]);
 });
 
 // tools/server.moth: a web server of the program's, on Windows' and Linux's own sockets, asked by another program
