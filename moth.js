@@ -10,7 +10,10 @@ export { MothError, excerpt } from "./vm.js";
 
 // ---------- tokens ----------
 
-const TOKEN = /(\s+)|(#.*)|(\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\.|[^"\\\n])*")|([-+*/(),])/y;
+// Every control character counts as a space (as in Wirth's compilers), and text holds any character but a
+// control character other than tab (\n makes a new line). Rules this small let the compiler written in Moth,
+// which has no character codes, follow them exactly.
+const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),])/y;
 const ESCAPES = { n: "\n", t: "\t" };
 // symbols people type out of habit from other languages, and what Moth says instead
 const HINTS = {
@@ -37,7 +40,7 @@ function tokenize(src) {
     const m = TOKEN.exec(src);
     const where = { line, col: at - lineStart + 1 };
     if (!m) {
-      const c = src[at];
+      const c = String.fromCodePoint(src.codePointAt(at)); // a whole emoji, not half of one
       if (c === '"') fail(where, "this text is missing its closing quote");
       fail(where, `I don't understand '${c}'${Object.hasOwn(HINTS, c) ? ` (${HINTS[c]})` : ""}`);
     }
@@ -56,9 +59,11 @@ function tokenize(src) {
       : word
         ? ["word", word.toLowerCase()]
         : string
-          ? ["string", string.slice(1, -1).replace(/\\(.)/g, (_, c) => ESCAPES[c] ?? c)]
+          ? ["string", string.slice(1, -1).replace(/\\(.)/gs, (_, c) => ESCAPES[c] ?? c)]
           : [text, text];
-    tokens.push({ type, value, ...where, nl });
+    const token = { type, value, ...where, nl };
+    if (number) token.text = number; // as written, for messages and the JIT
+    tokens.push(token);
     nl = false;
   }
   tokens.push({ type: "eof", value: "", line, col: src.length - lineStart + 1, nl: true });
@@ -84,7 +89,7 @@ function parse(tokens) {
   const match = (type) => check(type) && tokens[pos++];
   const isWord = (w) => check("word") && tokens[pos].value === w;
   const word = (w) => isWord(w) && tokens[pos++];
-  const describe = (t) => (t.type === "eof" ? "the end of the code" : t.type === "string" ? `"${t.value}"` : `'${t.value}'`);
+  const describe = (t) => (t.type === "eof" ? "the end of the code" : t.type === "string" ? `"${t.value}"` : `'${t.text ?? t.value}'`);
   const expected = (what) => fail(peek(), `expected ${what} but found ${describe(peek())}`);
   const expectWord = (w) => word(w) || expected(`'${w}'`);
 

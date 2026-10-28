@@ -73,6 +73,11 @@ const PROGRAMS = [
   ['set a to record with x 1, inner record with y 2\nsay y of inner of a " " (a is record with x 1, inner record with y 2)', "2 yes"],
   ['set r to empty record\nset colour of r to "red"\nsay r " " (r is empty record)', '(record with colour "red") no'],
   ["set r to record with n 2\nset xs to list of 10, 20\nsay item (n of r) of xs \" \" item 1 of xs", "20 10"], // `n of r` needs brackets inside `item ... of`
+  // numbers: leading zeros are fine, and one too big for JavaScript is Infinity on both engines
+  ["say 007 + 00.5 \" \" 2.50", "7.5 2.5"],
+  [`say 1${"0".repeat(400)}`, "Infinity"],
+  // every control character is a space, and a comment runs to the end of the line
+  ["say 1\v+\f2\r\n# a comment say 3\nsay 4", "3\n4"],
 ];
 
 test("programs print what they should, on both engines", () => {
@@ -129,6 +134,9 @@ const ERRORS = [
   ["set x to empty thing", "line 1: expected 'list' or 'record' but found 'thing'"],
   ["say person.name", "line 1: I don't understand '.' (to get a field write 'name of person')"],
   ['say "before"\nfail with "your own message"', "line 2: your own message"],
+  ["set x to 5 007", "line 1: expected a new line but found '007'"], // numbers are shown as written
+  ['say "a\u0001b"', "line 1: this text is missing its closing quote"], // text can't hold control characters but tab
+  ["say 1 😀", "line 1: I don't understand '😀'"],
 ];
 
 test("mistakes give a clear message, on both engines", () => {
@@ -311,6 +319,9 @@ test("load() hands JavaScript what a program made, and fail with's value", () =>
   assert.equal(made.greet("JavaScript"), "Hello, JavaScript");
   assert.equal(made.version, 3);
   assert.equal(load("set __proto__ to 5").__proto__, 5);
+  // a call that fails deep inside leaves nothing behind: the next call starts from the bottom again
+  const { outer } = load("to outer with n\n    return inner(n)\nend\nto inner with n\n    fail with n\nend");
+  for (let i = 0; i < 2500; i++) assert.throws(() => outer(i), MothError);
   assert.throws(() => made.check(7), (err) => err instanceof MothError && err.value.problem === "bad" && err.value.value === 7);
 });
 

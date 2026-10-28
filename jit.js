@@ -114,8 +114,8 @@ class JsCompiler extends Scope {
 
   expr(e) {
     switch (e.kind) {
-      case "value":
-        return e.value === null ? "null" : q(e.value);
+      case "value": // a number goes in as written, less leading zeros (JavaScript reads 07 as octal): no floats to format
+        return e.value === null ? "null" : typeof e.value === "number" ? e.at.text.replace(/^0+(?=\d)/, "") : q(e.value);
       case "name":
         if (!this.resolve(e.name)) return this.undefined(e.name, e.at);
         return `(${this.ref(e.name)} === UNSET ? unset(${q(e.name)}, ${this.pos(e.at)}) : ${this.ref(e.name)})`;
@@ -162,7 +162,11 @@ const MAX_DEPTH = 2000;
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
 function helpers(ats, print, draw, maxSteps) {
-  const errors = ats.map((at) => (message, value) => fail(at, message, value));
+  // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
+  const errors = ats.map((at) => (message, value) => {
+    depth = 0;
+    fail(at, message, value);
+  });
   const turtle = new Turtle(draw);
   let steps = 0;
   let depth = 0; // a failed call needs no undoing: any error ends the run
@@ -172,7 +176,10 @@ function helpers(ats, print, draw, maxSteps) {
   const enter = (f, argc, name, k) => {
     checkInputs(f, argc, name, errors[k]);
     tick(k);
-    if (++depth > MAX_DEPTH) throw new TooDeep();
+    if (++depth > MAX_DEPTH) {
+      depth = 0;
+      throw new TooDeep();
+    }
   };
   const leave = (result) => (depth--, result);
   const ordered = (op, test) => (a, b, k) => (typeof a === "number" && typeof b === "number" ? test(a, b) : compare(op, a, b, errors[k]));

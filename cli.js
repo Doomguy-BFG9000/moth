@@ -113,7 +113,7 @@ function main([command, file, ...extra]) {
   }
   let source;
   try {
-    source = readFileSync(file, "utf8");
+    source = readFileSync(file, "utf8").replace(/^\uFEFF/, ""); // a byte-order mark belongs to the file, not the code
   } catch (err) {
     console.error(`moth: can't read ${file} (${err.code === "ENOENT" ? "no such file" : err.message})`);
     return 1;
