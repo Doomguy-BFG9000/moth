@@ -23,7 +23,8 @@ function svg(lines) {
   }
   const attr = (text) => String(text).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`); // colors are the program's own text
   const body = lines.map((l) => `  <line x1="${l.x1}" y1="${-l.y1}" x2="${l.x2}" y2="${-l.y2}" stroke="${attr(l.color)}" stroke-width="${l.width}"/>`);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${left} ${-top} ${right - left} ${top - bottom}" stroke-linecap="round">\n${body.join("\n")}\n</svg>\n`;
+  const box = [left, -top, right - left, top - bottom].map((n) => Math.round(n * 100) / 100);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${box.join(" ")}" stroke-linecap="round">\n${body.join("\n")}\n</svg>\n`;
 }
 
 // With a file name: file:line:col: reason, the way editors and terminals can jump to. Then the line, with a ^ under the spot.

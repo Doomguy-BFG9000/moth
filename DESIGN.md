@@ -67,7 +67,7 @@ but it had three problems:
 - A running program couldn't be stopped, so v1 cut every program off after 10
   million steps.
 
-v2 compiles each function to a flat array of numbers (35 opcodes, one of them only in debug builds) and runs it in
+v2 compiles each function to a flat array of numbers (36 opcodes, one of them only in debug builds) and runs it in
 one loop with its own value stack and call stack. Best of 5 runs on a Ryzen 5
 4600H with Node 24 (`npm run bench`):
 
@@ -160,11 +160,17 @@ can't inject anything into the page.
   each loop round. Normal builds don't contain it at all.
 - **A machine that can stop and carry on.** The run loop lives in a `Machine`
   that keeps its state (stacks, current function, instruction pointer) between
-  `run()` calls. `run()` stops when the program ends, at a `LINE` when asked, or
-  after a given number of loop rounds. Step uses the second; Continue uses the
-  third and schedules the next slice with `setTimeout`, so the page keeps
-  responding. The debugger runs on the page rather than in a worker, because a
-  worker can't be paused and asked questions.
+  `run()` calls. `run()` stops when the program ends, or at a `LINE` when asked.
+- **Time travel by recording, not by undoing.** Running backwards would mean
+  undoing every change a program made. Instead, `timeline()` runs the debug
+  build once and takes a snapshot at every `LINE`: the line, the calls, every
+  variable in view, and how many lines had been said and drawn by then. Going
+  back to any step just shows its snapshot, with the output and the drawing cut
+  to those counts, so Back costs the same as Step, and the slider can jump
+  anywhere. Recording stops at 10,000 steps, so a loop that never ends is cut
+  short instead of hanging the page. The 7,673 steps of the Tree example take
+  about 20 ms to record. The cost is memory: each snapshot keeps its variables
+  as text.
 - **Showing what a closure remembers.** Each compiled function keeps a link to
   the function it was made inside, and each variable array keeps a link to the
   array of the scope it was made in. The two chains nest the same way, so
@@ -179,3 +185,21 @@ can't inject anything into the page.
   array it saw created in the same function. Each `run()` now creates a fresh
   local stack and copies in whatever a paused run left, and loops are back to
   60 ms.
+
+## 9. Drawing
+
+- **The turtle lives in the VM.** One `TURTLE` instruction covers `move`,
+  `turn` and `pen`. The machine keeps the turtle's position, heading, pen color
+  and width, and for each line it draws calls a `draw` callback with the two
+  ends, the color and the width. The VM never touches a canvas, so the same
+  program can draw in the browser, write an SVG from `moth run`, or be counted
+  in a test.
+- **Ends are rounded to hundredths.** Otherwise `cos(90°)` leaves lines ending
+  at 6.1e-17, or even `-0`, which a test caught, instead of 0.
+- **The canvas zooms out, never in.** A drawing that reaches past the edge is
+  scaled to fit, and one that fits is drawn at actual size. During time travel
+  the scale comes from the whole recording, so the picture doesn't jump while
+  the slider moves.
+- **Colors are the program's own text.** The canvas ignores a name it doesn't
+  know and keeps the previous color. The SVG writer escapes the text before
+  putting it in an attribute, so a "color" can't break the file.

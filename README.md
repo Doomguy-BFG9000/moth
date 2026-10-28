@@ -4,21 +4,35 @@
 
 A programming language that reads like plain English. It's written from scratch
 in JavaScript with no libraries: a parser, a bytecode compiler, a virtual
-machine, a step-by-step debugger, and a `moth` command with its own shell.
+machine, turtle drawing, a debugger that can go backwards in time, and a `moth`
+command with its own shell.
 **[Try it in the playground](https://samyyy2423.github.io/moth/)**.
 
+<p>
+  <img src="docs/spiral.svg" alt="A colour spiral drawn by Moth" width="300">
+  <img src="docs/tree.svg" alt="A tree drawn by a Moth function that calls itself" width="300">
+</p>
+
+Both pictures were drawn by Moth programs (the Spiral and Tree examples) and
+saved with `moth run`. The tree is a function that calls itself:
+
 ```
-for each n from 1 to 15
-    if n is divisible by 15
-        say "FizzBuzz"
-    else if n is divisible by 3
-        say "Fizz"
-    else if n is divisible by 5
-        say "Buzz"
-    else
-        say n
+to branch with size
+    if size is less than 6
+        return
     end
+    move forward size
+    turn left 25
+    branch size * 0.72
+    turn right 50
+    branch size * 0.72
+    turn left 25
+    pen up
+    move back size
+    pen down
 end
+
+branch 105
 ```
 
 ## The language
@@ -66,6 +80,14 @@ to greet with person
     say "Hello, " person
 end
 greet "Sam"                         # or call it on its own line
+
+# drawing: the turtle starts in the middle, facing up, with its pen down
+move forward 100                    # or: move back 50
+turn right 90                       # or: turn left 45
+pen color "tomato"                  # any CSS color name
+pen width 3
+pen up                              # move without drawing
+pen down
 ```
 
 - Values: numbers, `"text"`, `yes`, `no`, `nothing`, and lists.
@@ -108,11 +130,13 @@ if x > 5
 nothing to install.
 
 - **Run** runs the code in a background thread, so **Stop** works even on a
-  loop that never ends.
-- **Debug** goes through the code one statement at a time. **Step** highlights
-  the line about to run and shows the calls in progress and every variable in
-  view, including the ones a closure remembers from the function it was made
-  in. **Continue** runs to the end.
+  loop that never ends. Drawings appear on a canvas as they're drawn.
+- **Debug** is a time-travel debugger. It records the whole run, then **Back**,
+  **Step**, **End** and a slider move through it in either direction. At every
+  step it highlights the line about to run and shows the calls in progress,
+  every variable in view (including the ones a closure remembers from the
+  function it was made in), and the output and drawing as they were at that
+  moment. Drag the slider and watch the tree grow and shrink.
 - **Share** puts the code into the link, so opening the link opens the program.
 - **Show bytecode** shows what the compiler turned the code into.
 
@@ -125,7 +149,7 @@ npm install -g github:samyyy2423/moth
 | Command | What it does |
 |---|---|
 | `moth` | Starts the Moth shell |
-| `moth run hello.moth` | Runs a program |
+| `moth run hello.moth` | Runs a program. If it draws, the drawing is saved as `hello.svg` |
 | `moth build hello.moth` | Compiles it to `hello.mjs`, which runs with plain `node` and doesn't need Moth installed |
 | `moth bytecode hello.moth` | Shows the instructions the compiler made |
 
@@ -181,7 +205,7 @@ The source goes through four stages:
    text, and symbols, each with its line and column.
 2. **Parser**: recursive descent builds a syntax tree. Every node keeps the token
    it came from, so errors can point at it.
-3. **Compiler**: turns each function into bytecode (35 opcodes). Each variable
+3. **Compiler**: turns each function into bytecode (36 opcodes). Each variable
    is resolved here, once, to a fixed slot.
 4. **Virtual machine**: one loop with its own value stack and call stack, so
    recursion isn't limited by JavaScript's stack.
@@ -216,9 +240,10 @@ on the old and new engines.
 - No dictionaries, `break`, text functions (like upper case or split), or imports.
 - These words are part of the language and can't be variable names:
   `set add say if else end repeat while for to return and or not is yes no
-  nothing list empty length item`.
+  nothing list empty length item move turn pen`.
 - Recursion goes up to 100,000 calls deep.
-- The playground shows the first 10,000 lines of output.
+- The playground shows the first 10,000 lines of output, and the debugger
+  records the first 10,000 steps.
 - In the shell, Ctrl+C stops a program that never ends by quitting the shell.
 
 ## Run it from the source
