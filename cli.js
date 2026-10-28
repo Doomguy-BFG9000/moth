@@ -8,6 +8,7 @@ import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, dis
 const USAGE = `usage:
   moth                        start the Moth shell
   moth run <file.moth>        run a program; if it draws, the drawing goes to <file>.svg
+                              (add --engine wasm or --engine vm to pick the engine; the JIT is the default)
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
@@ -180,6 +181,8 @@ function bootstrap() {
 }
 
 function main([command, file, ...extra]) {
+  let engine = "jit";
+  if (command === "run" && extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
   if (["help", "--help", "-h"].includes(command)) return console.log(USAGE);
@@ -197,7 +200,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, ...reading(file) });
+      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, ...reading(file) });
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));

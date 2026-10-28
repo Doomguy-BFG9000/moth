@@ -624,3 +624,50 @@ test("use reads other files once, on all three engines, and mistakes in them say
     assert.deepEqual(compiled((s) => moth(s, files), source), compiled((s) => compileToJs(s, reading), source), source);
   }
 });
+
+// ---------- reading handwriting ----------
+
+const here = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
+
+// Digits drawn differently from the shapes it learned from (other proportions, another start, a sloppy 8),
+// and smaller, off to one side, as the drawing pad would send them.
+const DRAWN = {
+  0: ["70,52 66,25 45,14 24,25 20,52 26,80 45,90 64,80 70,52 68,40"],
+  1: ["40,22 50,10 48,90"],
+  2: ["25,30 35,15 55,12 70,22 68,40 30,85 75,85"],
+  3: ["25,15 55,10 68,25 50,45 70,60 65,85 35,90 22,80"],
+  4: ["55,10 20,60 80,60", "60,35 58,95"],
+  5: ["70,12 35,12 32,45 55,42 70,58 62,85 30,85"],
+  6: ["65,12 35,40 30,75 45,90 65,80 62,60 40,58 32,70"],
+  7: ["20,15 80,15 45,90"],
+  8: ["55,15 35,20 38,40 60,55 65,75 50,90 30,80 35,60 60,42 62,25 55,15"],
+  9: ["65,35 50,15 30,25 35,45 60,42 65,30 62,90"],
+};
+const small = (stroke) => stroke.split(" ").map((p) => p.split(",").map(Number)).map(([x, y]) => `${Math.round(x * 0.6 + 25)},${Math.round(y * 0.6 + 15)}`).join(" ");
+
+test("the network written in Moth reads digits drawn on the pad, on all three engines", () => {
+  for (const engine of ENGINES) {
+    const answers = Object.values(DRAWN).map((strokes) => strokes.map(small).join(";"));
+    const said = [];
+    try {
+      run(here("handwriting.moth"), (line) => said.push(line), { engine, files: here, ask: () => answers.shift() ?? null });
+    } catch (err) {
+      assert.match(err.message, /the input ended/); // it asks for another until the answers run out
+    }
+    assert.deepEqual(said.map((line) => line.match(/it's an? (\d)/)?.[1]), Object.keys(DRAWN), engine);
+  }
+  for (const name of ["handwriting.moth", "digits-train.moth", "neural.moth"]) assert.deepEqual(check(here(name), { files: here }), [], name);
+});
+
+// The real training takes seconds; a tiny one checks that it learns something and writes a model Moth can read.
+test("digits-train.moth writes the model as Moth", () => {
+  const source = here("digits-train.moth").replace(/set per_digit to \d+/, "set per_digit to 5").replace(/set rounds to \d+/, "set rounds to 1");
+  const said = [];
+  run(source, (line) => said.push(line), { engine: "wasm", files: here });
+  assert.match(said[1], /^# round 1: \d+% right while learning$/);
+  const model = said.join("\n");
+  assert.ok(compileToJs(`${model}\nsay length of hidden_weights of model " " length of output_bias of model`));
+  const out = [];
+  run(`${model}\nsay length of hidden_weights of model " " length of output_bias of model`, (line) => out.push(line));
+  assert.deepEqual(out, ["8192 10"]);
+});

@@ -67,6 +67,8 @@
     .side pre { margin: 0; padding: 10px 12px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     #output { min-height: 3em; }
     .answer { display: flex; align-items: center; gap: 8px; margin: 6px 12px 10px; font: 13px/1.5 var(--mono); }
+    .answer.drawing { flex-direction: column; align-items: flex-start; }
+    .pad { width: 220px; height: 220px; background: #111; border: 1px solid #4a4a4f; border-radius: 6px; touch-action: none; cursor: crosshair; }
     .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #4a4a4f; border-radius: 5px; padding: 3px 8px; }
     #output.error { color: #f48771; }
     #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; }
@@ -396,20 +398,85 @@
       });
     }
 
+    // A box to type the answer in, or, for a question that starts with "Draw", a pad to draw it on. Each
+    // answer is { text, shown }: what the program gets, and what the output shows after the question.
     function waitForAnswer(question) {
       finish("Waiting for an answer");
-      const form = Object.assign(document.createElement("form"), { className: "answer" });
-      const input = Object.assign(document.createElement("input"), { autocomplete: "off" });
-      input.setAttribute("aria-label", question);
-      form.append(Object.assign(document.createElement("span"), { textContent: question }), input,
-        Object.assign(document.createElement("button"), { textContent: "Answer" }));
-      form.onsubmit = (e) => {
-        e.preventDefault();
-        answers.push(input.value);
-        startRun();
-      };
+      const drawing = /^\s*draw\b/i.test(question);
+      const form = Object.assign(document.createElement("form"), { className: drawing ? "answer drawing" : "answer" });
+      const label = Object.assign(document.createElement("span"), { textContent: question });
+      const answer = Object.assign(document.createElement("button"), { textContent: "Answer" });
+      if (drawing) {
+        const pad = drawingPad();
+        const clear = Object.assign(document.createElement("button"), { type: "button", textContent: "Clear", onclick: pad.clear });
+        const buttons = document.createElement("div");
+        buttons.append(answer, " ", clear);
+        form.append(label, pad.canvas, buttons);
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          answers.push({ text: pad.text(), shown: "(a drawing)" });
+          startRun();
+        };
+      } else {
+        const input = Object.assign(document.createElement("input"), { autocomplete: "off" });
+        input.setAttribute("aria-label", question);
+        form.append(label, input, answer);
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          answers.push({ text: input.value });
+          startRun();
+        };
+        queueMicrotask(() => input.focus());
+      }
       output.after(form);
-      input.focus();
+    }
+
+    // A canvas to draw on with a mouse, pen or finger. text() gives the strokes the way digits.moth reads
+    // them: strokes split by ";", points by spaces, each "x,y" from 0 to 100 with y going down.
+    function drawingPad() {
+      const canvas = Object.assign(document.createElement("canvas"), { className: "pad", width: 440, height: 440 });
+      canvas.setAttribute("aria-label", "Drawing pad");
+      const pen = canvas.getContext("2d");
+      Object.assign(pen, { lineWidth: 26, lineCap: "round", lineJoin: "round", strokeStyle: "#f5f5f5" });
+      const strokes = [];
+      const at = (e) => {
+        const box = canvas.getBoundingClientRect();
+        return { x: Math.round(((e.clientX - box.left) / box.width) * 100), y: Math.round(((e.clientY - box.top) / box.height) * 100) };
+      };
+      const line = (a, b) => {
+        pen.beginPath();
+        pen.moveTo(a.x * 4.4, a.y * 4.4);
+        pen.lineTo(b.x * 4.4, b.y * 4.4);
+        pen.stroke();
+      };
+      let down = false;
+      canvas.onpointerdown = (e) => {
+        try {
+          canvas.setPointerCapture(e.pointerId); // keep the stroke going if the pen leaves the pad
+        } catch {} // a pointer that can't be captured still draws
+        down = true;
+        const p = at(e);
+        strokes.push([p]);
+        line(p, p);
+      };
+      canvas.onpointermove = (e) => {
+        const stroke = strokes.at(-1);
+        if (!down || !stroke) return;
+        const p = at(e);
+        const last = stroke.at(-1);
+        if (Math.hypot(p.x - last.x, p.y - last.y) < 1.5) return; // keep the text short
+        stroke.push(p);
+        line(last, p);
+      };
+      canvas.onpointerup = canvas.onpointercancel = () => (down = false);
+      return {
+        canvas,
+        clear: () => {
+          strokes.length = 0;
+          pen.clearRect(0, 0, canvas.width, canvas.height);
+        },
+        text: () => strokes.map((s) => s.map((p) => `${p.x},${p.y}`).join(" ")).join(";"),
+      };
     }
 
     // The time-travel debugger: Debug records the whole run first (timeline() in moth.js), then Back, Step,
@@ -422,7 +489,7 @@
       output.classList.remove("error");
       render((drawing = []));
       try {
-        trace = timeline(code.value, { answers, files }); // the answers given when it last ran
+        trace = timeline(code.value, { answers: answers.map((a) => a.text), files }); // the answers given when it last ran
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
         output.classList.add("error");
@@ -517,10 +584,11 @@
     // at the end that uses it.
     const FILES = {
       "Neural network": ["neural.moth", ""],
+      "Handwriting": ["handwriting.moth", ""],
       "Moth's own compiler": ["compiler.moth", `\n\n# The compiler above, compiling a line of Moth to JavaScript:\nsay js of compile("say 1 + 2")\n`],
     };
     const [first, second, ...rest] = Object.keys(examples);
-    picker.append(...[first, second, "Neural network", ...rest, "Moth's own compiler"].map((name) => new Option(name)));
+    picker.append(...[first, second, "Neural network", "Handwriting", ...rest, "Moth's own compiler"].map((name) => new Option(name)));
     picker.onchange = async () => {
       const name = picker.value;
       let text;

@@ -1,0 +1,143 @@
+# Teaches the digit reader in digits.moth, from digits it draws itself, and says what it learned as Moth:
+#
+#     moth run digits-train.moth --engine wasm > digits-model.moth
+#
+# Its progress comes out as lines starting with #, so the whole output is a Moth file.
+
+use "math.moth"
+use "digits.moth"
+use "digit-shapes.moth"
+
+set per_digit to 300 # pictures of each digit to learn from
+set rounds to 10 # times through all of them
+set first_rate to 0.06 # how big a step each correction takes, at first
+
+# a picture to learn from: one way of writing `digit`, bent at random, drawn with a random pen
+to example with digit
+    set way to whole(random() * ways_of(digit)) + 1
+    set drawn to picture_of(bent(digit, way), between(0.8, 2.2))
+    return record with digit digit, pixels drawn, inked inked_of(drawn)
+end
+
+to examples with count
+    set made to empty list
+    for each k from 1 to count
+        add example(k - (whole((k - 1) / 10) * 10) - 1) to made # 0 to 9, over and over
+    end
+    return made
+end
+
+to random_weights with count, size
+    set made to empty list
+    repeat count times
+        add between(0 - size, size) to made
+    end
+    return made
+end
+
+to zeros with count
+    set made to empty list
+    repeat count times
+        add 0 to made
+    end
+    return made
+end
+
+# 1 to count in a random order (Fisher and Yates)
+to shuffled with count
+    set order to empty list
+    for each k from 1 to count
+        add k to order
+    end
+    for each k from 1 to count - 1
+        set other to k + whole(random() * (count - k + 1))
+        set kept to item k of order
+        set item k of order to item other of order
+        set item other of order to kept
+    end
+    return order
+end
+
+# One step of learning from one picture: work out the chances, then move every weight a little against
+# its share of the error (backpropagation). Says whether the guess was right before the step.
+to learn with weights, ex, rate
+    set hidden to hidden_from(pixels of ex, inked of ex, weights)
+    set chances to chances_for_hidden(hidden, weights)
+    set right to likeliest(chances) is digit of ex
+    set ow to output_weights of weights
+    set ob to output_bias of weights
+    set back to zeros(hidden_size) # how much each hidden neuron was to blame
+    for each d from 1 to 10
+        set g to item d of chances # the error for this digit: its chance, less 1 for the right one
+        if d - 1 is digit of ex
+            set g to g - 1
+        end
+        set row to (d - 1) * hidden_size
+        for each j from 1 to hidden_size
+            set item j of back to item j of back + g * item (row + j) of ow
+            set item (row + j) of ow to item (row + j) of ow - rate * g * item j of hidden
+        end
+        set item d of ob to item d of ob - rate * g
+    end
+    set hw to hidden_weights of weights
+    set hb to hidden_bias of weights
+    for each j from 1 to hidden_size
+        if item j of hidden is greater than 0 # a neuron that didn't fire changed nothing
+            set g to item j of back
+            set item j of hb to item j of hb - rate * g
+            set row to (j - 1) * side * side
+            for each i in inked of ex
+                set item (row + i) of hw to item (row + i) of hw - rate * g * item i of pixels of ex
+            end
+        end
+    end
+    return right
+end
+
+# how many of the pictures it reads right, as a percentage
+to score with weights, pictures
+    set right to 0
+    for each ex in pictures
+        if likeliest(chances_for_hidden(hidden_from(pixels of ex, inked of ex, weights), weights)) is digit of ex
+            add 1 to right
+        end
+    end
+    return whole(right / length of pictures * 100 + 0.5)
+end
+
+# a list as a line of Moth, each number to 4 decimals
+to say_list with label, numbers
+    set text to ""
+    for each v in numbers
+        if text is not ""
+            add ", " to text
+        end
+        add floor(v * 10000 + 0.5) / 10000 to text
+    end
+    say "set " label " to list of " text
+end
+
+to teach
+    say "# Weights for the digit reader in digits.moth, learned by digits-train.moth."
+    set pictures to examples(per_digit * 10)
+    set weights to record with hidden_weights random_weights(side * side * hidden_size, sqrt(6 / (side * side + hidden_size))),
+        hidden_bias zeros(hidden_size), output_weights random_weights(10 * hidden_size, sqrt(6 / (hidden_size + 10))), output_bias zeros(10)
+    for each round from 1 to rounds
+        set right to 0
+        set rate to first_rate / (1 + (round - 1) / 3)
+        for each k in shuffled(length of pictures)
+            if learn(weights, item k of pictures, rate)
+                add 1 to right
+            end
+        end
+        say "# round " round ": " whole(right / length of pictures * 100 + 0.5) "% right while learning"
+    end
+    say "# " score(weights, examples(500)) "% right on 500 new drawings it hadn't seen"
+    say_list("model_hidden_weights", hidden_weights of weights)
+    say_list("model_hidden_bias", hidden_bias of weights)
+    say_list("model_output_weights", output_weights of weights)
+    say_list("model_output_bias", output_bias of weights)
+    say "set model to record with hidden_weights model_hidden_weights, hidden_bias model_hidden_bias, output_weights model_output_weights, output_bias model_output_bias"
+end
+
+teach

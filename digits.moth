@@ -1,0 +1,232 @@
+# Reading a handwritten digit, written in Moth: a drawing (pen strokes) becomes a 16 by 16 picture, and a
+# small neural network says how likely each digit is. The network's weights come from digits-model.moth,
+# which digits-train.moth makes by learning from digits it draws itself (digit-shapes.moth).
+#
+# A drawing is text: strokes split by ";", points by spaces, and each point is "x,y" with y going down,
+# like "50,5 50,95" for a 1, or "16,6 84,6 40,96;36,52 72,52" for a 7 with a bar across.
+
+use "math.moth"
+
+set side to 16 # the picture is side by side pixels
+set hidden_size to 32 # neurons between the picture and the ten answers
+
+# ---------- drawings ----------
+
+# the strokes of a drawing: a list of strokes, each a list of points, each a record with x and y
+to strokes_of with drawing
+    set strokes to empty list
+    for each stroke_text in split drawing by ";"
+        set stroke to empty list
+        for each point_text in split stroke_text by " "
+            if point_text is not ""
+                set xy to split point_text by ","
+                add record with x number of item 1 of xy, y number of item 2 of xy to stroke
+            end
+        end
+        if length of stroke is greater than 0
+            add stroke to strokes
+        end
+    end
+    return strokes
+end
+
+# ---------- pictures ----------
+
+# How dark a pixel is, by its distance d from the middle of a pen line `thickness` wide: dark inside it,
+# fading out over one pixel at its edge.
+to ink with d, thickness
+    set darkness to 1 - (d - thickness / 2)
+    if darkness is greater than 1
+        return 1
+    end
+    if darkness is less than 0
+        return 0
+    end
+    return darkness
+end
+
+# the distance from (px, py) to the line from a to b
+to distance_to_line with px, py, a, b
+    set dx to x of b - x of a
+    set dy to y of b - y of a
+    set along to 0
+    if dx * dx + dy * dy is greater than 0
+        set along to ((px - x of a) * dx + (py - y of a) * dy) / (dx * dx + dy * dy)
+    end
+    if along is less than 0
+        set along to 0
+    end
+    if along is greater than 1
+        set along to 1
+    end
+    set gx to px - (x of a + along * dx)
+    set gy to py - (y of a + along * dy)
+    return sqrt(gx * gx + gy * gy)
+end
+
+# The strokes, moved and scaled to fill the middle 12 by 12 pixels (keeping their shape, so a 1 stays
+# thin), then drawn with a pen `thickness` pixels wide. A list of side * side numbers from 0 (blank) to 1.
+to picture_of with strokes, thickness
+    set low_x to 1000000
+    set high_x to -1000000
+    set low_y to 1000000
+    set high_y to -1000000
+    for each stroke in strokes
+        for each p in stroke
+            if x of p is less than low_x
+                set low_x to x of p
+            end
+            if x of p is greater than high_x
+                set high_x to x of p
+            end
+            if y of p is less than low_y
+                set low_y to y of p
+            end
+            if y of p is greater than high_y
+                set high_y to y of p
+            end
+        end
+    end
+    set size to high_x - low_x
+    if high_y - low_y is greater than size
+        set size to high_y - low_y
+    end
+    set scale to 1
+    if size is greater than 0
+        set scale to 12 / size
+    end
+    set pixels to empty list
+    repeat side * side times
+        add 0 to pixels
+    end
+    for each stroke in strokes
+        set placed to empty list
+        for each p in stroke
+            add record with x (x of p - (low_x + high_x) / 2) * scale + side / 2, y (y of p - (low_y + high_y) / 2) * scale + side / 2 to placed
+        end
+        set previous to item 1 of placed
+        for each p in placed # each piece of the line, from the point before (a dot, for a stroke of one point)
+            draw_piece(pixels, previous, p, thickness)
+            set previous to p
+        end
+    end
+    return pixels
+end
+
+# darkens the pixels near one piece of a line, keeping the darkest value each pixel gets
+to draw_piece with pixels, a, b, thickness
+    set reach to thickness / 2 + 1
+    set left to floor(lowest(x of a, x of b) - reach)
+    set right to floor(highest(x of a, x of b) + reach)
+    set top to floor(lowest(y of a, y of b) - reach)
+    set bottom to floor(highest(y of a, y of b) + reach)
+    for each row from highest(top, 0) to lowest(bottom, side - 1)
+        for each column from highest(left, 0) to lowest(right, side - 1)
+            set darkness to ink(distance_to_line(column + 0.5, row + 0.5, a, b), thickness)
+            set spot to row * side + column + 1
+            if darkness is greater than item spot of pixels
+                set item spot of pixels to darkness
+            end
+        end
+    end
+end
+
+to lowest with a, b
+    if a is less than b
+        return a
+    end
+    return b
+end
+
+to highest with a, b
+    if a is greater than b
+        return a
+    end
+    return b
+end
+
+# ---------- the network ----------
+
+# The ten digits' chances for a picture: 256 pixels into hidden_size neurons (ReLU), into ten scores, made
+# into chances that add up to 1 (softmax). `weights` is a record of the four lists digits-train.moth learns.
+to chances_for with pixels, weights
+    return chances_for_hidden(hidden_layer(pixels, weights), weights)
+end
+
+# the same, from the hidden neurons
+to chances_for_hidden with hidden, weights
+    set scores to empty list
+    for each d from 1 to 10
+        set total to item d of output_bias of weights
+        set row to (d - 1) * hidden_size
+        for each j from 1 to hidden_size
+            set total to total + item (row + j) of output_weights of weights * item j of hidden
+        end
+        add total to scores
+    end
+    return softmax(scores)
+end
+
+to hidden_layer with pixels, weights
+    return hidden_from(pixels, inked_of(pixels), weights)
+end
+
+# the pixels with any ink, by number: only these count, which is most of the speed
+to inked_of with pixels
+    set inked to empty list
+    for each i from 1 to side * side
+        if item i of pixels is greater than 0
+            add i to inked
+        end
+    end
+    return inked
+end
+
+# the hidden neurons for a picture
+to hidden_from with pixels, inked, weights
+    set hidden to empty list
+    for each j from 1 to hidden_size
+        set total to item j of hidden_bias of weights
+        set row to (j - 1) * side * side
+        for each i in inked
+            set total to total + item (row + i) of hidden_weights of weights * item i of pixels
+        end
+        if total is less than 0
+            set total to 0
+        end
+        add total to hidden
+    end
+    return hidden
+end
+
+to softmax with scores
+    set top to item 1 of scores
+    for each s in scores
+        if s is greater than top
+            set top to s
+        end
+    end
+    set raised to empty list
+    set sum to 0
+    for each s in scores
+        set e to exp(s - top)
+        add e to raised
+        add e to sum
+    end
+    set chances to empty list
+    for each e in raised
+        add e / sum to chances
+    end
+    return chances
+end
+
+# the most likely digit, from a list of ten chances
+to likeliest with chances
+    set best to 1
+    for each d from 2 to 10
+        if item d of chances is greater than item best of chances
+            set best to d
+        end
+    end
+    return best - 1
+end

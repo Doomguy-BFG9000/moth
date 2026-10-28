@@ -74,3 +74,52 @@ end
 to rounded with x
     return whole(x * 1000 + 0.5) / 1000
 end
+
+# ---------- powers and roots ----------
+
+set ln2 to 0.6931471805599453
+
+# e to the power x. With x = k·ln 2 + r, where r is small, e^x = 2^k · e^r, and 20 terms of e^r's
+# series are plenty.
+to exp with x
+    set halvings to floor(x / ln2 + 0.5)
+    set r to x - halvings * ln2
+    set term to 1
+    set total to 1
+    for each n from 1 to 20
+        set term to term * r / n
+        add term to total
+    end
+    repeat while halvings is greater than 0
+        set total to total * 2
+        set halvings to halvings - 1
+    end
+    repeat while halvings is less than 0
+        set total to total / 2
+        set halvings to halvings + 1
+    end
+    return total
+end
+
+# The square root, by Newton's method: average a guess with x / guess until it settles.
+to sqrt with x
+    if x is less than 0
+        fail with "can't take the square root of a number below 0"
+    end
+    if x is 0
+        return 0
+    end
+    set guess to x
+    if guess is less than 1
+        set guess to 1
+    end
+    repeat 60 times
+        set guess to (guess + x / guess) / 2
+    end
+    return guess
+end
+
+# a random number from low up to high
+to between with low, high
+    return low + random() * (high - low)
+end

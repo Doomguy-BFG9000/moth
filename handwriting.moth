@@ -1,0 +1,35 @@
+# Draw a digit in the box under the output, and a neural network written in Moth reads it. It learned from
+# digits it drew itself: see digits-train.moth, which made digits-model.moth.
+use "digits.moth"
+use "digits-model.moth"
+
+to read_digit with drawing
+    set strokes to strokes_of(drawing)
+    if length of strokes is 0
+        say "That's empty: draw a digit with the mouse, then press Answer."
+        return
+    end
+    set chances to chances_for(picture_of(strokes, 1.4), model)
+    set best to likeliest(chances)
+    set sure to whole(item (best + 1) of chances * 100 + 0.5)
+    set item (best + 1) of chances to 0 # so the next likeliest is the runner-up
+    set next to likeliest(chances)
+    set maybe to whole(item (next + 1) of chances * 100 + 0.5)
+    if maybe is at least 5
+        say "I think it's " a(best) " (" sure "% sure; maybe " a(next) ", " maybe "%)"
+    else
+        say "I think it's " a(best) " (" sure "% sure)"
+    end
+end
+
+# "a 7", but "an 8"
+to a with digit
+    if digit is 8
+        return "an 8"
+    end
+    return "a " + digit
+end
+
+repeat while yes
+    read_digit(ask "Draw a digit (0 to 9):")
+end

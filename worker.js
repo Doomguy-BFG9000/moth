@@ -31,8 +31,9 @@ onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
   let asked = 0;
   const ask = (question) => {
     if (asked < answers.length) {
-      say(`${question} ${answers[asked]}`); // the question and its answer, as a line of output
-      return answers[asked++];
+      const { text, shown = text } = answers[asked++]; // a drawing is shown as "(a drawing)", not its points
+      say(`${question} ${shown}`); // the question and its answer, as a line of output
+      return text;
     }
     flush();
     postMessage({ question });
