@@ -5,64 +5,141 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moth playground</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
-    body { max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }
-    h1 { margin-bottom: 0; }
-    .bar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 1rem 0 0.5rem; }
-    textarea, pre { box-sizing: border-box; width: 100%; padding: 0.75rem; border: 1px solid #8888; border-radius: 6px; font: 0.95rem/1.5 ui-monospace, Consolas, monospace; tab-size: 2; }
-    textarea { height: 20rem; resize: vertical; }
-    pre { min-height: 5rem; margin: 0; white-space: pre-wrap; }
-    pre.error { border-color: #d33; }
-    button, select { font: inherit; padding: 0.3rem 0.8rem; }
-    #lines { position: relative; box-sizing: border-box; height: 20rem; overflow: auto; margin: 0; padding: 0.75rem 0.75rem 0.75rem 3.5rem; border: 1px solid #8888; border-radius: 6px; font: 0.95rem/1.5 ui-monospace, Consolas, monospace; }
-    #lines li { white-space: pre; min-height: 1.5em; }
-    #lines li::marker { color: #888; }
-    #lines li.current { background: #fc03; outline: 1px solid #fc0; }
-    #canvas { display: block; width: min(100%, 500px); aspect-ratio: 1; border: 1px solid #8888; border-radius: 6px; }
+    :root {
+      color-scheme: dark;
+      --bg: #1e1e1e; --panel: #252526; --raised: #333337; --border: #3c3c3c;
+      --text: #d4d4d4; --dim: #8b8b8b; --accent: #4f8ff7;
+      --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; grid-template-rows: auto 1fr auto; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+    [hidden] { display: none !important; }
+
+    /* toolbar */
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .logo { display: flex; align-items: baseline; gap: 10px; margin-right: 10px; }
+    .logo h1 { margin: 0; font-size: 19px; letter-spacing: 0.02em; }
+    .logo h1 span { color: var(--accent); }
+    .logo p { margin: 0; color: var(--dim); font-size: 12.5px; }
+    .spacer { flex: 1; }
+    button, select { font: inherit; font-size: 13px; color: var(--text); background: var(--raised); border: 1px solid #4a4a4f; border-radius: 5px; padding: 4px 12px; cursor: pointer; }
+    button:hover:not(:disabled), select:hover { background: #3e3e43; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    #run { background: #2ea043; border-color: #2ea043; color: #fff; font-weight: 600; }
+    #run:hover { background: #3fb950; }
+    #debug { background: #9e6a03; border-color: #9e6a03; color: #fff; font-weight: 600; }
+    #debug:hover { background: #bb8009; }
+    .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); cursor: pointer; }
+    .toolbar a { color: var(--dim); font-size: 13px; text-decoration: none; }
+    .toolbar a:hover { color: var(--text); }
+
+    /* the two panes */
+    .workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-height: 0; }
+    .pane { display: flex; flex-direction: column; min-height: 0; }
+    .pane + .pane { border-left: 1px solid var(--border); overflow: auto; }
+    .title { padding: 5px 12px; background: var(--panel); border-bottom: 1px solid var(--border); color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    /* editor: line numbers, plus a coloured copy of the code under a see-through textarea */
+    .editor { display: flex; flex: 1; min-height: 0; }
+    .gutter { margin: 0; padding: 12px 10px 12px 14px; min-width: 2ch; overflow: hidden; color: #5c5c5c; text-align: right; user-select: none; }
+    .code { position: relative; flex: 1; }
+    .code textarea, .code pre { position: absolute; inset: 0; box-sizing: border-box; margin: 0; padding: 12px 12px 12px 4px; border: 0; overflow: auto; white-space: pre; tab-size: 4; }
+    .code textarea { color: transparent; background: transparent; caret-color: #fff; resize: none; outline: none; }
+    .code textarea::selection { background: #264f78; }
+    .code pre { pointer-events: none; }
+    .gutter, .code textarea, .code pre, #lines { font: 14px/1.6 var(--mono); }
+    .k { color: #569cd6; } .s { color: #ce9178; } .n { color: #b5cea8; } .c { color: #6a9955; font-style: italic; }
+
+    /* the code while debugging: numbered lines, the next one highlighted */
+    #lines { position: relative; flex: 1; margin: 0; padding: 12px 12px 12px 48px; overflow: auto; }
+    #lines li { min-height: 1.6em; padding-left: 6px; white-space: pre; border-left: 2px solid transparent; }
+    #lines li::marker { color: #5c5c5c; }
+    #lines li.current { background: #ffcc0021; border-left-color: #ffcc00; }
+
+    /* right pane */
+    .side pre { margin: 0; padding: 10px 12px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    #output { min-height: 3em; }
+    #output.error { color: #f48771; }
+    #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; }
+    #bytecode { color: #a9a9a9; }
+
+    /* status bar: blue normally, amber while debugging */
+    .status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 26px; padding: 3px 12px; background: #007acc; color: #fff; font-size: 12.5px; }
+    .status.debugging { background: #9e6a03; }
+    .status button { padding: 1px 10px; font-size: 12px; color: #fff; background: #ffffff26; border-color: #ffffff40; }
+    .status button:hover:not(:disabled) { background: #ffffff40; }
+    #timeline { flex: 1; min-width: 120px; accent-color: #fff; }
+    .hint { margin-left: auto; opacity: 0.8; }
+
+    @media (max-width: 800px) {
+      body { height: auto; }
+      .workspace { grid-template-columns: 1fr; }
+      .pane:first-child { height: 55vh; }
+      .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
+    }
   </style>
 </head>
 <body>
-  <h1>Moth</h1>
-  <p>A small programming language that reads like plain English. Pick an example or write your own, then press <strong>Run</strong> or Ctrl+Enter. <strong>Debug</strong> goes through it one line at a time, backwards too.</p>
-
-  <div class="bar">
-    <label>Example <select id="example"></select></label>
-    <button id="run" type="button">Run</button>
-    <button id="debug" type="button">Debug</button>
-    <button id="back" type="button" hidden>Back</button>
-    <button id="step" type="button" hidden>Step</button>
-    <button id="end" type="button" hidden>End</button>
-    <button id="stop" type="button" disabled>Stop</button>
-    <button id="share" type="button">Share</button>
-    <label><input id="show-bytecode" type="checkbox"> Show bytecode</label>
-    <span id="status" role="status"></span>
-  </div>
-  <label for="code">Code</label>
-  <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
-  <ol id="lines" hidden aria-label="The code being debugged; the highlighted line runs next"></ol>
-
-  <section id="debug-panel" hidden>
-    <h2>Debugger</h2>
-    <div class="bar">
-      <input id="timeline" type="range" min="0" value="0" aria-label="Move through the run" style="flex: 1">
-      <span id="position"></span>
+  <header class="toolbar">
+    <div class="logo">
+      <h1><span>●</span> Moth</h1>
+      <p>a language that reads like English</p>
     </div>
-    <pre id="variables"></pre>
-  </section>
+    <select id="example" aria-label="Example"></select>
+    <button id="run" type="button" title="Ctrl+Enter">▶ Run</button>
+    <button id="debug" type="button" title="Go through the program a step at a time, backwards too">⏯ Debug</button>
+    <button id="stop" type="button" disabled>■ Stop</button>
+    <button id="share" type="button">⤴ Share</button>
+    <label class="toggle"><input id="show-bytecode" type="checkbox"> Bytecode</label>
+    <span class="spacer"></span>
+    <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
+  </header>
 
-  <section id="drawing-view" hidden>
-    <h2>Drawing</h2>
-    <canvas id="canvas" width="500" height="500" role="img" aria-label="What the program drew"></canvas>
-  </section>
+  <main class="workspace">
+    <section class="pane" aria-label="Code">
+      <div class="title">Code</div>
+      <div class="editor" id="editor">
+        <pre class="gutter" id="gutter" aria-hidden="true"></pre>
+        <div class="code">
+          <pre id="highlight" aria-hidden="true"></pre>
+          <textarea id="code" aria-label="Code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
+        </div>
+      </div>
+      <ol id="lines" hidden aria-label="The code being debugged; the highlighted line runs next"></ol>
+    </section>
 
-  <h2>Output</h2>
-  <pre id="output" aria-live="polite"></pre>
+    <section class="pane side" aria-label="Results">
+      <div id="drawing-view" hidden>
+        <div class="title">Drawing</div>
+        <canvas id="canvas" width="500" height="500" role="img" aria-label="What the program drew"></canvas>
+      </div>
+      <div id="debug-panel" hidden>
+        <div class="title">Variables</div>
+        <pre id="variables"></pre>
+      </div>
+      <div>
+        <div class="title">Output</div>
+        <pre id="output" aria-live="polite"></pre>
+      </div>
+      <div id="bytecode-view" hidden>
+        <div class="title">Bytecode · what the compiler made, which the virtual machine runs</div>
+        <pre id="bytecode"></pre>
+      </div>
+    </section>
+  </main>
 
-  <section id="bytecode-view" hidden>
-    <h2>Bytecode</h2>
-    <p>What the compiler turned your code into. The virtual machine runs these instructions.</p>
-    <pre id="bytecode"></pre>
-  </section>
+  <footer class="status" id="statusbar">
+    <span id="debug-controls" hidden style="display: contents">
+      <button id="back" type="button">◀ Back</button>
+      <button id="step" type="button">Step ▶</button>
+      <button id="end" type="button">End ⏭</button>
+      <input id="timeline" type="range" min="0" value="0" aria-label="Move through the run">
+      <span id="position"></span>
+    </span>
+    <span id="status" role="status"></span>
+    <span class="hint" id="hint">Ctrl+Enter runs · Debug goes backwards too</span>
+  </footer>
 
   <script type="module">
     import examples from "./examples.js";
@@ -74,6 +151,33 @@
     let trace = null; // the recorded run being debugged
     let at = 0; // which of its steps is showing
     let drawing = []; // every line the program has drawn
+
+    // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
+    // because the code can come from someone else's share link.
+    const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
+      + "move turn pen times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
+    const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    function highlight(source) {
+      return source.replace(/(#.*)|("(?:\\.|[^"\\\n])*"?)|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)|([^#"\w]+)/g, (all, comment, text, number, word, other) => {
+        if (comment) return `<span class="c">${escape(comment)}</span>`;
+        if (text) return `<span class="s">${escape(text)}</span>`;
+        if (number) return `<span class="n">${number}</span>`;
+        if (word) return WORDS.has(word.toLowerCase()) ? `<span class="k">${word}</span>` : word;
+        return escape(other);
+      });
+    }
+
+    function refreshEditor() {
+      $("highlight").innerHTML = highlight(code.value) + "\n"; // the extra line keeps its height in step with the textarea
+      $("gutter").textContent = code.value.split("\n").map((_, n) => n + 1).join("\n");
+      syncScroll();
+    }
+    function syncScroll() {
+      $("highlight").scrollTop = $("gutter").scrollTop = code.scrollTop;
+      $("highlight").scrollLeft = code.scrollLeft;
+    }
+    code.oninput = refreshEditor;
+    code.onscroll = syncScroll;
 
     // Draws `lines` with Moth's (0, 0) in the middle and y going up, zoomed out if `fitTo` reaches past the edge.
     function render(lines = drawing, fitTo = lines) {
@@ -118,7 +222,7 @@
         $("bytecode").textContent = disassemble(compile(code.value));
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
-        $("bytecode").textContent = "(fix the error above to see the bytecode)";
+        $("bytecode").textContent = "(fix the mistake in the code to see the bytecode)";
       }
     }
 
@@ -163,15 +267,17 @@
         output.classList.add("error");
         return output.append(`Error: ${err.message}\n${excerpt(code.value, err)}`); // it didn't compile
       }
-      $("lines").replaceChildren(...code.value.split("\n").map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+      $("lines").replaceChildren(...code.value.split("\n").map((text) => Object.assign(document.createElement("li"), { innerHTML: highlight(text) })));
       $("timeline").max = trace.steps.length - 1;
       setDebugging(true);
       show(0);
     }
 
     function setDebugging(on) {
-      code.hidden = on;
-      for (const id of ["lines", "debug-panel", "back", "step", "end"]) $(id).hidden = !on;
+      $("editor").hidden = on;
+      for (const id of ["lines", "debug-panel", "debug-controls"]) $(id).hidden = !on;
+      $("hint").hidden = on;
+      $("statusbar").classList.toggle("debugging", on);
       stopButton.disabled = !on;
       if (on) $("step").focus();
     }
@@ -203,7 +309,7 @@
       if (s.error) output.append(`Error: ${s.error.message}\n${excerpt(code.value, s.error)}`);
       if (s.done && !s.said && !trace.drawn.length) output.append("(no output)");
       render(trace.drawn.slice(0, s.drawn), trace.drawn); // fit to the whole drawing, so the view doesn't jump
-      status.textContent = s.error ? `Stopped by a mistake on line ${line}.` : s.done ? "Finished." : `Before line ${line}.`;
+      status.textContent = s.error ? `Stopped by a mistake on line ${line}` : s.done ? "Finished" : `Before line ${line}`;
 
       const list = (vars) => (vars.length ? vars.map(([name, value]) => `  ${name} = ${value}`).join("\n") : "  (nothing yet)");
       const calls = []; // "branch ×8" rather than eight of them, when a function calls itself
@@ -230,7 +336,7 @@
     stopButton.onclick = () => {
       if (trace) return stopDebugging("");
       output.append("(stopped)");
-      finish("Stopped.");
+      finish("Stopped");
     };
 
     // The code travels in the link's #fragment, which browsers never send to a server.
@@ -238,9 +344,9 @@
       history.replaceState(null, "", `#code=${encodeURIComponent(code.value)}`);
       try {
         await navigator.clipboard.writeText(location.href);
-        status.textContent = "Link copied.";
+        status.textContent = "Link copied";
       } catch {
-        status.textContent = "Copy the link from the address bar.";
+        status.textContent = "Copy the link from the address bar";
       }
     };
     $("show-bytecode").onchange = showBytecode;
@@ -248,9 +354,10 @@
     picker.append(...Object.keys(examples).map((name) => new Option(name)));
     picker.onchange = () => {
       code.value = examples[picker.value];
+      refreshEditor();
       runCode();
     };
-    document.getElementById("run").onclick = runCode;
+    $("run").onclick = runCode;
     code.onkeydown = (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -265,6 +372,7 @@
     else {
       code.value = shared;
       picker.selectedIndex = -1;
+      refreshEditor();
       runCode();
     }
   </script>

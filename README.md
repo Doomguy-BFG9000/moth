@@ -129,6 +129,8 @@ if x > 5
 [The playground](https://samyyy2423.github.io/moth/) runs in any browser, with
 nothing to install.
 
+![The playground's time-travel debugger, halfway through drawing the tree: line 16 highlighted, the tree half drawn, and the variables of the 8 nested calls](docs/debugger.png)
+
 - **Run** runs the code in a background thread, so **Stop** works even on a
   loop that never ends. Drawings appear on a canvas as they're drawn.
 - **Debug** is a time-travel debugger. It records the whole run, then **Back**,
