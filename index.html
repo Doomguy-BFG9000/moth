@@ -266,12 +266,19 @@
       finish("");
     }
 
-    // compiler.moth, Moth's compiler written in Moth, fetched the first time it's needed
-    let compilerSource = null;
-    const loadCompiler = async () => (compilerSource ??= await (await fetch("compiler.moth")).text());
-    let mothCompiled = null; // compiler.moth itself, compiled by the JIT
+    // Moth programs kept in files of their own (compiler.moth, neural.moth), fetched the first time they're needed
+    const files = new Map();
+    async function fetchText(file) {
+      if (!files.has(file)) {
+        const response = await fetch(file);
+        if (!response.ok) throw new Error(`${file}: ${response.status} ${response.statusText}`);
+        files.set(file, await response.text());
+      }
+      return files.get(file);
+    }
+    let mothCompiled = null; // compiler.moth, Moth's compiler written in Moth, compiled by the JIT
     async function compileWithMoth(source) {
-      mothCompiled ??= mothCompiler(await loadCompiler());
+      mothCompiled ??= mothCompiler(await fetchText("compiler.moth"));
       return mothCompiled(source).source;
     }
 
@@ -430,12 +437,25 @@
     };
     $("compiled").onchange = showCompiled;
 
-    // The last example is the compiler written in Moth, with a line at the end that uses it.
-    const COMPILER = "Moth's own compiler";
-    const TRY_IT = `\n\n# The compiler above, compiling a line of Moth to JavaScript:\nsay js of compile("say 1 + 2")\n`;
-    picker.append(...[...Object.keys(examples), COMPILER].map((name) => new Option(name)));
+    // Two examples are files: a neural network that learns, and the compiler written in Moth, with a line
+    // at the end that uses it.
+    const FILES = {
+      "Neural network": ["neural.moth", ""],
+      "Moth's own compiler": ["compiler.moth", `\n\n# The compiler above, compiling a line of Moth to JavaScript:\nsay js of compile("say 1 + 2")\n`],
+    };
+    const [first, second, ...rest] = Object.keys(examples);
+    picker.append(...[first, second, "Neural network", ...rest, "Moth's own compiler"].map((name) => new Option(name)));
     picker.onchange = async () => {
-      code.value = picker.value === COMPILER ? (await loadCompiler()).trimEnd() + TRY_IT : examples[picker.value];
+      const name = picker.value;
+      let text;
+      try {
+        text = Object.hasOwn(FILES, name) ? (await fetchText(FILES[name][0])).trimEnd() + FILES[name][1] : examples[name];
+      } catch (err) {
+        status.textContent = `Couldn't load that example (${err.message})`;
+        return;
+      }
+      if (name !== picker.value) return; // another example was picked while this one loaded
+      code.value = text;
       refreshEditor();
       runCode();
     };

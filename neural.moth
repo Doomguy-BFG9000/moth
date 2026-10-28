@@ -1,0 +1,399 @@
+# A neural network that learns, written from scratch in Moth. Moth has no random numbers and no sine,
+# so this program makes its own. The design follows Andrej Karpathy's micrograd: every number the
+# network works out remembers how it was made, so after a guess the network can trace back how much
+# each of its weights was to blame, and nudge them all the right way.
+#
+# It learns to tell apart two moons of dots, and draws what it believes at four moments: before
+# training, twice during, and at the end. Blue means it thinks a dot there belongs to the blue moon.
+
+# ---------- random numbers (Park and Miller, 1988) ----------
+
+set seed to 42
+
+# the whole-number part of a number that isn't negative, found one power of two at a time
+to whole with x
+    set n to 0
+    set p to 1
+    repeat while p * 2 is at most x
+        set p to p * 2
+    end
+    repeat while p is at least 1
+        if n + p is at most x
+            add p to n
+        end
+        set p to p / 2
+    end
+    return n
+end
+
+# a number between 0 and 1, different every time and the same on every run
+to random
+    set product to seed * 16807
+    set seed to product - whole(product / 2147483647) * 2147483647
+    if seed is less than 0
+        add 2147483647 to seed
+    end
+    return seed / 2147483647
+end
+
+# ---------- sine and cosine ----------
+
+set pi to 3.141592653589793
+
+# x - x³/3! + x⁵/5! - ..., after moving x between -pi and pi, where 12 terms are plenty
+to sine with x
+    repeat while x is greater than pi
+        set x to x - 2 * pi
+    end
+    repeat while x is less than 0 - pi
+        set x to x + 2 * pi
+    end
+    set term to x
+    set total to x
+    for each k from 1 to 12
+        set term to 0 - term * x * x / (2 * k * (2 * k + 1))
+        add term to total
+    end
+    return total
+end
+
+to cosine with x
+    return sine(x + pi / 2)
+end
+
+# ---------- the dots to learn ----------
+
+# about -0.15 to 0.15, more often near 0
+to noise
+    return (random() + random() + random() - 1.5) / 10
+end
+
+# Two moons that hook into each other: the orange one (-1) on top, the blue one (1) below.
+to moons with count
+    set made to empty list
+    repeat count times
+        set angle to random() * pi
+        add record with x cosine(angle) + noise(), y sine(angle) + noise(), label -1 to made
+        set angle to random() * pi
+        add record with x 1 - cosine(angle) + noise(), y 0.5 - sine(angle) + noise(), label 1 to made
+    end
+    return made
+end
+
+# ---------- numbers that remember how they were made ----------
+
+# `a` and `b` are the numbers it was made from, and `op` how. `grad` will say how much the final
+# loss changes when this number does.
+to leaf with data
+    return record with data data, grad 0, op "", a nothing, b nothing, mark 0
+end
+
+to plus with a, b
+    return record with data data of a + data of b, grad 0, op "+", a a, b b, mark 0
+end
+
+to times with a, b
+    return record with data data of a * data of b, grad 0, op "*", a a, b b, mark 0
+end
+
+# a ReLU: below zero becomes zero
+to relu with a
+    set out to 0
+    if data of a is greater than 0
+        set out to data of a
+    end
+    return record with data out, grad 0, op "relu", a a, b nothing, mark 0
+end
+
+set pass to 0 # each backward pass marks the numbers it has reached, so none is counted twice
+
+# Backpropagation: put every number that led to `root` in an order where each comes after the numbers it
+# was made from, then go through that order backwards, passing each number's grad to its makers.
+to backward with root
+    add 1 to pass
+    set order to empty list
+    to visit with v
+        if mark of v is not pass
+            set mark of v to pass
+            if a of v is not nothing
+                visit(a of v)
+            end
+            if b of v is not nothing
+                visit(b of v)
+            end
+            add v to order
+        end
+    end
+    visit(root)
+    set grad of root to 1
+    set count to length of order
+    for each i from 1 to count
+        set v to item (count - i + 1) of order
+        set g to grad of v
+        set left to a of v
+        if op of v is "+"
+            set right to b of v
+            set grad of left to grad of left + g
+            set grad of right to grad of right + g
+        else if op of v is "*"
+            set right to b of v
+            set grad of left to grad of left + data of right * g
+            set grad of right to grad of right + data of left * g
+        else if op of v is "relu" and data of v is greater than 0
+            set grad of left to grad of left + g
+        end
+    end
+end
+
+# ---------- the network ----------
+
+# A neuron adds up its inputs, each times a weight, plus a bias. Weights start random, between -1 and 1.
+to neuron with inputs, linear
+    set weights to empty list
+    repeat inputs times
+        add leaf(random() * 2 - 1) to weights
+    end
+    return record with weights weights, bias leaf(0), linear linear
+end
+
+# layers of neurons, each layer taking the one before as its inputs; the last one is linear
+to network with sizes
+    set layers to empty list
+    for each i from 1 to length of sizes - 1
+        set layer to empty list
+        repeat item (i + 1) of sizes times
+            add neuron(item i of sizes, i is length of sizes - 1) to layer
+        end
+        add layer to layers
+    end
+    return layers
+end
+
+to parameters with layers
+    set found to empty list
+    for each layer in layers
+        for each n in layer
+            for each w in weights of n
+                add w to found
+            end
+            add bias of n to found
+        end
+    end
+    return found
+end
+
+to fire with n, inputs
+    set total to bias of n
+    set k to 1
+    for each w in weights of n
+        set total to plus(total, times(w, item k of inputs))
+        add 1 to k
+    end
+    if linear of n
+        return total
+    end
+    return relu(total)
+end
+
+# the network's score for a dot: above 0 means blue, below 0 orange
+to think with layers, inputs
+    for each layer in layers
+        set outs to empty list
+        for each n in layer
+            add fire(n, inputs) to outs
+        end
+        set inputs to outs
+    end
+    return item 1 of inputs
+end
+
+# The same score with plain numbers, which is much faster when nothing needs to learn from it.
+to predict with layers, x, y
+    set inputs to list of x, y
+    for each layer in layers
+        set outs to empty list
+        for each n in layer
+            set total to data of bias of n
+            set k to 1
+            for each w in weights of n
+                set total to total + data of w * item k of inputs
+                add 1 to k
+            end
+            if not linear of n and total is less than 0
+                set total to 0
+            end
+            add total to outs
+        end
+        set inputs to outs
+    end
+    return item 1 of inputs
+end
+
+# How wrong the network is: a "max-margin" loss that wants every score past 1 on the right side, plus a
+# small push to keep the weights small. Also counts the dots it gets right.
+to judge with layers, dots
+    set total to leaf(0)
+    set right to 0
+    for each dot in dots
+        set score to think(layers, list of leaf(x of dot), leaf(y of dot))
+        set total to plus(total, relu(plus(leaf(1), times(leaf(0 - label of dot), score))))
+        if (label of dot is greater than 0) is (data of score is greater than 0)
+            add 1 to right
+        end
+    end
+    set size to leaf(0)
+    for each w in parameters(layers)
+        set size to plus(size, times(w, w))
+    end
+    set loss to plus(times(total, leaf(1 / length of dots)), times(size, leaf(0.0001)))
+    return record with loss loss, right right / length of dots
+end
+
+# ---------- drawing ----------
+
+# Between drawings the turtle faces right, and these say where it is.
+set turtle_x to 0
+set turtle_y to 0
+turn right 90
+
+to go_to with x, y
+    pen up
+    move forward x - turtle_x
+    turn left 90
+    move forward y - turtle_y
+    turn right 90
+    pen down
+    set turtle_x to x
+    set turtle_y to y
+end
+
+# a short line with round ends is a dot
+to dot_at with x, y, size, color
+    go_to(x, y)
+    pen width size
+    pen color color
+    move forward 0.01
+    set turtle_x to x + 0.01
+end
+
+to shade with score
+    if score is less than -1.5
+        return "#f4a77a"
+    else if score is less than -0.5
+        return "#f8c8a8"
+    else if score is less than 0
+        return "#fde4d3"
+    else if score is less than 0.5
+        return "#d9e6fb"
+    else if score is less than 1.5
+        return "#afc9f5"
+    end
+    return "#86acee"
+end
+
+# The view: x from -1.5 to 2.5 and y from -1 to 1.5, in cells of 1/12, each 5 turtle steps wide.
+set cell to 5
+set per_unit to 60
+set columns to 48
+set rows to 30
+
+# What the network believes, as rows of colour (a run of cells with the same colour is one line), with
+# the dots on top. `left` and `bottom` say where the picture goes.
+to picture with layers, dots, left, bottom
+    pen width cell + 0.6 # a little more than a cell, so rows overlap with no seam
+    for each row from 0 to rows - 1
+        set y to -1 + (row + 0.5) / 12
+        set height to bottom + (row + 0.5) * cell
+        set run_color to shade(predict(layers, -1.5 + 0.5 / 12, y))
+        set run_start to 0
+        for each column from 1 to columns
+            set color to "the end"
+            if column is less than columns
+                set color to shade(predict(layers, -1.5 + (column + 0.5) / 12, y))
+            end
+            if color is not run_color
+                go_to(left + (run_start + 0.5) * cell, height)
+                pen width cell + 0.6
+                pen color run_color
+                move forward (column - run_start - 1) * cell + 0.01
+                set turtle_x to left + (column - 0.5) * cell + 0.01
+                set run_color to color
+                set run_start to column
+            end
+        end
+    end
+    for each dot in dots
+        set x to left + (x of dot + 1.5) * per_unit
+        set y to bottom + (y of dot + 1) * per_unit
+        dot_at(x, y, 9, "white")
+        if label of dot is 1
+            dot_at(x, y, 6, "#1c5fd4")
+        else
+            dot_at(x, y, 6, "#e8590c")
+        end
+    end
+end
+
+# the loss after each step, as dots falling from the top left
+to chart with losses, left, bottom, width, height
+    pen width 1
+    pen color "#9aa4b2"
+    go_to(left, bottom + height)
+    turn right 90
+    move forward height
+    turn left 90
+    move forward width
+    set turtle_x to left + width
+    set turtle_y to bottom
+    set highest to item 1 of losses
+    set step to 0
+    for each loss in losses
+        dot_at(left + step / (length of losses - 1) * width, bottom + loss / highest * height, 4, "#e11d48")
+        add 1 to step
+    end
+end
+
+# ---------- learning ----------
+
+# a number with at most 3 decimals, for saying
+to rounded with x
+    return whole(x * 1000 + 0.5) / 1000
+end
+
+to train with layers, dots, steps
+    set weights to parameters(layers)
+    set losses to empty list
+    say "A network with 2 inputs, two layers of 8 neurons and 1 output: " length of weights " numbers to learn."
+    for each step from 1 to steps
+        set result to judge(layers, dots)
+        if step is 1
+            picture(layers, dots, -250, 60) # the turtle starts in the middle of the picture
+        end
+        for each w in weights
+            set grad of w to 0
+        end
+        backward(loss of result)
+        set rate to 1 - 0.9 * (step - 1) / steps
+        for each w in weights
+            set data of w to data of w - rate * grad of w
+        end
+        add data of loss of result to losses
+        if step is 1 or step is divisible by 10
+            say "step " step ": loss " rounded(data of loss of result) ", " whole(right of result * 100 + 0.5) "% right"
+        end
+        if step is 8
+            picture(layers, dots, 10, 60)
+        end
+        if step is 20
+            picture(layers, dots, -250, -110)
+        end
+    end
+    picture(layers, dots, 10, -110)
+    chart(losses, -250, -210, 500, 80)
+    set result to judge(layers, dots)
+    say "after " steps " steps: " whole(right of result * 100 + 0.5) "% of the dots are on the right side"
+end
+
+set dots to moons(30)
+set model to network(list of 2, 8, 8, 1)
+train(model, dots, 60)

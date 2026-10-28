@@ -476,3 +476,22 @@ test("the compiler written in Moth compiles itself, and what it makes does the s
   compiler(examples.Functions).run((line) => said.push(line), undefined, Infinity); // and what it compiles runs
   assert.deepEqual(said, ["Hello, Sam!", "fib(20) is 6765"]);
 });
+
+// ---------- the neural network written in Moth ----------
+
+// It makes its own random numbers, so a run is the same every time: both engines must say and draw
+// exactly the same things, and the network must learn to put every dot on the right side.
+test("the neural network written in Moth learns, the same way on both engines", () => {
+  const network = readFileSync(new URL("./neural.moth", import.meta.url), "utf8");
+  const train = (engine) => {
+    const said = [];
+    const drawn = [];
+    run(network, (line) => said.push(line), { engine, draw: (line) => drawn.push(line) });
+    return { said, drawn };
+  };
+  const jit = train("jit");
+  assert.deepEqual(train("vm"), jit);
+  assert.equal(jit.said[1], "step 1: loss 1.173, 50% right");
+  assert.equal(jit.said.at(-1), "after 60 steps: 100% of the dots are on the right side");
+  assert.deepEqual(check(network), []);
+});
