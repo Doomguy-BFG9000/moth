@@ -819,3 +819,48 @@ test("a hand-over to the VM reads the same files and writes nothing twice", () =
     assert.deepEqual(disk.log, ["read count.txt", "write count.txt", "read count.txt"], engine);
   }
 });
+
+// ---------- modules ----------
+
+// The file's names become shapes's sides and so on, so they can't clash with the program's; a file used as
+// two names is two separate copies; and inside the file, a function's inputs and its own functions still
+// hide the file's names, as they would anywhere.
+test("use ... as keeps a file's names apart, on all three engines and in the compiler written in Moth", () => {
+  const files = {
+    "shapes.moth": 'set sides to 4\nto area with w, h\n    return w * h\nend\nto describe\n    return "a shape with " + sides + " sides"\nend',
+    "counter.moth": "set count to 0\nto bump\n    add 1 to count\n    return count\nend",
+    "hide.moth": 'set n to 10\nset helper to 1\nto plus_one with n\n    return n + 1\nend\nto grow\n    set n to n + 5\n    return n\nend\nto own_helper\n    to helper\n        return "inner"\n    end\n    return helper()\nend',
+  };
+  const reading = { files: (name) => files[name] };
+  const program = [
+    'use "shapes.moth" as shapes',
+    'use "counter.moth" as a',
+    'use "counter.moth" as b',
+    'use "hide.moth" as h',
+    "set sides to 3",
+    'say shapes\'s sides " " sides',
+    "say shapes's area(2, 3)",
+    "say shapes's describe()",
+    'say a\'s bump() " " a\'s bump() " " b\'s bump()',
+    "a's bump",
+    "say a's count",
+    'say h\'s plus_one(1) " " h\'s grow() " " h\'s n',
+    'say h\'s own_helper() " " h\'s helper',
+  ].join("\n");
+  const mistakes = [
+    ['use "shapes.moth" as shapes\nsay shapes\'s sids', "line 2: 'shapes' has nothing called 'sids'. Did you mean 'shapes's sides'?"],
+    ['use "shapes.moth" as shapes\nshapes\'s nope(1)', "line 2: 'shapes' has nothing called 'nope'"],
+    ["say x's y", "line 1: 'x' has nothing called 'y'"],
+    ['use "shapes.moth" as list', "line 1: 'list' is a Moth word, so it can't be used as a name for the file"],
+    ['use "shapes.moth" as shapes\nsay shapes\'s 5', "line 2: expected a name but found '5'"],
+  ];
+  for (const engine of ENGINES) {
+    assert.equal(output(program, { engine, ...reading }), "4 3\n6\na shape with 4 sides\n1 2 1\n3\n2 15 15\ninner 1", engine);
+    for (const [source, message] of mistakes) assert.equal(error(source, { engine, ...reading }).message, message, `${engine}: ${source}`);
+  }
+  assert.deepEqual(check(program, reading), []);
+  const moth = mothCompiler(COMPILER);
+  for (const source of [program, ...mistakes.map(([source]) => source)]) {
+    assert.deepEqual(compiled((s) => moth(s, files), source), compiled((s) => compileToJs(s, reading), source), source);
+  }
+});

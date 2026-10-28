@@ -6,7 +6,7 @@ const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "retu
 
 // Names each function sets. Inputs and functions made with `to` always belong to the function itself;
 // a name it `set`s (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
-function declarations(body, found = { own: [], shared: [] }) {
+export function declarations(body, found = { own: [], shared: [] }) {
   for (const s of body) {
     if (s.kind === "define") found.own.push(s.name);
     if (s.kind === "set" || s.kind === "count" || s.kind === "each" || (s.kind === "try" && s.name)) found.shared.push(s.name);
@@ -48,7 +48,9 @@ export class Scope {
     const known = [];
     for (let c = this; c; c = c.parent) known.push(...c.slots.keys());
     const guess = closest(name, statement ? [...known, ...STATEMENT_WORDS] : known);
-    const message = call ? `there is no function called '${name}'` : guess ? `'${name}' has no value yet` : noValue(name);
+    const at = name.indexOf("'s "); // `math's sine`: a name the file used `as math` makes
+    const message = at >= 0 ? `'${name.slice(0, at)}' has nothing called '${name.slice(at + 3)}'`
+      : call ? `there is no function called '${name}'` : guess ? `'${name}' has no value yet` : noValue(name);
     return guess ? `${message}. Did you mean '${guess}'?` : message;
   }
 }

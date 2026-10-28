@@ -2,7 +2,7 @@
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
 import { MothError, fail, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
-import { Scope } from "./scope.js";
+import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
@@ -14,7 +14,7 @@ export { MothError, excerpt } from "./vm.js";
 // Every control character counts as a space (as in Wirth's compilers), and text holds any character but a
 // control character other than tab (\n makes a new line). Rules this small let the compiler written in Moth,
 // which has no character codes, follow them exactly.
-const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),])/y;
+const TOKEN = /([\0-\x20]+)|(#[^\n]*)|(0x[\da-fA-F]+|0b[01]+|\d+(?:\.\d+)?)|([A-Za-z_]\w*)|("(?:\\[^\0-\x08\n-\x1f]|[^"\\\0-\x08\n-\x1f])*")|([-+*/(),]|'s(?!\w))/y;
 const ESCAPES = { n: "\n", t: "\t" };
 // symbols people type out of habit from other languages, and what Moth says instead
 const HINTS = {
@@ -137,19 +137,24 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return body;
   }
 
-  // The statements of a file the program uses, or none if it was read already.
-  function useFile(nameToken) {
+  // The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
+  // names are kept apart (see prefixed), and it can be used again as another.
+  function useFile(nameToken, alias) {
     const name = nameToken.value;
+    const key = alias ? `${name} as ${alias}` : name;
     if (reading.open.includes(name)) fail(nameToken, `'${name}' is already being read, so it can't be used here: files can't use each other in a circle`);
-    if (reading.loaded.has(name)) return [];
+    if (reading.loaded.has(key)) return [];
     const text = reading.files?.(name);
     if (typeof text !== "string") fail(nameToken, `there is no file called '${name}'`);
-    reading.loaded.add(name);
+    reading.loaded.add(key);
     reading.open.push(name);
     const body = parse(tokenize(text, name), reading);
     reading.open.pop();
-    return body;
+    return alias ? prefixed(body, alias) : body;
   }
+
+  // `math's sine`: a name the file used `as math` makes
+  const member = (first) => (match("'s") ? `${first}'s ${name("a name")}` : first);
 
   function block(opener) {
     if (!peek().nl) expected("a new line");
@@ -244,8 +249,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("use")) {
       const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
+      const alias = word("as") ? name("a name for the file") : null; // `use "math.moth" as math`
       if (!atTop) fail(t, "'use' only works at the top level of a program");
-      return { kind: "use", body: useFile(nameToken), at: t };
+      return { kind: "use", body: useFile(nameToken, alias), at: t };
     }
     if (word("stop")) {
       if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
@@ -272,11 +278,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (t.type === "word" && !RESERVED.has(t.value)) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
       pos++;
-      if (isWord("is")) fail(t, `to give '${t.value}' a value write 'set ${t.value} to ...'`);
+      const called = member(t.value);
+      if (isWord("is")) fail(t, `to give '${called}' a value write 'set ${called} to ...'`);
       let args = [];
       if (match("(")) args = argList();
       else if (!peek().nl) do args.push(expression()); while (match(","));
-      return { kind: "call", name: t.value, args, at: t };
+      return { kind: "call", name: called, args, at: t };
     }
     fail(t, `a line can't start with ${describe(t)}`);
   }
@@ -442,9 +449,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       pos++;
-      if (match("(")) return { kind: "call", name: t.value, args: argList(), at: t };
-      if (!indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
-      return { kind: "name", name: t.value, at: t };
+      const full = member(t.value);
+      if (match("(")) return { kind: "call", name: full, args: argList(), at: t };
+      if (full === t.value && !indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
+      return { kind: "name", name: full, at: t };
     }
     expected("a value");
   }
@@ -463,6 +471,25 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   return statements(null);
+}
+
+// `use "math.moth" as math`: each name the file's top level makes becomes `math's pi`, `math's sine`, which
+// no name in the program can be, so the two can't clash. The file's code is then the program's, as with any
+// `use`. A name is renamed only where it means the top level's: not where an input of a function, or a
+// function that a function makes, has the same name.
+const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
+function prefixed(body, alias) {
+  const { own, shared } = declarations(body);
+  const top = new Set([...own, ...shared]);
+  const walk = (node, hidden) => {
+    if (NAMED.has(node.kind) && top.has(node.name) && !hidden.has(node.name)) node.name = `${alias}'s ${node.name}`;
+    const inside = node.kind === "define" ? new Set([...hidden, ...node.params, ...declarations(node.body).own]) : hidden;
+    for (const [key, child] of Object.entries(node)) {
+      if (key !== "at") for (const c of Array.isArray(child) ? child : [child]) if (c?.kind) walk(c, key === "body" ? inside : hidden);
+    }
+  };
+  for (const s of body) walk(s, new Set());
+  return body;
 }
 
 // ---------- bytecode compiler ----------

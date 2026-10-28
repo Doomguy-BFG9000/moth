@@ -214,6 +214,11 @@ to tokenize with source, file
             add 1 to k
             add 1 to col
             set nl to no
+        else if c is "'" and item (k + 1) of chars is "s" and not in_word(item (k + 2) of chars) # `math's sine`
+            add record with type "'s", value "'s", line line, col start, nl nl, file file to tokens
+            add 2 to k
+            add 2 to col
+            set nl to no
         else
             set hint to look_up(c, hint_symbols, hint_texts)
             if hint is nothing
@@ -356,13 +361,18 @@ to parse with tokens, reading
         return body
     end
 
-    # The statements of a file the program uses, or none if it was read already.
-    to use_file with name_token
+    # The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
+    # names are kept apart (see prefixed), and it can be used again as another.
+    to use_file with name_token, alias
         set wanted to value of name_token
+        set key to wanted
+        if alias is not nothing
+            set key to wanted + " as " + alias
+        end
         if contains(open of reading, wanted)
             fail with problem(name_token, "'" + wanted + "' is already being read, so it can't be used here: files can't use each other in a circle")
         end
-        if contains(loaded of reading, wanted)
+        if contains(loaded of reading, key)
             return empty list
         end
         set text to nothing
@@ -375,7 +385,7 @@ to parse with tokens, reading
             fail with problem(name_token, "there is no file called '" + wanted + "'")
         end
         set loaded_now to loaded of reading
-        add wanted to loaded_now
+        add key to loaded_now
         set open_now to open of reading
         add wanted to open_now
         set inner to parse(tokenize(text, wanted), reading)
@@ -384,7 +394,18 @@ to parse with tokens, reading
             add item n of open_now to still_open
         end
         set open of reading to still_open
+        if alias is not nothing
+            return prefixed(inner, alias)
+        end
         return inner
+    end
+
+    # `math's sine`: a name the file used `as math` makes
+    to member with first
+        if match("'s")
+            return first + "'s " + take_name("a name")
+        end
+        return first
     end
 
     to block with opener
@@ -549,10 +570,14 @@ to parse with tokens, reading
             if not name_token
                 expected("a file name in quotes, like \"shapes.moth\"")
             end
+            set alias to nothing
+            if word("as") # `use "math.moth" as math`
+                set alias to take_name("a name for the file")
+            end
             if not at_top
                 fail with problem(t, "'use' only works at the top level of a program")
             end
-            return record with kind "use", body use_file(name_token), at t
+            return record with kind "use", body use_file(name_token, alias), at t
         end
         if word("stop")
             if loop_depth is 0
@@ -595,8 +620,9 @@ to parse with tokens, reading
         if type of t is "word" and not contains(reserved, value of t)
             # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
             set pos to pos + 1
+            set called to member(value of t)
             if is_word("is")
-                fail with problem(t, "to give '" + value of t + "' a value write 'set " + value of t + " to ...'")
+                fail with problem(t, "to give '" + called + "' a value write 'set " + called + " to ...'")
             end
             set args to empty list
             if match("(")
@@ -607,7 +633,7 @@ to parse with tokens, reading
                     add expression() to args
                 end
             end
-            return record with kind "call", name value of t, args args, at t
+            return record with kind "call", name called, args args, at t
         end
         fail with problem(t, "a line can't start with " + describe(t))
     end
@@ -868,13 +894,14 @@ to parse with tokens, reading
         end
         if type of t is "word" and not contains(reserved, value of t)
             set pos to pos + 1
+            set full to member(value of t)
             if match("(")
-                return record with kind "call", name value of t, args arg_list(), at t
+                return record with kind "call", name full, args arg_list(), at t
             end
-            if not indexing and word("of") # `name of person`
+            if full is value of t and not indexing and word("of") # `name of person`
                 return record with kind "field", name value of t, subject unary(), at t
             end
-            return record with kind "name", name value of t, at t
+            return record with kind "name", name full, at t
         end
         expected("a value")
     end
@@ -923,6 +950,127 @@ to declarations with body, own, shared
         if what is "try"
             declarations(handler of s, own, shared)
         end
+    end
+end
+
+# `use "math.moth" as math`: each name the file's top level makes becomes `math's pi`, `math's sine`, which
+# no name in the program can be, so the two can't clash. A name is renamed only where it means the top
+# level's: not where an input of a function, or a function that a function makes, has the same name.
+set named_kinds to list of "set", "add", "count", "each", "define", "call", "name", "try" # their `name` is a variable
+
+to prefixed with body, alias
+    set own to empty list
+    set shared to empty list
+    declarations(body, own, shared)
+    set top to empty list
+    for each n in own
+        add n to top
+    end
+    for each n in shared
+        add n to top
+    end
+    rename_all(body, alias, top, empty list)
+    return body
+end
+
+to rename_all with nodes, alias, top, hidden
+    for each node in nodes
+        rename(node, alias, top, hidden)
+    end
+end
+
+# a node, and the nodes in it
+to rename with node, alias, top, hidden
+    if node is nothing
+        return nothing
+    end
+    set what to kind of node
+    if contains(named_kinds, what)
+        if contains(top, name of node) and not contains(hidden, name of node)
+            set name of node to alias + "'s " + name of node
+        end
+    end
+    if what is "define"
+        set inside to empty list
+        for each n in hidden
+            add n to inside
+        end
+        for each p in params of node
+            add p to inside
+        end
+        set own to empty list
+        set shared to empty list
+        declarations(body of node, own, shared)
+        for each n in own
+            add n to inside
+        end
+        rename_all(body of node, alias, top, inside)
+    end
+    if what is "set" or what is "add" or what is "return" or what is "fail" or what is "turtle"
+        rename(value of node, alias, top, hidden)
+    end
+    if what is "setItem" or what is "setField" or what is "write"
+        rename(target of node, alias, top, hidden)
+        rename(value of node, alias, top, hidden)
+    end
+    if what is "remove"
+        rename(key of node, alias, top, hidden)
+        rename(target of node, alias, top, hidden)
+    end
+    if what is "say"
+        rename_all(parts of node, alias, top, hidden)
+    end
+    if what is "if"
+        rename(cond of node, alias, top, hidden)
+        rename_all(then of node, alias, top, hidden)
+        rename_all(otherwise of node, alias, top, hidden)
+    end
+    if what is "while"
+        rename(cond of node, alias, top, hidden)
+        rename_all(body of node, alias, top, hidden)
+    end
+    if what is "repeat"
+        rename(count of node, alias, top, hidden)
+        rename_all(body of node, alias, top, hidden)
+    end
+    if what is "count"
+        rename(start of node, alias, top, hidden)
+        rename(limit of node, alias, top, hidden)
+        rename_all(body of node, alias, top, hidden)
+    end
+    if what is "each"
+        rename(over of node, alias, top, hidden)
+        rename_all(body of node, alias, top, hidden)
+    end
+    if what is "try"
+        rename_all(body of node, alias, top, hidden)
+        rename_all(handler of node, alias, top, hidden)
+    end
+    if what is "call" or what is "builtin"
+        rename_all(args of node, alias, top, hidden)
+    end
+    if what is "math" or what is "compare" or what is "or" or what is "and"
+        rename(left of node, alias, top, hidden)
+        rename(right of node, alias, top, hidden)
+    end
+    if what is "not" or what is "negate"
+        rename(operand of node, alias, top, hidden)
+    end
+    if what is "list" or what is "dictionary"
+        rename_all(items of node, alias, top, hidden)
+    end
+    if what is "record"
+        rename_all(values of node, alias, top, hidden)
+    end
+    if what is "length" or what is "field" or what is "read"
+        rename(subject of node, alias, top, hidden)
+    end
+    if what is "item"
+        rename(index of node, alias, top, hidden)
+        rename(subject of node, alias, top, hidden)
+    end
+    if what is "ask"
+        rename(question of node, alias, top, hidden)
     end
 end
 
@@ -1065,7 +1213,21 @@ to undefined_message with scope, wanted, call, statement
     end
     set guess to closest(wanted, known)
     set message to no_value(wanted)
-    if call
+    set split_at to position of "'s " in wanted # `math's sine`: a name the file used `as math` makes
+    if split_at is not 0
+        set module to ""
+        set member_name to ""
+        set i to 0
+        for each c in wanted
+            add 1 to i
+            if i is less than split_at
+                add c to module
+            else if i is greater than split_at + 2
+                add c to member_name
+            end
+        end
+        set message to "'" + module + "' has nothing called '" + member_name + "'"
+    else if call
         set message to "there is no function called '" + wanted + "'"
     else if guess is not nothing
         set message to "'" + wanted + "' has no value yet"
