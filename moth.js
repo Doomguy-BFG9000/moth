@@ -1,7 +1,8 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
+import { MothError, fail, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
+import { Scope } from "./scope.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -296,75 +297,21 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
-const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen"];
 
-// Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
-function distance(a, b) {
-  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-    }
-  }
-  return d[a.length][b.length];
-}
-
-// The candidate a misspelled name most likely meant, or null if none is close: 1 edit for short names, 2 otherwise.
-function closest(name, candidates) {
-  let best = null;
-  let bestDistance = (name.length <= 3 ? 1 : 2) + 1;
-  for (const c of candidates) {
-    const d = distance(name, c);
-    if (d < bestDistance) [best, bestDistance] = [c, d];
-  }
-  return best;
-}
-
-// Names each function sets. Inputs and functions made with `to` always belong to the function itself;
-// a name it `set`s (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
-function declarations(body, found = { own: [], shared: [] }) {
-  for (const s of body) {
-    if (s.kind === "define") found.own.push(s.name);
-    if (s.kind === "set" || s.kind === "count" || s.kind === "each") found.shared.push(s.name);
-    for (const inner of [s.then, s.otherwise, s.kind !== "define" && s.body]) if (inner) declarations(inner, found);
-  }
-  return found;
-}
-
-// Compiles one function (or the whole program) to bytecode. Variables are resolved here, once,
-// to a (depth, slot) pair: how many scopes out to walk, and which slot in that scope's array.
-class Compiler {
-  // `slots` carries a shell's earlier top-level variables; `debug` adds LINE markers for the debugger.
-  constructor(parent, name, params, body, { slots = new Map(), debug = parent?.debug ?? false } = {}) {
-    this.parent = parent;
-    this.slots = slots;
-    this.debug = debug;
-    this.fn = { name, params, nslots: slots.size, names: [], code: [], consts: [], at: [] };
-    for (const [n, slot] of slots) this.fn.names[slot] = n; // each slot's name, for the debugger and disassembler
-    Object.defineProperty(this.fn, "parent", { value: parent?.fn }); // for the debugger; not enumerable, so `moth build`'s JSON skips it
-    for (const p of params) this.declare(p);
-    const { own, shared } = declarations(body);
-    for (const n of own) if (!this.slots.has(n)) this.declare(n);
-    for (const n of shared) if (!this.slots.has(n) && !parent?.resolve(n)) this.declare(n);
+// Compiles one function (or the whole program) to bytecode for vm.js. Scope (scope.js) has already given
+// every variable a slot, so a name becomes a (depth, slot) pair here.
+class Compiler extends Scope {
+  constructor(parent, name, params, body, options) {
+    super(parent, name, params, body, options);
+    Object.assign(this.fn, { code: [], consts: [], at: [] });
     for (const s of body) this.statement(s);
     if (parent) this.emit(null, CONST, this.constant(null), RETURN);
     else this.emit(null, HALT);
   }
 
-  declare(name) {
-    this.slots.set(name, ++this.fn.nslots);
-    this.fn.names[this.fn.nslots] = name;
-  }
-
   // In a debug build, the machine can pause here: a statement on this line is about to run.
   mark(s) {
     if (this.debug) this.emit(s.at, LINE, s.at.line);
-  }
-
-  resolve(name) {
-    for (let c = this, depth = 0; c; c = c.parent, depth++) if (c.slots.has(name)) return [depth, c.slots.get(name)];
-    return null;
   }
 
   emit(at, ...code) {
@@ -389,14 +336,9 @@ class Compiler {
     this.fn.code[i] = this.here();
   }
 
-  // A name nothing ever sets: fail when this line runs, suggesting the closest name that does exist.
-  // A line that starts with an unknown name may be a misspelled Moth word instead, like `sya "hi"`.
-  undefinedName(name, at, { call = false, statement = false } = {}) {
-    const known = [];
-    for (let c = this; c; c = c.parent) known.push(...c.slots.keys());
-    const guess = closest(name, statement ? [...known, ...STATEMENT_WORDS] : known);
-    const message = call ? `there is no function called '${name}'` : guess ? `'${name}' has no value yet` : noValue(name);
-    this.emit(at, UNDEFINED, this.constant(guess ? `${message}. Did you mean '${guess}'?` : message));
+  // A name nothing ever sets: fail when this line runs (with any "did you mean" from Scope).
+  undefinedName(name, at, options) {
+    this.emit(at, UNDEFINED, this.constant(this.undefinedMessage(name, options)));
   }
 
   load(name, at) {

@@ -54,7 +54,9 @@ export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down",
 
 // ---------- values ----------
 
-class Closure {
+// A Moth function. `fn` is its compiled code (or, from the JIT, just its name and inputs plus `run`, the
+// JavaScript function it became); `env` is the scope it was made in.
+export class Closure {
   constructor(fn, env) {
     this.fn = fn;
     this.env = env;
@@ -63,12 +65,13 @@ class Closure {
 
 export const UNSET = Symbol("unset"); // a variable that is declared but hasn't been given a value yet
 const isList = Array.isArray;
-const truthy = (v) => v !== null && v !== false;
-const equal = (a, b) => (isList(a) && isList(b) ? a.length === b.length && a.every((x, i) => equal(x, b[i])) : a === b);
+export const truthy = (v) => v !== null && v !== false;
+export const equal = (a, b) => (isList(a) && isList(b) ? a.length === b.length && a.every((x, i) => equal(x, b[i])) : a === b);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const noValue = (name) => `'${name}' has no value yet (give it one with 'set ${name} to ...')`;
+export const stoppedMessage = (steps) => `stopped after ${steps.toLocaleString("en")} steps (is there a loop that never ends?)`;
 
-function kindOf(v) {
+export function kindOf(v) {
   if (v === null) return "nothing";
   if (typeof v === "boolean") return "yes/no";
   if (typeof v === "string") return "text";
@@ -77,7 +80,7 @@ function kindOf(v) {
   return "a number";
 }
 
-function show(v, nested = false) {
+export function show(v, nested = false) {
   if (v === null) return "nothing";
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "string") return nested ? JSON.stringify(v) : v;
@@ -86,7 +89,12 @@ function show(v, nested = false) {
   return String(v);
 }
 
-function item(target, n, writing, error = oops) {
+// ---------- what operations do, shared by both engines ----------
+// The VM below and the JIT (jit.js) run every check through these, so they can't drift apart. Each takes
+// `error`, which throws: the VM's version positions the error at the instruction it was running, the JIT's
+// at the spot in the source the code came from.
+
+export function item(target, n, writing, error = oops) {
   if (writing && !isList(target)) error(`can only change items of a list, not ${kindOf(target)}`);
   if (!isList(target) && typeof target !== "string") error(`can only take an item of a list or text, not ${kindOf(target)}`);
   const seq = typeof target === "string" ? [...target] : target; // by character, so "é" and emoji count as one
@@ -96,7 +104,7 @@ function item(target, n, writing, error = oops) {
   return [seq, n - 1];
 }
 
-function compare(op, a, b, error = oops) {
+export function compare(op, a, b, error = oops) {
   if (op === "is") return equal(a, b);
   const ok = op === "divisible by"
     ? typeof a === "number" && typeof b === "number"
@@ -104,6 +112,99 @@ function compare(op, a, b, error = oops) {
   if (!ok) error(`can't check if ${kindOf(a)} is ${op} ${kindOf(b)}`);
   if (op === "divisible by" && b === 0) error("can't divide by zero");
   return COMPARISONS[op](a, b);
+}
+
+// `+` when a and b aren't both numbers
+export function plus(a, b, error) {
+  if (typeof a === "string" || typeof b === "string") return show(a) + show(b);
+  error(`can't use '+' on ${kindOf(a)} and ${kindOf(b)}`);
+}
+
+// `-`, `*` and `/`
+export function arithmetic(op, a, b, error) {
+  if (typeof a !== "number" || typeof b !== "number") error(`can't use '${op}' on ${kindOf(a)} and ${kindOf(b)}`);
+  if (op === "/" && b === 0) error("can't divide by zero");
+  return op === "-" ? a - b : op === "*" ? a * b : a / b;
+}
+
+export function negate(v, error) {
+  if (typeof v !== "number") error(`'-' needs a number, not ${kindOf(v)}`);
+  return -v;
+}
+
+export function lengthOf(v, error) {
+  if (typeof v === "string") return [...v].length;
+  if (!isList(v)) error(`'length of' needs a list or text, not ${kindOf(v)}`);
+  return v.length;
+}
+
+// `add value to name`: returns the variable's new value
+export function addInto(current, value, name, error) {
+  if (current === UNSET) error(noValue(name));
+  if (isList(current)) {
+    current.push(value);
+    return current;
+  }
+  if (typeof current === "string") return current + show(value);
+  if (typeof current !== "number" || typeof value !== "number") error(`can't add ${kindOf(value)} to ${kindOf(current)}`);
+  return current + value;
+}
+
+export function checkRepeat(n, error) {
+  if (!Number.isInteger(n) || n < 0) error(`repeat needs a whole number of times, not ${show(n, true)}`);
+}
+
+export function checkRange(from, to, error) {
+  if (typeof from !== "number" || typeof to !== "number") error(`'from' and 'to' need numbers, not ${kindOf(from)} and ${kindOf(to)}`);
+}
+
+// what `for each` goes through: a copy, so adding to the list inside the loop can't make it endless
+export function itemsOf(v, error) {
+  if (!isList(v) && typeof v !== "string") error(`can only go through a list or text, not ${kindOf(v)}`);
+  return [...v];
+}
+
+export function callable(f, name, error) {
+  if (f === UNSET) error(`there is no function called '${name}'`);
+  if (!(f instanceof Closure)) error(`'${name}' is ${kindOf(f)}, not a function`);
+  return f;
+}
+
+export function checkInputs(f, argc, name, error) {
+  const n = f.fn.params.length;
+  if (argc !== n) error(`'${name}' needs ${plural(n, "input")} but got ${argc}`);
+}
+
+// The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`
+// as { x1, y1, x2, y2, color, width }, with y going up.
+export class Turtle {
+  constructor(draw = () => {}) {
+    Object.assign(this, { draw, x: 0, y: 0, heading: 90, pen: true, color: "#4f8ff7", width: 2 });
+  }
+
+  act(action, value, error = oops) {
+    const name = TURTLE_ACTIONS[action];
+    if (action < 4 && typeof value !== "number") error(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
+    if (name === "forward" || name === "back") {
+      const steps = name === "forward" ? value : -value;
+      const angle = (this.heading * Math.PI) / 180;
+      const x = this.x + steps * Math.cos(angle);
+      const y = this.y + steps * Math.sin(angle);
+      const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
+      if (this.pen) this.draw({ x1: round(this.x), y1: round(this.y), x2: round(x), y2: round(y), color: this.color, width: this.width });
+      Object.assign(this, { x, y });
+    } else if (name === "left" || name === "right") {
+      this.heading += name === "left" ? value : -value;
+    } else if (name === "color") {
+      if (typeof value !== "string") error(`'pen color' needs text like "red", not ${kindOf(value)}`);
+      this.color = value;
+    } else if (name === "width") {
+      if (typeof value !== "number" || value <= 0) error(`'pen width' needs a number above 0, not ${show(value, true)}`);
+      this.width = value;
+    } else {
+      this.pen = name === "down";
+    }
+  }
 }
 
 // ---------- the virtual machine ----------
@@ -117,7 +218,7 @@ class Failure {
 const oops = (message) => {
   throw new Failure(message);
 };
-const stopped = (steps) => oops(`stopped after ${steps.toLocaleString("en")} steps (is there a loop that never ends?)`);
+const stopped = (steps) => oops(stoppedMessage(steps));
 
 const MAX_DEPTH = 100_000; // function calls in progress at once; the VM keeps its own stack, so this is a choice, not a JS limit
 
@@ -129,36 +230,10 @@ export function newEnv(fn, parent) {
 
 // Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
 export class Machine {
-  // `draw` gets each line the turtle draws: { x1, y1, x2, y2, color, width }, with y going up.
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw = () => {} } = {}) {
-    Object.assign(this, { main, print, maxSteps, draw, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
-    // the turtle starts in the middle, facing up, with its pen down
-    this.turtle = { x: 0, y: 0, heading: 90, pen: true, color: "#4f8ff7", width: 2 };
-  }
-
-  move(action, value) {
-    const t = this.turtle;
-    const name = TURTLE_ACTIONS[action];
-    if (action < 4 && typeof value !== "number") oops(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
-    if (name === "forward" || name === "back") {
-      const steps = name === "forward" ? value : -value;
-      const angle = (t.heading * Math.PI) / 180;
-      const x = t.x + steps * Math.cos(angle);
-      const y = t.y + steps * Math.sin(angle);
-      const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
-      if (t.pen) this.draw({ x1: round(t.x), y1: round(t.y), x2: round(x), y2: round(y), color: t.color, width: t.width });
-      Object.assign(t, { x, y });
-    } else if (name === "left" || name === "right") {
-      t.heading += name === "left" ? value : -value;
-    } else if (name === "color") {
-      if (typeof value !== "string") oops(`'pen color' needs text like "red", not ${kindOf(value)}`);
-      t.color = value;
-    } else if (name === "width") {
-      if (typeof value !== "number" || value <= 0) oops(`'pen width' needs a number above 0, not ${show(value, true)}`);
-      t.width = value;
-    } else {
-      t.pen = name === "down";
-    }
+  // `draw` gets each line the turtle draws (see Turtle).
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw } = {}) {
+    Object.assign(this, { main, print, maxSteps, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+    this.turtle = new Turtle(draw);
   }
 
   // Runs until the program ends ("done") or, while `pauseAtLines` is on, reaches a LINE marker ("line").
@@ -220,9 +295,7 @@ export class Machine {
           case ADD: {
             const b = stack.pop();
             const a = stack.pop();
-            if (typeof a === "number" && typeof b === "number") stack.push(a + b);
-            else if (typeof a === "string" || typeof b === "string") stack.push(show(a) + show(b));
-            else oops(`can't use '+' on ${kindOf(a)} and ${kindOf(b)}`);
+            stack.push(typeof a === "number" && typeof b === "number" ? a + b : plus(a, b, oops));
             break;
           }
           case SUB:
@@ -231,20 +304,14 @@ export class Machine {
             const op = code[pc];
             const b = stack.pop();
             const a = stack.pop();
-            if (typeof a !== "number" || typeof b !== "number") oops(`can't use '${op === SUB ? "-" : op === MUL ? "*" : "/"}' on ${kindOf(a)} and ${kindOf(b)}`);
-            if (op === DIV && b === 0) oops("can't divide by zero");
-            stack.push(op === SUB ? a - b : op === MUL ? a * b : a / b);
+            stack.push(arithmetic(op === SUB ? "-" : op === MUL ? "*" : "/", a, b, oops));
             break;
           }
           case GET_FN: {
             let e = env;
             for (let d = code[ip]; d > 0; d--) e = e[0];
-            const f = e[code[ip + 1]];
-            const name = consts[code[ip + 2]];
+            stack.push(callable(e[code[ip + 1]], consts[code[ip + 2]], oops));
             ip += 3;
-            if (f === UNSET) oops(`there is no function called '${name}'`);
-            if (!(f instanceof Closure)) oops(`'${name}' is ${kindOf(f)}, not a function`);
-            stack.push(f);
             break;
           }
           case CALL: {
@@ -253,7 +320,7 @@ export class Machine {
             ip += 2;
             const first = stack.length - argc;
             const callee = stack[first - 1];
-            if (argc !== callee.fn.params.length) oops(`'${name}' needs ${plural(callee.fn.params.length, "input")} but got ${argc}`);
+            checkInputs(callee, argc, name, oops);
             if (frames.length >= MAX_DEPTH) oops("too much recursion: a function kept calling itself");
             if (++steps > maxSteps) stopped(maxSteps);
             const inner = newEnv(callee.fn, callee.env);
@@ -292,12 +359,9 @@ export class Machine {
             else stack.pop();
             break;
           }
-          case NEG: {
-            const v = stack.pop();
-            if (typeof v !== "number") oops(`'-' needs a number, not ${kindOf(v)}`);
-            stack.push(-v);
+          case NEG:
+            stack.push(negate(stack.pop(), oops));
             break;
-          }
           case NOT:
             stack.push(!truthy(stack.pop()));
             break;
@@ -306,13 +370,9 @@ export class Machine {
             stack.push(stack.splice(stack.length - n, n));
             break;
           }
-          case LENGTH: {
-            const v = stack.pop();
-            if (typeof v === "string") stack.push([...v].length);
-            else if (isList(v)) stack.push(v.length);
-            else oops(`'length of' needs a list or text, not ${kindOf(v)}`);
+          case LENGTH:
+            stack.push(lengthOf(stack.pop(), oops));
             break;
-          }
           case ITEM: {
             const n = stack.pop();
             const [seq, i] = item(stack.pop(), n, false);
@@ -335,13 +395,8 @@ export class Machine {
             let e = env;
             for (let d = code[ip]; d > 0; d--) e = e[0];
             const slot = code[ip + 1];
-            const current = e[slot];
-            if (current === UNSET) oops(noValue(consts[code[ip + 2]]));
+            e[slot] = addInto(e[slot], value, consts[code[ip + 2]], oops);
             ip += 3;
-            if (isList(current)) current.push(value);
-            else if (typeof current === "string") e[slot] = current + show(value);
-            else if (typeof current === "number" && typeof value === "number") e[slot] = current + value;
-            else oops(`can't add ${kindOf(value)} to ${kindOf(current)}`);
             break;
           }
           case SAY: {
@@ -349,11 +404,9 @@ export class Machine {
             print(stack.splice(stack.length - n, n).map((v) => show(v)).join(""));
             break;
           }
-          case CHECK_REPEAT: {
-            const n = stack[stack.length - 1];
-            if (!Number.isInteger(n) || n < 0) oops(`repeat needs a whole number of times, not ${show(n, true)}`);
+          case CHECK_REPEAT:
+            checkRepeat(stack[stack.length - 1], oops);
             break;
-          }
           case REPEAT_NEXT: { // stack: [... times left]
             const exit = code[ip++];
             const left = stack[stack.length - 1];
@@ -364,12 +417,9 @@ export class Machine {
             }
             break;
           }
-          case CHECK_RANGE: {
-            const to = stack[stack.length - 1];
-            const from = stack[stack.length - 2];
-            if (typeof from !== "number" || typeof to !== "number") oops(`'from' and 'to' need numbers, not ${kindOf(from)} and ${kindOf(to)}`);
+          case CHECK_RANGE:
+            checkRange(stack[stack.length - 2], stack[stack.length - 1], oops);
             break;
-          }
           case RANGE_NEXT: { // stack: [... next, last]; pushes the loop variable's value
             const exit = code[ip++];
             const top = stack.length;
@@ -383,12 +433,9 @@ export class Machine {
             }
             break;
           }
-          case ITER: {
-            const v = stack.pop();
-            if (!isList(v) && typeof v !== "string") oops(`can only go through a list or text, not ${kindOf(v)}`);
-            stack.push({ items: [...v], i: 0 }); // a copy, so adding to the list inside the loop can't make it endless
+          case ITER:
+            stack.push({ items: itemsOf(stack.pop(), oops), i: 0 });
             break;
-          }
           case ITER_NEXT: { // stack: [... iterator]; pushes the loop variable's value
             const exit = code[ip++];
             const it = stack[stack.length - 1];
@@ -407,7 +454,7 @@ export class Machine {
             break;
           case TURTLE: {
             const action = code[ip++];
-            this.move(action, action < 4 || action > 5 ? stack.pop() : null); // pen up and pen down take no value
+            this.turtle.act(action, action < 4 || action > 5 ? stack.pop() : null); // pen up and pen down take no value
             break;
           }
           case LINE:
