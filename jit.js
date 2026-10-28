@@ -4,10 +4,10 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
-const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv" };
+const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
 const MATH_HELPERS = { "+": "add", "-": "sub", "*": "mul", "/": "div" };
 
 // Compiles one Moth function (or the program) to the body of a JavaScript function. Each variable becomes a
@@ -57,8 +57,11 @@ class JsCompiler extends Scope {
     switch (s.kind) {
       case "set":
         return `${this.ref(s.name)} = ${this.expr(s.value)};`;
-      case "setItem":
-        return `{ const $r = itemRef(${this.expr(s.target.of)}, ${this.expr(s.target.index)}, ${this.pos(s.target.at)}); $r[0][$r[1]] = ${this.expr(s.value)}; }`;
+      case "setItem": {
+        const head = `{ const $r = itemRef(${this.expr(s.target.of)}, ${this.expr(s.target.index)}, `;
+        const k = this.pos(s.target.at);
+        return `${head}${k}); put($r, ${this.expr(s.value)}, ${k}); }`;
+      }
       case "add": {
         const value = this.expr(s.value);
         if (!this.resolve(s.name)) return `${value};\n${this.undefined(s.name, s.at)};`;
@@ -101,6 +104,8 @@ class JsCompiler extends Scope {
         return `failWith(${this.expr(s.value)}, ${this.pos(s.at)});`;
       case "stop":
         return "break;"; // every Moth loop is a JavaScript loop, and nothing else is
+      case "remove":
+        return `removeKey(${this.expr(s.key)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "try": { // the call depth when it began, so catching a mistake deep in calls can put it back
         const t = this.temp();
         const body = this.block(s.body);
@@ -155,6 +160,8 @@ class JsCompiler extends Scope {
         return `item(${this.expr(e.of)}, ${this.expr(e.index)}, ${this.pos(e.at)})`;
       case "record":
         return `record(${q(e.fields)}, [${e.values.map((v) => this.expr(v)).join(", ")}])`;
+      case "dictionary":
+        return `dict([${e.items.map((x) => this.expr(x)).join(", ")}], ${this.pos(e.at)})`;
       case "field":
         return `field(${this.expr(e.of)}, ${q(e.name)}, ${this.pos(e.at)})`;
       case "ask":
@@ -222,13 +229,17 @@ function helpers(ats, print, draw, maxSteps, answer) {
     ge: ordered("at least", (a, b) => a >= b),
     le: ordered("at most", (a, b) => a <= b),
     dv: (a, b, k) => (typeof a === "number" && typeof b === "number" && b !== 0 ? a % b === 0 : compare("divisible by", a, b, errors[k])),
+    isIn: (a, b, k) => compare("in", a, b, errors[k]),
     lengthOf: (v, k) => lengthOf(v, errors[k]),
     item: (target, n, k) => {
       if (Array.isArray(target) && Number.isInteger(n) && n >= 1 && n <= target.length) return target[n - 1];
       const [seq, i] = item(target, n, false, errors[k]);
-      return seq[i];
+      return itemAt(seq, i);
     },
     itemRef: (target, n, k) => item(target, n, true, errors[k]),
+    put: (ref, value, k) => putItem(ref[0], ref[1], value, errors[k]),
+    dict: (items, k) => makeDictionary(items, errors[k]),
+    removeKey: (key, target, k) => removeKey(key, target, errors[k]),
     addInto: (current, value, name, k) => (typeof current === "number" && typeof value === "number" ? current + value : addInto(current, value, name, errors[k])),
     say: (parts) => print(parts.map((p) => show(p)).join("")),
     checkRepeat: (n, k) => (checkRepeat(n, errors[k]), n),

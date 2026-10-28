@@ -78,11 +78,11 @@ function tokenize(src, file) {
 const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try"]);
+  "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
-  ["join", [null, "with"]], ["position", ["of", "in"]]]);
+  ["join", [null, "with"]], ["position", ["of", "in"]], ["keys", ["of"]]]);
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -246,6 +246,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
       return { kind: "stop", at: t };
     }
+    if (word("remove")) { // `remove "Sam" from ages`
+      const key = additive();
+      expectWord("from");
+      return { kind: "remove", key, target: unary(), at: t };
+    }
     const turtle = t.type === "word" && TURTLE_WORDS.get(t.value);
     if (turtle) {
       pos++;
@@ -302,7 +307,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (!t) return left;
     const negate = Boolean(word("not"));
     const phrase = check("word") && tokens[pos + 1].type === "word" ? `${peek().value} ${tokens[pos + 1].value}` : "";
-    const op = Object.hasOwn(COMPARISONS, phrase) ? ((pos += 2), phrase) : "is";
+    const op = Object.hasOwn(COMPARISONS, phrase) ? ((pos += 2), phrase) : word("in") ? "in" : "is";
     return { kind: "compare", op, negate, left, right: additive(), at: t };
   }
 
@@ -343,9 +348,20 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       } while (match(","));
       return { kind: "record", fields, values, at: t };
     }
+    if (word("dictionary")) { // `dictionary where "Sam" is 20, "Ana" is 31`: its items are each key, then its value
+      expectWord("where");
+      const items = [];
+      do {
+        items.push(additive());
+        expectWord("is");
+        items.push(expression());
+      } while (match(","));
+      return { kind: "dictionary", items, at: t };
+    }
     if (word("empty")) {
       if (word("record")) return { kind: "record", fields: [], values: [], at: t };
-      if (!word("list")) expected("'list' or 'record'");
+      if (word("dictionary")) return { kind: "dictionary", items: [], at: t };
+      if (!word("list")) expected("'list', 'record' or 'dictionary'");
       return { kind: "list", items: [], at: t };
     }
     if (word("length")) {
@@ -407,7 +423,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -586,6 +602,11 @@ class Compiler extends Scope {
         this.expr(s.value);
         this.emit(s.at, FAIL);
         return;
+      case "remove":
+        this.expr(s.key);
+        this.expr(s.target);
+        this.emit(s.at, REMOVE);
+        return;
       case "try": {
         const handler = this.jump(s.at, TRY);
         this.tries++;
@@ -665,6 +686,10 @@ class Compiler extends Scope {
       case "record":
         for (const value of e.values) this.expr(value);
         this.emit(e.at, RECORD, this.constant(e.fields));
+        return;
+      case "dictionary":
+        for (const x of e.items) this.expr(x);
+        this.emit(e.at, DICT, e.items.length);
         return;
       case "field":
         this.expr(e.of);

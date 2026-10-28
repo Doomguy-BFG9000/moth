@@ -39,10 +39,10 @@ to joined with things, separator
     return out
 end
 
-# the item of `values` at the place `key` has in `keys`, or nothing
-to look_up with key, keys, values
-    for each n from 1 to length of keys
-        if item n of keys is key
+# the item of `values` at the place `key` has in `known`, or nothing
+to look_up with key, known, values
+    for each n from 1 to length of known
+        if item n of known is key
             return item n of values
         end
     end
@@ -208,8 +208,8 @@ end
 # words that start a statement or a value, so they can't name a variable
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
-    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try"
-set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position" # in the order of BUILTINS in vm.js
+    "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in"
+set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys" # in the order of BUILTINS in vm.js
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
@@ -384,7 +384,7 @@ to parse with tokens, reading
         if type of t is not "word"
             return nothing
         end
-        if value of t is "uppercase" or value of t is "lowercase" or value of t is "number"
+        if value of t is "uppercase" or value of t is "lowercase" or value of t is "number" or value of t is "keys"
             return list of "of"
         end
         if value of t is "split"
@@ -530,6 +530,11 @@ to parse with tokens, reading
             end
             return record with kind "stop", at t
         end
+        if word("remove") # `remove "Sam" from ages`
+            set key to additive()
+            expect_word("from")
+            return record with kind "remove", key key, target unary(), at t
+        end
         set actions to turtle_words(t)
         if actions is not nothing
             set pos to pos + 1
@@ -634,6 +639,8 @@ to parse with tokens, reading
         if contains(comparison_phrases, phrase)
             set pos to pos + 2
             set op to phrase
+        else if word("in")
+            set op to "in"
         end
         return record with kind "compare", op op, negate negated, left left, right additive(), at t
     end
@@ -698,12 +705,27 @@ to parse with tokens, reading
             end
             return record with kind "record", fields fields, values values, at t
         end
+        if word("dictionary") # `dictionary where "Sam" is 20, "Ana" is 31`: its items are each key, then its value
+            expect_word("where")
+            set entries to empty list
+            set going to yes
+            repeat while going
+                add additive() to entries
+                expect_word("is")
+                add expression() to entries
+                set going to match(",")
+            end
+            return record with kind "dictionary", items entries, at t
+        end
         if word("empty")
             if word("record")
                 return record with kind "record", fields empty list, values empty list, at t
             end
+            if word("dictionary")
+                return record with kind "dictionary", items empty list, at t
+            end
             if not word("list")
-                expected("'list' or 'record'")
+                expected("'list', 'record' or 'dictionary'")
             end
             return record with kind "list", items empty list, at t
         end
@@ -782,7 +804,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -964,8 +986,8 @@ set ats to empty list # every token an error can point at; a position in the cod
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
-set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by"
-set compare_helpers to list of "eq", "lt", "gt", "ge", "le", "dv"
+set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"
+set compare_helpers to list of "eq", "lt", "gt", "ge", "le", "dv", "isIn"
 
 to remember with at
     add at to ats
@@ -1056,8 +1078,9 @@ to js_statement with scope, s
     end
     if what is "setItem"
         set target to target of s
-        set head to "{ const $r = itemRef(" + js_expr(scope, subject of target) + ", " + js_expr(scope, index of target) + ", " + remember(at of target)
-        return head + "); $r[0][$r[1]] = " + js_expr(scope, value of s) + "; }"
+        set head to "{ const $r = itemRef(" + js_expr(scope, subject of target) + ", " + js_expr(scope, index of target) + ", "
+        set k to remember(at of target)
+        return head + k + "); put($r, " + js_expr(scope, value of s) + ", " + k + "); }"
     end
     if what is "add"
         set value to js_expr(scope, value of s)
@@ -1123,6 +1146,9 @@ to js_statement with scope, s
     end
     if what is "stop"
         return "break;"
+    end
+    if what is "remove"
+        return "removeKey(" + js_expr(scope, key of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
     end
     if what is "try" # the call depth when it began, so catching a mistake deep in calls can put it back
         set t to temp(scope)
@@ -1216,6 +1242,9 @@ to js_expr with scope, e
     end
     if what is "record"
         return "record(" + quote_list(fields of e) + ", [" + js_list(scope, values of e) + "])"
+    end
+    if what is "dictionary"
+        return "dict([" + js_list(scope, items of e) + "], " + remember(at of e) + ")"
     end
     if what is "field"
         return "field(" + js_expr(scope, subject of e) + ", " + quote(name of e) + ", " + remember(at of e) + ")"

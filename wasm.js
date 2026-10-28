@@ -12,14 +12,14 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
 const F64 = "f64";
 const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has its own stack
 const MATH = ["+", "-", "*", "/"];
-const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6 };
+const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7 };
 
 // What the module imports: the checks and actions it leaves to JavaScript. Most only ever throw.
 const IMPORTS = {
@@ -37,6 +37,9 @@ const IMPORTS = {
   lengthOf: [[EQ, I32], [F64]],
   item: [[EQ, EQ, I32], [EQ]],
   itemRef: [[EQ, EQ, I32], []],
+  put: [[EQ, EQ, EQ, I32], []], // a value into a dictionary: where, the key, the value, and a position
+  dict: [[EQ, I32], [EQ]], // a new dictionary, from a list of each key and then its value
+  remove: [[EQ, EQ, I32], []],
   addInto: [[EQ, EQ, I32, I32], [EQ]],
   checkRepeat: [[EQ, I32], []],
   checkRange: [[EQ, EQ, I32], []],
@@ -70,12 +73,15 @@ function declareTypes(m) {
   m.type({ kind: "struct", fields: [{ type: refNull(T.env) }, { type: ref(T.items) }] });
   T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }] });
   T.unset = m.type({ kind: "struct", fields: [] });
+  // A dictionary holds a JavaScript Map, from keys as JavaScript values to the module's own values. Its field
+  // is mutable only so that the type differs from text's: struct types with the same fields are the same type.
+  T.dict = m.type({ kind: "struct", fields: [{ type: "externref", mutable: true }] });
   T.fn = (n) => { // a Moth function with n inputs
     const index = m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]);
     m.typeNames[index] = `fn${n}`;
     return index;
   };
-  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset"]) m.typeNames[T[name]] = name;
+  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "dict"]) m.typeNames[T[name]] = name;
   return T;
 }
 
@@ -125,8 +131,8 @@ function declareRuntime(m, T, im) {
     c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("unreachable").emit("end");
   });
 
-  // `is`: numbers by value, text by its letters, lists and records (in JavaScript) by what they hold,
-  // everything else (yes, no, nothing, functions) by identity
+  // `is`: numbers by value, text by its letters, lists, records and dictionaries (in JavaScript) by what
+  // they hold, everything else (yes, no, nothing, functions) by identity
   fn("eq", [EQ, EQ], [I32], (c) => {
     bothNums(c, T, 0, 1).emit("if");
     numOf(c, T, 0);
@@ -139,6 +145,8 @@ function declareRuntime(m, T, im) {
     c.emit("call", im.sameText).emit("return").emit("end");
     both(T.list);
     both(T.record);
+    c.emit("i32.or");
+    both(T.dict);
     c.emit("i32.or").emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", im.equal).emit("return").emit("end");
     c.emit("i32.const", 0);
   });
@@ -201,11 +209,12 @@ function declareRuntime(m, T, im) {
     c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.item).emit("end");
   });
 
-  // where `set item n of list to ...` goes; anything that isn't a list item fails in JavaScript
+  // where `set item n of list to ...` goes: the place in the list, or -1 for a dictionary's key, which
+  // JavaScript checks; anything else fails there
   fn("itemRef", [EQ, EQ, I32], [I32], (c, f) => {
     const at = f.local(I32);
     c.emit("local.get", 0).emit("local.get", 1).emit("call", R.place).emit("local.tee", at).emit("i32.const", 0).emit("i32.lt_s");
-    c.emit("if").emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.itemRef).emit("unreachable").emit("end");
+    c.emit("if").emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.itemRef).emit("end");
     c.emit("local.get", at);
   });
 
@@ -304,7 +313,7 @@ function declareExports(m, T, R) {
     m.export(label, f.index);
   };
   fn("tag", [EQ], [I32], (c) => {
-    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function]])
+    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function], [T.dict, TAGS.dictionary]])
       c.emit("local.get", 0).emit("ref.test", type).emit("if").emit("i32.const", tag).emit("return").emit("end");
     c.emit("i32.const", TAGS.unset);
   });
@@ -321,6 +330,8 @@ function declareExports(m, T, R) {
   fn("makeText", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.text));
   fn("newList", [], [EQ], (c) => c.emit("i32.const", 0).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.list));
   fn("listPush", [EQ, EQ], [], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("call", R.push));
+  fn("dictValue", [EQ], ["externref"], (c) => c.emit("local.get", 0).emit("ref.cast", T.dict).emit("struct.get", T.dict, 0));
+  fn("makeDict", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.dict));
 }
 
 // ---------- which variables need the heap ----------
@@ -345,7 +356,7 @@ function findCaptured(program) {
     };
     const statement = (s) => {
       if (["set", "add", "count", "each", "call"].includes(s.kind) || (s.kind === "try" && s.name)) use(s.name);
-      for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
+      for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.key, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
       if (s.kind === "define") {
         const inner = new Scope(scope, s.name, s.params, s.body);
         inner.body = s.body;
@@ -607,17 +618,19 @@ class WasmCompiler extends Scope {
         this.exprNum(s.value);
         return this.setNumber(number);
       }
-      case "setItem": {
+      case "setItem": { // a list's item here, a dictionary's in JavaScript
         const k = this.pos(s.target.at);
-        const [list, at, value] = [this.temp(), this.temp(I32), this.temp()];
+        const [list, key, at, value] = [this.temp(), this.temp(), this.temp(I32), this.temp()];
         this.expr(s.target.of);
         this.e("local.set", list);
-        this.e("local.get", list);
         this.expr(s.target.index);
-        this.e("i32.const", k).e("call", R.itemRef).e("local.set", at);
+        this.e("local.set", key);
+        this.e("local.get", list).e("local.get", key).e("i32.const", k).e("call", R.itemRef).e("local.set", at);
         this.expr(s.value);
         this.e("local.set", value);
+        this.e("local.get", at).e("i32.const", 0).e("i32.ge_s").e("if");
         this.e("local.get", list).e("ref.cast", T.list).e("struct.get", T.list, 0).e("local.get", at).e("local.get", value).e("array.set", T.items);
+        this.e("else").e("local.get", list).e("local.get", key).e("local.get", value).e("i32.const", k).e("call", im.put).e("end");
         return;
       }
       case "add": {
@@ -729,6 +742,11 @@ class WasmCompiler extends Scope {
       case "stop":
         this.e("br", this.labels - 1 - this.stops.at(-1)).note("stop");
         return;
+      case "remove":
+        this.expr(s.key);
+        this.expr(s.target);
+        this.e("i32.const", this.pos(s.at)).e("call", im.remove);
+        return;
       case "try": { // what JavaScript throws is caught here; JavaScript says whether it was a mistake to handle
         const depth = this.temp(I32);
         this.e("global.get", this.ctx.depth).e("local.set", depth).e("call", im.tryStart);
@@ -817,6 +835,15 @@ class WasmCompiler extends Scope {
         this.e("i32.const", this.pos(e.at)).e("call", R[["add", "sub", "mul", "div"][MATH.indexOf(e.op)]]);
         return;
       case "compare":
+        if (e.op === "in") { // in JavaScript
+          this.e("i32.const", COMPARE_OPS.indexOf("in"));
+          this.expr(e.left);
+          this.expr(e.right);
+          this.e("i32.const", this.pos(e.at)).e("call", im.compare);
+          if (e.negate) this.e("i32.eqz");
+          this.e("ref.i31");
+          return;
+        }
         if (this.isNumber(e.left) && this.isNumber(e.right)) { // two numbers: no boxes, no checks
           this.exprNum(e.left);
           this.exprNum(e.right);
@@ -888,6 +915,11 @@ class WasmCompiler extends Scope {
         this.e("local.get", record);
         return;
       }
+      case "dictionary":
+        for (const x of e.items) this.expr(x);
+        this.e("array.new_fixed", T.items, e.items.length).e("i32.const", e.items.length).e("struct.new", T.list);
+        this.e("i32.const", this.pos(e.at)).e("call", im.dict);
+        return;
       case "field":
         this.expr(e.of);
         this.e("i32.const", this.id(e.name)).e("i32.const", this.pos(e.at)).e("call", R.field);
@@ -1004,10 +1036,20 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
       }
       case TAGS.function:
         return new Closure({ name: names[x.functionName(v)], params: Array(x.functionInputs(v)) }, null);
+      case TAGS.dictionary: {
+        const dictionary = new Map();
+        seen.set(v, dictionary);
+        for (const [key, value] of x.dictValue(v)) dictionary.set(key, toJs(value, seen));
+        return dictionary;
+      }
       default:
         return UNSET;
     }
   }
+
+  // A dictionary's own Map, whose values stay the module's, so changing it changes the dictionary; any other
+  // value as JavaScript. For checks that only need to see the dictionary, not what is in it.
+  const rawOf = (v) => (v !== null && typeof v !== "number" && x.tag(v) === TAGS.dictionary ? x.dictValue(v) : toJs(v));
 
   // only new values come back from JavaScript (text, and the letters of a text), never a list it changed
   function toWasm(v) {
@@ -1015,6 +1057,7 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     if (typeof v === "boolean") return v ? 1 : 0;
     if (typeof v === "number") return x.makeNum(v);
     if (typeof v === "string") return x.makeText(v);
+    if (v instanceof Map) return x.makeDict(new Map([...v].map(([key, value]) => [key, toWasm(value)])));
     const list = x.newList();
     for (const item of v) x.listPush(list, toWasm(item));
     return list;
@@ -1027,21 +1070,26 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     plus: (a, b, k) => toWasm(plus(toJs(a), toJs(b), errors[k])),
     arithmetic: (op, a, b, k) => arithmetic(MATH[op], toJs(a), toJs(b), errors[k]),
     negate: (v, k) => negate(toJs(v), errors[k]),
-    compare: (op, a, b, k) => (compare(COMPARE_OPS[op], toJs(a), toJs(b), errors[k]) ? 1 : 0),
+    compare: (op, a, b, k) => (compare(COMPARE_OPS[op], toJs(a), COMPARE_OPS[op] === "in" ? rawOf(b) : toJs(b), errors[k]) ? 1 : 0),
     remainder: (a, b) => a % b,
     equal: (a, b) => (equal(toJs(a), toJs(b)) ? 1 : 0),
     sameText: (a, b) => (a === b ? 1 : 0),
     text: (i) => texts[i],
-    lengthOf: (v, k) => lengthOf(toJs(v), errors[k]),
-    item: (target, n, k) => {
-      const [seq, i] = item(toJs(target), toJs(n), false, errors[k]);
-      return toWasm(seq[i]);
+    lengthOf: (v, k) => lengthOf(rawOf(v), errors[k]),
+    item: (target, n, k) => { // a list's items are found in WebAssembly, so a list here is a mistake
+      const [seq, i] = item(rawOf(target), toJs(n), false, errors[k]);
+      return seq instanceof Map ? seq.get(i) : toWasm(seq[i]);
     },
-    itemRef: (target, n, k) => item(toJs(target), toJs(n), true, errors[k]),
+    itemRef: (target, n, k) => {
+      item(rawOf(target), toJs(n), true, errors[k]);
+    },
+    put: (target, key, value, k) => putItem(x.dictValue(target), toJs(key), value, errors[k]),
+    dict: (list, k) => x.makeDict(makeDictionary(Array.from({ length: x.listLength(list) }, (_, i) => x.listItem(list, i)), errors[k], toJs)),
+    remove: (key, target, k) => removeKey(toJs(key), rawOf(target), errors[k]),
     addInto: (current, value, name, k) => toWasm(addInto(toJs(current), toJs(value), names[name], errors[k])),
     checkRepeat: (n, k) => checkRepeat(toJs(n), errors[k]),
     checkRange: (from, to, k) => checkRange(toJs(from), toJs(to), errors[k]),
-    itemsOf: (v, k) => toWasm(itemsOf(toJs(v), errors[k])),
+    itemsOf: (v, k) => toWasm(itemsOf(rawOf(v), errors[k])),
     callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),
     checkInputs: (f, argc, name, k) => checkInputs(toJs(f), argc, names[name], errors[k]),
     stopped: (k) => {

@@ -62,6 +62,7 @@ export const COMPARISONS = {
   "at least": (a, b) => a >= b,
   "at most": (a, b) => a <= b,
   "divisible by": (a, b) => a % b === 0,
+  "in": (a, b) => isIn(a, b),
 };
 export const COMPARE_OPS = Object.keys(COMPARISONS);
 const COMPARE_FNS = Object.values(COMPARISONS);
@@ -85,11 +86,13 @@ export const OPCODES = [
   ["ASK", 0],
   ["TRY", 1], // where its `if it fails` starts
   ["END_TRY", 0], ["CAUGHT", 0],
+  ["DICT", 1], // the keys and values on the stack, one after the other, become a dictionary; the operand counts both
+  ["REMOVE", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -112,10 +115,13 @@ const isList = Array.isArray;
 export function Record() {}
 Record.prototype = Object.create(null);
 export const isRecord = (v) => v instanceof Record;
+// A dictionary is a Map whose keys are text or numbers. It keeps them in the order they were added.
+export const isDictionary = (v) => v instanceof Map;
 export const truthy = (v) => v !== null && v !== false;
 export function equal(a, b) {
   if (a === b) return true;
   if (isList(a) && isList(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
+  if (isDictionary(a) && isDictionary(b)) return a.size === b.size && [...a].every(([key, value]) => b.has(key) && equal(value, b.get(key)));
   if (isRecord(a) && isRecord(b)) {
     const fields = Object.keys(a);
     return fields.length === Object.keys(b).length && fields.every((f) => Object.hasOwn(b, f) && equal(a[f], b[f]));
@@ -133,6 +139,7 @@ export function kindOf(v) {
   if (isList(v)) return "a list";
   if (v instanceof Closure) return "a function";
   if (isRecord(v)) return "a record";
+  if (isDictionary(v)) return "a dictionary";
   return "a number";
 }
 
@@ -146,6 +153,10 @@ export function show(v, nested = false) {
     const fields = Object.keys(v);
     return fields.length ? `(record with ${fields.map((f) => `${f} ${show(v[f], true)}`).join(", ")})` : "(empty record)";
   }
+  if (isDictionary(v)) {
+    const entries = [...v].map(([key, value]) => `${show(key, true)} is ${show(value, true)}`);
+    return entries.length ? `(dictionary where ${entries.join(", ")})` : "(empty dictionary)";
+  }
   return String(v);
 }
 
@@ -154,9 +165,16 @@ export function show(v, nested = false) {
 // `error`, which throws: the VM's version positions the error at the instruction it was running, the JIT's
 // at the spot in the source the code came from.
 
+// Where `item n of target` is: [the list (or the text's letters, or the dictionary), the place in it].
+// Any key of a dictionary can be set, but one that is read must be there.
 export function item(target, n, writing, error = oops) {
-  if (writing && !isList(target)) error(`can only change items of a list, not ${kindOf(target)}`);
-  if (!isList(target) && typeof target !== "string") error(`can only take an item of a list or text, not ${kindOf(target)}`);
+  if (isDictionary(target)) {
+    dictionaryKey(n, error);
+    if (!writing && !target.has(n)) error(notIn(target, n));
+    return [target, n];
+  }
+  if (writing && !isList(target)) error(`can only change items of a list or dictionary, not ${kindOf(target)}`);
+  if (!isList(target) && typeof target !== "string") error(`can only take an item of a list, text or dictionary, not ${kindOf(target)}`);
   const seq = typeof target === "string" ? [...target] : target; // by character, so "é" and emoji count as one
   if (!Number.isInteger(n)) error(`item numbers must be whole numbers, not ${show(n, true)}`);
   if (n < 1) error(`there is no item ${n}, items are counted from 1`);
@@ -164,8 +182,51 @@ export function item(target, n, writing, error = oops) {
   return [seq, n - 1];
 }
 
+// the value at the place item() found, and putting one there
+export const itemAt = (seq, i) => (isDictionary(seq) ? seq.get(i) : seq[i]);
+export function putItem(seq, i, value) {
+  if (isDictionary(seq)) seq.set(i, value);
+  else seq[i] = value;
+}
+
+const dictionaryKey = (key, error) => {
+  if (typeof key !== "string" && typeof key !== "number") error(`a dictionary's keys are text or numbers, not ${kindOf(key)}`);
+  return key;
+};
+
+// "there is no "aple" in this dictionary. Did you mean "apple"?"
+function notIn(dictionary, key) {
+  const guess = typeof key === "string" ? closest(key, [...dictionary.keys()].filter((k) => typeof k === "string")) : null;
+  return `there is no ${show(key, true)} in this dictionary${guess !== null ? `. Did you mean ${show(guess, true)}?` : ""}`;
+}
+
+// `dictionary where "Sam" is 20, "Ana" is 31`: `items` holds each key, then its value. A key given twice keeps
+// its first place and its last value. `keyOf` makes a key a JavaScript value (the WebAssembly engine's are its own).
+export function makeDictionary(items, error, keyOf = (key) => key) {
+  const dictionary = new Map();
+  for (let i = 0; i < items.length; i += 2) dictionary.set(dictionaryKey(keyOf(items[i]), error), items[i + 1]);
+  return dictionary;
+}
+
+// `remove key from dictionary`
+export function removeKey(key, dictionary, error) {
+  if (!isDictionary(dictionary)) error(`can only remove from a dictionary, not ${kindOf(dictionary)}`);
+  dictionaryKey(key, error);
+  if (!dictionary.has(key)) error(notIn(dictionary, key));
+  dictionary.delete(key);
+}
+
+// `x is in y`: an item of a list, a key of a dictionary, or a piece of a text
+function isIn(a, b, error = oops) {
+  if (isList(b)) return b.some((x) => equal(a, x));
+  if (isDictionary(b)) return b.has(a);
+  if (typeof a !== "string" || typeof b !== "string") error(`can't check if ${kindOf(a)} is in ${kindOf(b)}`);
+  return b.includes(a);
+}
+
 export function compare(op, a, b, error = oops) {
   if (op === "is") return equal(a, b);
+  if (op === "in") return isIn(a, b, error);
   const ok = op === "divisible by"
     ? typeof a === "number" && typeof b === "number"
     : typeof a === typeof b && (typeof a === "number" || typeof a === "string");
@@ -194,7 +255,8 @@ export function negate(v, error) {
 
 export function lengthOf(v, error) {
   if (typeof v === "string") return [...v].length;
-  if (!isList(v)) error(`'length of' needs a list or text, not ${kindOf(v)}`);
+  if (isDictionary(v)) return v.size;
+  if (!isList(v)) error(`'length of' needs a list, text or dictionary, not ${kindOf(v)}`);
   return v.length;
 }
 
@@ -218,9 +280,11 @@ export function checkRange(from, to, error) {
   if (typeof from !== "number" || typeof to !== "number") error(`'from' and 'to' need numbers, not ${kindOf(from)} and ${kindOf(to)}`);
 }
 
-// what `for each` goes through: a copy, so adding to the list inside the loop can't make it endless
+// what `for each` goes through: a copy, so adding to the list inside the loop can't make it endless; for a
+// dictionary, its keys
 export function itemsOf(v, error) {
-  if (!isList(v) && typeof v !== "string") error(`can only go through a list or text, not ${kindOf(v)}`);
+  if (isDictionary(v)) return [...v.keys()];
+  if (!isList(v) && typeof v !== "string") error(`can only go through a list, text or dictionary, not ${kindOf(v)}`);
   return [...v];
 }
 
@@ -299,6 +363,13 @@ export const BUILTINS = [
       needText("'position of ... in'", whole, error);
       const at = whole.indexOf(part);
       return at < 0 ? 0 : [...whole.slice(0, at)].length + 1; // counted in letters, from 1; 0 if it isn't there
+    },
+  },
+  {
+    name: "keys", needs: [["dictionary"]], gives: "list",
+    run: ([dictionary], error) => {
+      if (!isDictionary(dictionary)) error(`'keys of' needs a dictionary, not ${kindOf(dictionary)}`);
+      return [...dictionary.keys()];
     },
   },
 ];
@@ -436,8 +507,9 @@ export class Machine {
             const op = code[ip++];
             const b = stack.pop();
             const a = stack.pop();
-            // two numbers is the common case; compare() handles the rest, divisible by, and the error messages
-            if (typeof a === "number" && typeof b === "number" && op !== DIVISIBLE) stack.push(COMPARE_FNS[op](a, b));
+            // two numbers is the common case; compare() handles the rest, divisible by and in (the ops after
+            // the ones two numbers can't fail), and the error messages
+            if (typeof a === "number" && typeof b === "number" && op < DIVISIBLE) stack.push(COMPARE_FNS[op](a, b));
             else stack.push(compare(COMPARE_OPS[op], a, b));
             break;
           }
@@ -526,18 +598,28 @@ export class Machine {
           case ITEM: {
             const n = stack.pop();
             const [seq, i] = item(stack.pop(), n, false);
-            stack.push(seq[i]);
+            stack.push(itemAt(seq, i));
             break;
           }
           case ITEM_REF: {
             const n = stack.pop();
-            stack.push(...item(stack.pop(), n, true)); // leaves the list and the index for SET_ITEM
+            stack.push(...item(stack.pop(), n, true)); // leaves the list (or dictionary) and the place for SET_ITEM
             break;
           }
           case SET_ITEM: {
             const v = stack.pop();
             const i = stack.pop();
-            stack.pop()[i] = v;
+            putItem(stack.pop(), i, v);
+            break;
+          }
+          case DICT: {
+            const n = code[ip++];
+            stack.push(makeDictionary(stack.splice(stack.length - n, n), oops));
+            break;
+          }
+          case REMOVE: {
+            const dictionary = stack.pop();
+            removeKey(stack.pop(), dictionary, oops);
             break;
           }
           case ADD_TO: {

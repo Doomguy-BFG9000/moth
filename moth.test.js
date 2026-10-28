@@ -113,6 +113,16 @@ const PROGRAMS = [
   ["to safe_div with a, b\n    try\n        return a / b\n    if it fails\n        return 0\n    end\nend\nsay safe_div(6, 3) \" \" safe_div(1, 0)", "2 0"],
   ["set total to 0\nfor each k from 1 to 10\n    try\n        if k is 4\n            stop\n        end\n        add k to total\n    if it fails\n        say \"never\"\n    end\nend\nsay total", "6"],
   ["to deep with n\n    if n is 0\n        say 1 / 0\n    end\n    return deep(n - 1)\nend\ntry\n    deep(3000)\nif it fails with why\n    say \"deep: \" why\nend", "deep: can't divide by zero"],
+  // dictionaries: look things up by key, change them, go through their keys; and `is in`
+  ["set ages to dictionary where \"Sam\" is 20, \"Ana\" is 31\nsay item \"Sam\" of ages\nset item \"Bo\" of ages to 7\nsay ages\nsay length of ages\nremove \"Ana\" from ages\nsay ages\nsay \"Sam\" is in ages\nsay \"Ana\" is in ages\nsay keys of ages", "20\n(dictionary where \"Sam\" is 20, \"Ana\" is 31, \"Bo\" is 7)\n3\n(dictionary where \"Sam\" is 20, \"Bo\" is 7)\nyes\nno\n[\"Sam\", \"Bo\"]"],
+  ["set counts to empty dictionary\nfor each w in split \"a b a c b a\" by \" \"\n    if w is in counts\n        set item w of counts to item w of counts + 1\n    else\n        set item w of counts to 1\n    end\nend\nfor each w in counts\n    say w \": \" item w of counts\nend", "a: 3\nb: 2\nc: 1"],
+  ["set squares to dictionary where 1 is 1, 2 is 4, 3 is 9\nsay item 2 of squares\nsay 3 is in list of 1, 2, 3\nsay \"ell\" is in \"hello\"\nsay 5 is not in squares\nsay (list of 1) is in list of (list of 1), 2", "4\nyes\nyes\nyes\nyes"],
+  ["set a to dictionary where \"x\" is list of 1, 2\nset b to dictionary where \"x\" is list of 1, 2\nsay a is b\nset l to item \"x\" of a\nadd 3 to l\nsay a\nsay a is b\nsay empty dictionary\nsay length of empty dictionary", "yes\n(dictionary where \"x\" is [1, 2, 3])\nno\n(empty dictionary)\n0"],
+  ["set people to list of (dictionary where \"name\" is \"Sam\"), (dictionary where \"name\" is \"Ana\", \"likes\" is yes)\nfor each p in people\n    say item \"name\" of p\nend\nsay people", "Sam\nAna\n[(dictionary where \"name\" is \"Sam\"), (dictionary where \"name\" is \"Ana\", \"likes\" is yes)]"],
+  ["set d to dictionary where \"apple\" is 3\ntry\n    say item \"aple\" of d\nif it fails with why\n    say why\nend", "there is no \"aple\" in this dictionary. Did you mean \"apple\"?"],
+  ["to total with prices\n    set sum to 0\n    for each name in prices\n        add item name of prices to sum\n    end\n    return sum\nend\nsay total(dictionary where \"tea\" is 2, \"cake\" is 3.5)", "5.5"],
+  ["set d to dictionary where \"a\" is 1, \"b\" is 2, \"a\" is 3\nsay d\nset item \"b\" of d to nothing\nsay d is dictionary where \"a\" is 3, \"b\" is nothing\nsay (dictionary where 1 is 2) is (dictionary where \"1\" is 2)", "(dictionary where \"a\" is 3, \"b\" is 2)\nyes\nno"],
+  ["set grid to dictionary where \"row\" is list of 0, 0\nset item 2 of item \"row\" of grid to 5\nset item \"next\" of grid to grid\nsay item 2 of item \"row\" of item \"next\" of grid", "5"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -140,13 +150,13 @@ const ERRORS = [
   ['say "a" is less than 5', "line 1: can't check if text is less than a number"],
   ['say item 0 of "abc"', "line 1: there is no item 0, items are counted from 1"],
   ['say item 4 of "abc"', "line 1: there is no item 4, the text only has 3 letters"],
-  ['set s to "ab"\nset item 1 of s to "x"', "line 2: can only change items of a list, not text"],
+  ['set s to "ab"\nset item 1 of s to "x"', "line 2: can only change items of a list or dictionary, not text"],
   ["set n to 5\nadd list of 1 to n", "line 2: can't add a list to a number"],
   ["to f with a\nend\nf", "line 3: 'f' needs 1 input but got 0"],
   ['greet "x"', "line 1: there is no function called 'greet'"],
   ["constructor 1", "line 1: there is no function called 'constructor'"], // a name JavaScript objects already have
   ["set n to 5\nn", "line 2: 'n' is a number, not a function"],
-  ["for each x in 5\nend", "line 1: can only go through a list or text, not a number"],
+  ["for each x in 5\nend", "line 1: can only go through a list, text or dictionary, not a number"],
   ['repeat "a" times\nend', 'line 1: repeat needs a whole number of times, not "a"'],
   ['say "hi', "line 1: this text is missing its closing quote"],
   ['if yes\n    say "hi"', "line 2: 'if' from line 1 is missing its 'end'"],
@@ -166,7 +176,7 @@ const ERRORS = [
   ['set p to record with name "Sam"\nsay nmae of p', "line 2: this record has no 'nmae'. Did you mean 'name'?"],
   ["say name of 5", "line 1: can't take 'name' of a number"],
   ['set s to "x"\nset name of s to 1', "line 2: can only change 'name' of a record, not text"],
-  ["set x to empty thing", "line 1: expected 'list' or 'record' but found 'thing'"],
+  ["set x to empty thing", "line 1: expected 'list', 'record' or 'dictionary' but found 'thing'"],
   ["say person.name", "line 1: I don't understand '.' (to get a field write 'name of person')"],
   ['say "before"\nfail with "your own message"', "line 2: your own message"],
   ["set x to 5 007", "line 1: expected a new line but found '007'"], // numbers are shown as written
@@ -198,6 +208,21 @@ const ERRORS = [
   ["try say 1\nif it fails\nend", "line 1: expected a new line but found 'say'"],
   ["set try to 1", "line 1: 'try' is a Moth word, so it can't be used as a variable name"],
   ["try\n    say 1\nif it fails\n    say 2", "line 4: 'try' from line 1 is missing its 'end'"],
+  // dictionaries: look things up by key, change them, go through their keys; and `is in`
+  ["say item \"Bob\" of (dictionary where \"Bo\" is 1)", "line 1: there is no \"Bob\" in this dictionary. Did you mean \"Bo\"?"],
+  ["set d to dictionary where 1 is 2\nsay item 2 of d", "line 2: there is no 2 in this dictionary"],
+  ["set d to dictionary where (list of 1) is 2", "line 1: a dictionary's keys are text or numbers, not a list"],
+  ["remove \"x\" from list of 1, 2", "line 1: can only remove from a dictionary, not a list"],
+  ["remove \"x\" from empty dictionary", "line 1: there is no \"x\" in this dictionary"],
+  ["say keys of 5", "line 1: 'keys of' needs a dictionary, not a number"],
+  ["say 1 is in 2", "line 1: can't check if a number is in a number"],
+  ["say 1 is in \"a1\"", "line 1: can't check if a number is in text"],
+  ["set item yes of empty dictionary to 1", "line 1: a dictionary's keys are text or numbers, not yes/no"],
+  ["say dictionary \"a\" is 1", "line 1: expected 'where' but found \"a\""],
+  ["say dictionary where \"a\" 1", "line 1: expected 'is' but found '1'"],
+  ["set keys to 1", "line 1: 'keys' is a Moth word, so it can't be used as a variable name"],
+  ["remove \"a\" of d", "line 1: expected 'from' but found 'of'"],
+  ["set d to empty dictionary\nadd 1 to d", "line 2: can't add a number to a dictionary"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -364,8 +389,8 @@ test("the checker finds mistakes without running the program", () => {
     "14:1 fails: 'count' is a number, not a function",
     '15:1 fails: repeat needs a whole number of times, not "x"',
     "17:5 fails: there is no item 0, items are counted from 1",
-    "18:5 fails: 'length of' needs a list or text, not a number",
-    "19:1 fails: can only go through a list or text, not a number",
+    "18:5 fails: 'length of' needs a list, text or dictionary, not a number",
+    "19:1 fails: can only go through a list, text or dictionary, not a number",
     "21:1 fails: 'move forward' needs a number, not text",
     "22:7 fails: can't divide by zero",
   ]);

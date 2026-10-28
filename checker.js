@@ -3,11 +3,11 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, makeRecord, fieldOf, recordFor } from "./vm.js";
+  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
-const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []) };
+const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map() };
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
 
 class Found {
@@ -103,6 +103,8 @@ class Checker extends Scope {
         return () => "list";
       case "record":
         return () => "record";
+      case "dictionary":
+        return () => "dictionary";
       default: // calls, items, fields, and/or: could be anything
         return () => null;
     }
@@ -212,6 +214,13 @@ class Checker extends Scope {
         return;
       case "stop":
         return;
+      case "remove": { // which keys a dictionary has isn't known, so only removing from something else is certain to fail
+        this.expr(s.key);
+        this.expr(s.target);
+        const type = this.type(s.target);
+        this.willFail(s.at, () => this.known(type()) && type() !== "dictionary" && removeKey("a", SAMPLES[type()], found));
+        return;
+      }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program
         this.maybeSkipped++;
         this.block(s.body);
@@ -306,6 +315,9 @@ class Checker extends Scope {
       case "record":
         for (const value of e.values) this.expr(value);
         return;
+      case "dictionary":
+        for (const x of e.items) this.expr(x);
+        return;
       case "field": { // which fields a record has isn't known, so only taking a field of something else is certain to fail
         this.expr(e.of);
         const type = this.type(e.of);
@@ -335,7 +347,7 @@ class Checker extends Scope {
         const type = this.type(e.of);
         this.willFail(e.at, () => {
           const t = type();
-          if (!this.known(t)) return;
+          if (!this.known(t) || t === "dictionary") return; // which keys a dictionary has isn't known
           if (t !== "list" && t !== "text") return item(SAMPLES[t], 1, false, found); // can't take an item of this
           // the index is only certain when it is written out; the length of the list never is
           const n = e.index.kind === "value" ? e.index.value : undefined;
