@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
+import { MothError, fail, noValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, UNSET, Machine, execute } from "./vm.js";
 
 export { MothError, excerpt } from "./vm.js";
 
@@ -623,6 +623,32 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw } =
 // inspect() to see where it is and what its variables hold.
 export function debug(source, print = console.log, draw = undefined) {
   return new Machine(compile(source, { debug: true }), print, { draw });
+}
+
+// A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
+// variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
+// (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
+export function timeline(source, { limit = 10_000 } = {}) {
+  const said = [];
+  const drawn = [];
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line));
+  const steps = [];
+  const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
+  let cut = false;
+  try {
+    for (;;) {
+      if (machine.run({ pauseAtLines: true }) === "done") {
+        snapshot({ done: true });
+        break;
+      }
+      snapshot();
+      if ((cut = steps.length >= limit)) break;
+    }
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    snapshot({ error: err }); // the variables as they were when it failed, since lists and values change in place
+  }
+  return { steps, said, drawn, cut };
 }
 
 // A shell session: each entry runs with the variables and functions made by the entries before it.

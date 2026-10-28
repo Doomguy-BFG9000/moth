@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { run, debug, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, excerpt, MothError } from "./moth.js";
 import examples from "./examples.js";
 
 function output(source, options) {
@@ -209,11 +209,26 @@ test("a debug build prints exactly what a normal run prints", () => {
   }
 });
 
-test("run() can stop after a slice of loop rounds and carry on", () => {
-  const machine = debug("set n to 0\nrepeat while yes\n    add 1 to n\nend", () => {});
-  assert.equal(machine.run({ slice: 1000 }), "slice");
-  assert.equal(machine.run({ slice: 1000 }), "slice");
-  assert.deepEqual(machine.inspect().scopes, [{ name: "main", vars: [["n", "2000"]] }]);
+// Time travel: timeline() records every step, so a debugger can go backwards as well as forwards.
+test("a timeline records each step with the variables, output and drawing so far", () => {
+  const { steps, said, drawn, cut } = timeline("set x to 1\nrepeat 2 times\n    add 1 to x\n    say x\n    move forward x\nend");
+  const x = (step) => step.scopes.at(-1).vars.find(([name]) => name === "x")?.[1];
+  assert.deepEqual(
+    steps.map((s) => [s.done ? "done" : s.line, x(s), s.said, s.drawn]),
+    [[1, undefined, 0, 0], [2, "1", 0, 0], [3, "1", 0, 0], [4, "2", 0, 0], [5, "2", 1, 0], [2, "2", 1, 1], [3, "2", 1, 1], [4, "3", 1, 1], [5, "3", 2, 1], ["done", "3", 2, 2]],
+  );
+  assert.deepEqual(said, ["2", "3"]);
+  assert.equal(drawn.length, 2);
+  assert.equal(cut, false);
+});
+
+test("a timeline ends with the mistake, or is cut short if the program never ends", () => {
+  const failed = timeline('say "hi"\nsay item 2 of "a"');
+  assert.equal(failed.steps.at(-1).error.message, "line 2: there is no item 2, the text only has 1 letter");
+  assert.equal(failed.steps.at(-1).said, 1);
+  const forever = timeline("repeat while yes\nend", { limit: 50 });
+  assert.equal(forever.steps.length, 50);
+  assert.equal(forever.cut, true);
 });
 
 // Fuzzing: thousands of randomly broken programs must only ever fail with a MothError that points

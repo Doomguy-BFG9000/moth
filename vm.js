@@ -161,9 +161,8 @@ export class Machine {
     }
   }
 
-  // Runs until the program ends ("done"), reaches a LINE marker while `pauseAtLines` is on ("line"), or has
-  // gone round loops `slice` more times ("slice"), which lets a page stay responsive between slices.
-  run({ pauseAtLines = false, slice = Infinity } = {}) {
+  // Runs until the program ends ("done") or, while `pauseAtLines` is on, reaches a LINE marker ("line").
+  run({ pauseAtLines = false } = {}) {
     const { frames, print, maxSteps } = this;
     // A stack made right here runs ~1.4x faster than one read off `this`: V8 optimises push and pop best on
     // arrays it saw being created. So each run starts a fresh one with whatever an earlier, paused run left.
@@ -173,7 +172,6 @@ export class Machine {
     let code = fn.code;
     let consts = fn.consts;
     let pc = ip; // instruction being run, for error positions
-    const yieldAt = steps + slice;
     let why; // why the loop below stopped
 
     try {
@@ -201,15 +199,8 @@ export class Machine {
             break;
           case JUMP: {
             const to = code[ip];
-            const back = to < ip; // jumping back means another loop round
+            if (to < ip && ++steps > maxSteps) stopped(maxSteps); // jumping back means another loop round
             ip = to;
-            if (back) {
-              if (++steps > maxSteps) stopped(maxSteps);
-              if (steps >= yieldAt) {
-                why = "slice";
-                break loop;
-              }
-            }
             break;
           }
           case JUMP_IF_FALSE: {
