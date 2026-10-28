@@ -1844,10 +1844,13 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 // `name` is the program's own, for its mistakes, and `allow` the --allow flags built into it, which say what it
 // may do without asking.
 export function machineCompiler(machineSource, compilerSource) {
-  const { compile_allowing: compileMachine } = loadProgram(compileToJs(machineSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "machine.moth" }));
-  return (source, { files = {}, target, name = "program.moth", allow = [] } = {}) => {
+  const { compile_shipping: compileMachine } = loadProgram(compileToJs(machineSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "machine.moth" }));
+  // `icon`, an .ico or .png file's bytes, and `version`, as "1.2.0", for a Windows program; `include`, files built
+  // into the program, as { "logo.png": bytes }, which its `read`s find there first
+  return (source, { files = {}, target, name = "program.moth", allow = [], icon = null, version = null, include = {} } = {}) => {
     try {
-      return Uint8Array.from(compileMachine(source, Object.keys(files), Object.values(files), target, name, allow));
+      return Uint8Array.from(compileMachine(source, Object.keys(files), Object.values(files), target, name, allow, icon, version,
+        Object.keys(include), Object.values(include).map((b) => Uint8Array.from(b))));
     } catch (err) {
       if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
       if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");

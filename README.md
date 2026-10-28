@@ -707,6 +707,8 @@ moth build hello.moth --target linux     for the other system: --target linux or
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-libraries, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
 moth build moth.moth --allow-read --allow-write --allow-run    moth, built by itself
+moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (.ico or .png) and version
+moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
 ```
 
 `moth run` is `moth build` and then the program: it builds it into a file
@@ -913,7 +915,9 @@ calls that led there.
   drawings; on Linux `tools/linux.moth` doing the same with GTK's, on CI's
   Xvfb display; `tools/ui.moth` on both; and `tools/server.moth` answering
   another Moth program's reads and sends, on both; and `tools/tasks.moth`
-  starting, asking about and stopping programs in the background, on both
+  starting, asking about and stopping programs in the background, on both; and
+  `moth build --icon --version --include`, a program moved away from its files
+  reading them from inside itself, on both, and Windows' resources read back
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

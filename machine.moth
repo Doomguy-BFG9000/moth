@@ -233,7 +233,7 @@ to new_asm
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
-        library_callbacks empty dictionary, callback_jobs empty list
+        library_callbacks empty dictionary, callback_jobs empty list, shipping nothing
     set code of made to hot of made
     return made
 end
@@ -27317,6 +27317,7 @@ to emit_files with a, target, allowed
     emit_file_io(a, target)
     emit_named(a, target)
     emit_reading(a, target)
+    emit_included(a)
     emit_writing(a, target)
     emit_arguments(a, target)
     emit_run(a, target)
@@ -29068,6 +29069,17 @@ to emit_reading with a, target
     shifti(a, "shr", rax, 48)
     alui(a, "cmp", rax, kind_text)
     jcc(a, cc_ne, not_text)
+    if length of included_of(a) is greater than 0 # a file built into the program: no need to ask, and not the disk's
+        set not_included to new_label(a)
+        call_to(a, "rt_included")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, not_included)
+        load(a, r14, mem(rax, 16))
+        load(a, rcx, mem(rax, 24))
+        store(a, rip("f_used"), rcx)
+        jmp_to(a, have_all)
+        mark(a, not_included)
+    end
     call_to(a, "rt_is_site")
     mov_rr(a, r13, rax)
     mov_rr(a, rcx, rax)
@@ -35471,6 +35483,25 @@ end
 
 # compile_machine for a program built with --allow flags, which say what it may do without asking
 to compile_allowing with source, file_names, file_texts, target, program_name, flags
+    return compile_shipping(source, file_names, file_texts, target, program_name, flags, nothing, nothing, empty list,
+        empty list)
+end
+
+# compile_allowing, and the program shipped with an icon (an .ico or .png file's bytes) and its version (as
+# "1.2.0"), both for Windows, and files built into it, on both: `included_names` and `included_bytes`, each
+# file's name and its bytes, which `read` and `read bytes` find there before they look on the disk
+to compile_shipping with source, file_names, file_texts, target, program_name, flags, icon, version, included_names, included_bytes
+    set shipping to record with icon icon, version version, included empty list, name program_name
+    set included to included of shipping
+    for each i from 1 to length of included_names
+        add record with name included_slashes(item i of included_names), data item i of included_bytes to included
+    end
+    if icon is not nothing
+        icon_images(icon) # a mistake now, if it isn't an icon
+    end
+    if version is not nothing
+        version_numbers(version)
+    end
     set allowing to allowed_of(flags)
     set files to empty list
     for each i from 1 to length of file_names
@@ -35479,6 +35510,7 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
     set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set body to front's parse(front's tokenize(source, ""), reading)
     set a to new_asm()
+    set shipping of a to shipping
     set st to new_state(a, program_name, files, source, target)
     set allowed of st to allowing
     gen_program(st, body)
@@ -35490,6 +35522,7 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
             set guess to sigs_met(sigs of st, st)
         end
         set a to new_asm()
+        set shipping of a to shipping
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
         set sigs of st to guess
@@ -35498,6 +35531,7 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
     if uses_units of st # it has amounts in it: written again, so the slow paths of its arithmetic look for them
         set settled to sigs of st
         set a to new_asm()
+        set shipping of a to shipping
         set units of a to yes
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
@@ -39268,6 +39302,13 @@ to windows_file with a
     set bss_rva to data_rva + length of dat
     set data_virtual to length of dat + bss of a
     set image_size to align_up(data_rva + data_virtual, 4096)
+    set rsrc_rva to image_size # the icon and the version, if there are, after the rest
+    set rsrc to resource_section(a, rsrc_rva)
+    set sections to 3
+    if length of rsrc is greater than 0
+        set sections to 4
+        set image_size to align_up(rsrc_rva + length of rsrc, 4096)
+    end
     set bases to dictionary where "hot" is text_rva, "rodata" is rdata_rva, "data" is data_rva, "bss" is bss_rva
     set text to place_labels(a, bases)
     place_absolutes(a, bases, 0x140000000)
@@ -39283,7 +39324,7 @@ to windows_file with a
     put32(out, 64)
     put32(out, 0x4550) # "PE\0\0"
     put16(out, 0x8664) # x86-64
-    put16(out, 3) # sections
+    put16(out, sections)
     put32(out, 0)
     put32(out, 0)
     put32(out, 0)
@@ -39292,7 +39333,7 @@ to windows_file with a
     put16(out, 0x20B) # PE32+
     put16(out, 14)
     put32(out, text_raw)
-    put32(out, rdata_raw + data_raw)
+    put32(out, rdata_raw + data_raw + align_up(length of rsrc, 512))
     put32(out, 0)
     put32(out, text_rva + label_offset(a, "start"))
     put32(out, text_rva)
@@ -39320,6 +39361,9 @@ to windows_file with a
         if n is 1 # the imports
             put32(out, data_rva + descriptors)
             put32(out, 20 * (length of groups + 1))
+        else if n is 2 and length of rsrc is greater than 0 # the resources
+            put32(out, rsrc_rva)
+            put32(out, length of rsrc)
         else if n is 10 # the load configuration
             put32(out, data_rva + load_config)
             put32(out, load_config_size)
@@ -39334,6 +39378,10 @@ to windows_file with a
     section_header(out, ".text", text_size, text_rva, text_raw, 1024, 0x60000020)
     section_header(out, ".rdata", length of rodata of a, rdata_rva, rdata_raw, 1024 + text_raw, 0x40000040)
     section_header(out, ".data", data_virtual, data_rva, data_raw, 1024 + text_raw + rdata_raw, 0xC0000040)
+    if length of rsrc is greater than 0
+        section_header(out, ".rsrc", length of rsrc, rsrc_rva, align_up(length of rsrc, 512),
+            1024 + text_raw + rdata_raw + data_raw, 0x40000040)
+    end
     pad_to_size(out, 1024)
     put_all(out, text)
     pad_to_size(out, 1024 + text_raw)
@@ -39341,6 +39389,10 @@ to windows_file with a
     pad_to_size(out, 1024 + text_raw + rdata_raw)
     put_all(out, dat)
     pad_to_size(out, 1024 + text_raw + rdata_raw + data_raw)
+    if length of rsrc is greater than 0
+        put_all(out, rsrc)
+        pad_to_size(out, 1024 + text_raw + rdata_raw + data_raw + align_up(length of rsrc, 512))
+    end
     return out
 end
 
@@ -39433,4 +39485,403 @@ to program_header with out, type, flags, offset, address, file_size, memory_size
     put64(out, file_size)
     put64(out, memory_size)
     put64(out, 4096)
+end
+
+# ---------- shipping a program: files built in, an icon and a version ----------
+
+# a file's name as it's built in: / between its folders, and no ./ at its start
+to included_slashes with named
+    set made to join (split named by "\\") with "/"
+    repeat while length of made is greater than 2 and position of "./" in made is 1
+        set made to shipping_part_text(made, 3)
+    end
+    return made
+end
+
+# a text from its character `from` on
+to shipping_part_text with words, from
+    set made to ""
+    set at to 0
+    for each c in words
+        add 1 to at
+        if at is at least from
+            add c to made
+        end
+    end
+    return made
+end
+
+to included_of with a
+    if shipping of a is nothing
+        return empty list
+    end
+    return included of shipping of a
+end
+
+# The files built in, in the read-only data: how many, then for each where its name's bytes are and how many,
+# and where its own bytes are and how many. rt_included: err_a a name, as text; rax where its four are in that
+# table, or 0 if it's none of theirs. Every other register but r8 and r9 is kept.
+to emit_included with a
+    set included to included_of(a)
+    if length of included is 0
+        return nothing
+    end
+    set ro to rodata of a
+    set labels to empty list
+    for each one in included
+        pad_to(ro, 8)
+        set name_label to "IN" + length of ro
+        rodata_here(a, name_label)
+        put_all(ro, name of one as bytes)
+        pad_to(ro, 8)
+        set data_label to "ID" + length of ro
+        rodata_here(a, data_label)
+        put_all(ro, data of one)
+        add list of name_label, data_label to labels
+    end
+    pad_to(ro, 8)
+    rodata_here(a, "included_table")
+    put64(ro, length of included)
+    set k to 0
+    for each one in included
+        add 1 to k
+        absolute(a, "rodata", length of ro, item 1 of item k of labels, 0)
+        put64(ro, 0)
+        put64(ro, length of (name of one as bytes))
+        absolute(a, "rodata", length of ro, item 2 of item k of labels, 0)
+        put64(ro, 0)
+        put64(ro, length of data of one)
+    end
+    set search to new_label(a)
+    set next to new_label(a)
+    set none to new_label(a)
+    set found to new_label(a)
+    set out to new_label(a)
+    mark(a, "rt_included")
+    for each r in list of rsi, rdi, rcx, rdx, rbx
+        push_r(a, r)
+    end
+    load(a, rax, rip("err_a"))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 0)) # the name's bytes: how many, and where
+    load(a, rbx, mem(rax, 16))
+    lea(a, r8, rip("included_table"))
+    load(a, r9, mem(r8, 0))
+    alui(a, "add", r8, 8)
+    mark(a, search)
+    test_rr(a, r9, r9)
+    jcc(a, cc_e, none)
+    alu_load(a, "cmp", rdx, mem(r8, 8))
+    jcc(a, cc_ne, next)
+    mov_rr(a, rsi, rbx)
+    load(a, rdi, mem(r8, 0))
+    mov_rr(a, rcx, rdx)
+    raw(a, list of 0xF3, 0xA6) # repe cmpsb, which leaves ZF as the cmp did for no bytes
+    jcc(a, cc_e, found)
+    mark(a, next)
+    alui(a, "add", r8, 32)
+    dec_r(a, r9)
+    jmp_to(a, search)
+    mark(a, none)
+    movi(a, rax, 0)
+    jmp_to(a, out)
+    mark(a, found)
+    mov_rr(a, rax, r8)
+    mark(a, out)
+    for each r in list of rbx, rdx, rcx, rdi, rsi
+        pop_r(a, r)
+    end
+    ret(a)
+end
+
+# a little-endian number from `count` bytes of `b`, from byte `from`
+to shipping_number with b, from, count
+    set made to 0
+    set k to count
+    repeat count times
+        set made to made * 256 + byte (from + k - 1) of b
+        set k to k - 1
+    end
+    return made
+end
+
+to shipping_bytes_part with b, from, count
+    set made to empty list
+    for each k from 1 to count
+        add byte (from + k - 1) of b to made
+    end
+    return made
+end
+
+# An icon's pictures: an .ico file's, each its size, colours and bytes; or a .png's one picture, which Windows
+# Vista and later show from inside an icon
+to icon_images with icon
+    set made to empty list
+    if length of icon is at least 24 and byte 1 of icon is 137 and byte 2 of icon is 80 and byte 3 of icon is 78
+        set width to byte 19 of icon * 256 + byte 20 of icon
+        set height to byte 23 of icon * 256 + byte 24 of icon
+        add record with width width, height height, colours 0, planes 1, bits 32, data icon to made
+        return made
+    end
+    if length of icon is less than 6 or shipping_number(icon, 3, 2) is not 1
+        fail with "the icon isn't an .ico or a .png file"
+    end
+    set count to shipping_number(icon, 5, 2)
+    if count is 0 or length of icon is less than 6 + 16 * count
+        fail with "the icon isn't an .ico or a .png file"
+    end
+    for each k from 1 to count
+        set at to 7 + 16 * (k - 1)
+        set size to shipping_number(icon, at + 8, 4)
+        set from to shipping_number(icon, at + 12, 4)
+        if from + size is greater than length of icon
+            fail with "the icon isn't an .ico or a .png file: a picture in it goes past its end"
+        end
+        set width to byte at of icon
+        set height to byte (at + 1) of icon
+        if width is 0
+            set width to 256
+        end
+        if height is 0
+            set height to 256
+        end
+        add record with width width, height height, colours byte (at + 2) of icon, planes shipping_number(icon, at + 4, 2),
+            bits shipping_number(icon, at + 6, 2), data shipping_bytes_part(icon, from + 1, size) to made
+    end
+    return made
+end
+
+# "1.2.3" as its four numbers, each from 0 to 65535: 1, 2, 3 and 0
+to version_numbers with version
+    set parts to split version by "."
+    if length of parts is greater than 4
+        fail with "a version is up to four numbers with dots between, as 1.2.3, not '" + version + "'"
+    end
+    set made to empty list
+    for each part in parts
+        set n to nothing
+        try
+            set n to number of part
+        if it fails
+            set n to nothing
+        end
+        if n is nothing or not (n is divisible by 1) or n is less than 0 or n is greater than 65535 or part is ""
+            fail with "a version is up to four numbers with dots between, as 1.2.3, not '" + version + "'"
+        end
+        add n to made
+    end
+    repeat while length of made is less than 4
+        add 0 to made
+    end
+    return made
+end
+
+# a text as UTF-16, lowest byte first, with a 0 after it
+to utf16_z with words
+    set made to empty list
+    for each c in words
+        set codes to c as bytes
+        set point to byte 1 of codes
+        if length of codes is 2
+            set point to (byte 1 of codes bit and 31) * 64 + (byte 2 of codes bit and 63)
+        else if length of codes is 3
+            set point to (byte 1 of codes bit and 15) * 4096 + (byte 2 of codes bit and 63) * 64 + (byte 3 of codes bit and 63)
+        else if length of codes is 4
+            set point to (byte 1 of codes bit and 7) * 262144 + (byte 2 of codes bit and 63) * 4096
+            set point to point + (byte 3 of codes bit and 63) * 64 + (byte 4 of codes bit and 63)
+        end
+        if point is at least 65536
+            set point to point - 65536
+            put16(made, 55296 + shift point right by 10)
+            put16(made, 56320 + (point bit and 1023))
+        else
+            put16(made, point)
+        end
+    end
+    put16(made, 0)
+    return made
+end
+
+# one of the blocks a version resource is made of: its length, its value's, whether it's text, its key, then
+# its value and the blocks inside it, each on a 4-byte boundary
+to version_block with key, value, kind, value_length, children
+    set made to empty list
+    put16(made, 0)
+    put16(made, value_length)
+    put16(made, kind)
+    put_all(made, utf16_z(key))
+    pad_to(made, 4)
+    put_all(made, value)
+    for each child in children
+        pad_to(made, 4)
+        put_all(made, child)
+    end
+    set n to length of made
+    set item 1 of made to n bit and 255
+    set item 2 of made to shift n right by 8
+    return made
+end
+
+# the version resource Windows shows in a file's properties: its numbers, and its name
+to version_resource with shipping
+    set numbers to version_numbers(version of shipping)
+    set fixed to empty list
+    put32(fixed, 0xFEEF04BD)
+    put32(fixed, 65536)
+    repeat 2 times # the file's version, then the product's
+        put32(fixed, item 1 of numbers * 65536 + item 2 of numbers)
+        put32(fixed, item 3 of numbers * 65536 + item 4 of numbers)
+    end
+    put32(fixed, 63)
+    put32(fixed, 0)
+    put32(fixed, 262148) # VOS_NT_WINDOWS32
+    put32(fixed, 1) # VFT_APP
+    put32(fixed, 0)
+    put32(fixed, 0)
+    put32(fixed, 0)
+    set program to name of shipping
+    set parts to split (join (split program by "\\") with "/") by "/"
+    set program to item (length of parts) of parts
+    set title to program
+    if length of title is greater than 5 and position of ".moth" in title is length of title - 4
+        set title to shipping_text_first(title, length of title - 5)
+    end
+    set strings to empty list
+    for each pair in list of (list of "FileDescription", title), (list of "FileVersion", version of shipping),
+        (list of "ProductName", title), (list of "ProductVersion", version of shipping),
+        (list of "InternalName", title), (list of "OriginalFilename", title + ".exe")
+        set value to utf16_z(item 2 of pair)
+        add version_block(item 1 of pair, value, 1, length of value / 2, empty list) to strings
+    end
+    set table to version_block("040904B0", empty list, 1, 0, strings) # US English, in Unicode
+    set translation to empty list
+    put16(translation, 1033)
+    put16(translation, 1200)
+    set var to version_block("Translation", translation, 0, 4, empty list)
+    set string_info to version_block("StringFileInfo", empty list, 1, 0, list of table)
+    set var_info to version_block("VarFileInfo", empty list, 1, 0, list of var)
+    return version_block("VS_VERSION_INFO", fixed, 0, 52, list of string_info, var_info)
+end
+
+to shipping_text_first with words, count
+    set made to ""
+    set at to 0
+    for each c in words
+        add 1 to at
+        if at is at most count
+            add c to made
+        end
+    end
+    return made
+end
+
+# The .rsrc section, for a section at `rva`: the icon's pictures (RT_ICON), the icon made of them
+# (RT_GROUP_ICON) and the version (RT_VERSION), as Windows' resource directories hold them: by type, then by
+# number, then by language, each a data entry; or nothing, for a program with none
+to resource_section with a, rva
+    set shipping to shipping of a
+    set made to empty list
+    if shipping is nothing
+        return made
+    end
+    set items to empty list
+    if icon of shipping is not nothing
+        set images to icon_images(icon of shipping)
+        set group to empty list
+        put16(group, 0)
+        put16(group, 1)
+        put16(group, length of images)
+        set k to 0
+        for each image in images
+            add 1 to k
+            add record with type 3, which k, data data of image to items
+            add width of image bit and 255 to group
+            add height of image bit and 255 to group
+            add colours of image to group
+            add 0 to group
+            put16(group, planes of image)
+            put16(group, bits of image)
+            put32(group, length of data of image)
+            put16(group, k)
+        end
+        add record with type 14, which 1, data group to items
+    end
+    if version of shipping is not nothing
+        add record with type 16, which 1, data version_resource(shipping) to items
+    end
+    if length of items is 0
+        return made
+    end
+    set types to empty list
+    for each one in items
+        if not (type of one is in types)
+            add type of one to types
+        end
+    end
+    set at to 16 + 8 * length of types
+    set type_at to empty list
+    for each t in types
+        add at to type_at
+        set count to 0
+        for each one in items
+            if type of one is t
+                add 1 to count
+            end
+        end
+        set at to at + 16 + 8 * count
+    end
+    for each one in items # its language's directory, then its data entry
+        set lang_at of one to at
+        set entry_at of one to at + 24
+        set at to at + 40
+    end
+    for each one in items
+        set at to align_up(at, 8)
+        set data_at of one to at
+        set at to at + length of data of one
+    end
+    resource_directory(made, length of types)
+    set k to 0
+    for each t in types
+        add 1 to k
+        put32(made, t)
+        put32(made, 2147483648 + item k of type_at)
+    end
+    for each t in types
+        set count to 0
+        for each one in items
+            if type of one is t
+                add 1 to count
+            end
+        end
+        resource_directory(made, count)
+        for each one in items
+            if type of one is t
+                put32(made, which of one)
+                put32(made, 2147483648 + lang_at of one)
+            end
+        end
+    end
+    for each one in items
+        resource_directory(made, 1)
+        put32(made, 1033)
+        put32(made, entry_at of one)
+        put32(made, rva + data_at of one)
+        put32(made, length of data of one)
+        put32(made, 0)
+        put32(made, 0)
+    end
+    for each one in items
+        pad_to(made, 8)
+        put_all(made, data of one)
+    end
+    return made
+end
+
+to resource_directory with made, count
+    put32(made, 0)
+    put32(made, 0)
+    put32(made, 0)
+    put16(made, 0)
+    put16(made, count)
 end

@@ -20,6 +20,7 @@ use the library "gtk-3"
     gtk_init_check(a pointer, a pointer) gives yes or no
     gtk_window_new(a whole number) gives a pointer
     gtk_window_set_title(a pointer, text)
+    gtk_window_set_icon_from_file(a pointer, text, a pointer) gives yes or no
     gtk_window_set_default_size(a pointer, a whole number, a whole number)
     gtk_window_resize(a pointer, a whole number, a whole number)
     gtk_window_close(a pointer)
@@ -932,4 +933,11 @@ to words with canvas, text, x, y
     cairo_set_font_size(cr of canvas, 13)
     cairo_move_to(cr of canvas, x, y + 12)
     cairo_show_text(cr of canvas, text)
+end
+
+# the window's icon, from a picture's file (a PNG, JPEG, GIF or BMP)
+to set_icon with parent, file
+    if not gtk_window_set_icon_from_file(handle of parent, file, nothing)
+        fail with "can't show '" + file + "': it isn't there, or isn't a picture"
+    end
 end

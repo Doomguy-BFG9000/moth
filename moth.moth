@@ -2,6 +2,7 @@
 # (moth on Linux), which compiles a Moth program into a program of its own with neither JavaScript nor Rust:
 #
 #     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
+#         [--icon app.ico] [--version 1.2.0] [--include files]
 #     moth run [--allow-...] program.moth [arguments...]
 #     moth tidy program.moth [--check]
 #     moth check program.moth
@@ -17,7 +18,10 @@
 
 use "machine.moth" as machine
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
+# what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
+set cli_asked to record with icon nothing, version nothing, include empty list
+
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -149,7 +153,13 @@ end
 
 # a mistake in the program, as Moth shows one
 to cli_report with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
-    set cli_at to at of cli_why
+    set cli_at to nothing
+    try
+        set cli_at to at of cli_why
+    if it fails # a mistake in what the build was given, as its icon, not in the program: it has no place
+        say "moth: " + cli_why to the error output
+        return nothing
+    end
     set cli_where to cli_main_file
     if file of cli_at is not ""
         set cli_where to file of cli_at
@@ -253,6 +263,58 @@ to cli_build with cli_path, cli_target, cli_allowing, cli_into, cli_telling
     return cli_build_source(cli_path, cli_source, cli_target, cli_allowing, cli_into, cli_telling, cli_name_of(cli_path))
 end
 
+# what --icon and --include name, read: the icon's bytes, and each file's name and bytes, a folder's every
+# file; or nothing, said, if one can't be read
+to cli_shipping
+    set cli_made to record with icon nothing, names empty list, datas empty list
+    try
+        if icon of cli_asked is not nothing
+            set icon of cli_made to read bytes icon of cli_asked
+        end
+        for each cli_given_path in include of cli_asked
+            cli_include_path(cli_made, cli_given_path)
+        end
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+        return nothing
+    end
+    return cli_made
+end
+
+to cli_include_path with cli_made, cli_path
+    set cli_inside to nothing
+    try
+        set cli_inside to read the folder cli_path
+    if it fails
+        set cli_inside to nothing
+    end
+    if cli_inside is nothing # a file
+        set cli_named to names of cli_made
+        add cli_path to cli_named
+        set cli_held to datas of cli_made
+        add read bytes cli_path to cli_held
+        return nothing
+    end
+    set cli_base to cli_path
+    if length of cli_base is greater than 0
+        set cli_end to item (length of cli_base) of cli_base
+        if cli_end is not "/" and cli_end is not "\\"
+            set cli_base to cli_base + "/"
+        end
+    end
+    for each cli_entry in cli_inside
+        if item (length of cli_entry) of cli_entry is "/" # a folder inside, without its /
+            set cli_folder_name to ""
+            for each cli_k from 1 to length of cli_entry - 1
+                add item cli_k of cli_entry to cli_folder_name
+            end
+            cli_include_path(cli_made, cli_base + cli_folder_name)
+        else
+            cli_include_path(cli_made, cli_base + cli_entry)
+        end
+    end
+end
+
 # the same, for code that isn't quite what the file holds: the test runner adds lines at its end. Its
 # mistakes say they're in `cli_program`: the file's name, or for a test its path, as the Node.js command
 # line said it.
@@ -260,8 +322,13 @@ to cli_build_source with cli_path, cli_source, cli_target, cli_allowing, cli_int
     set cli_used to cli_sources_of(cli_path, cli_source)
     set cli_names to names of cli_used
     set cli_texts to texts of cli_used
+    set cli_shipped to cli_shipping()
+    if cli_shipped is nothing
+        return no
+    end
     try
-        set cli_bytes to machine's compile_allowing(cli_source, cli_names, cli_texts, cli_target, cli_program, cli_allowing)
+        set cli_bytes to machine's compile_shipping(cli_source, cli_names, cli_texts, cli_target, cli_program, cli_allowing,
+            icon of cli_shipped, version of cli_asked, names of cli_shipped, datas of cli_shipped)
     if it fails with cli_why
         cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
         return no
@@ -1281,6 +1348,17 @@ to cli_main
         else if cli_arg is "--target" and cli_command is "build" and cli_k is less than length of cli_given and cli_target is nothing
             set cli_target to item (cli_k + 1) of cli_given
             set cli_fine to cli_target is "windows" or cli_target is "linux"
+            add 2 to cli_k
+        else if (cli_arg is "--icon" or cli_arg is "--version" or cli_arg is "--include") and (cli_command is "build" or cli_command is "run") and cli_k is less than length of cli_given
+            set cli_value to item (cli_k + 1) of cli_given
+            if cli_arg is "--icon"
+                set icon of cli_asked to cli_value
+            else if cli_arg is "--version"
+                set version of cli_asked to cli_value
+            else
+                set cli_included to include of cli_asked
+                add cli_value to cli_included
+            end
             add 2 to cli_k
         else if cli_command is not "tidy" and cli_command is not "check" and cli_allow_flag(cli_arg)
             add cli_arg to cli_flags

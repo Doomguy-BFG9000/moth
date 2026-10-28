@@ -2384,3 +2384,38 @@ hold them to agreeing.
   isn't there.
 - **Not yet.** Sending a task its input, threads of the program's own, and
   telling its output from its error output.
+
+## 53. Shipping a program: its icon, its version and its files
+
+- **Why.** A program to give someone is one file, and on Windows it looks like
+  one of theirs: an icon in Explorer and the taskbar, and a version in its
+  properties. Its pictures and data shouldn't be files lying beside it.
+- **`--include`.** `moth build app.moth --include data --include logo.png`
+  builds the files, and every file in a folder and the folders inside it,
+  into the program's read-only data, each with its name as it was given, `/`
+  between folders and no `./` at the start. `read` and `read bytes`, and what
+  reads through them (a picture's file, say), look for the name there first,
+  byte for byte, and then on the disk: a file that's built in is the
+  program's own, so it needs no `--allow-read`.
+- **`--icon` and `--version`**, on Windows, make a resource section, `.rsrc`,
+  after the data: the directories Windows reads resources by (type, then
+  number, then language, US English), the icon's pictures as RT_ICON, the icon
+  made of them as RT_GROUP_ICON, number 1, and RT_VERSION, the fixed numbers
+  and the text Explorer shows: the version, and the program's name as its
+  description, product and file name. An .ico file's pictures are taken as
+  they are; a .png is one picture, which Windows shows from inside an icon
+  since Vista. windows.moth's windows use icon number 1 for theirs, so a
+  program built with an icon has it in its title bar as well, and `set_icon`
+  gives a window one from a file, on Linux too.
+- **For Node.js** `machineCompiler`'s options take `icon`, `version` and
+  `include`; machine.moth's `compile_shipping` takes them, and
+  `compile_allowing` is it with none.
+- **A mistake in what it's given** (an icon that isn't one, a version that
+  isn't up to four whole numbers, a file to include that isn't there) is
+  moth's, said as `moth: ...`, not a place in the program.
+- **Tested.** moth.exe building a program with a folder of files, one inside
+  another, a picture built in and used as its icon, and a version; the program
+  moved to a folder with none of them, reading them all, and refused a file
+  that isn't built in; on Windows, its RT_ICON, RT_GROUP_ICON and RT_VERSION,
+  and the version as Windows' own `VersionInfo` reads it; and the three
+  mistakes. On Linux, the files.

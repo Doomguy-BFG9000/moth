@@ -313,6 +313,54 @@ test("moth.exe builds a program, and itself into the same bytes", { skip }, () =
   assert.ok(Buffer.from(made).equals(readFileSync(executable(dir, "moth"))), "moth.exe built itself into different bytes");
 });
 
+// --icon, --version and --include: a program shipped as one file, its files built in and found where they
+// aren't on the disk, and on Windows its icon and version where Windows' resources keep them
+function resourceTypes(exe) {
+  const b = readFileSync(exe);
+  const pe = b.readUInt32LE(60);
+  const sections = b.readUInt16LE(pe + 6);
+  const headers = pe + 24 + b.readUInt16LE(pe + 20);
+  for (let k = 0; k < sections; k++) {
+    const at = headers + 40 * k;
+    if (b.toString("latin1", at, at + 5) !== ".rsrc") continue;
+    const raw = b.readUInt32LE(at + 20);
+    const count = b.readUInt16LE(raw + 12) + b.readUInt16LE(raw + 14);
+    return Array.from({ length: count }, (_, i) => b.readUInt32LE(raw + 16 + 8 * i));
+  }
+  return [];
+}
+test("moth build ships a program with an icon, its version, and files built into it", { skip }, () => {
+  const { dir, exe } = mothExe();
+  mkdirSync(join(dir, "data", "more"), { recursive: true });
+  writeFileSync(join(dir, "data", "hello.txt"), "Hello from inside the program");
+  writeFileSync(join(dir, "data", "more", "deep.txt"), "deeper");
+  writeFileSync(join(dir, "logo.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
+  writeFileSync(join(dir, "app.moth"), 'say read "data/hello.txt"\nsay read "data/more/deep.txt"\nsay length of read bytes "logo.png"\n'
+    + 'try\n    say read "not built in.txt"\nif it fails with why\n    say why\nend\n');
+  const built = spawnSync(exe, ["build", "app.moth", "--include", "data", "--include", "./logo.png", "--icon", "logo.png", "--version", "2.5.1"],
+    { cwd: dir, encoding: "utf8" });
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  const away = join(dir, "away");
+  mkdirSync(away);
+  const moved = executable(away, "app");
+  writeFileSync(moved, readFileSync(executable(dir, "app")));
+  if (target === "linux") chmodSync(moved, 0o755);
+  const ran = spawnSync(moved, [], { cwd: away, encoding: "utf8" });
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`Hello from inside the program\ndeeper\n${readFileSync(join(dir, "logo.png")).length}\n`
+    + "can't read 'not built in.txt': this program isn't allowed to read files (start it with --allow-read)\n", "", 0]);
+  if (target === "windows") {
+    assert.deepEqual(resourceTypes(moved), [3, 14, 16]); // RT_ICON, RT_GROUP_ICON, RT_VERSION
+    assert.ok(readFileSync(moved).includes(Buffer.from("2.5.1\0", "utf16le")));
+  }
+  for (const [flag, value, said] of [["--icon", "app.moth", "the icon isn't an .ico or a .png file"],
+    ["--version", "1.x", "a version is up to four numbers with dots between, as 1.2.3, not '1.x'"],
+    ["--include", "nowhere.txt", "there is no file called 'nowhere.txt'"]]) {
+    const wrong = spawnSync(exe, ["build", "app.moth", flag, value], { cwd: dir, encoding: "utf8" });
+    assert.equal(wrong.status, 1, wrong.stdout + wrong.stderr);
+    assert.ok(wrong.stderr.includes(said), wrong.stderr);
+  }
+});
+
 test("a program moth.exe builds uses files, and shows a mistake in one as moth run did", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "uses");

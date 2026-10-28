@@ -47,6 +47,7 @@ use the library "user32"
     DispatchMessageW(bytes) gives a pointer
     PostQuitMessage(a whole number)
     LoadCursorW(a pointer, a pointer) gives a pointer
+    LoadIconW(a pointer, a pointer) gives a pointer
     AdjustWindowRectEx(a box_edges, a whole number, yes or no, a whole number) gives yes or no
     MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number
     SetTimer(a pointer, a pointer, a whole number, a pointer) gives a pointer
@@ -122,6 +123,7 @@ use the library "gdiplus"
     GdipCreateBitmapFromFile(wide text, bytes) gives a whole number
     GdipCreateHBITMAPFromBitmap(a pointer, bytes, a whole number) gives a whole number
     GdipDisposeImage(a pointer) gives a whole number
+    GdipCreateHICONFromBitmap(a pointer, bytes) gives a whole number
 end
 use the library "comdlg32"
     structure open_file_name with size as a whole number, owner as a pointer, instance as a pointer,
@@ -187,8 +189,9 @@ to ui_start
     end
     set ui_font to CreateFontW(0 - MulDiv(9, ui_dpi, 72), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI")
     set ui_instance to GetModuleHandleW(nothing)
+    set icon to LoadIconW(ui_instance, 1) # the program's own, if moth build was given --icon
     set class to record with size 80, procedure ui_procedure, instance ui_instance, cursor LoadCursorW(nothing, 32512),
-        background 16, class_name "MothWindow"
+        background 16, class_name "MothWindow", icon icon, small_icon icon
     RegisterClassExW(class)
     InitCommonControlsEx(record with size 8, classes 255) # progress bars, tabs, tables, and the rest Windows 95 had
     set class to record with size 80, style 3, procedure ui_procedure, instance ui_instance,
@@ -897,4 +900,26 @@ end
 to words with canvas, text, x, y
     set room to record with left ui_px(x), top ui_px(y), right ui_px(x), bottom ui_px(y)
     DrawTextW(dc of canvas, text, -1, room, 256 + 32 + 2048) # not cut off, on one line, & as it is
+end
+
+# the window's icon, from a picture's file (a PNG, JPEG, GIF, BMP or ICO): in its title, and the taskbar's
+to set_icon with parent, file
+    if not ui_gdiplus
+        GdiplusStartup(8 bytes, (record with version 1), nothing)
+        set ui_gdiplus to yes
+    end
+    set got to 8 bytes
+    if GdipCreateBitmapFromFile(file, got) is not 0
+        fail with "can't show '" + file + "': it isn't there, or isn't a picture"
+    end
+    set image to ui_bytes_number(got, 1, 8)
+    set made to 8 bytes
+    GdipCreateHICONFromBitmap(image, made)
+    GdipDisposeImage(image)
+    set icon to ui_bytes_number(made, 1, 4) # a handle: 32 bits, made 64 by its sign
+    if icon is at least 2147483648
+        set icon to icon - 4294967296
+    end
+    SendMessageW(handle of parent, 128, 1, icon) # WM_SETICON, the big one and the small
+    SendMessageW(handle of parent, 128, 0, icon)
 end

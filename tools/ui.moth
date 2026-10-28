@@ -404,3 +404,10 @@ to words with canvas, text, x, y
     end
     return gtk's words(canvas, text, x, y)
 end
+
+to set_icon with parent, file
+    if on_windows
+        return win's set_icon(parent, file)
+    end
+    return gtk's set_icon(parent, file)
+end
