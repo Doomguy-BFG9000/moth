@@ -2374,121 +2374,519 @@ to emit_mistakes with a
 end
 
 # ---------- the runtime: memory ----------
-# Values that live in memory come from rt_alloc: big blocks from the system, handed out from the front and
-# never given back, which is simple and quick, and enough for a program that runs and ends. A text's bytes
-# come from rt_bytes instead, one after another, so a text whose bytes were the last given out can grow in
-# place: `add c to text` in a loop copies each character once, not the whole text each time.
+# Values that live in memory come from rt_alloc, and memory no value can reach any more is given back by a
+# garbage collector, so a program that makes and drops values all the time, as a compiler does, runs in the
+# memory its live values need.
+#
+# Blocks come in 38 sizes, from 16 bytes to 32 KB; a page of 64 KB holds blocks of one size, and anything
+# bigger gets whole pages of its own. A bitmap beside the memory, one bit for each 16 bytes, says where a
+# block that's been handed out starts, and another marks what the collector finds. The collector looks
+# for values everywhere they can be: the stack, the registers, the program's variables and the runtime's
+# own, and every word of every block it finds that can hold values. Any word that could be where a block
+# is counts, tagged as a value or not, so code in the middle of making a list never loses it; nothing
+# moves, so whatever points at a block keeps pointing at it. What it doesn't find is zeroed and handed
+# out again, and a page with nothing left on it goes back to be used for anything.
+#
+# All of it sits in one stretch of address space taken at the start, given memory as it's needed: 64 GB
+# for blocks, then the two bitmaps, 32 bytes about each page (what it holds), and room for the collector's
+# own list of blocks still to look through.
+
+set gc_page to 65536
+set gc_heap_size to 68719476736 # 64 GB
+set gc_abits_at to gc_heap_size # which 16 bytes start a block
+set gc_mbits_at to gc_heap_size + 536870912 # which blocks the collector found
+set gc_info_at to gc_heap_size + 1073741824 # 32 bytes for each page
+set gc_marks_at to gc_heap_size + 2147483648 # blocks found but not yet looked through
+set gc_reserved to gc_heap_size + 2147483648 + 4294967296 + 65536
+set gc_chunk to 67108864 # memory is asked for 64 MB at a time
+set gc_first_run to 67108864 # the first collection after 64 MB of pages
+set gc_sizes to list of 16, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024,
+    1280, 1536, 1792, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 9360, 10912, 13104, 16384, 21840, 32768
+
+to movi_big with a, r, v
+    set eight to empty list
+    put64(eight, v)
+    movi64(a, r, eight)
+end
+
+# the carry flag gets bit r of the bits starting at `at`; bts sets it as well, btr clears it
+to bt_at with a, at, r
+    enc(a, empty list, yes, (list of 0x0F, 0xA3), r, at, empty list)
+end
+
+to bts_at with a, at, r
+    enc(a, empty list, yes, (list of 0x0F, 0xAB), r, at, empty list)
+end
+
+to btr_at with a, at, r
+    enc(a, empty list, yes, (list of 0x0F, 0xB3), r, at, empty list)
+end
+
+# the tables of block sizes: for each size up to 32 KB in 16-byte steps, its size's number; each size; and
+# how many blocks of it a page holds
+to emit_gc_tables with a
+    set ro to rodata of a
+    rodata_here(a, "gc_size_class")
+    set sc_class to 0
+    for each sc_g from 0 to 2048
+        repeat while item (sc_class + 1) of gc_sizes is less than sc_g * 16
+            add 1 to sc_class
+        end
+        add sc_class to ro
+    end
+    pad_to(ro, 8)
+    rodata_here(a, "gc_class_size")
+    for each sc_size in gc_sizes
+        put64(ro, sc_size)
+    end
+    rodata_here(a, "gc_class_count")
+    for each sc_size in gc_sizes
+        set sc_fit to 0
+        repeat while (sc_fit + 1) * sc_size is at most gc_page
+            add 1 to sc_fit
+        end
+        put64(ro, sc_fit)
+    end
+end
 
 to emit_memory with a, target
-    # rt_alloc: rcx: that many bytes of zeroed memory, 16-aligned, in rax; every other register is kept
-    set again to new_label(a)
-    set more to new_label(a)
+    emit_alloc(a)
+    emit_pages(a)
+    emit_collect(a)
+    emit_os_memory(a, target)
+end
+
+to emit_alloc with a
+    # rt_alloc: rcx: a zeroed block of at least that many bytes, 16-aligned, in rax, which may hold values;
+    # rt_alloc_raw: the same for bytes that are never values, which the collector doesn't look through.
+    # Every other register is kept.
+    set common to new_label(a)
+    set sized to new_label(a)
+    set take to new_label(a)
+    set refill to new_label(a)
+    set big to new_label(a)
+    mark(a, "rt_alloc_raw")
+    push_r(a, r8)
+    movi(a, r8, 1)
+    jmp_to(a, common)
     mark(a, "rt_alloc")
+    push_r(a, r8)
+    movi(a, r8, 0)
+    mark(a, common)
     push_r(a, rcx)
     push_r(a, rdx)
     alui(a, "add", rcx, 15)
-    alui(a, "and", rcx, -16)
-    mark(a, again)
-    load(a, rax, rip("heap_top"))
-    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rcx, 4) # in 16-byte steps
+    jcc(a, cc_ne, sized)
+    movi(a, rcx, 1)
+    mark(a, sized)
+    alui(a, "cmp", rcx, 2048)
+    jcc(a, cc_a, big)
+    lea(a, rdx, rip("gc_size_class"))
     alu(a, "add", rdx, rcx)
-    alu_load(a, "cmp", rdx, rip("heap_end"))
-    jcc(a, cc_a, more)
-    store(a, rip("heap_top"), rdx)
+    load8(a, rdx, mem(rdx, 0))
+    shifti(a, "shl", rdx, 1)
+    alu(a, "add", rdx, r8)
+    shifti(a, "shl", rdx, 3)
+    lea(a, rax, rip("gc_free"))
+    alu(a, "add", rdx, rax) # where the first free block of that size is
+    load(a, rax, mem(rdx, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, refill)
+    mark(a, take)
+    load(a, rcx, mem(rax, 0))
+    store(a, mem(rdx, 0), rcx)
+    storei(a, mem(rax, 0), 0)
+    mov_rr(a, rcx, rax)
+    alu_load(a, "sub", rcx, rip("gc_base"))
+    shifti(a, "shr", rcx, 4)
+    load(a, rdx, rip("gc_abits"))
+    bts_at(a, mem(rdx, 0), rcx)
     pop_r(a, rdx)
     pop_r(a, rcx)
+    pop_r(a, r8)
     ret(a)
-    mark(a, more)
-    call_to(a, "rt_grow")
-    jmp_to(a, again)
+    mark(a, refill)
+    call_to(a, "rt_gc_refill")
+    load(a, rax, mem(rdx, 0))
+    jmp_to(a, take)
+    mark(a, big)
+    call_to(a, "rt_gc_large")
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    pop_r(a, r8)
+    ret(a)
 
-    # rt_bytes: rcx: room for that many bytes in rax; every other register is kept
-    set fits to new_label(a)
-    set sized to new_label(a)
+    # rt_block_size: rcx bytes: how big the block rt_alloc gives for them is, in rcx; every other register
+    # is kept
+    set whole_pages to new_label(a)
+    set some to new_label(a)
+    mark(a, "rt_block_size")
+    push_r(a, rdx)
+    alui(a, "add", rcx, 15)
+    shifti(a, "shr", rcx, 4)
+    jcc(a, cc_ne, some)
+    movi(a, rcx, 1)
+    mark(a, some)
+    alui(a, "cmp", rcx, 2048)
+    jcc(a, cc_a, whole_pages)
+    lea(a, rdx, rip("gc_size_class"))
+    alu(a, "add", rdx, rcx)
+    load8(a, rcx, mem(rdx, 0))
+    shifti(a, "shl", rcx, 3)
+    lea(a, rdx, rip("gc_class_size"))
+    alu(a, "add", rdx, rcx)
+    load(a, rcx, mem(rdx, 0))
+    pop_r(a, rdx)
+    ret(a)
+    mark(a, whole_pages)
+    shifti(a, "shl", rcx, 4)
+    alui(a, "add", rcx, 65535)
+    alui(a, "and", rcx, -65536)
+    pop_r(a, rdx)
+    ret(a)
+
+    # rt_bytes: rcx: room for that many bytes of a text, in rax; rt_bytes_room: the same with rdx bytes more
+    # to grow into. Every other register is kept. They come in a block of their own, after how many of its
+    # bytes are used and how many it has room for, so a text that ends where its block's used bytes end can
+    # grow in place.
     mark(a, "rt_bytes")
     push_r(a, rdx)
-    load(a, rax, rip("bytes_top"))
-    mov_rr(a, rdx, rax)
-    alu(a, "add", rdx, rcx)
-    alu_load(a, "cmp", rdx, rip("bytes_end"))
-    jcc(a, cc_be, fits)
-    push_r(a, rcx) # a new block, of 1 MB or more
-    alui(a, "cmp", rcx, 1048576)
-    jcc(a, cc_ae, sized)
-    movi(a, rcx, 1048576)
-    mark(a, sized)
-    call_to(a, "rt_alloc")
-    store(a, rip("bytes_top"), rax)
-    alu(a, "add", rax, rcx)
-    store(a, rip("bytes_end"), rax)
-    pop_r(a, rcx)
-    load(a, rax, rip("bytes_top"))
-    mov_rr(a, rdx, rax)
-    alu(a, "add", rdx, rcx)
-    mark(a, fits)
-    store(a, rip("bytes_top"), rdx)
+    movi(a, rdx, 0)
+    call_to(a, "rt_bytes_room")
     pop_r(a, rdx)
     ret(a)
+    mark(a, "rt_bytes_room")
+    push_r(a, rcx)
+    push_r(a, r8)
+    mov_rr(a, r8, rcx)
+    alu(a, "add", rcx, rdx)
+    alui(a, "add", rcx, 16)
+    call_to(a, "rt_alloc_raw")
+    store(a, mem(rax, 0), r8)
+    call_to(a, "rt_block_size")
+    alui(a, "sub", rcx, 16)
+    store(a, mem(rax, 8), rcx)
+    alui(a, "add", rax, 16)
+    pop_r(a, r8)
+    pop_r(a, rcx)
+    ret(a)
 
-    # rt_grow: rcx: at least that much more memory from the system, 64 MB at a time; every register is kept
-    set enough to new_label(a)
-    set none to new_label(a)
-    mark(a, "rt_grow")
-    for each r in list of rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    # rt_tail_block: rax a text, untagged: the block its bytes are in, in rax, if they start it and end
+    # where its used bytes do, so more can go straight after them; else 0. Every other register is kept.
+    set not_tail to new_label(a)
+    mark(a, "rt_tail_block")
+    push_r(a, rcx)
+    push_r(a, rdx)
+    push_r(a, r8)
+    load(a, rdx, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    alui(a, "sub", rdx, 16)
+    mov_rr(a, rax, rdx)
+    alui(a, "and", rax, 15)
+    jcc(a, cc_ne, not_tail)
+    mov_rr(a, rax, rdx)
+    alu_load(a, "sub", rax, rip("gc_base"))
+    load(a, r8, rip("gc_pages"))
+    shifti(a, "shl", r8, 16)
+    alu(a, "cmp", rax, r8)
+    jcc(a, cc_ae, not_tail) # not in the memory blocks come from: one of the program's own texts
+    shifti(a, "shr", rax, 4)
+    load(a, r8, rip("gc_abits"))
+    bt_at(a, mem(r8, 0), rax)
+    jcc(a, cc_ae, not_tail)
+    alu_load(a, "cmp", rcx, mem(rdx, 0))
+    jcc(a, cc_ne, not_tail)
+    mov_rr(a, rax, rdx)
+    pop_r(a, r8)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
+    mark(a, not_tail)
+    movi(a, rax, 0)
+    pop_r(a, r8)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
+end
+
+to emit_pages with a
+    # rt_gc_refill: rdx where the first free block of a size is, when there's none: more, after collecting
+    # if enough pages have been taken since the last time, else from a new page. Every register but rax
+    # is kept.
+    set fresh to new_label(a)
+    set filled to new_label(a)
+    set linking to new_label(a)
+    set linked to new_label(a)
+    mark(a, "rt_gc_refill")
+    for each r in list of rbx, rcx, rdx, rsi, rdi, r8, r9, r10
         push_r(a, r)
     end
-    mov_rr(a, rax, rcx)
-    alui(a, "add", rax, 65536)
-    alui(a, "cmp", rax, 67108864)
-    jcc(a, cc_ae, enough)
-    movi(a, rax, 67108864)
-    mark(a, enough)
-    alui(a, "add", rax, 65535)
-    alui(a, "and", rax, -65536)
-    if target is "windows"
-        push_r(a, rbp)
-        mov_rr(a, rbp, rsp)
-        alui(a, "and", rsp, -16)
-        alui(a, "sub", rsp, 96)
-        for each k from 0 to 5
-            movsd_store(a, mem(rsp, 32 + 8 * k), k)
-        end
-        mov_rr(a, rdi, rax)
-        movi(a, rcx, 0)
-        mov_rr(a, rdx, rdi)
-        movi(a, r8, 0x3000) # MEM_COMMIT and MEM_RESERVE
-        movi(a, r9, 4) # PAGE_READWRITE
-        call_import(a, "imp_VirtualAlloc")
-        test_rr(a, rax, rax)
-        jcc(a, cc_e, none)
-        store(a, rip("heap_top"), rax)
-        alu(a, "add", rax, rdi)
-        store(a, rip("heap_end"), rax)
-        for each k from 0 to 5
-            movsd_load(a, k, mem(rsp, 32 + 8 * k))
-        end
-        mov_rr(a, rsp, rbp)
-        pop_r(a, rbp)
-    else
-        mov_rr(a, rsi, rax)
-        movi(a, rdi, 0)
-        movi(a, rdx, 3) # PROT_READ and PROT_WRITE
-        movi(a, r10, 0x22) # MAP_PRIVATE and MAP_ANONYMOUS
-        movi(a, r8, -1)
-        movi(a, r9, 0)
-        movi(a, rax, 9) # mmap
-        raw(a, list of 0x0F, 0x05)
-        alui(a, "cmp", rax, -4096)
-        jcc(a, cc_a, none)
-        store(a, rip("heap_top"), rax)
-        alu(a, "add", rax, rsi)
-        store(a, rip("heap_end"), rax)
-    end
-    for each r in list of r11, r10, r9, r8, rdi, rsi, rdx, rcx
+    mov_rr(a, rbx, rdx)
+    load(a, rax, rip("gc_since"))
+    alu_load(a, "cmp", rax, rip("gc_threshold"))
+    jcc(a, cc_b, fresh)
+    call_to(a, "rt_collect")
+    load(a, rax, mem(rbx, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, filled)
+    mark(a, fresh)
+    movi(a, rcx, 1)
+    call_to(a, "rt_gc_pages")
+    mov_rr(a, rcx, rbx) # which size, and whether its blocks hold values
+    lea(a, rdx, rip("gc_free"))
+    alu(a, "sub", rcx, rdx)
+    shifti(a, "shr", rcx, 3)
+    mov_rr(a, r8, rcx)
+    alui(a, "and", r8, 1)
+    shifti(a, "shr", rcx, 1)
+    mov_rr(a, rdx, rax) # the page holds blocks of that size
+    shifti(a, "shl", rdx, 5)
+    alu_load(a, "add", rdx, rip("gc_info"))
+    mov_rr(a, r9, rcx)
+    shifti(a, "shl", r9, 8)
+    alu(a, "or", r9, r8)
+    shifti(a, "shl", r9, 8)
+    alui(a, "or", r9, 1)
+    store(a, mem(rdx, 0), r9)
+    mov_rr(a, rsi, rax)
+    shifti(a, "shl", rsi, 16)
+    alu_load(a, "add", rsi, rip("gc_base"))
+    shifti(a, "shl", rcx, 3)
+    lea(a, r9, rip("gc_class_size"))
+    alu(a, "add", r9, rcx)
+    load(a, r9, mem(r9, 0))
+    lea(a, r10, rip("gc_class_count"))
+    alu(a, "add", r10, rcx)
+    load(a, r10, mem(r10, 0))
+    movi(a, rax, 0) # each block points at the next, the first first
+    mov_rr(a, rdi, r10)
+    dec_r(a, rdi)
+    imul_rr(a, rdi, r9)
+    alu(a, "add", rdi, rsi)
+    mark(a, linking)
+    store(a, mem(rdi, 0), rax)
+    mov_rr(a, rax, rdi)
+    alu(a, "cmp", rdi, rsi)
+    jcc(a, cc_e, linked)
+    alu(a, "sub", rdi, r9)
+    jmp_to(a, linking)
+    mark(a, linked)
+    store(a, mem(rbx, 0), rax)
+    mark(a, filled)
+    for each r in list of r10, r9, r8, rdi, rsi, rdx, rcx, rbx
         pop_r(a, r)
     end
     ret(a)
-    mark(a, none)
+
+    # rt_gc_large: rcx 16-byte steps, more than a page of blocks holds, and r8 1 if they never hold values:
+    # whole pages of their own, zeroed, in rax; every other register is kept
+    set taken to new_label(a)
+    set rest_pages to new_label(a)
+    set paged to new_label(a)
+    mark(a, "rt_gc_large")
+    for each r in list of rbx, rcx, rdx, rsi
+        push_r(a, r)
+    end
+    load(a, rax, rip("gc_since"))
+    alu_load(a, "cmp", rax, rip("gc_threshold"))
+    jcc(a, cc_b, taken)
+    call_to(a, "rt_collect")
+    mark(a, taken)
+    shifti(a, "shl", rcx, 4)
+    alui(a, "add", rcx, 65535)
+    shifti(a, "shr", rcx, 16)
+    mov_rr(a, rbx, rcx)
+    call_to(a, "rt_gc_pages")
+    mov_rr(a, rdx, rax)
+    shifti(a, "shl", rdx, 5)
+    alu_load(a, "add", rdx, rip("gc_info"))
+    mov_rr(a, rsi, r8)
+    shifti(a, "shl", rsi, 8)
+    alui(a, "or", rsi, 2)
+    store(a, mem(rdx, 0), rsi)
+    store(a, mem(rdx, 8), rbx)
+    movi(a, rcx, 1) # the pages after it say where it starts
+    mark(a, rest_pages)
+    alu(a, "cmp", rcx, rbx)
+    jcc(a, cc_ae, paged)
+    alui(a, "add", rdx, 32)
+    storei(a, mem(rdx, 0), 3)
+    store(a, mem(rdx, 8), rax)
+    inc_r(a, rcx)
+    jmp_to(a, rest_pages)
+    mark(a, paged)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shl", rcx, 12)
+    load(a, rdx, rip("gc_abits"))
+    bts_at(a, mem(rdx, 0), rcx)
+    shifti(a, "shl", rax, 16)
+    alu_load(a, "add", rax, rip("gc_base"))
+    for each r in list of rsi, rdx, rcx, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gc_pages: rcx pages next to each other, zeroed: the first one's number, in rax. From the free runs
+    # of pages, the first that's long enough, else new ones. Every other register is kept.
+    set walk to new_label(a)
+    set fits to new_label(a)
+    set whole to new_label(a)
+    set clean to new_label(a)
+    set bump to new_label(a)
+    set enough to new_label(a)
+    set got to new_label(a)
+    mark(a, "rt_gc_pages")
+    for each r in list of rbx, rcx, rdx, rsi, rdi, r8
+        push_r(a, r)
+    end
+    mov_rr(a, r8, rcx)
+    lea(a, rbx, rip("gc_runs")) # where the link to the run looked at is
+    mark(a, walk)
+    load(a, rax, mem(rbx, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, bump)
+    dec_r(a, rax)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shl", rdx, 5)
+    alu_load(a, "add", rdx, rip("gc_info"))
+    load(a, rcx, mem(rdx, 16))
+    alu(a, "cmp", rcx, r8)
+    jcc(a, cc_ae, fits)
+    lea(a, rbx, mem(rdx, 24))
+    jmp_to(a, walk)
+    mark(a, fits)
+    jcc(a, cc_e, whole)
+    mov_rr(a, rsi, rax) # the rest of the run, after the pages taken
+    alu(a, "add", rsi, r8)
+    mov_rr(a, rdi, rsi)
+    shifti(a, "shl", rdi, 5)
+    alu_load(a, "add", rdi, rip("gc_info"))
+    alu(a, "sub", rcx, r8)
+    store(a, mem(rdi, 16), rcx)
+    load(a, rcx, mem(rdx, 24))
+    store(a, mem(rdi, 24), rcx)
+    inc_r(a, rsi)
+    store(a, mem(rbx, 0), rsi)
+    jmp_to(a, clean)
+    mark(a, whole)
+    load(a, rcx, mem(rdx, 24))
+    store(a, mem(rbx, 0), rcx)
+    mark(a, clean) # used before: zeroed now
+    push_r(a, rax)
+    mov_rr(a, rdi, rax)
+    shifti(a, "shl", rdi, 16)
+    alu_load(a, "add", rdi, rip("gc_base"))
+    mov_rr(a, rcx, r8)
+    shifti(a, "shl", rcx, 13)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    pop_r(a, rax)
+    jmp_to(a, got)
+    mark(a, bump) # new pages, with memory from the system if there isn't enough yet
+    load(a, rax, rip("gc_pages"))
+    mov_rr(a, rcx, rax)
+    alu(a, "add", rcx, r8)
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shl", rdx, 16)
+    alu_load(a, "cmp", rdx, rip("gc_committed"))
+    jcc(a, cc_be, enough)
+    call_to(a, "rt_gc_commit")
+    mark(a, enough)
+    store(a, rip("gc_pages"), rcx)
+    mark(a, got)
+    mov_rr(a, rcx, r8)
+    shifti(a, "shl", rcx, 16)
+    alu_store(a, "add", rip("gc_since"), rcx)
+    for each r in list of r8, rdi, rsi, rdx, rcx, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gc_commit: rdx bytes of blocks from the start: memory for them, and for what's kept about them, 64
+    # MB at a time; every register is kept
+    set room to new_label(a)
+    mark(a, "rt_gc_commit")
+    for each r in list of rax, rbx, rcx, rdx, rsi
+        push_r(a, r)
+    end
+    alui(a, "add", rdx, gc_chunk - 1)
+    alui(a, "and", rdx, 0 - gc_chunk)
+    movi_big(a, rax, gc_heap_size)
+    alu(a, "cmp", rdx, rax)
+    jcc(a, cc_be, room)
+    jmp_to(a, "rt_out_of_memory")
+    mark(a, room)
+    mov_rr(a, rbx, rdx)
+    load(a, rsi, rip("gc_committed"))
+    mov_rr(a, rcx, rsi) # the blocks
+    alu_load(a, "add", rcx, rip("gc_base"))
+    mov_rr(a, rdx, rbx)
+    alu(a, "sub", rdx, rsi)
+    call_to(a, "rt_os_commit")
+    for each bits in list of "gc_abits", "gc_mbits" # their bits, one for each 16 bytes
+        mov_rr(a, rcx, rsi)
+        shifti(a, "shr", rcx, 7)
+        alu_load(a, "add", rcx, rip(bits))
+        mov_rr(a, rdx, rbx)
+        alu(a, "sub", rdx, rsi)
+        shifti(a, "shr", rdx, 7)
+        call_to(a, "rt_os_commit")
+    end
+    mov_rr(a, rcx, rsi) # 32 bytes for each page
+    shifti(a, "shr", rcx, 11)
+    alu_load(a, "add", rcx, rip("gc_info"))
+    mov_rr(a, rdx, rbx)
+    alu(a, "sub", rdx, rsi)
+    shifti(a, "shr", rdx, 11)
+    call_to(a, "rt_os_commit")
+    store(a, rip("gc_committed"), rbx)
+    for each r in list of rsi, rdx, rcx, rbx, rax
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gc_init: the address space for all of it; before anything else runs
+    mark(a, "rt_gc_init")
+    movi_big(a, rcx, gc_reserved)
+    call_to(a, "rt_os_reserve")
+    alui(a, "add", rax, 65535)
+    alui(a, "and", rax, -65536)
+    store(a, rip("gc_base"), rax)
+    for each part in list of (list of "gc_abits", gc_abits_at), (list of "gc_mbits", gc_mbits_at),
+        (list of "gc_info", gc_info_at), (list of "gc_marks", gc_marks_at)
+        movi_big(a, rcx, item 2 of part)
+        alu(a, "add", rcx, rax)
+        store(a, rip(item 1 of part), rcx)
+    end
+    load(a, rcx, rip("gc_marks"))
+    store(a, rip("gc_marks_end"), rcx)
+    storei(a, rip("gc_threshold"), gc_first_run)
+    ret(a)
+
+    # rt_gc_more_marks: room for more blocks still to look through; every register is kept
+    set marks_room to new_label(a)
+    mark(a, "rt_gc_more_marks")
+    for each r in list of rax, rcx, rdx
+        push_r(a, r)
+    end
+    load(a, rcx, rip("gc_marks_end"))
+    load(a, rax, rip("gc_marks"))
+    movi_big(a, rdx, 4294967296 - 16777216)
+    alu(a, "add", rax, rdx)
+    alu(a, "cmp", rcx, rax)
+    jcc(a, cc_be, marks_room)
+    jmp_to(a, "rt_out_of_memory")
+    mark(a, marks_room)
+    movi(a, rdx, 16777216)
+    call_to(a, "rt_os_commit")
+    alu_store(a, "add", rip("gc_marks_end"), rdx)
+    for each r in list of rdx, rcx, rax
+        pop_r(a, r)
+    end
+    ret(a)
+
+    mark(a, "rt_out_of_memory")
     call_to(a, "rt_flush_out")
     point_at_text(a, "a value got too big to fit in memory\n")
     mov_rr(a, rdx, rcx)
@@ -2496,6 +2894,408 @@ to emit_memory with a, target
     call_to(a, "rt_write")
     movi(a, rcx, 1)
     jmp_to(a, "rt_exit")
+end
+
+to emit_collect with a
+    # rt_collect: every block a value can still be reached from is kept, and the rest given back. Every
+    # register is kept. While it runs: r9 is where blocks start, r10 how far they go, r11 where what's kept
+    # about pages is, rbx and r14 the two bitmaps, r12 and r13 the bottom and top of the blocks found but
+    # not looked through yet.
+    set tracing to new_label(a)
+    set traced to new_label(a)
+    set small_one to new_label(a)
+    set sized_one to new_label(a)
+    set at_least to new_label(a)
+    mark(a, "rt_collect")
+    for each r in list of rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r11, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    alui(a, "sub", rsp, 128) # the xmm registers, so the stack holds every value there is
+    for each k from 0 to 15
+        movsd_store(a, mem(rsp, 8 * k), k)
+    end
+    storei(a, rip("gc_live"), 0)
+    load(a, r9, rip("gc_base"))
+    load(a, r10, rip("gc_pages"))
+    shifti(a, "shl", r10, 16)
+    load(a, r11, rip("gc_info"))
+    load(a, rbx, rip("gc_abits"))
+    load(a, r14, rip("gc_mbits"))
+    load(a, r12, rip("gc_marks"))
+    mov_rr(a, r13, r12)
+    mov_rr(a, rsi, rsp)
+    load(a, rdi, rip("stack_top"))
+    call_to(a, "rt_gc_scan")
+    lea(a, rsi, rip("globals"))
+    lea(a, rdi, rip("globals_end"))
+    call_to(a, "rt_gc_scan")
+    lea(a, rsi, rip("gc_roots_from"))
+    lea(a, rdi, rip("gc_roots_to"))
+    call_to(a, "rt_gc_scan")
+    mark(a, tracing) # each block found: through it, if it can hold values
+    alu(a, "cmp", r13, r12)
+    jcc(a, cc_e, traced)
+    alui(a, "sub", r13, 8)
+    load(a, rax, mem(r13, 0))
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 16)
+    shifti(a, "shl", rdx, 5)
+    alu(a, "add", rdx, r11)
+    load8(a, r8, mem(rdx, 0))
+    alui(a, "cmp", r8, 1)
+    jcc(a, cc_e, small_one)
+    load(a, rcx, mem(rdx, 8))
+    shifti(a, "shl", rcx, 16)
+    jmp_to(a, sized_one)
+    mark(a, small_one)
+    load8(a, r8, mem(rdx, 2))
+    shifti(a, "shl", r8, 3)
+    lea(a, rcx, rip("gc_class_size"))
+    alu(a, "add", rcx, r8)
+    load(a, rcx, mem(rcx, 0))
+    mark(a, sized_one)
+    alu_store(a, "add", rip("gc_live"), rcx)
+    load8(a, r8, mem(rdx, 1))
+    test_rr(a, r8, r8)
+    jcc(a, cc_ne, tracing)
+    mov_rr(a, rsi, rax)
+    alu(a, "add", rsi, r9)
+    mov_rr(a, rdi, rsi)
+    alu(a, "add", rdi, rcx)
+    call_to(a, "rt_gc_scan")
+    jmp_to(a, tracing)
+    mark(a, traced)
+    call_to(a, "rt_gc_sweep")
+    load(a, rax, rip("gc_live")) # the next time after as much again as is live, and at least 64 MB
+    alui(a, "cmp", rax, gc_first_run)
+    jcc(a, cc_ae, at_least)
+    movi(a, rax, gc_first_run)
+    mark(a, at_least)
+    store(a, rip("gc_threshold"), rax)
+    storei(a, rip("gc_since"), 0)
+    for each k from 0 to 15
+        movsd_load(a, k, mem(rsp, 8 * k))
+    end
+    alui(a, "add", rsp, 128)
+    for each r in list of r15, r14, r13, r12, r11, r10, r9, r8, rbp, rdi, rsi, rdx, rcx, rbx, rax
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gc_scan: rsi to rdi, 8 bytes at a time: each that could be where a block is, a value tagged as
+    # one or an address, marks the block and adds it to those to look through, if it wasn't marked yet.
+    # Uses rax, rcx, rdx, rsi, rbp, r8 and r15.
+    set word to new_label(a)
+    set address to new_label(a)
+    set small_block to new_label(a)
+    set large_block to new_label(a)
+    set found to new_label(a)
+    set pushed_room to new_label(a)
+    set scanned to new_label(a)
+    mark(a, "rt_gc_scan")
+    mark(a, word)
+    alu(a, "cmp", rsi, rdi)
+    jcc(a, cc_ae, scanned)
+    load(a, rax, mem(rsi, 0))
+    alui(a, "add", rsi, 8)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    jcc(a, cc_e, address)
+    alui(a, "sub", rdx, kind_text)
+    alui(a, "cmp", rdx, kind_function - kind_text)
+    jcc(a, cc_a, word)
+    untag(a, rax)
+    mark(a, address)
+    alu(a, "sub", rax, r9)
+    alu(a, "cmp", rax, r10)
+    jcc(a, cc_ae, word)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 16)
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shl", rdx, 5)
+    alu(a, "add", rdx, r11)
+    load8(a, r8, mem(rdx, 0))
+    alui(a, "cmp", r8, 1)
+    jcc(a, cc_e, small_block)
+    alui(a, "cmp", r8, 2)
+    jcc(a, cc_e, large_block)
+    alui(a, "cmp", r8, 3)
+    jcc(a, cc_ne, word)
+    load(a, rcx, mem(rdx, 8)) # in the middle of a big block: where it starts
+    mark(a, large_block)
+    mov_rr(a, rax, rcx)
+    shifti(a, "shl", rax, 16)
+    jmp_to(a, found)
+    mark(a, small_block) # which block of the page
+    load8(a, r8, mem(rdx, 2))
+    shifti(a, "shl", r8, 3)
+    lea(a, r15, rip("gc_class_size"))
+    alu(a, "add", r15, r8)
+    load(a, r15, mem(r15, 0))
+    lea(a, rbp, rip("gc_class_count"))
+    alu(a, "add", rbp, r8)
+    load(a, rbp, mem(rbp, 0))
+    mov_rr(a, r8, rcx)
+    alui(a, "and", rax, 65535)
+    movi(a, rdx, 0)
+    unary(a, "div", r15)
+    alu(a, "cmp", rax, rbp)
+    jcc(a, cc_ae, word)
+    imul_rr(a, rax, r15)
+    shifti(a, "shl", r8, 16)
+    alu(a, "add", rax, r8)
+    mark(a, found) # rax: where the block starts, from where blocks do
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 4)
+    bt_at(a, mem(rbx, 0), rcx)
+    jcc(a, cc_ae, word) # not a block that's been handed out
+    bts_at(a, mem(r14, 0), rcx)
+    jcc(a, cc_b, word) # found already
+    alu_load(a, "cmp", r13, rip("gc_marks_end"))
+    jcc(a, cc_b, pushed_room)
+    mov_rr(a, rcx, r13)
+    call_to(a, "rt_gc_more_marks")
+    mark(a, pushed_room)
+    store(a, mem(r13, 0), rax)
+    alui(a, "add", r13, 8)
+    jmp_to(a, word)
+    mark(a, scanned)
+    ret(a)
+
+    # rt_gc_sweep: every page, in order: a big block not found gives its pages back; a page of small blocks
+    # with none found goes back whole; on any other, each block not found is zeroed and becomes free. The
+    # pages that go back join the runs of free pages next to them. r15 is the page, r13 the first page of
+    # the run being made (or -1) and r12 where the link to it goes.
+    set page_loop to new_label(a)
+    set pages_done to new_label(a)
+    set free_page to new_label(a)
+    set large_page to new_label(a)
+    set large_dead to new_label(a)
+    set free_pages to new_label(a)
+    set small_page to new_label(a)
+    set any_found to new_label(a)
+    set some_found to new_label(a)
+    set block_loop to new_label(a)
+    set block_free to new_label(a)
+    set block_kept to new_label(a)
+    set page_swept to new_label(a)
+    set run_open to new_label(a)
+    set run_none to new_label(a)
+    mark(a, "rt_gc_sweep")
+    lea(a, rdi, rip("gc_free"))
+    movi(a, rcx, 2 * length of gc_sizes)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    storei(a, rip("gc_runs"), 0)
+    lea(a, r12, rip("gc_runs"))
+    movi(a, r13, -1)
+    movi(a, r15, 0)
+    mark(a, page_loop)
+    alu_load(a, "cmp", r15, rip("gc_pages"))
+    jcc(a, cc_ae, pages_done)
+    mov_rr(a, rdx, r15)
+    shifti(a, "shl", rdx, 5)
+    alu(a, "add", rdx, r11)
+    load8(a, rax, mem(rdx, 0))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_e, small_page)
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, large_page)
+    mark(a, free_page) # free already: part of a run
+    alui(a, "cmp", r13, -1)
+    jcc(a, cc_ne, run_open)
+    mov_rr(a, r13, r15)
+    mark(a, run_open)
+    inc_r(a, r15)
+    jmp_to(a, page_loop)
+    mark(a, large_page)
+    load(a, rcx, mem(rdx, 8))
+    mov_rr(a, rax, r15)
+    shifti(a, "shl", rax, 12)
+    bt_at(a, mem(r14, 0), rax)
+    jcc(a, cc_ae, large_dead)
+    call_to(a, "rt_gc_end_run")
+    alu(a, "add", r15, rcx)
+    jmp_to(a, page_loop)
+    mark(a, large_dead)
+    btr_at(a, mem(rbx, 0), rax)
+    alui(a, "cmp", r13, -1)
+    jcc(a, cc_ne, free_pages)
+    mov_rr(a, r13, r15)
+    mark(a, free_pages)
+    storei(a, mem(rdx, 0), 0)
+    alui(a, "add", rdx, 32)
+    inc_r(a, r15)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, free_pages)
+    jmp_to(a, page_loop)
+    mark(a, small_page) # any block on it found?
+    mov_rr(a, rsi, r15)
+    shifti(a, "shl", rsi, 9)
+    alu(a, "add", rsi, r14)
+    movi(a, rcx, 64)
+    movi(a, rax, 0)
+    mark(a, any_found)
+    alu_load(a, "or", rax, mem(rsi, 0))
+    alui(a, "add", rsi, 8)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, any_found)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, some_found)
+    mov_rr(a, rdi, r15) # none: the whole page goes back
+    shifti(a, "shl", rdi, 9)
+    alu(a, "add", rdi, rbx)
+    movi(a, rcx, 64)
+    rep_stosq(a)
+    storei(a, mem(rdx, 0), 0)
+    jmp_to(a, free_page)
+    mark(a, some_found)
+    call_to(a, "rt_gc_end_run")
+    load8(a, rcx, mem(rdx, 2)) # its size, and whether it holds values: which free list
+    load8(a, rax, mem(rdx, 1))
+    mov_rr(a, r8, rcx)
+    shifti(a, "shl", r8, 1)
+    alu(a, "add", r8, rax)
+    shifti(a, "shl", r8, 3)
+    lea(a, rax, rip("gc_free"))
+    alu(a, "add", r8, rax)
+    shifti(a, "shl", rcx, 3)
+    lea(a, rbp, rip("gc_class_size"))
+    alu(a, "add", rbp, rcx)
+    load(a, rbp, mem(rbp, 0))
+    lea(a, rax, rip("gc_class_count"))
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    mov_rr(a, rdx, r15) # rdx: the page; rsi: its last block
+    shifti(a, "shl", rdx, 16)
+    alu(a, "add", rdx, r9)
+    mov_rr(a, rsi, rax)
+    dec_r(a, rsi)
+    imul_rr(a, rsi, rbp)
+    alu(a, "add", rsi, rdx)
+    load(a, r10, mem(r8, 0))
+    mark(a, block_loop)
+    mov_rr(a, rax, rsi)
+    alu(a, "sub", rax, r9)
+    shifti(a, "shr", rax, 4)
+    bt_at(a, mem(r14, 0), rax)
+    jcc(a, cc_b, block_kept)
+    bt_at(a, mem(rbx, 0), rax)
+    jcc(a, cc_ae, block_free)
+    btr_at(a, mem(rbx, 0), rax)
+    mov_rr(a, rdi, rsi)
+    mov_rr(a, rcx, rbp)
+    shifti(a, "shr", rcx, 3)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    mark(a, block_free)
+    store(a, mem(rsi, 0), r10)
+    mov_rr(a, r10, rsi)
+    mark(a, block_kept)
+    alu(a, "cmp", rsi, rdx)
+    jcc(a, cc_e, page_swept)
+    alu(a, "sub", rsi, rbp)
+    jmp_to(a, block_loop)
+    mark(a, page_swept)
+    store(a, mem(r8, 0), r10)
+    inc_r(a, r15)
+    jmp_to(a, page_loop)
+    mark(a, pages_done)
+    call_to(a, "rt_gc_end_run")
+    mov_rr(a, rdi, r14) # nothing is found, for next time
+    load(a, rcx, rip("gc_pages"))
+    shifti(a, "shl", rcx, 6)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    ret(a)
+
+    # rt_gc_end_run: the run of free pages being made, if there is one, ends before page r15; keeps every
+    # register but r12 and r13
+    mark(a, "rt_gc_end_run")
+    alui(a, "cmp", r13, -1)
+    jcc(a, cc_e, run_none)
+    push_r(a, rax)
+    push_r(a, rcx)
+    mov_rr(a, rax, r13)
+    shifti(a, "shl", rax, 5)
+    alu(a, "add", rax, r11)
+    mov_rr(a, rcx, r15)
+    alu(a, "sub", rcx, r13)
+    store(a, mem(rax, 16), rcx)
+    storei(a, mem(rax, 24), 0)
+    lea(a, rcx, mem(r13, 1))
+    store(a, mem(r12, 0), rcx)
+    lea(a, r12, mem(rax, 24))
+    movi(a, r13, -1)
+    pop_r(a, rcx)
+    pop_r(a, rax)
+    mark(a, run_none)
+    ret(a)
+end
+
+# rt_os_reserve: rcx bytes of address space, with no memory yet, in rax; rt_os_commit: memory for rdx
+# bytes from rcx. Both keep every other register, and stop the program if the system says no.
+to emit_os_memory with a, target
+    set refused to new_label(a)
+    for each which in list of "rt_os_reserve", "rt_os_commit"
+        mark(a, which)
+        for each r in list of rcx, rdx, rsi, rdi, r8, r9, r10, r11
+            push_r(a, r)
+        end
+        if target is "windows"
+            push_r(a, rbp)
+            mov_rr(a, rbp, rsp)
+            alui(a, "and", rsp, -16)
+            alui(a, "sub", rsp, 96)
+            for each k from 0 to 5
+                movsd_store(a, mem(rsp, 32 + 8 * k), k)
+            end
+            if which is "rt_os_reserve"
+                mov_rr(a, rdx, rcx)
+                movi(a, rcx, 0)
+                movi(a, r8, 0x2000) # MEM_RESERVE
+                movi(a, r9, 1) # PAGE_NOACCESS
+            else
+                movi(a, r8, 0x1000) # MEM_COMMIT
+                movi(a, r9, 4) # PAGE_READWRITE
+            end
+            call_import(a, "imp_VirtualAlloc")
+            for each k from 0 to 5
+                movsd_load(a, k, mem(rsp, 32 + 8 * k))
+            end
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, refused)
+        else
+            if which is "rt_os_reserve"
+                mov_rr(a, rsi, rcx)
+                movi(a, rdi, 0)
+                movi(a, rdx, 0) # PROT_NONE
+                movi(a, r10, 0x4022) # MAP_PRIVATE, MAP_ANONYMOUS and MAP_NORESERVE
+                movi(a, r8, -1)
+                movi(a, r9, 0)
+                movi(a, rax, 9) # mmap
+                raw(a, list of 0x0F, 0x05)
+                alui(a, "cmp", rax, -4096)
+                jcc(a, cc_a, refused)
+            else
+                mov_rr(a, rdi, rcx)
+                mov_rr(a, rsi, rdx)
+                movi(a, rdx, 3) # PROT_READ and PROT_WRITE
+                movi(a, rax, 10) # mprotect
+                raw(a, list of 0x0F, 0x05)
+                test_rr(a, rax, rax)
+                jcc(a, cc_ne, refused)
+            end
+        end
+        for each r in list of r11, r10, r9, r8, rdi, rsi, rdx, rcx
+            pop_r(a, r)
+        end
+        ret(a)
+    end
+    mark(a, refused)
+    jmp_to(a, "rt_out_of_memory")
 end
 
 # ---------- the runtime: the builder, and showing values ----------
@@ -2532,7 +3332,7 @@ to emit_builder with a
     mark(a, least)
     store(a, rip("b_cap"), rax)
     mov_rr(a, rcx, rax)
-    call_to(a, "rt_alloc")
+    call_to(a, "rt_alloc_raw")
     mov_rr(a, rdi, rax)
     load(a, rsi, rip("b_ptr"))
     load(a, rcx, rip("b_len"))
@@ -2590,14 +3390,17 @@ to emit_builder with a
     mark(a, counted)
     ret(a)
 
-    # rt_text_from: rsi, rcx: a new text of those bytes, in rax
+    # rt_text_from: rsi, rcx: a new text of those bytes, in rax; rt_text_from_room: with rdx bytes more to
+    # grow into
     mark(a, "rt_text_from")
+    movi(a, rdx, 0)
+    mark(a, "rt_text_from_room")
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
     mov_rr(a, r12, rsi)
     mov_rr(a, r13, rcx)
-    call_to(a, "rt_bytes")
+    call_to(a, "rt_bytes_room")
     mov_rr(a, rbx, rax)
     mov_rr(a, rdi, rax)
     mov_rr(a, rsi, r12)
@@ -2639,12 +3442,15 @@ to emit_builder with a
     ret(a)
 
     # rt_join: xmm2 and xmm1 shown and joined, as `+` joins text, into xmm0, with rax 0, or 3 if that's longer
-    # than JavaScript's longest text. When the first is text whose bytes were the last given out, the second
-    # goes straight after them, and the new text shares them.
+    # than JavaScript's longest text. When the first is text whose bytes end where its block's used bytes
+    # do, and there's room, the second goes straight after them, and the new text shares them; a long text
+    # made anew gets half as much room again, so text that keeps growing is copied a few times, not each
+    # time.
     set general to new_label(a)
     set redo to new_label(a)
     set fits_after to new_label(a)
     set too_long to new_label(a)
+    set short_join to new_label(a)
     mark(a, "rt_join")
     movsd_store(a, rip("j_a"), xmm2)
     movsd_store(a, rip("j_b"), xmm1)
@@ -2655,11 +3461,9 @@ to emit_builder with a
     alui(a, "cmp", rdx, kind_text)
     jcc(a, cc_ne, general)
     untag(a, rax)
-    load(a, rcx, mem(rax, 0))
-    load(a, rdx, mem(rax, 16))
-    alu(a, "add", rdx, rcx)
-    alu_load(a, "cmp", rdx, rip("bytes_top"))
-    jcc(a, cc_ne, general)
+    call_to(a, "rt_tail_block")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, general)
     load(a, rax, rip("j_b"))
     movi(a, rdx, 0)
     call_to(a, "rt_b_value")
@@ -2681,15 +3485,22 @@ to emit_builder with a
     alui(a, "cmp", rax, max_text)
     jcc(a, cc_a, too_long)
     mark(a, fits_after)
+    load(a, rax, rip("j_a"))
+    untag(a, rax)
+    call_to(a, "rt_tail_block")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, redo)
     load(a, rcx, rip("b_len"))
-    load(a, rax, rip("bytes_top"))
-    alu(a, "add", rax, rcx)
-    alu_load(a, "cmp", rax, rip("bytes_end"))
+    load(a, rdx, mem(rax, 0))
+    alu(a, "add", rdx, rcx)
+    alu_load(a, "cmp", rdx, mem(rax, 8))
     jcc(a, cc_a, redo)
-    load(a, rdi, rip("bytes_top"))
+    load(a, rdi, mem(rax, 0))
+    store(a, mem(rax, 0), rdx)
+    alu(a, "add", rdi, rax)
+    alui(a, "add", rdi, 16)
     load(a, rsi, rip("b_ptr"))
     rep_movsb(a)
-    store(a, rip("bytes_top"), rdi)
     load(a, rsi, rip("b_ptr"))
     load(a, rcx, rip("b_len"))
     call_to(a, "rt_b_chars")
@@ -2723,7 +3534,15 @@ to emit_builder with a
     call_to(a, "rt_b_fits")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, too_long)
-    call_to(a, "rt_b_text")
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    movi(a, rdx, 0)
+    alui(a, "cmp", rcx, 256)
+    jcc(a, cc_b, short_join)
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shr", rdx, 1)
+    mark(a, short_join)
+    call_to(a, "rt_text_from_room")
     movq_xr(a, xmm0, rax)
     movi(a, rax, 0)
     ret(a)
@@ -4624,7 +5443,7 @@ to emit_records with a
     store(a, mem(rbx, 24), rax)
     storei(a, mem(rbx, 32), 16)
     movi(a, rcx, 128)
-    call_to(a, "rt_alloc")
+    call_to(a, "rt_alloc_raw")
     store(a, mem(rbx, 40), rax)
     mov_rr(a, rax, rbx)
     pop_r(a, rbx)
@@ -4786,7 +5605,7 @@ to emit_records with a
     alu(a, "add", rcx, rcx)
     store(a, mem(rbx, 32), rcx)
     shifti(a, "shl", rcx, 3)
-    call_to(a, "rt_alloc")
+    call_to(a, "rt_alloc_raw")
     store(a, mem(rbx, 40), rax)
     movi(a, r12, 0)
     mark(a, each_entry)
@@ -5191,7 +6010,7 @@ to emit_closest with a
     store(a, rip("cl_w"), rax)
     imul_rr(a, rcx, rax)
     shifti(a, "shl", rcx, 3)
-    call_to(a, "rt_alloc")
+    call_to(a, "rt_alloc_raw")
     store(a, rip("cl_d"), rax)
     movi(a, r12, 0) # d[i][0] = i
     mark(a, rows)
@@ -5336,7 +6155,7 @@ to emit_builtins with a
     store(a, mem(rax, 0), rbx)
     push_r(a, rax)
     mov_rr(a, rcx, rbx)
-    call_to(a, "rt_alloc")
+    call_to(a, "rt_alloc_raw")
     mov_rr(a, rcx, rax)
     pop_r(a, rax)
     store(a, mem(rax, 8), rcx)
@@ -7064,6 +7883,8 @@ end
 to emit_runtime with st
     set a to a of st
     mark(a, "rt_begin")
+    call_to(a, "rt_gc_init")
+    store(a, rip("stack_top"), rsp)
     movi(a, r15, 0)
     call_to(a, "moth_main")
     call_to(a, "rt_flush_out")
@@ -7080,6 +7901,7 @@ to emit_runtime with st
     emit_records(a)
     emit_builtins(a)
     emit_functions(a)
+    emit_gc_tables(a)
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
     pad_to(ro, 8)
     rodata_here(a, "pow10")
@@ -7096,14 +7918,21 @@ to emit_runtime with st
         reserve(a, "stack", stack_size, 16)
     end
     reserve(a, "out_buf", out_cap, 16)
+    for each name in list of "gc_base", "gc_abits", "gc_mbits", "gc_info", "gc_marks", "gc_marks_end", "gc_pages",
+        "gc_committed", "gc_since", "gc_threshold", "gc_live", "gc_runs", "stack_top"
+        reserve(a, name, 8, 8)
+    end
+    reserve(a, "gc_free", 16 * length of gc_sizes, 8)
+    reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
     for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
-        "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev", "heap_top", "heap_end", "bytes_top", "bytes_end",
+        "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev",
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
         "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d"
         reserve(a, name, 8, 8)
     end
     reserve(a, "scratch", 64, 16)
+    reserve(a, "gc_roots_to", 0, 8)
     reserve(a, "dbuf", 64, 16)
     for each name in list of "big_r", "big_s", "big_mp", "big_mm", "big_t", "big_n"
         reserve(a, name, 8 * limbs, 16)
@@ -7579,6 +8408,7 @@ to gen_program with st, body
     for each n in names of scope
         put_all(data of a, bits_unset)
     end
+    data_here(a, "globals_end")
     mark(a, "moth_main")
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)

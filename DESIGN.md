@@ -890,12 +890,11 @@ hold them to agreeing.
   text, lists and records, which need memory that grows.
 - **Memory, text and lists.** A value that lives in memory is a pointer whose top
   16 bits say what it is, which makes it a NaN arithmetic never makes, so a sum
-  of two numbers still costs no more than before. Memory comes from the system
-  64 MB at a time and is handed out from the front, never given back: simple,
-  quick, and enough for a program that runs and ends. A text is its length in
-  bytes and in characters, and where its UTF-8 bytes are, which come from a
-  separate run of their own, so a text whose bytes were the last given out
-  grows in place: `add c to text` in a loop copies each character once, not the
+  of two numbers still costs no more than before. A text is its length in
+  bytes and in characters, and where its UTF-8 bytes are, which have a block of
+  their own, after how many of its bytes are used and how many it has room
+  for: a text that ends where its block's used bytes end grows in place, so
+  `add c to text` in a loop copies each character a few times at most, not the
   whole text each time. A character of a text is a text that shares its bytes.
   What `say` says, what `+` joins and a mistake's message are all put together
   in one builder that grows as it needs to. Text sorts by its UTF-16, as
@@ -931,6 +930,27 @@ hold them to agreeing.
   function, then its description checks the inputs, with the engines'
   mistakes. Every frame now holds the function's number as well as the call's,
   so a trail names the function that ran, not the name it was called by.
+- **A garbage collector.** At first memory came from the system 64 MB at a time
+  and was never given back, which was enough for programs that run and end,
+  but machine.moth compiling itself took 9 GB and ran out. Now blocks come in
+  38 sizes, from 16 bytes to 32 KB, a 64 KB page holding blocks of one size and
+  anything bigger getting whole pages; a bitmap beside them, a bit for each 16
+  bytes, says where a block that's been handed out starts. After 64 MB of new
+  pages, or as much again as was live after the last collection, it marks
+  everything it can reach from the stack, the registers, the program's
+  variables and the runtime's own, looking through every word of every block
+  that can hold values, and gives the rest back. It's conservative: any word
+  that could be where a block is counts, a tagged value or a plain address, so
+  the runtime's code needs no maps of where its pointers are, and nothing
+  moves. Blocks that never hold values (a text's bytes, a dictionary's index)
+  aren't looked through. machine.moth now compiles itself in machine code in
+  1.9 s and 535 MB, into exactly the bytes it makes on Node.js.
+- **The trap, a third time.** The first try at that ran out of memory even with
+  the collector, which looked like the collector keeping what it shouldn't. It
+  was the test: the program that used machine.moth had top-level variables
+  called `total` and `k`, and since a file used `as` a name shares its
+  functions' variables with the program's top level, machine.moth's own loops
+  counted with them and never ended.
 - **A trap, twice.** In Moth a `set` inside a function changes a top-level
   variable of the same name, and a file used `as` a name shares its functions'
   variables with the program's top level. A label called `here` in machine.moth

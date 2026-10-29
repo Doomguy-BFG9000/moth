@@ -71,6 +71,67 @@ test("what can't become machine code yet stops at a mistake that says so", () =>
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
 });
 
+// Programs that make far more than they keep, so the garbage collector runs many times over: lists, text
+// that grows, records kept while others come and go, dictionaries, functions made inside functions, and
+// deep recursion while making things.
+const GARBAGE = [
+  "set total to 0\nfor each i from 1 to 3000000\n    set l to list of i, i + 1, \"x\"\n    add item 2 of l to total\nend\nsay total",
+  "set t to \"\"\nrepeat 2000000 times\n    add \"ab\" to t\nend\nsay length of t\nset u to \"\"\nfor each i from 1 to 200000\n    set u to u + i\nend\nsay length of u",
+  "set keep to empty list\nfor each i from 1 to 200000\n    add record with n i, name \"r\" + i to keep\nend\nset junk to 0\nfor each i from 1 to 2000000\n    set tmp to list of i, \"y\" + i\n    add length of tmp to junk\nend\nset total to 0\nfor each r in keep\n    add n of r to total\nend\nsay total\nsay name of item 123456 of keep\nsay junk",
+  "set d to empty dictionary\nfor each i from 1 to 300000\n    set item (\"k\" + i) of d to list of i\nend\nfor each round from 1 to 5\n    set e to empty dictionary\n    for each i from 1 to 100000\n        set item i of e to \"v\" + i\n    end\nend\nsay length of keys of d\nsay item \"k77777\" of d\nsay item 99999 of e",
+  "to make with n\n    set seen to list of n\n    to get\n        return item 1 of seen\n    end\n    return get\nend\nset fs to empty list\nfor each i from 1 to 100000\n    add make(i) to fs\nend\nset total to 0\nfor each round from 1 to 20\n    for each i from 1 to 100000\n        set g to make(i)\n        add g() to total\n    end\nend\nfor each f in fs\n    add f() to total\nend\nsay total",
+  "to deep with n, acc\n    if n is 0\n        return length of acc\n    end\n    return deep(n - 1, acc + \"z\")\nend\nset total to 0\nfor each i from 1 to 40\n    add deep(2000, \"\") to total\nend\nsay total\nto tree with n\n    if n is 0\n        return list of \"leaf\"\n    end\n    return list of tree(n - 1), tree(n - 1)\nend\nto count with t\n    if length of t is 1\n        return 1\n    end\n    return count(item 1 of t) + count(item 2 of t)\nend\nfor each i from 1 to 30\n    set t to tree(14)\nend\nsay count(t)",
+];
+
+test("garbage: programs that make far more than they keep say what moth run says", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    GARBAGE.forEach((source, i) => {
+      let want = "";
+      run(source, (line) => (want += `${line}\n`));
+      const exe = executable(dir, `g${i}`);
+      writeFileSync(exe, machine(source, { target, name: `g${i}.moth` }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = spawnSync(exe, [], { encoding: "utf8", timeout: 60_000 });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: want, stderr: "", status: 0 }, source);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// machine.moth, made into machine code, compiling itself: the bytes must be the ones it makes on Node.js. The
+// driver's own names start with zz_, as a file used `as` a name shares its functions' variables with the
+// program's top level.
+test("machine.moth in machine code compiles itself into the same bytes", { skip }, () => {
+  const sources = { "machine.moth": here("machine.moth").replace(/\r/g, ""), "compiler.moth": here("compiler.moth").replace(/\r/g, "") };
+  const want = machine(sources["machine.moth"], { files: { "compiler.moth": sources["compiler.moth"] }, target, name: "machine.moth" });
+  let sum = 0, mix = 0;
+  want.forEach((x, i) => { sum += x; mix += x * ((i + 1) & 1023); });
+  const driver = `use "machine.moth" as m
+set zz_bytes to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
+say length of zz_bytes
+set zz_sum to 0
+set zz_mix to 0
+for each zz_i from 1 to length of zz_bytes
+    add item zz_i of zz_bytes to zz_sum
+    add item zz_i of zz_bytes * (zz_i bit and 1023) to zz_mix
+end
+say zz_sum
+say zz_mix
+`;
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "self");
+    writeFileSync(exe, machine(driver, { files: sources, target, name: "driver.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { encoding: "utf8", timeout: 120_000 });
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: `${want.length}\n${sum}\n${mix}\n`, stderr: "", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // A `set` in a function changes a variable of the same name at the top level, and a file used `as` a name
 // shares its functions' variables with the program's top level: names that clash there change each other.
 test("machine.moth's functions never set a name its top level or compiler.moth's functions use", () => {

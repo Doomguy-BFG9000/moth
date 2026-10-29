@@ -206,11 +206,13 @@ mistake, like adding `nothing` to a number. The rest is room to grow: machine.mo
 keeps every value in memory rather than in the processor's registers, and
 always works in decimals, even for a count that is only ever whole.
 
-**Is Moth standalone yet?** Halfway. What `moth build --exe` makes runs with
-nothing else installed, but making it still takes Node.js, which runs
-machine.moth. The rest of the way: reading and writing files; and then machine.moth compiling itself into a `moth.exe` that
-builds every program, itself included, into exactly the same bytes. From
-then on Moth needs neither JavaScript nor Rust.
+**Is Moth standalone yet?** Nearly. What `moth build --exe` makes runs with
+nothing else installed, and machine.moth, made into machine code, already
+compiles itself into exactly the bytes it makes on Node.js, in 1.9 s against
+Node.js's 5.1 s, with a garbage collector keeping it to 535 MB. Making a
+program still starts from Node.js, though: the rest of the way is reading and
+writing files, so a `moth.exe` can read a program and write the one it makes.
+From then on Moth needs neither JavaScript nor Rust.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -845,7 +847,7 @@ unboxed numbers were all caught, some only by the fuzzer.
 - `moth build --exe` takes only part of Moth so far: no units, `uppercase`
   or `lowercase`, tables, files, `ask`, drawing, apps or `expect`; anything
   else stops with a mistake that says it can't become
-  machine code yet. Memory a program takes isn't given back until it ends.
+  machine code yet.
   It makes programs for x86-64 Windows and Linux, not for Macs.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
   allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
