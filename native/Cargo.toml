@@ -1,6 +1,6 @@
 [package]
 name = "moth-native"
-version = "1.5.0"
+version = "1.5.1"
 edition = "2021"
 description = "Moth, a programming language that reads like English, with no JavaScript: its own lexer, parser, compiler and virtual machine"
 license = "MIT"
