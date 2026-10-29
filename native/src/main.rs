@@ -95,7 +95,7 @@ const NET: usize = 2;
 
 #[derive(Default)]
 struct Permits {
-    all: [bool; 3],                         // read, write and go online: allowed for everything
+    all: [bool; 3],                        // read, write and go online: allowed for everything
     asked: HashMap<(usize, String), bool>, // what the person was asked, and said
 }
 
@@ -146,7 +146,15 @@ fn fetch(_: &str) -> Result<Vec<u8>, String> {
 
 impl Terminal {
     fn new(args: Vec<String>, random: Box<dyn FnMut() -> f64>) -> Terminal {
-        Terminal { out: std::io::BufWriter::new(std::io::stdout()), drawn: vec![], args, random, pending: vec![], said: None, permits: None }
+        Terminal {
+            out: std::io::BufWriter::new(std::io::stdout()),
+            drawn: vec![],
+            args,
+            random,
+            pending: vec![],
+            said: None,
+            permits: None,
+        }
     }
 
     // whether the program may do this (READ, WRITE or NET) to this file or site, asking if there's a person to ask
@@ -237,7 +245,8 @@ impl Host for Terminal {
         Some(answer)
     }
     fn read(&mut self, name: &str, bytes: bool) -> Option<Result<Option<FileData>, String>> {
-        let as_data = |data: Vec<u8>| if bytes { FileData::Bytes(data) } else { FileData::Text(String::from_utf8_lossy(&data).into_owned()) };
+        let as_data =
+            |data: Vec<u8>| if bytes { FileData::Bytes(data) } else { FileData::Text(String::from_utf8_lossy(&data).into_owned()) };
         if let Err(why) = self.permit(if is_site(name) { NET } else { READ }, name) {
             return Some(Err(why));
         }

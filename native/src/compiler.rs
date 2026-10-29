@@ -143,9 +143,9 @@ pub const BUILTINS: [(&str, usize); 25] = [
     ("as text", 1),
     ("as hex", 1),
     ("as binary", 1),
-    ("unit", 2), // `5 km`
-    ("in", 2),   // `trip in miles`
-    ("table", 1), // `read table "sales.csv"`
+    ("unit", 2),   // `5 km`
+    ("in", 2),     // `trip in miles`
+    ("table", 1),  // `read table "sales.csv"`
     ("column", 2), // `price in sales`, after `total of` and `draw chart of`
     ("total", 1),
     ("average", 1),

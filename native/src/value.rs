@@ -296,7 +296,8 @@ fn show_into(v: &Value, nested: bool, showing: &mut HashSet<usize>, out: &mut St
         Value::Num(n) => out.push_str(&num::display(*n)), // to 15 digits
         Value::Qty(n, u) => {
             let (one, many, _, _) = UNITS[*u as usize];
-            out.push_str(&format!("{} {}", num::display(*n), if num::canon(*n).abs() == 1.0 { one } else { many })); // 1 mile, 2 miles
+            out.push_str(&format!("{} {}", num::display(*n), if num::canon(*n).abs() == 1.0 { one } else { many }));
+            // 1 mile, 2 miles
         }
         Value::Func(c) => out.push_str(&format!("<function {}>", c.func.name)),
         Value::Bytes(b) => {

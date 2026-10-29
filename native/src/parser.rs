@@ -145,7 +145,8 @@ fn builtin_syntax(w: &str) -> Option<(Option<&'static str>, Option<&'static str>
     })
 }
 const BIT_WORDS: [&str; 3] = ["and", "or", "xor"];
-const AGGREGATES: [&str; 4] = ["total", "average", "largest", "smallest"]; // `total of prices`
+// `total of prices`: these words and `of` work out something from a list
+const AGGREGATES: [&str; 4] = ["total", "average", "largest", "smallest"];
 // what an input can say it is, in the order of KINDS in vm.js
 pub const KINDS: [&str; 8] = ["a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"];
 const AS_WORDS: [&str; 4] = ["bytes", "text", "hex", "binary"];
