@@ -578,8 +578,11 @@
         status.textContent = "Copy the link from the address bar";
       }
     };
-    // Tidy (format() in moth.js) leaves code with a mistake alone. It types the tidy code in, so Undo brings
-    // the old back.
+    // Tidy (format() in moth.js) leaves code with a mistake alone. It puts the tidy code in all at once: the
+    // browser's own undoable way, execCommand("insertText"), does slow work for every line (Chrome took 17
+    // seconds for the compiler's 1,580), so Tidy keeps its own undo: Ctrl+Z puts back the code as it was, as
+    // long as the tidy code hasn't been changed since (or has been undone back to it).
+    let untidy = null; // { before, after } the last Tidy
     $("tidy").onclick = () => {
       let tidied;
       try {
@@ -592,12 +595,21 @@
         status.textContent = "Already tidy";
         return;
       }
-      code.focus();
-      code.select();
-      if (!document.execCommand("insertText", false, tidied)) code.value = tidied;
-      refreshEditor();
-      status.textContent = "Tidied";
+      untidy = { before: code.value, after: tidied };
+      replaceCode(tidied);
+      status.textContent = "Tidied (Ctrl+Z puts it back)";
     };
+    // new text for the editor, keeping the cursor on the line it was on and the view where it was
+    function replaceCode(text) {
+      const line = code.value.slice(0, code.selectionStart).split("\n").length;
+      const top = code.scrollTop;
+      code.value = text;
+      const at = text.split("\n").slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
+      code.setSelectionRange(Math.min(at, text.length), Math.min(at, text.length));
+      code.scrollTop = top;
+      code.focus();
+      refreshEditor();
+    }
     $("compiled").onchange = showCompiled;
     $("engine").onchange = runCode;
 
@@ -629,6 +641,13 @@
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         runCode();
+      }
+      // Tidy's own undo (see Tidy): only while the code is just as Tidy left it
+      if (e.key.toLowerCase() === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey && untidy?.after === code.value) {
+        e.preventDefault();
+        replaceCode(untidy.before);
+        untidy = null;
+        status.textContent = "Put back as it was before Tidy";
       }
     };
     let shared = null;
