@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, seeded, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, seeded, EVENTS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -79,7 +79,7 @@ const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
   "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-  "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw"]);
+  "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -88,6 +88,9 @@ const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["
 const BIT_WORDS = ["and", "or", "xor"];
 // what `as` turns a value into: `block as text`, `"hi" as bytes`, `255 as hex`
 const AS_WORDS = ["bytes", "text", "hex", "binary"];
+// what `when` can wait for, and how many values each gives its handler
+const EVENT_PHRASES = new Map([["a key is pressed", { event: "key", gives: 1 }], ["the mouse is clicked", { event: "click", gives: 2 }],
+  ["the mouse is dragged", { event: "drag", gives: 2 }]]);
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -240,13 +243,32 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const fnName = name("a function name");
       const params = [];
       if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
-      const outside = loopDepth; // a function's body starts outside any loop
-      fnDepth++;
-      loopDepth = 0;
-      const body = blockEnd(t);
-      fnDepth--;
-      loopDepth = outside;
-      return { kind: "define", name: fnName, params, body, at: t };
+      return func(fnName, params, t);
+    }
+    if (word("when")) { // `when a key is pressed with key`, `when the mouse is clicked with x and y`
+      const start = pos;
+      const words = [];
+      while (check("word") && !isWord("with") && !peek().nl) words.push(tokens[pos++].value);
+      const phrase = words.join(" ");
+      const known = EVENT_PHRASES.get(phrase);
+      if (!known) {
+        pos = start;
+        expected("'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged'");
+      }
+      const params = [];
+      if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
+      if (params.length && params.length !== known.gives) {
+        fail(t, `'when ${phrase}' gives ${known.gives === 1 ? "1 value" : `${known.gives} values`}, so name ${known.gives === 1 ? "one input" : `${known.gives} inputs`} or none, not ${params.length}`);
+      }
+      if (!atTop) fail(t, "'when' only works at the top level of a program");
+      return { kind: "when", event: known.event, fn: func(`when ${phrase}`, params, t), at: t };
+    }
+    if (word("every")) { // `every 100 milliseconds`, `every 2 seconds`
+      const interval = additive();
+      const unit = ["milliseconds", "millisecond", "seconds", "second"].find(isWord) ?? expected("'milliseconds' or 'seconds'");
+      pos++;
+      if (!atTop) fail(t, "'every' only works at the top level of a program");
+      return { kind: "every", interval, unit: unit.startsWith("milli") ? 1 : 1000, fn: func("every", [], t), at: t };
     }
     if (word("return")) {
       if (!fnDepth) fail(t, "'return' only works inside a function (one made with 'to')");
@@ -321,6 +343,17 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "call", name: called, args, at: t };
     }
     fail(t, `a line can't start with ${describe(t)}`);
+  }
+
+  // the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
+  function func(fnName, params, t) {
+    const outside = loopDepth;
+    fnDepth++;
+    loopDepth = 0;
+    const body = blockEnd(t);
+    fnDepth--;
+    loopDepth = outside;
+    return { kind: "define", name: fnName, params, body, at: t };
   }
 
   function ifRest(t) {
@@ -548,7 +581,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -702,6 +735,17 @@ class Compiler extends Scope {
         const fn = new Compiler(this, s.name, s.params, s.body).fn;
         this.emit(s.at, MAKE_FN, this.constant(fn));
         this.store(s.name, s.at);
+        return;
+      }
+      case "when": // a handler is a function of its own, made and handed over, not kept in a variable
+        this.emit(s.at, MAKE_FN, this.constant(new Compiler(this, s.fn.name, s.fn.params, s.fn.body).fn));
+        this.emit(s.at, HANDLE, EVENTS.indexOf(s.event));
+        return;
+      case "every": {
+        const fn = new Compiler(this, s.fn.name, s.fn.params, s.fn.body).fn;
+        this.expr(s.interval);
+        this.emit(s.at, MAKE_FN, this.constant(fn));
+        this.emit(s.at, EVERY, s.unit);
         return;
       }
       case "return":
@@ -1013,7 +1057,8 @@ export function format(source) {
 // `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
 // `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
 // for `use` (see build). `disk` holds the files `read` and `write` use (see readFile in vm.js, and memoryDisk
-// below), and `args` is what `arguments` gives.
+// below), `args` is what `arguments` gives, and `random` gives the random numbers (seeded() unless given).
+// A program that sets up handlers with `when` or `every` is an app: run() returns it, to be sent events.
 export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded() } = {}) {
   const reading = { files, file };
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
@@ -1040,29 +1085,69 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
   }
-  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer, disk: drive, args, random: chance }).run();
   let said = 0;
   let drawn = 0;
-  try {
-    // counted once passed on, so a hand-over in the middle of passing one on can't lose it
-    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance);
-  } catch (err) {
-    if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
-    // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value outgrew what
-    // JavaScript allows. Moth programs can't read the clock, and get the same answers and files again, so a
-    // second run says and draws exactly the same things: run it again on the VM, which keeps its own stack and
-    // reports a too-big value at the right line, and pass on only what the first run hadn't already.
-    let next = 0;
-    const again = (f) => f && ((...inputs) => {
+  const sent = []; // each event an app has handled so far, as [handler, inputs]: a run on the VM handles them again
+
+  // The program on the VM. `again`: run from the start once more, as the JIT or WebAssembly engine handed it
+  // over, getting everything from outside that the first run got, and passing on only what it hadn't said or
+  // drawn already. Moth programs can't read the clock, so a second run does exactly the same things.
+  function onVm(again) {
+    let [next, skipSaid, skipDrawn] = [0, again ? said : 0, again ? drawn : 0];
+    const replay = (f) => f && (!again ? f : (...inputs) => {
       if (next >= outside.length) return f(...inputs);
       const before = outside[next++];
       if ("err" in before) throw before.err;
       return copy(before.got);
     });
-    new Machine(compile(source, reading), (line) => said-- > 0 || print(line), {
-      maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again(answer), disk: drive && { read: again(drive.read), write: again(drive.write) }, args, random: again(chance),
-    }).run();
+    const say = (line) => skipSaid-- > 0 || print(line);
+    const options = {
+      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write) }, args, random: replay(chance),
+      listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)),
+    };
+    new Machine(compile(source, reading), say, options).run();
+    const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options) };
+    for (const [i, inputs] of sent) host.call(host.handlers[i], inputs);
+    return host;
   }
+
+  // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value
+  // outgrew what JavaScript allows: the VM keeps its own stack, and reports a too-big value at the right line.
+  const handOver = (err) => err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError";
+  let host = { handlers: [] }; // the engine running the program, which fills in its handlers and how to call one
+  if (!program) host = onVm(false);
+  else {
+    try {
+      // counted once passed on, so a hand-over in the middle of passing one on can't lose it
+      program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance, host);
+    } catch (err) {
+      if (!handOver(err)) throw err;
+      host = onVm(true);
+    }
+  }
+  if (!host.handlers.length) return undefined;
+
+  // An app: what its handlers wait for, and a way to hand them events. Each handler call gets `maxSteps` of
+  // its own, and a mistake in one throws, which ends the app.
+  const app = {
+    waits: host.handlers.map(({ event, interval }) => (interval === undefined ? { event } : { event, interval })),
+    handle(i, inputs = []) {
+      try {
+        host.call(host.handlers[i], inputs);
+      } catch (err) {
+        if (host.vm || !handOver(err)) throw err;
+        host = onVm(true); // everything so far again, on the VM, then this event
+        host.call(host.handlers[i], inputs);
+      }
+      sent.push([i, inputs]);
+    },
+    // every handler of this event, in the order the program made them: "key" with the key's name, "click"
+    // and "drag" with x and y
+    send(event, inputs = []) {
+      app.waits.forEach((wait, i) => wait.event === event && app.handle(i, inputs));
+    },
+  };
+  return app;
 }
 const copy = (v) => (v instanceof Uint8Array ? v.slice() : v); // bytes a program read could be changed after
 

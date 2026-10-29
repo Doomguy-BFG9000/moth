@@ -149,6 +149,8 @@ const PROGRAMS = [
   // random number from: the same numbers every run unless real ones are given
   ["set rolls to empty list\nrepeat 10 times\n    add random number from 1 to 6 to rolls\nend\nsay rolls\nsay random number from 5 to 5\nsay random number from -2 to 2 is in list of -2, -1, 0, 1, 2", "[4, 1, 4, 6, 6, 2, 4, 5, 3, 6]\n5\nyes"],
   ["to random\n    return 4\nend\nsay random() \" \" random number from 1 to 1", "4 1"],
+  // when and every: the program sets them up, and run() returns an app that waits for them
+  ["say \"set up\"\nwhen a key is pressed\n    say \"never, until a key comes\"\nend\nevery 1 second\n    say \"nor this\"\nend\nsay \"done\"", "set up\ndone"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -302,6 +304,17 @@ const ERRORS = [
   ["say random number from \"a\" to 2", "line 1: 'random number from' needs whole numbers, not text"],
   ["say random number from 6 to 1", "line 1: there is no number from 6 to 1"],
   ["say random number 1 to 6", "line 1: expected 'of' but found '1'"],
+  // when and every: the program sets them up, and run() returns an app that waits for them
+  ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged' but found 'the'"],
+  ["when a key is pressed with a and b\n    say 1\nend", "line 1: 'when a key is pressed' gives 1 value, so name one input or none, not 2"],
+  ["when the mouse is clicked with x\n    say 1\nend", "line 1: 'when the mouse is clicked' gives 2 values, so name 2 inputs or none, not 1"],
+  ["if yes\n    when a key is pressed\n        say 1\n    end\nend", "line 2: 'when' only works at the top level of a program"],
+  ["to f\n    every 1 second\n        say 1\n    end\nend", "line 2: 'every' only works at the top level of a program"],
+  ["every 100\n    say 1\nend", "line 2: expected 'milliseconds' or 'seconds' but found 'say'"],
+  ["every \"a\" seconds\n    say 1\nend", "line 1: 'every' needs a number above 0, not text"],
+  ["every 0 seconds\n    say 1\nend", "line 1: 'every' needs a number above 0, not 0"],
+  ["set when to 1", "line 1: 'when' is a Moth word, so it can't be used as a variable name"],
+  ["when a key is pressed\n    stop\nend", "line 2: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -1209,4 +1222,81 @@ test("random number from uses the randomness it's given, and a hand-over to the 
     assert.equal(i, 2, `${engine} asked for ${i} random numbers`); // the VM's second run got them again, not new ones
   }
   assert.notEqual(output("say random number from 1 to 1000000000", { random: real }), output("say random number from 1 to 1000000000", { random: real }));
+});
+
+// ---------- apps ----------
+
+const APP = [
+  "set count to 0",
+  'say "ready"',
+  "when a key is pressed with key",
+  "    add 1 to count",
+  '    say "key " key " (" count ")"',
+  "end",
+  "when the mouse is clicked with x and y",
+  '    say "click at " x ", " y',
+  "    draw circle at x, y size 3",
+  "end",
+  "every 100 milliseconds",
+  '    say "tick " count',
+  "end",
+  "when a key is pressed",
+  '    say "and again"',
+  "end",
+].join("\n");
+
+test("an app sets up its handlers, then each event runs the ones waiting for it, on all three engines", () => {
+  for (const engine of ENGINES) {
+    const said = [];
+    const drawn = [];
+    const app = run(APP, (line) => said.push(line), { engine, draw: (d) => drawn.push(d) });
+    assert.deepEqual(app.waits, [{ event: "key" }, { event: "click" }, { event: "every", interval: 100 }, { event: "key" }], engine);
+    assert.deepEqual(said, ["ready"], engine);
+    app.send("key", ["left"]);
+    app.send("click", [10, -20]);
+    app.handle(2);
+    app.send("key", ["a"]);
+    app.send("drag", [1, 1]); // nothing waits for it
+    assert.deepEqual(said, ["ready", "key left (1)", "and again", "click at 10, -20", "tick 1", "key a (2)", "and again"], engine);
+    assert.deepEqual(drawn, [{ shape: "circle", x: 10, y: -20, radius: 3, color: "#4f8ff7" }], engine);
+  }
+  assert.equal(run('say "no handlers"', () => {}), undefined);
+});
+
+test("a handler's mistake says where, each event gets its own steps, and going too deep inside one moves the app to the VM", () => {
+  const source = [
+    "set total to 0",
+    "to deep with n",
+    "    if n is 0",
+    "        return random number from 1 to 1000000",
+    "    end",
+    "    return deep(n - 1)",
+    "end",
+    "when a key is pressed with key",
+    '    if key is "x"',
+    "        say 1 / 0",
+    "    end",
+    '    if key is "deep"',
+    '        say "deep " deep(3000)',
+    "    end",
+    "    add 1 to total",
+    '    say "total " total',
+    "end",
+    "every 1 second",
+    "    repeat 3000 times",
+    "        add 1 to total",
+    "    end",
+    "end",
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const said = [];
+    const app = run(source, (line) => said.push(line), { engine, maxSteps: 5000 });
+    app.send("key", ["a"]);
+    app.handle(1);
+    app.handle(1); // 3,000 rounds each time: more than 5,000 in all, but each event counts its own
+    app.send("key", ["deep"]); // too deep for the JIT and WebAssembly: the VM runs it all again, then this
+    app.send("key", ["b"]);
+    assert.deepEqual(said, ["total 1", "deep 627074", "total 6002", "total 6003"], engine);
+    assert.throws(() => app.send("key", ["x"]), { name: "Error", message: "line 10: can't divide by zero" }, engine);
+  }
 });

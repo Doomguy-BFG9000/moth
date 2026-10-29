@@ -12,7 +12,7 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -66,6 +66,8 @@ const IMPORTS = {
   write: [[EQ, EQ, I32], []],
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
+  handle: [[I32, EQ, I32], []], // which event (EVENTS), its handler, a position
+  every: [[EQ, F64, EQ, I32], []], // how often, 1 or 1000 (for seconds), the handler, a position
   expect: [[I32, I32, EQ, EQ, I32], []], // which comparison, 1 for `is not`, its two sides, and a position
   expectYes: [[EQ, I32], []],
   tryStart: [[], []], // a `try` begins: forget the last mistake
@@ -493,10 +495,12 @@ function findCaptured(program) {
     const statement = (s) => {
       if (["set", "add", "count", "each", "call"].includes(s.kind) || (s.kind === "try" && s.name)) use(s.name);
       for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.key, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
-      if (s.kind === "define") {
-        const inner = new Scope(scope, s.name, s.params, s.body);
-        inner.body = s.body;
-        return visit(inner, s.body);
+      const made = s.kind === "define" ? s : s.fn; // `when` and `every` make a function too
+      if (made) {
+        if (s.interval) expr(s.interval);
+        const inner = new Scope(scope, made.name, made.params, made.body);
+        inner.body = made.body;
+        return visit(inner, made.body);
       }
       for (const block of [s.then, s.otherwise, s.body, s.handler]) if (block) block.forEach(statement);
     };
@@ -508,7 +512,7 @@ function findCaptured(program) {
   return captured;
 }
 
-const makesFunctions = (body) => body.some((s) => s.kind === "define" || [s.then, s.otherwise, s.body, s.handler].some((b) => b && makesFunctions(b)));
+const makesFunctions = (body) => body.some((s) => s.kind === "define" || s.fn || [s.then, s.otherwise, s.body, s.handler].some((b) => b && makesFunctions(b)));
 
 // ---------- compiling Moth ----------
 
@@ -838,12 +842,21 @@ class WasmCompiler extends Scope {
           this.block(s.body);
         });
       }
-      case "define": {
-        const inner = new WasmCompiler(this, s.name, s.params, s.body, this.ctx);
-        this.ctx.m.declared.add(inner.f.index);
-        return this.store(s.name, () => {
-          this.e("ref.func", inner.f.index).e("local.get", this.envLocal).e("i32.const", s.params.length).e("i32.const", this.id(s.name)).e("struct.new", T.closure);
-        });
+      case "define":
+        return this.store(s.name, this.closure(s));
+      case "when": { // a handler is a function of its own, made and handed over, not kept in a variable
+        const make = this.closure(s.fn);
+        this.e("i32.const", EVENTS.indexOf(s.event));
+        make();
+        this.e("i32.const", this.pos(s.at)).e("call", im.handle);
+        return;
+      }
+      case "every": {
+        this.expr(s.interval);
+        this.e("f64.const", s.unit);
+        this.closure(s.fn)();
+        this.e("i32.const", this.pos(s.at)).e("call", im.every);
+        return;
       }
       case "return":
         if (s.value) this.expr(s.value);
@@ -933,6 +946,14 @@ class WasmCompiler extends Scope {
       this.e("local.get", value).e("i32.const", this.id(s.name)).e("i32.const", k).e("call", R.addInto).e("ref.cast", T.num).e("struct.get", T.num, 0);
     }
     this.setNumber(number);
+  }
+
+  // A Moth function, made from `to` (or a handler's `when`), compiled now; what's returned emits the closure.
+  closure(d) {
+    const { T } = this.ctx;
+    const inner = new WasmCompiler(this, d.name, d.params, d.body, this.ctx);
+    this.ctx.m.declared.add(inner.f.index);
+    return () => this.e("ref.func", inner.f.index).e("local.get", this.envLocal).e("i32.const", d.params.length).e("i32.const", this.id(d.name)).e("struct.new", T.closure);
   }
 
   // The function is looked up before its inputs are worked out, and checked after, as in the other engines.
@@ -1175,6 +1196,21 @@ export function compileToWasmModule(program) {
     write(f.code);
     m.export(label, f.index);
   }
+  // an app's handler, called from outside with its inputs (as many as it takes: 0, 1 or 2); and its steps
+  // and depth from 0 before each
+  const invoke = m.func("invoke", [EQ, EQ, EQ], [EQ]);
+  for (const n of [0, 1, 2]) {
+    const c = invoke.code;
+    c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 2).emit("i32.const", n).emit("i32.eq").emit("if");
+    c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 1);
+    for (let i = 1; i <= n; i++) c.emit("local.get", i);
+    c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 0).emit("ref.cast", T.fn(n)).emit("call_ref", T.fn(n)).emit("return").emit("end");
+  }
+  invoke.code.emit("ref.null", "eq");
+  m.export("invoke", invoke.index);
+  const restart = m.func("restart", [], []);
+  restart.code.emit("f64.const", 0).emit("global.set", ctx.steps).emit("i32.const", 0).emit("global.set", ctx.depth);
+  m.export("restart", restart.index);
   return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts };
 }
 
@@ -1182,11 +1218,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = [], chance = seeded()) {
+function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1337,9 +1373,16 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
+    handle: (event, closure) => void host.handlers.push({ event: EVENTS[event], closure }),
+    every: (interval, unit, closure, k) => void host.handlers.push({ event: "every", interval: everyInterval(toJs(interval), unit, errors[k]), closure }),
     expect: (op, negate, a, b, k) => expectThat(COMPARE_OPS[op], negate === 1, toJs(a), toJs(b), errors[k]),
     expectYes: (value, k) => expectYes(toJs(value), errors[k]),
   };
   x = new WebAssembly.Instance(module, { moth: imports }).exports;
+  host.call = (handler, inputs) => {
+    x.restart();
+    const [a = null, b = null] = inputs.map(toWasm);
+    x.invoke(handler.closure, a, b);
+  };
   return x;
 }

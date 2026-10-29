@@ -351,7 +351,8 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, random: Math.random, ...reading(file) });
+      const app = run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, random: Math.random, ...reading(file) });
+      if (app) console.error(`${basename(file)} is an app: it waits for keys, clicks or time, which a terminal can't give it. Open it in the playground, or make a web page of it with: moth build --web ${file}`);
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));

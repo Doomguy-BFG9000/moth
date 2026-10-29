@@ -3,7 +3,7 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole } from "./vm.js";
+  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -211,6 +211,16 @@ class Checker extends Scope {
         new Checker(this, s.name, s.params, s.body, this.all);
         return;
       }
+      case "every": { // how often must be a number
+        this.expr(s.interval);
+        const type = this.type(s.interval);
+        this.willFail(s.at, () => this.known(type()) && type() !== "number" && everyInterval(this.sample(s.interval), s.unit, found));
+        new Checker(this, s.fn.name, s.fn.params, s.fn.body, this.all);
+        return;
+      }
+      case "when":
+        new Checker(this, s.fn.name, s.fn.params, s.fn.body, this.all);
+        return;
       case "return":
         if (s.value) this.expr(s.value);
         return;

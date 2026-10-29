@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -87,10 +87,13 @@ class JsCompiler extends Scope {
         const k = this.pos(s.at);
         return `for (const $x of itemsOf(${this.expr(s.list)}, ${k})) {\n${this.ref(s.name)} = $x;\n${this.block(s.body)}\ntick(${k});\n}`;
       }
-      case "define": {
-        const inner = new JsCompiler(this, s.name, s.params, s.body, this.ats);
-        const params = s.params.map((_, i) => inner.v(i + 1)).join(", ");
-        return `${this.ref(s.name)} = fn(${q(s.name)}, ${q(s.params)}, function (${params}) {\n${inner.code}\nreturn null;\n});`;
+      case "define":
+        return `${this.ref(s.name)} = ${this.closure(s)};`;
+      case "when": // a handler is a function of its own, made and handed over, not kept in a variable
+        return `handle(${EVENTS.indexOf(s.event)}, ${this.closure(s.fn)}, ${this.pos(s.at)});`;
+      case "every": {
+        const interval = this.expr(s.interval);
+        return `every(${interval}, ${s.unit}, ${this.closure(s.fn)}, ${this.pos(s.at)});`;
       }
       case "return":
         return `return ${s.value ? this.expr(s.value) : "null"};`;
@@ -120,6 +123,13 @@ class JsCompiler extends Scope {
         return `${t} = depthNow();\ntry {\n${body}\n} catch ($e) {\n${keep}caught($e, ${t});\n${this.block(s.handler)}\n}`;
       }
     }
+  }
+
+  // a Moth function, made from `to` (or a handler's `when`): a JavaScript function, and its name and inputs
+  closure(d) {
+    const inner = new JsCompiler(this, d.name, d.params, d.body, this.ats);
+    const params = d.params.map((_, i) => inner.v(i + 1)).join(", ");
+    return `fn(${q(d.name)}, ${q(d.params)}, function (${params}) {\n${inner.code}\nreturn null;\n})`;
   }
 
   // The function is looked up before its inputs are worked out, and checked after, as in the VM.
@@ -193,7 +203,8 @@ const MAX_DEPTH = 2000;
 
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
-function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded()) {
+// `host` gets an app's handlers (see run() in moth.js), and a way to call one: with steps and depth from 0.
+function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
     const calls = trail();
@@ -228,6 +239,10 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     from[depth++] = k;
   };
   const leave = (result) => (depth--, result);
+  host.call = (handler, inputs) => {
+    [steps, depth] = [0, 0];
+    handler.closure.fn.run(...inputs.slice(0, handler.closure.fn.params.length));
+  };
   const ordered = (op, test) => (a, b, k) => (typeof a === "number" && typeof b === "number" ? test(a, b) : compare(op, a, b, errors[k]));
   return {
     UNSET,
@@ -290,6 +305,8 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     write: (value, name, k) => writeFile(value, name, disk, errors[k]),
     args: () => [...args],
     random: (low, high, k) => randomWhole(low, high, chance, errors[k]),
+    handle: (event, f) => void host.handlers.push({ event: EVENTS[event], closure: f }),
+    every: (interval, unit, f, k) => void host.handlers.push({ event: "every", interval: everyInterval(interval, unit, errors[k]), closure: f }),
     expect: (op, negate, a, b, k) => expectThat(op, negate, a, b, errors[k]),
     expectYes: (value, k) => expectYes(value, errors[k]),
   };
@@ -310,5 +327,5 @@ export function jit(program) {
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random)) };
+  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random, host) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random, host)) };
 }

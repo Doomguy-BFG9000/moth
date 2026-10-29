@@ -115,11 +115,13 @@ export const OPCODES = [
   ["WRITE", 0], ["ARGUMENTS", 0],
   ["EXPECT", 2], // which comparison (COMPARE_OPS), or -1 for just a value that must be yes; and 1 for `is not`
   ["RANDOM", 0],
+  ["HANDLE", 1], // the function on the stack handles an event, one of EVENTS
+  ["EVERY", 1], // the function on the stack runs every so often: the number under it, times the operand (1 or 1000)
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`
@@ -497,6 +499,16 @@ export function askFor(question, answer, error) {
   return String(reply);
 }
 
+// What an app's handlers wait for: `when a key is pressed`, `when the mouse is clicked`, `... is dragged`.
+// A handler is { event, closure }, or for `every`, { event: "every", interval (in milliseconds), closure }.
+export const EVENTS = ["key", "click", "drag"];
+
+// `every 100 milliseconds`: how often, in milliseconds (`unit` is 1000 for seconds)
+export function everyInterval(interval, unit, error) {
+  if (typeof interval !== "number" || !(interval > 0) || interval === Infinity) error(`'every' needs a number above 0, not ${described(interval)}`);
+  return interval * unit;
+}
+
 // `random number from 1 to 6`: a whole number from low to high, each as likely. `random` is where the
 // randomness comes from: a number from 0 up to (not including) 1, like Math.random.
 export function randomWhole(low, high, random, error) {
@@ -647,12 +659,13 @@ export function newEnv(fn, parent) {
 export class Machine {
   // `draw` gets each line the turtle draws (see Turtle), `ask` answers questions (see askFor), `disk` holds
   // the files `read` and `write` use (see readFile), `args` is what `arguments` gives: a list of text, and
-  // `random` gives the random numbers (see randomWhole).
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded() } = {}) {
-    Object.assign(this, { main, print, maxSteps, ask, disk, args, random, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // `random` gives the random numbers (see randomWhole). An app's handlers go in `listeners`, and `turtle`
+  // keeps one picture going from one handler to the next (see callFunction).
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle } = {}) {
+    Object.assign(this, { main, print, maxSteps, ask, disk, args, random, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
-    this.turtle = new Turtle(draw);
+    this.turtle = turtle ?? new Turtle(draw);
   }
 
   // Runs until the program ends ("done") or, while `pauseAtLines` is on, reaches a LINE marker ("line").
@@ -758,6 +771,11 @@ export class Machine {
           }
           case RETURN: {
             while (this.handlers.length && this.handlers.at(-1).frames === frames.length) this.handlers.pop(); // its tries end with it
+            if (!frames.length) { // the function this machine was made to run (see callFunction) is done
+              this.done = true;
+              why = "done";
+              break loop;
+            }
             const value = stack.pop();
             while (stack.length > base) stack.pop(); // drops anything a loop left behind
             stack.push(value);
@@ -911,6 +929,14 @@ export class Machine {
             writeFile(stack.pop(), name, this.disk, oops);
             break;
           }
+          case HANDLE:
+            this.listeners.push({ event: EVENTS[code[ip++]], closure: stack.pop() });
+            break;
+          case EVERY: {
+            const closure = stack.pop();
+            this.listeners.push({ event: "every", interval: everyInterval(stack.pop(), code[ip++], oops), closure });
+            break;
+          }
           case RANDOM: {
             const high = stack.pop();
             stack.push(randomWhole(stack.pop(), high, this.random, oops));
@@ -1007,6 +1033,14 @@ export class Machine {
     }
     return { line: this.line, calls: [...this.frames.map((f) => f.fn.name), this.fn.name], scopes };
   }
+}
+
+// Runs a Moth function from outside, as an app runs a handler: a machine of its own, whose program is the
+// function's code, with `inputs` in its first slots. `options` are the Machine's.
+export function callFunction(closure, inputs, print, options) {
+  const env = newEnv(closure.fn, closure.env);
+  inputs.slice(0, closure.fn.params.length).forEach((value, i) => (env[i + 1] = value));
+  new Machine(closure.fn, print, { ...options, env }).run();
 }
 
 export function execute(main, print, maxSteps, env, ask, disk, args, random) {

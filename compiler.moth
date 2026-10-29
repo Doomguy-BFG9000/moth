@@ -239,7 +239,7 @@ end
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
     "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-    "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw"
+    "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
@@ -535,13 +535,68 @@ to parse with tokens, reading
                     add take_name("an input name") to params
                 end
             end
-            set outside_loops to loop_depth # a function's body starts outside any loop
-            set fn_depth to fn_depth + 1
-            set loop_depth to 0
-            set body to block_end(t)
-            set fn_depth to fn_depth - 1
-            set loop_depth to outside_loops
-            return record with kind "define", name fn_name, params params, body body, at t
+            return func(fn_name, params, t)
+        end
+        if word("when") # `when a key is pressed with key`, `when the mouse is clicked with x and y`
+            set start to pos
+            set words to empty list
+            repeat while check("word") and not is_word("with") and not nl of peek()
+                add value of peek() to words
+                set pos to pos + 1
+            end
+            set phrase to joined(words, " ")
+            set event to ""
+            set gives to 0
+            if phrase is "a key is pressed"
+                set event to "key"
+                set gives to 1
+            else if phrase is "the mouse is clicked"
+                set event to "click"
+                set gives to 2
+            else if phrase is "the mouse is dragged"
+                set event to "drag"
+                set gives to 2
+            end
+            if event is ""
+                set pos to start
+                expected("'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged'")
+            end
+            set params to empty list
+            if word("with")
+                add take_name("an input name") to params
+                repeat while match(",") or word("and")
+                    add take_name("an input name") to params
+                end
+            end
+            if length of params is not 0 and length of params is not gives
+                set values_given to gives + " values"
+                set inputs_named to gives + " inputs"
+                if gives is 1
+                    set values_given to "1 value"
+                    set inputs_named to "one input"
+                end
+                fail with problem(t, "'when " + phrase + "' gives " + values_given + ", so name " + inputs_named + " or none, not " + length of params)
+            end
+            if not at_top
+                fail with problem(t, "'when' only works at the top level of a program")
+            end
+            return record with kind "when", event event, fn func("when " + phrase, params, t), at t
+        end
+        if word("every") # `every 100 milliseconds`, `every 2 seconds`
+            set interval to additive()
+            set unit to 0
+            if is_word("milliseconds") or is_word("millisecond")
+                set unit to 1
+            else if is_word("seconds") or is_word("second")
+                set unit to 1000
+            else
+                expected("'milliseconds' or 'seconds'")
+            end
+            set pos to pos + 1
+            if not at_top
+                fail with problem(t, "'every' only works at the top level of a program")
+            end
+            return record with kind "every", interval interval, unit unit, fn func("every", empty list, t), at t
         end
         if word("return")
             if fn_depth is 0
@@ -685,6 +740,17 @@ to parse with tokens, reading
             return record with kind "call", name called, args args, at t
         end
         fail with problem(t, "a line can't start with " + describe(t))
+    end
+
+    # the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
+    to func with fn_name, params, t
+        set outside_loops to loop_depth
+        set fn_depth to fn_depth + 1
+        set loop_depth to 0
+        set body to block_end(t)
+        set fn_depth to fn_depth - 1
+        set loop_depth to outside_loops
+        return record with kind "define", name fn_name, params params, body body, at t
     end
 
     to if_rest with t
@@ -998,7 +1064,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect", "when", "every"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -1098,6 +1164,12 @@ to rename with node, alias, top, hidden
     end
     if what is "expect"
         rename(cond of node, alias, top, hidden)
+    end
+    if what is "when" or what is "every"
+        rename(fn of node, alias, top, hidden)
+    end
+    if what is "every"
+        rename(interval of node, alias, top, hidden)
     end
     if what is "while"
         rename(cond of node, alias, top, hidden)
@@ -1315,6 +1387,7 @@ end
 # ---------- JavaScript ----------
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
+set event_names to list of "key", "click", "drag" # in the order of EVENTS in vm.js
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
@@ -1445,13 +1518,14 @@ to js_statement with scope, s
         return "for (const $x of itemsOf(" + js_expr(scope, over of s) + ", " + k + ")) {\n" + ref(scope, name of s) + " = $x;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "define"
-        set inner to function_code(scope, params of s, body of s)
-        set inputs to empty list
-        for each n from 1 to length of params of s
-            add v(n, level of scope of inner) to inputs
-        end
-        set head to ref(scope, name of s) + " = fn(" + quote(name of s) + ", " + quote_list(params of s) + ", function (" + joined(inputs, ", ") + ") {\n"
-        return head + code of inner + "\nreturn null;\n});"
+        return ref(scope, name of s) + " = " + closure_code(scope, s) + ";"
+    end
+    if what is "when" # a handler is a function of its own, made and handed over, not kept in a variable
+        return "handle(" + (slot_of(event_names, event of s) - 1) + ", " + closure_code(scope, fn of s) + ", " + remember(at of s) + ");"
+    end
+    if what is "every"
+        set interval to js_expr(scope, interval of s)
+        return "every(" + interval + ", " + unit of s + ", " + closure_code(scope, fn of s) + ", " + remember(at of s) + ");"
     end
     if what is "return"
         if value of s is nothing
@@ -1506,6 +1580,17 @@ to js_statement with scope, s
         end
         return t + " = depthNow();\ntry {\n" + body + "\n} catch ($e) {\n" + keep + "caught($e, " + t + ");\n" + js_block(scope, handler of s) + "\n}"
     end
+end
+
+# a Moth function, made from `to` (or a handler's `when`): a JavaScript function, and its name and inputs
+to closure_code with scope, d
+    set inner to function_code(scope, params of d, body of d)
+    set inputs to empty list
+    for each n from 1 to length of params of d
+        add v(n, level of scope of inner) to inputs
+    end
+    set head to "fn(" + quote(name of d) + ", " + quote_list(params of d) + ", function (" + joined(inputs, ", ") + ") {\n"
+    return head + code of inner + "\nreturn null;\n})"
 end
 
 # The function is looked up before its inputs are worked out, and checked after, as in the VM.
