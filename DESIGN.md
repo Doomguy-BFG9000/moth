@@ -533,3 +533,47 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   ...)`) and the checker's sample showed a different one, so wrong kinds are
   now named by kind (`not bytes`), and only a number that's wrong as itself
   is shown.
+
+## 19. Trails, speed, tests and tidying
+
+- **Error trails.** A mistake inside functions lists the calls that led to it,
+  innermost first. Each engine already knew its calls in its own way, so each
+  reads them its own way: the VM walks its frames (a frame is saved by a CALL
+  with two operands, so the call it made is three instructions before where it
+  returns to), the JIT keeps two arrays beside its depth counter (the function
+  and the call's position, one store each per call), and WebAssembly keeps both
+  in an i32 array inside the module, read through three exports when JavaScript
+  builds the error. A function that called itself from one spot is one line
+  with a count, so even the VM's 100,000-deep recursion is two lines. The
+  fuzzer now compares trails too: the same message at the same spot isn't
+  enough, the same calls must have led there. The cost is about 10% on fib.
+- **WebAssembly, without the trips.** Bytes and dictionaries went to
+  JavaScript for every read and write, which made a million-byte loop 20 times
+  slower than the JIT. Bytes now live in the module as an array of 8-bit
+  numbers, so a byte is one instruction. A dictionary is still a JavaScript Map
+  (text keys can only be hashed in JavaScript), but the module hands over the
+  Map and the key as a plain string or number, with nothing to convert, which
+  makes it as fast as the JIT. Bit operations on numbers below 2^31 are single
+  instructions, with a shift left only up to 21 places and right up to 31, so
+  the answer is always exact; anything outside those edges goes to the shared
+  code, and a test checks the engines agree right at each edge.
+- **`expect` and `moth test`.** `expect` keeps both sides of its comparison, so
+  a failure can say what they were: `expected 6 to be 5`. A test is a function
+  named `test_...`, and each runs in a fresh run of the whole file, so one
+  can't spoil another: the simplest isolation, which costs a run of the file's
+  top level per test. The call that starts a test is left out of its trail.
+- **`moth fmt` asks the parser.** Indenting by keywords goes wrong in a
+  language where `to` starts a function and also ends `set x to`, and where
+  `label -1` in a record is a negative number while `x - 1` is a subtraction.
+  So the parser records how deep each statement starts, which bracket opens a
+  call and which minus makes a number negative, and the formatter only lays
+  out what it is told. It checks its own work: the tidied code must read
+  exactly the same, piece for piece, or nothing is written. Every `.moth` file
+  here was already tidy, the 1,500-line compiler included, which says the
+  rules match how Moth was already being written.
+- **Tools as tests of the language.** Writing `picture.moth`,
+  `wordcount.moth` and `json.moth` found two precedence surprises in my own
+  code (`read` and `shift ... by` take everything up to the next comparison),
+  and the trail pointed straight at the second one. They also show a gap: Moth
+  has no word for asking what kind a value is, which is why the JSON tool
+  reads JSON but doesn't write it.

@@ -96,10 +96,12 @@ fastest:
 
 | `npm run bench` | VM | JIT | WebAssembly |
 |:--|--:|--:|--:|
-| fib(25), function calls | 67 ms | 6.8 ms | **4.7 ms** |
-| a million-round loop | 55 ms | 7.1 ms | **2.6 ms** |
-| primes up to 5,000 | 104 ms | 17 ms | **13 ms** |
-| 200,000 records | 86 ms | 14 ms | **7.7 ms** |
+| fib(25), function calls | 67 ms | 9.3 ms | **5.9 ms** |
+| a million-round loop | 57 ms | 7.0 ms | **3.5 ms** |
+| primes up to 5,000 | 110 ms | 18 ms | **14 ms** |
+| 200,000 records | 85 ms | 15 ms | **8.5 ms** |
+| a million bytes, filled and summed | 380 ms | 93 ms | **48 ms** |
+| 200,000 words counted in a dictionary | 117 ms | 31 ms | **27 ms** |
 | the neural network below | 3.1 s | 0.58 s | **0.33 s** |
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 1,500
@@ -161,6 +163,28 @@ Moth file: 99% right on drawings it hadn't seen.
 ```bash
 moth run digits-train.moth --engine wasm > digits-model.moth
 ```
+
+**Real tools.** [`tools/`](tools) holds programs that do real work with files,
+bytes and dictionaries:
+
+<p align="center"><img src="docs/mandelbrot.png" width="560" alt="The Mandelbrot set: a black shape like a beetle, edged with a glow that goes from deep blue to bright cyan, drawn by picture.moth"></p>
+
+- [`picture.moth`](tools/picture.moth) draws the Mandelbrot set above and writes
+  it as a BMP file, byte by byte, the header's numbers put together with bit
+  operations.
+- [`wordcount.moth`](tools/wordcount.moth) counts the words in any file:
+
+  ```text
+  $ moth run wordcount.moth story.txt 4
+  290 words, 107 different ones
+  the   ██████████████████████████████ 45
+  and   █████████████ 20
+  it    ███████ 11
+  moth  ██████ 10
+  ```
+- [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
+  escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
+  tests it with `moth test`.
 
 ## The language
 
@@ -270,6 +294,10 @@ say block                                   # (4 bytes: 255, 0, 0, 0)
 say "hi" as bytes                           # (2 bytes: 104, 105); back again with: as text
 say 12 bit and 10 " " shift 1 left by 4     # 8 16; also bit or, bit xor, shift right
 say 255 as hex " " 5 as binary              # ff 101
+
+to test_area                                # moth test runs every function named test_...
+    expect area(3, 4) is 12                 # and if it isn't so: expected 13 to be 12
+end
 ```
 
 - **Values:** numbers, `"text"`, `yes`, `no`, `nothing`, lists, records,
@@ -285,8 +313,8 @@ say 255 as hex " " 5 as binary              # ff 101
   `\t` for a tab. Upper or lower case doesn't matter in names and words.
 
 Mistakes get a message in plain words that points at the exact spot, with the
-right name when you misspell one, and the right word when you type a symbol from
-another language:
+right name when you misspell one, the right word when you type a symbol from
+another language, and the calls that led there:
 
 ```text
 line 2: 'totl' has no value yet. Did you mean 'total'?
@@ -295,6 +323,11 @@ say "Total: " totl
 line 1: I don't understand '>' (write 'is greater than')
 if x > 5
      ^
+line 6: can't divide by zero
+    return total / length of numbers
+                 ^
+  in 'average', called from line 10
+  in 'report', called from line 13
 ```
 
 <p align="center">
@@ -318,7 +351,8 @@ nothing to install.
 - **Problems** appear as you type. Click one to jump to it.
 - **Compiled** shows what the code became: bytecode, the JIT's JavaScript, the
   JavaScript from the compiler written in Moth, or the WebAssembly module.
-- **Share** puts the code in the link.
+- **Share** puts the code in the link, and **Tidy** lays it out the one way
+  Moth writes it (Undo brings it back).
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
   number-guessing game that asks for answers), **Neural network**, and **Moth's
   own compiler**, running in your browser.
@@ -334,6 +368,8 @@ moth                               start the Moth shell
 moth run hello.moth                run it, saving any drawing as hello.svg
 moth run hello.moth --engine wasm  the same, on WebAssembly (or vm)
 moth run tool.moth a b c           run it with arguments; its files are read and written here
+moth test                          run every test_ function in every .test.moth file here
+moth fmt hello.moth                tidy it (--check only says whether it's tidy)
 moth check hello.moth              find mistakes without running it
 moth build hello.moth              compile it to hello.mjs, which runs with plain node
 moth bytecode hello.moth           show the bytecode the VM runs
@@ -344,6 +380,20 @@ moth bootstrap                     compile Moth's compiler with itself, three ti
 
 <details>
 <summary>What they look like</summary>
+
+`moth test` runs each test on its own, in a fresh run of the file:
+
+```text
+$ moth test shapes.test.moth
+✓ test_area
+✗ test_average
+    shapes.test.moth:17:5: expected 1.5 to be 2
+        expect average(list of 1, 2) is 2
+        ^
+    it said:
+      checking
+1 passed, 1 failed
+```
 
 `moth check` gives each problem in the same words as the error it would stop with:
 
@@ -420,6 +470,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
+| [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
 | [`cli.js`](cli.js) | The `moth` command and its shell |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
@@ -427,9 +478,11 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 
 ## Tested
 
-`npm test` runs on every push. Tables of programs and mistakes run on all three
+`npm test` runs on every push, then `moth test` and `moth fmt --check` on the
+Moth in this repository. Tables of programs and mistakes run on all three
 engines, and 5,000 randomly broken programs must make all three agree: the same
-output, the same drawing, the same error at the same spot.
+output, the same drawing, the same error at the same spot, and the same trail of
+calls that led there.
 
 <details>
 <summary>Everything it checks</summary>
@@ -450,6 +503,12 @@ output, the same drawing, the same error at the same spot.
 - `try`, dictionaries, bytes and bits, files and arguments (a run handed over
   reads the same files and writes nothing twice), and modules, whose names stay
   apart even where a function's own names hide them
+- WebAssembly's own fast paths for bytes, bits and dictionaries, right at their
+  edges (2^31, a shift by 21 or 22, -0, 255 and 256), against the other engines
+- `expect` and `moth test`, including that each test starts afresh; `moth fmt`
+  on every file here (already tidy) and on 2,000 broken programs (each tidied
+  without changing a piece, and tidy the second time); and the three tools,
+  whose pictures must match byte for byte on every engine
 - the WebAssembly encoder against the spec's examples, the playground's script,
   and every `moth` command as a real process
 
@@ -477,7 +536,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   say if else end repeat while for to return and or not is yes no nothing list
   empty length item move turn pen record fail stop ask use try uppercase
   lowercase split join number position dictionary remove keys in byte bytes as
-  shift read write arguments`.
+  shift read write arguments expect`.
+- There's no word yet for asking what kind a value is (a number, text, a list...).
 - Bits work on whole numbers from 0 to 2^53 − 1, the most a Moth number holds
   exactly.
 - Recursion goes up to 100,000 calls deep.
