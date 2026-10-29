@@ -121,17 +121,29 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const isIfItFails = () => isWord("if") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "it"
     && tokens[pos + 2]?.type === "word" && tokens[pos + 2].value === "fails";
 
+  // For format(): how deep in blocks each statement starts, and each end, else and if it fails, by "line:col";
+  // and the pieces written with no space after them: a negating minus, and a call's bracket (no space before)
+  let nesting = 0;
+  const lay = (t) => reading.layout && !t.file && reading.layout.set(`${t.line}:${t.col}`, nesting);
+  const tight = (t) => (reading.tight && t && !t.file && reading.tight.add(`${t.line}:${t.col}`), t);
+
   // `inTry`: the statements of a `try`, which also end at its `if it fails`
   function statements(opener, inTry = false) {
     const body = [];
     const outside = atTop;
     atTop = !opener;
+    if (opener) nesting++;
     while (opener ? !isWord("end") && !isWord("else") && !(inTry && isIfItFails()) : !check("eof")) {
       if (check("eof")) fail(peek(), `'${opener.value}' from line ${opener.line} is missing its 'end'`);
+      lay(peek());
       const s = statement();
       if (s.kind === "use") body.push(...s.body); // the file's code, in its place
       else body.push(s);
       if (!peek().nl) expected("a new line");
+    }
+    if (opener) {
+      nesting--;
+      lay(peek()); // the end, else or if it fails that closes the block
     }
     atTop = outside;
     return body;
@@ -282,7 +294,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const called = member(t.value);
       if (isWord("is")) fail(t, `to give '${called}' a value write 'set ${called} to ...'`);
       let args = [];
-      if (match("(")) args = argList();
+      if (tight(match("("))) args = argList();
       else if (!peek().nl) do args.push(expression()); while (match(","));
       return { kind: "call", name: called, args, at: t };
     }
@@ -366,7 +378,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   function unary() {
-    const t = match("-");
+    const t = tight(match("-"));
     return t ? { kind: "negate", operand: unary(), at: t } : primary();
   }
 
@@ -451,7 +463,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (t.type === "word" && !RESERVED.has(t.value)) {
       pos++;
       const full = member(t.value);
-      if (match("(")) return { kind: "call", name: full, args: argList(), at: t };
+      if (tight(match("("))) return { kind: "call", name: full, args: argList(), at: t };
       if (full === t.value && !indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
       return { kind: "name", name: full, at: t };
     }
@@ -884,6 +896,72 @@ export function check(source, options) {
     if (!(err instanceof MothError)) throw err;
     return [{ line: err.line, col: err.col, kind: "error", message: err.reason, ...(err.file && { file: err.file }) }];
   }
+}
+
+// ---------- tidying ----------
+
+// One line of code as its pieces, as written, and its comment: [{ type, text, col }], comment or null.
+function piecesOf(line) {
+  const pieces = [];
+  for (let at = 0; at < line.length; at = TOKEN.lastIndex) {
+    TOKEN.lastIndex = at;
+    const [text, space, comment, number, word, string] = TOKEN.exec(line);
+    if (comment) return { pieces, comment: text.trimEnd(), commentCol: at };
+    if (space) continue;
+    pieces.push({ type: number ? "number" : word ? "word" : string ? "string" : text, text, col: at + 1, end: at + text.length });
+  }
+  return { pieces, comment: null };
+}
+
+// The pieces of line `line` joined the one way Moth writes them: a space between each, but none inside
+// brackets, before a comma or 's, before a call's bracket, or after a minus that makes a number negative.
+// `tight` holds those brackets and minuses, which only the parser can tell from the others.
+function joined(pieces, line, tight) {
+  let out = "";
+  pieces.forEach((p, i) => {
+    const before = pieces[i - 1];
+    const marked = (q) => tight.has(`${line}:${q.col}`);
+    const close = !before || before.type === "(" || p.type === ")" || p.type === "," || p.type === "'s"
+      || (before.type === "-" && marked(before)) || (p.type === "(" && marked(p));
+    out += (close ? "" : " ") + p.text;
+  });
+  return out;
+}
+
+// Moth code, tidied: each line indented 4 spaces for each block it's in (and 4 more if it carries on a
+// statement from the line before), single spaces between the pieces of a line, comments kept where they
+// are, at most one blank line in a row, and one new line at the end. The parser says where each statement
+// starts and how deep, so nothing is guessed. Only code that can be read is tidied (a mistake throws, as in
+// compile()), and the result must read exactly the same, piece for piece.
+export function format(source) {
+  const [layout, tight] = [new Map(), new Set()];
+  parse(tokenize(source), { files: () => "", loaded: new Set(), open: [], layout, tight }); // what a used file holds doesn't matter here
+  const tidy = [];
+  let indent = 0; // the indent of the statement being written, for the lines that carry it on
+  let waiting = []; // lines with only a comment, which take the indent of the code after them
+  source.split("\n").forEach((line, i) => {
+    const { pieces, comment, commentCol } = piecesOf(line);
+    if (!pieces.length) {
+      if (comment) waiting.push(tidy.push(comment) - 1);
+      else if (tidy.length && tidy.at(-1) !== "") tidy.push("");
+      return;
+    }
+    const depth = layout.get(`${i + 1}:${pieces[0].col}`);
+    const here = depth === undefined ? indent + 4 : depth * 4;
+    if (depth !== undefined) indent = here;
+    // a comment just before an end, else or if it fails belongs to the block it closes
+    const closing = /^(end|else)$/i.test(pieces[0].text) || pieces.slice(0, 3).map((p) => p.text.toLowerCase()).join(" ") === "if it fails";
+    for (const at of waiting) tidy[at] = " ".repeat(closing ? here + 4 : here) + tidy[at];
+    waiting = [];
+    let text = " ".repeat(here) + joined(pieces, i + 1, tight);
+    if (comment) text += " ".repeat(Math.max(1, commentCol - pieces.at(-1).end)) + comment;
+    tidy.push(text);
+  });
+  while (tidy.at(-1) === "") tidy.pop();
+  const result = tidy.length ? `${tidy.join("\n")}\n` : "";
+  const same = (a, b) => a.length === b.length && a.every((t, i) => t.type === b[i].type && t.value === b[i].value);
+  if (!same(tokenize(source), tokenize(result))) throw new Error("tidying would have changed the code"); // a bug in format(), never a mistake in the code
+  return result;
 }
 
 // Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`, and each

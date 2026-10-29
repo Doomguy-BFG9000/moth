@@ -183,3 +183,23 @@ test("moth test runs the tests in a file, or every .test.moth file in a folder, 
   assert.match(none.stderr, /no tests found/);
   assert.equal(none.status, 1);
 });
+
+// ---------- moth fmt ----------
+
+test("moth fmt tidies files, and with --check only says which aren't tidy", (t) => {
+  const file = tempFile(t, "messy.moth", "if yes\nsay  1\nend");
+  const checked = moth(["fmt", "--check", file]);
+  assert.equal(checked.status, 1);
+  assert.equal(checked.stdout, `${file} needs tidying\n`);
+  assert.equal(readFileSync(file, "utf8"), "if yes\nsay  1\nend");
+  const fixed = moth(["fmt", file]);
+  assert.equal(fixed.status, 0);
+  assert.equal(fixed.stdout, `tidied ${file}\n`);
+  assert.equal(readFileSync(file, "utf8"), "if yes\n    say 1\nend\n");
+  assert.equal(moth(["fmt", "--check", file]).stdout, `${file} is tidy\n`);
+  const broken = tempFile(t, "broken.moth", "if yes\n");
+  const bad = moth(["fmt", broken]);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /missing its 'end'/);
+  assert.equal(readFileSync(broken, "utf8"), "if yes\n");
+});

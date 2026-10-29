@@ -3,7 +3,7 @@
 import { readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { run, test, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, test, format, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -14,6 +14,8 @@ const USAGE = `usage:
   moth test [files...]        run the tests: each function named test_..., on its own; with no file,
                               every file ending in .test.moth here and in the folders inside
                               (--engine wasm or --engine vm picks the engine)
+  moth fmt <files...>         tidy them: indents, spaces and blank lines, the one way Moth writes them
+                              (--check only says which aren't tidy, and fails if any aren't)
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
@@ -262,7 +264,49 @@ function tests(files, engine) {
   return failed ? 1 : 0;
 }
 
+// `moth fmt`: tidies each file in place, or with --check only says which ones need it. Code with a mistake
+// that stops it from being read is left alone.
+function tidy(files, checkOnly) {
+  let failed = 0;
+  for (const file of files) {
+    let source;
+    try {
+      source = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    } catch (err) {
+      console.error(`moth: can't read ${file} (${err.code === "ENOENT" ? "no such file" : err.message})`);
+      failed++;
+      continue;
+    }
+    let tidied;
+    try {
+      tidied = format(source);
+    } catch (err) {
+      if (err instanceof MothError) report(err, source, file);
+      else console.error(`moth: ${file}: ${err.message}`);
+      failed++;
+      continue;
+    }
+    if (tidied === source) console.log(`${file} is tidy`);
+    else if (checkOnly) {
+      console.log(`${file} needs tidying`);
+      failed++;
+    } else {
+      writeFileSync(file, tidied);
+      console.log(`tidied ${file}`);
+    }
+  }
+  return failed ? 1 : 0;
+}
+
 function main([command, file, ...extra]) {
+  if (command === "fmt") {
+    const files = [file, ...extra].filter((a) => a !== undefined && a !== "--check");
+    if (!files.length) {
+      console.error(USAGE);
+      return 2;
+    }
+    return tidy(files, [file, ...extra].includes("--check"));
+  }
   if (command === "test") {
     const rest = [file, ...extra].filter((a) => a !== undefined);
     const at = rest.indexOf("--engine");

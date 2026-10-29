@@ -101,6 +101,7 @@
     <button id="debug" type="button" title="Go through the program a step at a time, backwards too">⏯ Debug</button>
     <button id="stop" type="button" disabled>■ Stop</button>
     <button id="share" type="button">⤴ Share</button>
+    <button id="tidy" type="button" title="Indents, spaces and blank lines, the one way Moth writes them">✎ Tidy</button>
     <label class="toggle">Engine
       <select id="engine" title="All three run the same program the same way, at different speeds">
         <option value="jit">JIT (JavaScript)</option>
@@ -172,7 +173,7 @@
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, excerpt, MothError } from "./moth.js";
+    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -576,6 +577,26 @@
       } catch {
         status.textContent = "Copy the link from the address bar";
       }
+    };
+    // Tidy (format() in moth.js) leaves code with a mistake alone. It types the tidy code in, so Undo brings
+    // the old back.
+    $("tidy").onclick = () => {
+      let tidied;
+      try {
+        tidied = format(code.value).replace(/\n$/, "");
+      } catch (err) {
+        status.textContent = err instanceof MothError ? `Can't tidy it yet: ${err.message}` : `Couldn't tidy it: ${err.message}`;
+        return;
+      }
+      if (tidied === code.value) {
+        status.textContent = "Already tidy";
+        return;
+      }
+      code.focus();
+      code.select();
+      if (!document.execCommand("insertText", false, tidied)) code.value = tidied;
+      refreshEditor();
+      status.textContent = "Tidied";
     };
     $("compiled").onchange = showCompiled;
     $("engine").onchange = runCode;

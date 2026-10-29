@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { run, test as testMoth, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
+import { readFileSync, readdirSync } from "node:fs";
+import { run, test as testMoth, format, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -995,4 +995,41 @@ test("test() runs each test_ function on its own, and says why one failed, on al
   const [whole] = testMoth("say 1\nexpect 1 is 2"); // no tests: the file is one
   assert.deepEqual([whole.name, whole.said, whole.error.message], [null, ["1"], "line 2: expected 1 to be 2"]);
   assert.throws(() => testMoth("to test_a\n    say 1"), /'to' from line 1 is missing its 'end'/);
+});
+
+// ---------- tidying ----------
+
+test("format() tidies code the one way, without changing a piece of it, and tidy code stays as it is", () => {
+  const messy = [
+    "to   area with w,h", "return w*h", "  end", "", "", "", "if area( 2,3 ) is 6   # check", '        say "six"',
+    "# a note before else", "else", 'say  "no"', "end", "set l to list of 1 ,2,", " 3", "say - 5", "try", "say 1/0",
+    "if it fails with why", " say why", "end", "set r to record with label -1, x (2 + 3)", "move forward (1 + 2)", "", "",
+  ].join("\n");
+  const tidy = [
+    "to area with w, h", "    return w * h", "end", "", "if area(2, 3) is 6   # check", '    say "six"',
+    "    # a note before else", "else", '    say "no"', "end", "set l to list of 1, 2,", "    3", "say -5", "try",
+    "    say 1 / 0", "if it fails with why", "    say why", "end", "set r to record with label -1, x (2 + 3)",
+    "move forward (1 + 2)", "",
+  ].join("\n");
+  assert.equal(format(messy), tidy);
+  assert.equal(format(tidy), tidy);
+  for (const source of Object.values(examples)) assert.equal(format(source), `${source}\n`); // they only lack the last new line
+  for (const file of readdirSync(new URL(".", import.meta.url)).filter((f) => f.endsWith(".moth"))) {
+    const text = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    assert.equal(format(text), text, file);
+  }
+  assert.throws(() => format("if yes\n    say 1"), MothError);
+  let tidied = 0;
+  for (const source of brokenPrograms(7, 2000)) {
+    let once;
+    try {
+      once = format(source); // which itself checks that every piece is the same
+    } catch (err) {
+      if (err instanceof MothError) continue;
+      throw err;
+    }
+    assert.equal(format(once), once, source);
+    tidied++;
+  }
+  assert.ok(tidied > 500, `only ${tidied} could be tidied`);
 });
