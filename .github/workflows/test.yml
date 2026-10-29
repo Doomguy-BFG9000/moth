@@ -12,4 +12,4 @@ jobs:
           node-version: 22
       - run: npm test
       - run: node cli.js test # every .test.moth file, with Moth's own test runner
-      - run: node cli.js fmt --check *.moth tools/*.moth # and all the Moth here is tidy
+      - run: node cli.js fmt --check *.moth tools/*.moth apps/*.moth # and all the Moth here is tidy

@@ -1,28 +1,64 @@
 // Runs one Moth program off the page's main thread, so a loop that never ends can't freeze the page:
-// the page just ends this worker when Stop is pressed.
+// the page just ends this worker when Stop is pressed. An app (a program with `when` or `every`) keeps the
+// worker going after it has set up: the worker runs its timers, and the page sends it keys and clicks.
 import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./moth.js";
 
-// shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more
+// shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more.
+// Drawing counts from the last `clear`, so an app that draws every frame can go on for ever.
 const MAX_LINES = 10_000;
 const MAX_DRAWN = 100_000;
+const FASTEST = 10; // milliseconds: an `every` faster than this runs this often
 
 // Thrown by `ask` when the page hasn't answered yet: this run stops, the page asks the person, and runs the
 // program again from the start with every answer so far. It says and draws the same things up to there.
 class Waiting {}
 
-onmessage = ({ data: { source, engine, answers = [], files = {}, seed = 1 } }) => {
-  let lines = [];
-  let drawn = [];
+let app = null; // the running app, once the program has set it up
+let lines = [];
+let drawn = [];
+let sent = 0;
+const flush = () => {
+  if (lines.length || drawn.length) postMessage({ lines, drawn });
+  lines = [];
+  drawn = [];
+  sent = performance.now();
+};
+const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
+
+let source = "";
+let files = {};
+// A mistake ends the program, or the app; anything else that goes wrong is Moth's own.
+function failed(err) {
+  if (err instanceof Waiting) {
+    flush();
+    postMessage({ error: "Error: an app can't ask a question once it's running" });
+    app = null;
+    return;
+  }
+  flush();
+  const trail = err instanceof MothError && err.trail.length ? `\n${describeTrail(err.trail)}` : ""; // the calls that led there
+  postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}${trail}` : `Moth itself crashed: ${err.message}` });
+  app = null;
+}
+
+// one event for the app: its handlers run, then what they said and drew goes to the page
+function handle(run) {
+  if (!app) return;
+  try {
+    run();
+    flush();
+  } catch (err) {
+    failed(err);
+  }
+}
+
+onmessage = ({ data }) => {
+  if (data.event) return handle(() => app.send(data.event, data.inputs)); // a key or a click, from the page
+  ({ source, files = {} } = data);
+  const { engine, answers = [], seed = 1 } = data;
   let said = 0;
   let total = 0;
-  let sent = performance.now();
-  const flush = () => {
-    if (lines.length || drawn.length) postMessage({ lines, drawn });
-    lines = [];
-    drawn = [];
-    sent = performance.now();
-  };
-  const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
+  let pictured = 0; // drawn since the last clear
   const say = (line) => {
     if (++said <= MAX_LINES) lines.push(line);
     else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
@@ -35,15 +71,18 @@ onmessage = ({ data: { source, engine, answers = [], files = {}, seed = 1 } }) =
       say(`${question} ${shown}`); // the question and its answer, as a line of output
       return text;
     }
+    if (app) throw new Waiting(); // too late to stop and ask
     flush();
     postMessage({ question });
     throw new Waiting();
   };
   const start = performance.now();
   try {
-    run(source, say, {
-      draw: (line) => {
-        if (++total <= MAX_DRAWN) drawn.push(line);
+    app = run(source, say, {
+      draw: (d) => {
+        total++;
+        if (d.clear) pictured = 0;
+        if (++pictured <= MAX_DRAWN) drawn.push(d);
         due();
       },
       engine,
@@ -51,13 +90,12 @@ onmessage = ({ data: { source, engine, answers = [], files = {}, seed = 1 } }) =
       files: (name) => files[name],
       disk: memoryDisk(), // a page has no files of its own: `write` makes them, for this run
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
-    });
+    }) ?? null;
     flush();
-    postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });
+    postMessage({ done: true, app: app?.waits, empty: said === 0 && total === 0, ms: performance.now() - start });
+    app?.waits.forEach((wait, i) => wait.event === "every" && setInterval(() => handle(() => app.handle(i)), Math.max(FASTEST, wait.interval)));
   } catch (err) {
     if (err instanceof Waiting) return; // the page asks, and runs it again
-    flush();
-    const trail = err instanceof MothError && err.trail.length ? `\n${describeTrail(err.trail)}` : ""; // the calls that led there
-    postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}${trail}` : `Moth itself crashed: ${err.message}` });
+    failed(err);
   }
 };

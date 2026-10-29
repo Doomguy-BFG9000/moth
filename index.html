@@ -71,7 +71,8 @@
     .pad { width: 220px; height: 220px; background: #111; border: 1px solid #4a4a4f; border-radius: 6px; touch-action: none; cursor: crosshair; }
     .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #4a4a4f; border-radius: 5px; padding: 3px 8px; }
     #output.error { color: #f48771; }
-    #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; }
+    #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
+    #canvas:focus-visible { outline: 2px solid #4f8ff7; outline-offset: 2px; }
     #bytecode { color: #a9a9a9; }
 
     /* status bar: blue normally, amber while debugging */
@@ -138,7 +139,7 @@
     <section class="pane side" aria-label="Results">
       <div id="drawing-view" hidden>
         <div class="title">Drawing</div>
-        <canvas id="canvas" width="500" height="500" role="img" aria-label="What the program drew"></canvas>
+        <canvas id="canvas" width="500" height="500" tabindex="0" role="img" aria-label="What the program drew; an app takes keys and clicks here"></canvas>
       </div>
       <div id="debug-panel" hidden>
         <div class="title">Variables</div>
@@ -180,7 +181,9 @@
     let worker = null;
     let trace = null; // the recorded run being debugged
     let at = 0; // which of its steps is showing
-    let drawing = []; // every line the program has drawn
+    let drawing = []; // what the program has drawn since its last `clear` (which stays first, so the view stays open)
+    let shownDrawn = 0; // how much it has drawn in all, counting what a `clear` wiped
+    let appRunning = false; // an app is running: its picture stays put, and takes keys and clicks
 
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
@@ -295,8 +298,8 @@
       const pen = canvas.getContext("2d");
       const half = canvas.width / 2;
       const reach = Math.max(0, ...sinceClear(fitTo).map(reachOf));
-      const scale = Math.min(1, (half - 10) / reach);
-      $("drawing-view").hidden = !fitTo.length;
+      const scale = appRunning ? 1 : Math.min(1, (half - 10) / reach); // an app's view never moves: it's where its clicks land
+      $("drawing-view").hidden = !appRunning && !fitTo.length;
       pen.setTransform(1, 0, 0, 1, 0, 0);
       pen.clearRect(0, 0, canvas.width, canvas.height);
       pen.setTransform(scale, 0, 0, -scale, half, half);
@@ -325,7 +328,19 @@
       }
     }
 
+    // at most once a frame, however fast an app draws
+    let painting = false;
+    function paintSoon() {
+      if (painting) return;
+      painting = true;
+      requestAnimationFrame(() => {
+        painting = false;
+        render();
+      });
+    }
+
     function finish(message) {
+      appRunning = false;
       worker?.terminate();
       worker = null;
       stopButton.disabled = true;
@@ -404,6 +419,7 @@
       output.textContent = "";
       output.classList.remove("error");
       drawing = [];
+      shownDrawn = 0;
       render();
       answers = [];
       shownLines = 0;
@@ -414,7 +430,7 @@
       document.querySelector(".answer")?.remove();
       finish("Running…");
       stopButton.disabled = false;
-      let [skipLines, skipDrawn] = [shownLines, drawing.length]; // shown by the runs before this one
+      let [skipLines, skipDrawn] = [shownLines, shownDrawn]; // shown by the runs before this one
       const current = (worker = new Worker("./worker.js", { type: "module" }));
       current.onmessage = ({ data }) => {
         if (worker !== current) return; // a message from a run that was already replaced
@@ -429,14 +445,22 @@
         if (data.drawn?.length) {
           const skip = Math.min(skipDrawn, data.drawn.length);
           skipDrawn -= skip;
-          if (data.drawn.length > skip) render((drawing = drawing.concat(data.drawn.slice(skip))));
+          if (data.drawn.length > skip) {
+            const fresh = data.drawn.slice(skip);
+            shownDrawn += fresh.length;
+            drawing = drawing.concat(fresh);
+            drawing = drawing.slice(Math.max(0, drawing.findLastIndex((d) => d.clear))); // nothing before a clear is seen again
+            paintSoon();
+          }
         }
         if (data.question !== undefined) return waitForAnswer(data.question);
         if (data.error) fail(data.error);
         if (data.done) {
-          if (data.empty) output.append("(no output)");
+          if (data.empty && !data.app) output.append("(no output)");
           const engine = { jit: "the JIT", wasm: "WebAssembly", vm: "the VM" }[$("engine").value];
-          finish(`Ran in ${data.ms < 10 ? data.ms.toFixed(1) : Math.round(data.ms)} ms on ${engine}`);
+          const ms = data.ms < 10 ? data.ms.toFixed(1) : Math.round(data.ms);
+          if (data.app) return startApp(data.app, `Set up in ${ms} ms on ${engine}`);
+          finish(`Ran in ${ms} ms on ${engine}`);
         }
       };
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
@@ -445,6 +469,37 @@
         if (worker === current) current.postMessage({ source, engine: $("engine").value, answers, files: Object.fromEntries(usedFiles), seed });
       });
     }
+
+    // An app: the worker keeps running it, and the picture, which stays put, takes keys pressed while it has
+    // the focus, clicks and drags. Stop ends it.
+    function startApp(waits, done) {
+      appRunning = true;
+      const wants = [waits.some((w) => w.event === "key") && "press keys", waits.some((w) => w.event !== "key" && w.event !== "every") && "click the picture"].filter(Boolean);
+      status.textContent = `${done} · an app, running${wants.length ? `: ${wants.join(" or ")}` : ""} · Stop ends it`;
+      render(); // now, not on the next frame: a hidden picture can't take the focus
+      $("canvas").focus({ preventScroll: true });
+    }
+    const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space", Enter: "enter", Escape: "escape", Backspace: "backspace" };
+    const sendEvent = (event, inputs) => appRunning && worker?.postMessage({ event, inputs });
+    $("canvas").onkeydown = (e) => {
+      if (!appRunning || e.ctrlKey || e.metaKey || e.altKey || e.key === "Tab") return; // Tab still moves on
+      e.preventDefault(); // arrows and space would scroll the page
+      sendEvent("key", [KEYS[e.key] ?? e.key.toLowerCase()]);
+    };
+    // where the pointer is, in the picture's own numbers: (0, 0) in the middle, y going up
+    function spot(e) {
+      const canvas = $("canvas");
+      const box = canvas.getBoundingClientRect();
+      const x = ((e.clientX - box.left) / box.width) * canvas.width - canvas.width / 2;
+      const y = canvas.height / 2 - ((e.clientY - box.top) / box.height) * canvas.height;
+      return [Math.round(x), Math.round(y)];
+    }
+    $("canvas").onpointerdown = (e) => {
+      if (!appRunning) return;
+      $("canvas").setPointerCapture(e.pointerId); // a drag keeps going past the edge
+      sendEvent("click", spot(e));
+    };
+    $("canvas").onpointermove = (e) => e.buttons && sendEvent("drag", spot(e));
 
     // A box to type the answer in, or, for a question that starts with "Draw", a pad to draw it on. Each
     // answer is { text, shown }: what the program gets, and what the output shows after the question.
@@ -660,15 +715,17 @@
     $("compiled").onchange = showCompiled;
     $("engine").onchange = runCode;
 
-    // Two examples are files: a neural network that learns, and the compiler written in Moth, with a line
-    // at the end that uses it.
+    // Some examples are files: two apps, a neural network that learns, the handwriting reader, and the
+    // compiler written in Moth, with a line at the end that uses it.
     const FILES = {
       "Neural network": ["neural.moth", ""],
       "Handwriting": ["handwriting.moth", ""],
+      "Snake": ["apps/snake.moth", ""],
+      "Paint": ["apps/paint.moth", ""],
       "Moth's own compiler": ["compiler.moth", `\n\n# The compiler above, compiling a line of Moth to JavaScript:\nsay js of compile("say 1 + 2")\n`],
     };
     const [first, second, ...rest] = Object.keys(examples);
-    picker.append(...[first, second, "Neural network", "Handwriting", ...rest, "Moth's own compiler"].map((name) => new Option(name)));
+    picker.append(...[first, second, "Snake", "Paint", "Neural network", "Handwriting", ...rest, "Moth's own compiler"].map((name) => new Option(name)));
     picker.onchange = async () => {
       const name = picker.value;
       let text;

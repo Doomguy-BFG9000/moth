@@ -1,0 +1,54 @@
+# Paint: drag on the picture to draw. Click a colour at the bottom to pick it, and press c to start again.
+
+set colours to list of "white", "tomato", "gold", "#4caf50", "#4f8ff7", "violet"
+set colour to "white"
+set bottom to -210 # the colours are below this
+
+to palette
+    for each i from 1 to length of colours
+        pen color item i of colours
+        draw box at -240 + (i - 1) * 50, -245 size 40 by 30
+    end
+    pen color colour # the colour picked, in a bigger box to the right
+    draw box at 200, -245 size 40 by 30
+end
+
+to start_again
+    clear
+    palette()
+end
+
+when the mouse is clicked with x and y
+    pen up
+    if y is less than bottom
+        for each i from 1 to length of colours
+            if x is at least -240 + (i - 1) * 50 and x is less than -200 + (i - 1) * 50
+                set colour to item i of colours
+            end
+        end
+        palette()
+    else
+        move to x, y
+        pen down
+        pen color colour
+        pen width 6
+        draw circle at x, y size 3
+    end
+end
+
+when the mouse is dragged with x and y
+    if y is at least bottom
+        move to x, y
+    else
+        pen up
+    end
+end
+
+when a key is pressed with key
+    if key is "c"
+        start_again()
+    end
+end
+
+start_again()
+say "Drag to draw. Click a colour to pick it, and press c to start again."

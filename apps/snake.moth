@@ -1,0 +1,110 @@
+# Snake: eat the food, and don't hit the walls or yourself. The arrow keys turn; space plays again.
+# Click the picture first, so the keys go to it.
+
+set cells to 10 # the board goes from -10 to 9 each way
+set cell to 20 # and each cell is this many steps across
+set snake to empty list # its parts, each a list of x and y, the head last
+set dx to 1 # which way it's going
+set dy to 0
+set food to nothing
+set score to 0
+set over to no
+set playing to no # it waits for the first arrow key
+set turned to no # one turn a step, so two quick turns can't turn it back into itself
+
+to start
+    set snake to list of (list of -2, 0), (list of -1, 0), (list of 0, 0)
+    set dx to 1
+    set dy to 0
+    set score to 0
+    set over to no
+    set playing to no
+    set turned to no
+    place_food()
+end
+
+to place_food
+    set food to list of random number from -cells to cells - 1, random number from -cells to cells - 1
+    if food is in snake
+        place_food()
+    end
+end
+
+to step
+    if over or not playing
+        return
+    end
+    set head to item (length of snake) of snake
+    set next to list of item 1 of head + dx, item 2 of head + dy
+    set outside to item 1 of next is less than -cells or item 1 of next is at least cells
+    if outside or item 2 of next is less than -cells or item 2 of next is at least cells or next is in snake
+        set over to yes
+    else
+        add next to snake
+        if next is food
+            add 1 to score
+            place_food()
+        else # it moved: the tail comes along
+            set rest to empty list
+            for each i from 2 to length of snake
+                add item i of snake to rest
+            end
+            set snake to rest
+        end
+    end
+    set turned to no
+    show()
+end
+
+to show
+    clear
+    pen color "#202020"
+    draw box at -cells * cell, -cells * cell size 2 * cells * cell by 2 * cells * cell
+    pen color "#4caf50"
+    for each part in snake
+        draw box at item 1 of part * cell + 1, item 2 of part * cell + 1 size cell - 2 by cell - 2
+    end
+    pen color "tomato"
+    draw circle at item 1 of food * cell + cell / 2, item 2 of food * cell + cell / 2 size cell / 2 - 2
+    pen color "white"
+    draw "Score: " + score at -cells * cell, cells * cell + 12
+    if not playing
+        draw "Press an arrow key to start" at -130, -8 size 20
+    else if over
+        draw "Game over: space plays again" at -140, -8 size 20
+    end
+end
+
+when a key is pressed with key
+    if key is "space" and over
+        start()
+        show()
+    else if not turned
+        set turned to yes
+        if key is "left" and dx is not 1
+            set dx to -1
+            set dy to 0
+        else if key is "right" and dx is not -1
+            set dx to 1
+            set dy to 0
+        else if key is "up" and dy is not -1
+            set dx to 0
+            set dy to 1
+        else if key is "down" and dy is not 1
+            set dx to 0
+            set dy to -1
+        else
+            set turned to no
+        end
+        if turned and not over
+            set playing to yes
+        end
+    end
+end
+
+every 120 milliseconds
+    step()
+end
+
+start()
+show()
