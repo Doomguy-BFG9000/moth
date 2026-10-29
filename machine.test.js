@@ -66,11 +66,20 @@ test("machine code says, fails and exits exactly as moth run does", { skip }, ()
 
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
-  not('set b to 4 bytes', /^line 1: 'bytes' can't become machine code yet/);
-  not("try\n    say 1\nif it fails\n    say 2\nend", /^line 1: 'try' can't become machine code yet/);
+  not('say uppercase of "a"', /^line 1: 'uppercase' can't become machine code yet/);
+  not("move forward 10", /^line 1: drawing can't become machine code yet/);
   not("to f\n    to g\n        say 1\n    end\nend", /^line 2: a function made inside a function can't become machine code yet/);
   not("to f\n    return 1\nend\nset g to f", /^line 4: a function used as a value \('f'\) can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
+});
+
+// A `set` in a function changes a variable of the same name at the top level, and a file used `as` a name
+// shares its functions' variables with the program's top level: names that clash there change each other.
+test("machine.moth's functions never set a name its top level or compiler.moth's functions use", () => {
+  const top = new Set([...here("machine.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
+  const set = (source) => [...source.matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]);
+  assert.deepEqual(set(here("machine.moth")).filter((n) => top.has(n)), []);
+  assert.deepEqual([...new Set(set(here("compiler.moth")))].filter((n) => top.has(n)), []);
 });
 
 test("a program becomes the same bytes each time, as a PE file for Windows and an ELF file for Linux", () => {

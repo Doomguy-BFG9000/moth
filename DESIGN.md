@@ -910,6 +910,23 @@ hold them to agreeing.
   is 10^22 or less, and big whole numbers below that. A misspelled field or key
   gets the engines' "Did you mean ...?", from the same edit distance over
   UTF-16.
+- **`try`.** A `try` puts a record on the stack: the calls in progress, the
+  frame, where its `if it fails` starts, and the try further out. A mistake
+  checks for one before it writes anything: the message without its place, or
+  what `fail with` gave, becomes the caught value, and the stack and frame go
+  back to the try's. A `stop` or `return` inside one takes it off first.
+- **The helpers, and bytes.** `number of` reads text as JavaScript's `Number()`
+  reads Moth's numbers: up to 2^53 times or over a power of ten up to 10^22 is
+  one exact step, and anything else is a first guess on the x87, at its 64-bit
+  precision, then moved a step at a time with big whole numbers until it's the
+  nearest double. Bytes read as text the way TextDecoder reads UTF-8, each
+  broken part a U+FFFD.
+- **A trap, twice.** In Moth a `set` inside a function changes a top-level
+  variable of the same name, and a file used `as` a name shares its functions'
+  variables with the program's top level. A label called `here` in machine.moth
+  was overwritten by compiler.moth's `resolve`, and a label called `bits_made`
+  overwrote machine.moth's own marker, which showed only when one compiler made
+  two programs. A test now checks that no function sets such a name.
 - **Checked.** 400 random programs made from what it takes, 27 written for what's
   easy to get wrong, and every test program and 300 broken ones it can take, on
   the system the tests run on, against the JavaScript engine's output, mistakes,
