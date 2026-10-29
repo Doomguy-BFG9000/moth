@@ -10,6 +10,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: cargo build --release --manifest-path native/Cargo.toml # the Rust engine, which native.test.js holds up against the others
+      - run: cargo clippy --release --manifest-path native/Cargo.toml -- -D warnings
+      - run: cargo fmt --check --manifest-path native/Cargo.toml
       - run: npm test
       - run: node cli.js test # every .test.moth file, with Moth's own test runner
+      - run: native/target/release/moth-native test # and with the Rust engine's
       - run: node cli.js fmt --check *.moth tools/*.moth apps/*.moth # and all the Moth here is tidy

@@ -1,5 +1,7 @@
 // Times a few Moth programs. Run with `npm run bench`; pass a path to time another copy of moth.js.
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 const { run } = await import(process.argv[2] ? pathToFileURL(process.argv[2]).href : "./moth.js");
 
@@ -91,10 +93,19 @@ function time(source, engine) {
   return { ms: best, result };
 }
 
+// the Rust engine, if it's built: it times itself, so starting it up isn't counted
+const NATIVE = new URL(`./native/target/release/moth-native${process.platform === "win32" ? ".exe" : ""}`, import.meta.url);
+function timeNative(source) {
+  if (!existsSync(NATIVE)) return null;
+  const [best, result] = spawnSync(fileURLToPath(NATIVE), ["bench"], { input: source, encoding: "utf8" }).stdout.split("\n");
+  return { ms: Number(best), result };
+}
+
 const ms = (n) => `${n < 10 ? n.toFixed(1) : n.toFixed(0)} ms`.padStart(9);
-console.log(`${"".padEnd(32)} ${"VM".padStart(9)} ${"JIT".padStart(9)} ${"Wasm".padStart(9)}`);
+console.log(`${"".padEnd(32)} ${"VM".padStart(9)} ${"JIT".padStart(9)} ${"Wasm".padStart(9)} ${"Rust".padStart(9)}`);
 for (const [name, source] of Object.entries(PROGRAMS)) {
   const [vm, jit, wasm] = ["vm", "jit", "wasm"].map((engine) => time(source, engine));
-  const same = vm.result === jit.result && vm.result === wasm.result ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result} / ${wasm.result}`;
-  console.log(`${name.padEnd(32)} ${ms(vm.ms)} ${ms(jit.ms)} ${ms(wasm.ms)}${same}`);
+  const native = timeNative(source) ?? { ms: NaN, result: vm.result };
+  const same = [jit, wasm, native].every((t) => t.result === vm.result) ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result} / ${wasm.result} / ${native.result}`;
+  console.log(`${name.padEnd(32)} ${ms(vm.ms)} ${ms(jit.ms)} ${ms(wasm.ms)} ${Number.isNaN(native.ms) ? "(not built)".padStart(9) : ms(native.ms)}${same}`);
 }

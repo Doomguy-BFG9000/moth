@@ -2,3 +2,5 @@
 tools/*.bmp
 # pages made from the apps with moth build --web
 apps/*.html
+# what cargo builds
+native/target/

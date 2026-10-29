@@ -88,21 +88,22 @@ the list only has 3 items
 
 ## What makes it different
 
-**Three engines that agree.** Every program can run on a bytecode virtual
-machine, on a JIT that compiles it to JavaScript, or as WebAssembly that Moth
-writes byte by byte. All three must say, draw and fail exactly alike, and 5,000
-randomly broken programs check that they do on every push. WebAssembly is the
-fastest:
+**Four engines that agree.** Every program can run on a bytecode virtual
+machine, on a JIT that compiles it to JavaScript, as WebAssembly that Moth
+writes byte by byte, or on [the Rust engine](#without-javascript), which has no
+JavaScript at all. All four must say, draw and fail exactly alike, and
+thousands of randomly broken programs check that they do on every push.
+WebAssembly is the fastest:
 
-| `npm run bench` | VM | JIT | WebAssembly |
-|:--|--:|--:|--:|
-| fib(25), function calls | 67 ms | 9.3 ms | **5.9 ms** |
-| a million-round loop | 57 ms | 7.0 ms | **3.5 ms** |
-| primes up to 5,000 | 110 ms | 18 ms | **14 ms** |
-| 200,000 records | 85 ms | 15 ms | **8.5 ms** |
-| a million bytes, filled and summed | 380 ms | 93 ms | **48 ms** |
-| 200,000 words counted in a dictionary | 117 ms | 31 ms | **27 ms** |
-| the neural network below | 3.1 s | 0.58 s | **0.33 s** |
+| `npm run bench` | VM | JIT | WebAssembly | Rust |
+|:--|--:|--:|--:|--:|
+| fib(25), function calls | 67 ms | 9.3 ms | **5.9 ms** | 61 ms |
+| a million-round loop | 57 ms | 7.0 ms | **3.5 ms** | 48 ms |
+| primes up to 5,000 | 110 ms | 18 ms | **14 ms** | 193 ms |
+| 200,000 records | 85 ms | 15 ms | **8.5 ms** | 77 ms |
+| a million bytes, filled and summed | 380 ms | 93 ms | **48 ms** | 248 ms |
+| 200,000 words counted in a dictionary | 117 ms | 31 ms | **27 ms** | 104 ms |
+| the neural network below | 3.1 s | 0.58 s | **0.33 s** | 2.3 s |
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 1,500
 lines of Moth that compile any Moth program, itself included, to exactly the
@@ -464,6 +465,31 @@ main:
 
 </details>
 
+## Without JavaScript
+
+Moth's engines are written in JavaScript, so a bug in JavaScript itself could
+reach them. [`native/`](native/) is Moth written again from scratch in Rust,
+with no JavaScript anywhere: its own lexer, parser, compiler and virtual machine,
+and no libraries.
+
+```bash
+cargo install --git https://github.com/samyyy2423/moth moth-native
+```
+
+```text
+moth-native run hello.moth         run it, saving any drawing as hello.svg
+moth-native test                   run every test_ function in every .test.moth file here
+moth-native bytecode hello.moth    show the bytecode, the same as moth bytecode
+```
+
+It isn't a lookalike. On every push, a test holds it up against the JavaScript
+VM on every test program, 5,000 broken and 1,500 generated ones, the neural
+network, the handwriting reader, and Moth's compiler compiling itself: the two
+must compile to the same bytecode and say, draw, write and fail exactly alike.
+To get there it prints numbers the way JavaScript does, down to which digit
+wins a tie, and works out sine and cosine with the same method as Chrome's
+engine, checked bit for bit on a million numbers.
+
 ## How it's built
 
 ```text
@@ -543,6 +569,9 @@ calls that led there.
   whose pictures must match byte for byte on every engine
 - the WebAssembly encoder against the spec's examples, the playground's script,
   and every `moth` command as a real process
+- the Rust engine against the JavaScript VM: every test program, 5,000 broken
+  and 1,500 generated ones, the bundled programs, every character's upper and
+  lower case, and its commands against `moth`'s, down to the bytes of a drawing
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -564,6 +593,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
   Safari 18.2, or later.
+- The Rust engine runs code and values nested deeper than JavaScript's stack
+  allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
+  with a mistake, and Rust carries on. It runs and tests programs; checking,
+  tidying, apps and the playground are the JavaScript side's.
 
 <details>
 <summary>The rest</summary>
@@ -591,8 +624,9 @@ unboxed numbers were all caught, some only by the fuzzer.
 ## Run it from the source
 
 ```bash
-npm test                     # everything above, in about 40 seconds
-npm run bench                # the three engines, timed
+cargo build --release --manifest-path native/Cargo.toml   # the Rust engine, which npm test checks too
+npm test                     # everything above, in about a minute
+npm run bench                # the four engines, timed
 node cli.js run hello.moth   # the moth command, without installing it
 python -m http.server        # then open http://localhost:8000 for the playground
 ```

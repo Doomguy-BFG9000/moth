@@ -637,3 +637,43 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   browser's own box. Text in the program can hold `</script>`, which would end
   the page's script early, so every one is written `<\/script>`, which reads
   the same to JavaScript.
+
+## 22. Moth without JavaScript: the Rust engine
+
+- **Why another engine.** Every engine so far runs inside a JavaScript engine,
+  so a bug in JavaScript could reach any Moth program. [`native/`](native/) is
+  Moth again, from the first character to the last instruction, in Rust with no
+  libraries: about 3,000 lines for the lexer, parser, compiler, virtual machine,
+  turtle and command line.
+- **The same bytecode, so it can be checked.** The compiler makes exactly what
+  moth.js's does, instruction for instruction and constant for constant, so
+  `moth-native bytecode` and `moth bytecode` print the same text. That splits
+  every disagreement in two: different bytecode is a front-end bug, the same
+  bytecode with a different result is a machine bug.
+- **Numbers, bit for bit.** Rust's shortest float printing picks the same digits
+  as JavaScript's except in a tie, where Rust rounds up and JavaScript picks the
+  even digit (`-2.6916885375976562`, not `...563`): 2,719 of a million random
+  numbers. Ties only happen at 16 or 17 digits, so only those are checked.
+  Sine and cosine are fdlibm's, as V8 has them, ported line by line: a library
+  sine can differ in the last bit, which moves a drawing's rounding. Both were
+  checked against V8 on a million numbers, with no difference.
+- **Text as JavaScript sees it.** Columns count UTF-16 units, so mistakes point
+  at the same spot after an emoji; text compares by UTF-16 units too
+  (`"！" is less than "😀"` is no in JavaScript, though its code point is
+  smaller); and every character's upper and lower case is checked against V8.
+- **Checked on 80,000 programs.** `native.test.js` sends programs to
+  `moth-native conform`, which runs each and reports what it said, drew,
+  wrote and failed with, and its bytecode, for the test to hold up against the
+  JavaScript VM. On every push: the tables, the examples, 5,000 broken and
+  1,500 generated programs, the bundled programs, and the compiler written in
+  Moth compiling itself. Once, by hand: 80,000 more from other seeds, with no
+  difference. A one-character bug planted in an error message failed two tests.
+- **One bug found by timing.** Dictionaries first used a fast hash that only
+  mixed the high bits, and a whole number's float has all its low bits zero, so
+  300,000 number keys all landed in the same few places: 22 seconds instead of
+  0.14. A final mixing step fixed it.
+- **Where the engines can differ.** JavaScript stops code nested more deeply
+  than its stack allows (about 900 brackets) and values held more deeply (a
+  list 2,000 deep), and those limits change with the stack's size, so they
+  already differed between the command line and the playground. The Rust
+  engine goes further, then stops with the same message.
