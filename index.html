@@ -223,10 +223,36 @@
       const problems = check(code.value, { files });
       const marks = new Map();
       for (const p of problems) if (!p.file) marks.set(p.line, (marks.get(p.line) ?? new Map()).set(p.col, p.kind));
-      $("highlight").innerHTML = highlight(code.value, marks) + "\n"; // the extra line keeps its height in step with the textarea
+      paint(code.value, marks);
       $("gutter").textContent = code.value.split("\n").map((_, n) => n + 1).join("\n");
       showProblems(problems);
       syncScroll();
+    }
+
+    // The coloured copy of the code under the textarea (whose own text is see-through), redrawn only where
+    // lines changed: rebuilding all of a long program's lines took most of the time a key press took. Each
+    // line is its own block, a <div> ending in a new line, so changing one doesn't lay out all the others
+    // again; the last line ends in a new line too, which keeps the copy's height in step with the textarea's.
+    // `painted` holds each line's text and marks, as drawn now.
+    let painted = [];
+    function paint(source, marks) {
+      const box = $("highlight");
+      if (!painted.length) box.replaceChildren();
+      const lines = source.split("\n");
+      const keys = lines.map((text, i) => (marks.has(i + 1) ? `${text}\u0000${[...marks.get(i + 1)].join(";")}` : text));
+      let start = 0; // the lines that changed are the ones between the unchanged ones at each end
+      while (start < keys.length && start < painted.length && keys[start] === painted[start]) start++;
+      let [oldEnd, newEnd] = [painted.length, keys.length];
+      while (oldEnd > start && newEnd > start && painted[oldEnd - 1] === keys[newEnd - 1]) [oldEnd, newEnd] = [oldEnd - 1, newEnd - 1];
+      const after = box.childNodes[oldEnd] ?? null;
+      for (let i = start; i < oldEnd; i++) box.childNodes[start].remove();
+      const fresh = document.createElement("template");
+      fresh.innerHTML = lines.slice(start, newEnd).map((text, i) => {
+        const line = start + i + 1;
+        return `<div>${highlight(text, marks.has(line) ? new Map([[1, marks.get(line)]]) : undefined)}\n</div>`;
+      }).join("");
+      box.insertBefore(fresh.content, after);
+      painted = keys;
     }
 
     function showProblems(problems) {
