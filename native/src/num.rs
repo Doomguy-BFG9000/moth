@@ -134,16 +134,21 @@ pub fn order(a: f64, b: f64) -> Option<std::cmp::Ordering> {
 }
 
 // a count loop's test, `for each i from 1 to n`: i is at most n, to 15 digits
+#[inline]
 pub fn at_most(a: f64, b: f64) -> bool {
     a <= b || order(a, b) == Some(std::cmp::Ordering::Equal)
 }
 
 // `a is divisible by b` (b isn't 0): whole numbers by their remainder, anything else by whether a / b is
 // whole, to 15 digits
+#[inline]
 pub fn divisible(a: f64, b: f64) -> bool {
     if is_integer(a) && is_integer(b) {
+        if a.abs() < 2147483648.0 && b.abs() < 2147483648.0 {
+            return (a as i32).wrapping_rem(b as i32) == 0; // the same answer for whole numbers this size, and a quick one
+        }
         if a.abs() < 9007199254740992.0 && b.abs() < 9007199254740992.0 {
-            return (a as i64) % (b as i64) == 0; // the same answer for whole numbers this size, without a float's remainder
+            return (a as i64).wrapping_rem(b as i64) == 0; // the same, without a float's slow remainder
         }
         a % b == 0.0
     } else {
@@ -202,6 +207,7 @@ pub fn round(x: f64) -> f64 {
 }
 
 // Number.isInteger
+#[inline]
 pub fn is_integer(x: f64) -> bool {
     x.is_finite() && x.floor() == x
 }

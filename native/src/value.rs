@@ -31,6 +31,8 @@ impl fmt::Debug for Value {
 pub struct Closure {
     pub func: Rc<Function>,
     pub env: Rc<Env>,
+    #[allow(dead_code)]
+    pub native: Option<crate::vm::NativeFn>, // in a program `moth-native build --exe` made, the function's own code
 }
 
 // A function's variables: slot 0 is the scope it was made in, then its inputs, then the rest
@@ -221,6 +223,7 @@ pub fn kind_of(v: &Value) -> &'static str {
     }
 }
 
+#[inline]
 pub fn truthy(v: &Value) -> bool {
     !matches!(v, Value::Nothing | Value::Bool(false))
 }

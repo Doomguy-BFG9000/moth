@@ -790,3 +790,50 @@ hold them to agreeing.
   the program on to any other: neither Node nor `curl` follows a site now; each
   new address is asked about again, ten at most. The question shows a file's
   name with anything that moves the cursor or turns text around made `?`.
+
+## 24. Speed: a faster engine, and machine code
+
+- **A faster Rust engine.** Built as one unit with link-time optimisation, which
+  alone took 30% off. Each function's code is read out once into instructions
+  that hold their operands (`Ins`), instead of each operand being looked up as
+  it runs. A function that makes no functions (`is_flat`) keeps its variables
+  on the machine's own list, so a call makes no environment. And a few pairs and
+  triples that come up all the time run as one instruction (`fuse`): a count
+  loop's next number and its variable, `n is less than 2`, `n - 1`, `a + b`, a
+  `get` then an `add`. Those leave the instructions after them where they are,
+  so a jump into the middle still works, and each fails exactly where its part
+  would. Calls got 1.9 times faster, loops 1.7, lists and bytes 1.4 to 1.6; the
+  bytecode itself didn't change, so it still matches compiler.moth's.
+- **Machine code by way of Rust.** `moth-native build --exe` (exe.rs) writes the
+  program as Rust and has rustc finish the job. It starts from the bytecode, not
+  the program's text, so every name is already resolved and every instruction
+  knows its place for a mistake. Each function's bytecode becomes a Rust
+  function: the stack becomes local variables (its depth at each instruction is
+  worked out first), each block of straight-line code a branch of a `match` in a
+  loop, a jump a change of state, and a `try` a list of the blocks its `if it
+  fails` starts. LLVM's DFA jump threading, which is off unless asked for, turns
+  that loop back into jumps straight from block to block: twice as fast.
+- **One set of checks.** Every instruction's work, with its checks and its
+  messages, moved out of the machine's loop into functions the machine and the
+  compiled code both call (`got`, `compare_values`, `add_to_value`, `said` and
+  thirty more), so the two can't say different things. The machine got no slower.
+- **Numbers as numbers.** What a stack place holds is worked out for each
+  instruction: a number, yes or no, an iterator, or anything. A number lives in
+  an `f64` and yes or no in a `bool`, made into a value only where one is
+  needed. A variable is a number for good if no inner function sees it, every
+  `set` gives it a number (an `add` to a number gives one or fails), and it isn't
+  an input, unless it says it's a number, which every call checks. A million-round
+  loop then takes 2.5 ms, faster than WebAssembly's 6.5. A `for each` keeps its
+  own copy of the items and a place in them, as the machine's iterator does but
+  with nothing shared to borrow at each step, and moves each item out instead
+  of copying it: lists got twice as fast.
+- **Checked as everything else is.** A test builds one program holding 700
+  compiled programs, which answers `conform`'s jobs as the engine does, and holds
+  each to the engine's output, drawings and mistakes, trail and all; Moth's own
+  compiler, compiled to machine code, compiles itself to the same bytecode.
+- **What's still slow.** A call checks its inputs and finds its function by name
+  each time, and lists, records and dictionaries are the engine's own values
+  behind reference counts and borrow checks: about twice the Rust engine's speed,
+  but behind V8, which inlines, guesses types and keeps objects in shapes. A big
+  program is slow to build: compiler.moth is 1.3 MB of Rust, and rustc takes
+  minutes over it.

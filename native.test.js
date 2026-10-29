@@ -287,6 +287,82 @@ test("moth-native as WebAssembly runs a program's files, its answers and its mis
   assert.equal(built.stdout.match(/the same bytecode/g).length, 3);
 });
 
+// ---------- machine code: moth-native build --exe ----------
+
+const rustc = spawnSync("rustc", ["--version"]).status === 0;
+const noRustc = !rustc && "rustc, which moth-native build --exe needs, isn't here";
+const EXE = process.platform === "win32" ? ".exe" : "";
+
+test("moth-native build --exe makes programs that say, draw, write and fail exactly as the machine does", { skip: skip || noRustc, timeout: 1_800_000 }, (t) => {
+  const disk = { "file.txt": { text: "hello\nworld" }, "data.bin": { bytes: [1, 2, 3] }, "data.csv": { text: "Name,Price, x\na,1.5,\nb,-2,q\n" } };
+  const jobs = [
+    ...[...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s)].map((source) => ({ source, answers: ["50", "25", "37"] })),
+    ...generatePrograms(7, 150).map((source) => ({ source, disk, args: ["one", "2"], maxSteps: 5_000 })),
+    ...brokenPrograms(9, 150).map((source) => ({ source, maxSteps: 10_000 })),
+  ].filter(whole);
+  // a compiled program has no limit on its steps, so only the ones that end without one are compared
+  const machine = onRust(jobs);
+  const ending = jobs.map((job, i) => [job, machine[i]]).filter(([, r]) => !(r.error && /stopped after/.test(r.error.message)));
+  assert.ok(ending.length > 400);
+  const dir = tempDir(t);
+  writeFileSync(join(dir, "programs.json"), JSON.stringify(ending.map(([job]) => ({ source: job.source, files: job.files ?? {} }))));
+  const built = spawnSync(BINARY, ["build", "--exe-conform", "programs.json", "programs"], { cwd: dir, encoding: "utf8" });
+  assert.equal(built.status, 0, built.stderr);
+  const ran = spawnSync(join(dir, `programs${EXE}`), [], {
+    input: ending.map(([job]) => JSON.stringify({ ...job, maxSteps: undefined })).join("\n") + "\n",
+    encoding: "utf8",
+    maxBuffer: 1 << 30,
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  const compiled = ran.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  ending.forEach(([job, r], i) => assert.deepEqual(compiled[i], { ...r, bytecode: null, mothc: null }, job.source.slice(0, 2000)));
+});
+
+test("a program moth-native build --exe made runs on its own, asks as moth-native run does, and shows its mistakes the same", { skip: skip || noRustc, timeout: 600_000 }, (t) => {
+  const dir = tempDir(t);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  writeFileSync(join(dir, "shapes.moth"), "to area with w as a number, h as a number\n    return w * h\nend\n");
+  writeFileSync(join(dir, "tool.moth"), [
+    'use "shapes.moth"',
+    'say "area " area(3, 4)',
+    "for each a in arguments",
+    "    say a",
+    "end",
+    'write uppercase of read "in.txt" to "out.txt"',
+    'say read "out.txt"',
+    "set total to 0",
+    "for each i from 1 to 1000",
+    "    add i * i to total",
+    "end",
+    "say total",
+    "move forward 50",
+    "to deep with n",
+    '    return area(n, "x")',
+    "end",
+    "say deep(2)",
+  ].join("\n"));
+  const exe = (args, flags = []) => {
+    const built = spawnSync(BINARY, ["build", "--exe", "tool.moth", ...flags], { cwd: dir, encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+    return spawnSync(join(dir, `tool${EXE}`), args, { cwd: dir, encoding: "utf8", input: "" });
+  };
+  const denied = exe(["one"]);
+  const run = spawnSync(BINARY, ["run", "tool.moth", "one"], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(denied.status, 1);
+  assert.equal(denied.stdout, run.stdout);
+  assert.equal(denied.stderr, run.stderr);
+  assert.match(denied.stderr, /can't read 'in\.txt': this program isn't allowed to read files/);
+  const allowed = exe(["one", "two"], ["--allow-read", "--allow-write"]);
+  const runAllowed = spawnSync(BINARY, ["run", "tool.moth", "--allow-read", "--allow-write", "one", "two"], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(allowed.stdout, "area 12\none\ntwo\nHELLO\n333833500\n");
+  assert.equal(allowed.stdout, runAllowed.stdout);
+  assert.equal(allowed.stderr, runAllowed.stderr); // the mistake in deep, through area in shapes.moth, with its trail
+  assert.match(allowed.stderr, /^shapes\.moth:2:12: can't use '\*' on a number and text|'area' needs h to be a number, not text/);
+  assert.equal(allowed.status, 1);
+  const bad = spawnSync(BINARY, ["build", "--exe", "tool.moth", "--allow-everything"], { cwd: dir, encoding: "utf8" });
+  assert.equal(bad.status, 2);
+});
+
 // ---------- the command line ----------
 
 function tempDir(t) {

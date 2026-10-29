@@ -141,18 +141,19 @@ a distance and a time
 machine, on a JIT that compiles it to JavaScript, as WebAssembly that Moth
 writes byte by byte, or on [the Rust engine](#without-javascript), which has no
 JavaScript at all. All four must say, draw and fail exactly alike, and
-thousands of randomly broken programs check that they do on every push.
-WebAssembly is the fastest:
+thousands of randomly broken programs check that they do on every push. And
+`moth-native build --exe` turns a program into
+[machine code](#in-machine-code): a program of its own, the fastest of all at
+working with numbers, and well ahead of the Rust engine everywhere else:
 
-| `npm run bench` | VM | JIT | WebAssembly | Rust |
-|:--|--:|--:|--:|--:|
-| fib(25), function calls | 67 ms | 9.3 ms | **5.9 ms** | 61 ms |
-| a million-round loop | 57 ms | 7.0 ms | **3.5 ms** | 48 ms |
-| primes up to 5,000 | 110 ms | 18 ms | **14 ms** | 193 ms |
-| 200,000 records | 85 ms | 15 ms | **8.5 ms** | 77 ms |
-| a million bytes, filled and summed | 380 ms | 93 ms | **48 ms** | 248 ms |
-| 200,000 words counted in a dictionary | 117 ms | 31 ms | **27 ms** | 104 ms |
-| the neural network below | 3.1 s | 0.58 s | **0.33 s** | 2.3 s |
+| `npm run bench` | VM | JIT | WebAssembly | Rust | Machine code |
+|:--|--:|--:|--:|--:|--:|
+| fib(25), function calls | 68 ms | 9.8 ms | **8.5 ms** | 31 ms | 16 ms |
+| a million-round loop | 73 ms | 11 ms | 6.5 ms | 33 ms | **2.5 ms** |
+| primes up to 5,000 | 119 ms | 19 ms | **15 ms** | 110 ms | 45 ms |
+| 200,000 records | 93 ms | 15 ms | **10 ms** | 66 ms | 48 ms |
+| a million bytes, filled and summed | 397 ms | 94 ms | **43 ms** | 186 ms | 90 ms |
+| 200,000 words counted in a dictionary | 104 ms | 28 ms | **26 ms** | 80 ms | 53 ms |
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 2,400
 lines of Moth that compile any Moth program, itself included, to exactly the
@@ -598,6 +599,7 @@ cargo install --git https://github.com/samyyy2423/moth moth-native
 moth-native run hello.moth              run it, saving any drawing as hello.svg; it asks, as moth run does
 moth-native build hello.moth            compile it to hello.mothc, bytecode that runs without compiling again
 moth-native run hello.mothc             run the bytecode
+moth-native build --exe hello.moth      compile it to machine code: hello.exe (or hello), a program of its own
 moth-native test                        run every test_ function in every .test.moth file here
 moth-native bytecode hello.moth         show the bytecode, the same as moth bytecode
 moth-native bootstrap compiler.moth     build Moth's compiler with itself, with no JavaScript
@@ -622,6 +624,29 @@ with itself.
 cd native && rustup target add wasm32-wasip1 && cargo build --release --target wasm32-wasip1
 wasmtime run --dir . target/wasm32-wasip1/release/moth-native.wasm run hello.moth
 ```
+
+### In machine code
+
+`moth-native build --exe hello.moth` makes `hello.exe` (just `hello` on Mac and
+Linux): the program in machine code, which runs with nothing else installed.
+Each Moth function becomes a function of its own; a variable no inner function
+can see becomes a local; and a variable or value that can only ever be a number
+becomes a plain machine number, so a loop over numbers runs at the speed of C.
+An input that says it is a number (`to area with width as a number`) counts as
+one, so saying what inputs are makes them faster. Every check and every message
+is the Rust engine's own, so it does exactly what `moth-native run` does: on
+every push a test compiles 700 programs and holds them to the engine's output,
+drawings and mistakes. It asks before files and going online as `run` does, and
+`--allow` flags after the file are built into it:
+
+```bash
+moth-native build --exe tool.moth --allow-read=data
+```
+
+It needs Rust's compiler, `rustc` (from [rustup.rs](https://rustup.rs)), which
+turns the Rust that moth-native writes into machine code, together with the
+engine's own source, which moth-native carries inside it. A small program builds
+in about five seconds; Moth's 2,400-line compiler takes a few minutes.
 
 **Moth builds itself, with no JavaScript.** [`compiler.moth`](compiler.moth),
 Moth's compiler written in Moth, now writes bytecode as well as JavaScript, and
@@ -726,6 +751,10 @@ calls that led there.
 - compiler.moth's bytecode against the Rust compiler's, byte for byte, on 630
   programs and 1,500 broken ones, and `moth-native bootstrap` three stages deep,
   natively and as WebAssembly
+- `moth-native build --exe` against the Rust engine: every test program, 150
+  generated and 150 broken ones compiled to machine code, which must say, draw,
+  write and fail exactly alike; and a compiled tool's files, arguments, asking
+  and mistakes against `moth-native run`'s
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -753,6 +782,11 @@ unboxed numbers were all caught, some only by the fuzzer.
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
   Safari 18.2, or later.
+- A program in machine code is fastest at work with numbers; with lists,
+  records and dictionaries it is about twice as fast as the Rust engine, but
+  JavaScript's engine, which has years of tuning behind it, is faster still.
+  Building one needs `rustc`, and a very big program takes minutes. It has no
+  limit on its steps, so a loop that never ends runs until it's stopped.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
   allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
   with a mistake, and Rust carries on. As WebAssembly, whose stack is smaller,

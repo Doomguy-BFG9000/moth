@@ -260,6 +260,7 @@ fn compare(op: usize, a: &Value, b: &Value) -> Res<bool> {
 }
 
 // numbers compare to 15 digits (see num::order)
+#[inline]
 fn compare_numbers(op: usize, a: f64, b: f64) -> bool {
     use std::cmp::Ordering::*;
     match op {
@@ -886,6 +887,482 @@ impl Turtle {
     }
 }
 
+// ---------- what instructions do, for the machine and for compiled programs alike ----------
+// A program `moth-native build --exe` makes (exe.rs) runs its own code, not this machine, but every check and
+// every message comes from these, which the machine uses too, so the two can't drift apart.
+
+// GET's value, or that the variable has none yet
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+#[inline]
+fn got(v: Value, func: &Function, name: i32) -> Res<Value> {
+    if let Value::Unset = v {
+        return oops(no_value(&func.text(name)));
+    }
+    Ok(v)
+}
+
+// GET_FN's value, which must be a function
+#[inline]
+fn got_fn(v: Value, func: &Function, name: i32) -> Res<Value> {
+    match v {
+        Value::Func(_) => Ok(v),
+        Value::Unset => oops(format!("there is no function called '{}'", func.text(name))),
+        other => oops(format!("'{}' is {}, not a function", func.text(name), kind_of(&other))),
+    }
+}
+
+// whether a call gives a function the inputs it needs: as many as it has, each what it says it is
+#[inline]
+fn check_call(callee: &Closure, args: &[Value], func: &Function, name_at: i32) -> Res<()> {
+    let n = callee.func.params.len();
+    if args.len() != n {
+        return oops(format!("'{}' needs {} but got {}", func.text(name_at), plural(n, "input"), args.len()));
+    }
+    for (i, &k) in callee.func.kinds.iter().enumerate() {
+        if !fits_kind(k, &args[i]) {
+            return oops(format!(
+                "'{}' needs {} to be {}, not {}",
+                func.text(name_at),
+                callee.func.params[i],
+                crate::parser::KINDS[k as usize],
+                kind_of(&args[i])
+            ));
+        }
+    }
+    Ok(())
+}
+
+// COMPARE: numbers straight away, anything else by compare()
+#[inline]
+fn compare_values(o: usize, a: &Value, b: &Value) -> Res<bool> {
+    match (a, b) {
+        (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => Ok(compare_numbers(o, *x, *y)),
+        _ => compare(o, a, b),
+    }
+}
+
+// ADD, SUB, MUL or DIV (by opcode): numbers straight away, anything else by plus() or arithmetic()
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+#[inline]
+fn math_values(op: i32, a: &Value, b: &Value) -> Res<Value> {
+    match (a, b) {
+        (Value::Num(x), Value::Num(y)) if op != DIV || *y != 0.0 => Ok(Value::Num(match op {
+            ADD => x + y,
+            SUB => x - y,
+            MUL => x * y,
+            _ => x / y,
+        })),
+        _ if op == ADD => plus(a, b),
+        _ => arithmetic(
+            if op == SUB {
+                "-"
+            } else if op == MUL {
+                "*"
+            } else {
+                "/"
+            },
+            a,
+            b,
+        ),
+    }
+}
+
+#[inline]
+fn negate_value(v: Value) -> Res<Value> {
+    match v {
+        Value::Num(x) => Ok(Value::Num(-x)),
+        Value::Qty(x, u) => Ok(Value::Qty(-x, u)),
+        other => oops(format!("'-' needs a number, not {}", kind_of(&other))),
+    }
+}
+
+// ITEM: a whole number in range of a list or bytes goes straight there; anything else through item()
+#[inline]
+fn item_value(target: &Value, n: &Value) -> Res<Value> {
+    match (target, n) {
+        (Value::List(l), Value::Num(i)) if *i >= 1.0 && *i <= l.borrow().len() as f64 && i.fract() == 0.0 => {
+            Ok(l.borrow()[*i as usize - 1].clone())
+        }
+        (Value::Bytes(b), Value::Num(i)) if *i >= 1.0 && *i <= b.borrow().len() as f64 && i.fract() == 0.0 => {
+            Ok(Value::Num(b.borrow()[*i as usize - 1] as f64))
+        }
+        _ => {
+            let (seq, i) = item(target, n, false)?;
+            Ok(item_at(&seq, &i))
+        }
+    }
+}
+
+// DICT: each key, then its value
+fn make_dict(pairs: &[Value]) -> Res<Value> {
+    let mut d = Dict::default();
+    for pair in pairs.chunks(2) {
+        let k = dictionary_key(&pair[0])?;
+        d.set(k, pair[1].clone());
+    }
+    Ok(Value::Dict(Rc::new(RefCell::new(d))))
+}
+
+// REMOVE: `remove key from dictionary`
+fn remove_key(key: &Value, dictionary: &Value) -> Res<()> {
+    let Value::Dict(d) = dictionary else {
+        return oops(format!("can only remove from a dictionary, not {}", kind_of(dictionary)));
+    };
+    let k = dictionary_key(key)?;
+    if !d.borrow().has(&k) {
+        return oops(not_in(&d.borrow(), key)?);
+    }
+    d.borrow_mut().remove(&k);
+    Ok(())
+}
+
+// ADD_TO: `add value to` the variable in `slot`, whose name is the constant `name`
+#[inline]
+fn add_to_value(slot: &mut Value, value: Value, func: &Function, name: i32) -> Res<()> {
+    let updated = match (&mut *slot, &value) {
+        (Value::Num(x), Value::Num(y)) => {
+            *x += y;
+            None
+        }
+        (Value::List(l), _) => {
+            l.borrow_mut().push(value);
+            None
+        }
+        (current, _) => Some(add_into(current, &value, &func.text(name))?),
+    };
+    if let Some(u) = updated {
+        *slot = u;
+    }
+    Ok(())
+}
+
+// SAY: the line its parts make
+fn said(parts: &[Value]) -> Res<String> {
+    let mut line = String::new();
+    for p in parts {
+        line += &shown(p, false)?;
+    }
+    fits(line)
+}
+
+// CHECK_REPEAT: how many times a `repeat` goes round
+fn repeat_count(v: &Value) -> Res<Value> {
+    match canon(v) {
+        Value::Num(x) if num::is_integer(x) && x >= 0.0 => Ok(Value::Num(x)), // 0.1 * 30 is 3 times
+        other => {
+            let shown = shown(&other, true)?;
+            oops(format!("repeat needs a whole number of times, not {shown}"))
+        }
+    }
+}
+
+// CHECK_RANGE: `for each i from a to b`
+fn check_range(from: &Value, to: &Value) -> Res<()> {
+    if !matches!((from, to), (Value::Num(_), Value::Num(_))) {
+        return oops(format!("'from' and 'to' need numbers, not {} and {}", kind_of(from), kind_of(to)));
+    }
+    Ok(())
+}
+
+// ITER, and ITER_NEXT: what `for each x in` goes through, and its next item, if there's one
+fn iter_of(v: &Value) -> Res<Value> {
+    let items = items_of(v)?;
+    Ok(Value::Iter(Rc::new(RefCell::new(Iter { items, i: 0 }))))
+}
+#[inline]
+fn iter_next(iter: &Value) -> Option<Value> {
+    let Value::Iter(it) = iter else { unreachable!() };
+    let mut it = it.borrow_mut();
+    if it.i < it.items.len() {
+        it.i += 1;
+        Some(it.items[it.i - 1].clone())
+    } else {
+        None
+    }
+}
+
+// RECORD: its fields' names, and their values in the same order
+fn make_record(fields: &[Rc<str>], values: impl Iterator<Item = Value>) -> Value {
+    let mut r = Record::default();
+    for (f, v) in fields.iter().zip(values) {
+        r.set(f.clone(), v);
+    }
+    Value::Record(Rc::new(RefCell::new(r)))
+}
+
+// FIELD: `name of person`
+fn field_value(record: &Value, field: Rc<str>) -> Res<Value> {
+    let Value::Record(r) = record else {
+        return oops(format!("can't take '{}' of {}", field, kind_of(record)));
+    };
+    let found = r.borrow().get(&field).cloned();
+    match found {
+        Some(v) => Ok(v),
+        None => {
+            let names: Vec<String> = r.borrow().fields.iter().map(|(n, _)| n.to_string()).collect();
+            let guess = closest(&field, &names).map(|g| format!(". Did you mean '{g}'?")).unwrap_or_default();
+            oops(format!("this record has no '{field}'{guess}"))
+        }
+    }
+}
+
+// RECORD_REF, then SET_FIELD: `set name of person to ...`
+fn record_ref(record: &Value, field: &str) -> Res<()> {
+    if !matches!(record, Value::Record(_)) {
+        return oops(format!("can only change '{field}' of a record, not {}", kind_of(record)));
+    }
+    Ok(())
+}
+fn set_field(record: Value, field: Rc<str>, value: Value) {
+    let Value::Record(r) = record else { unreachable!() };
+    r.borrow_mut().set(field, value);
+}
+
+// ASK: the answer, as text
+fn ask_answer(host: &mut dyn Host, question: &Value) -> Res<Value> {
+    let q = shown(question, false)?;
+    match host.ask(&q) {
+        None => oops("this program asks a question, but nothing can answer it here".into()),
+        Some(None) => oops("there was no answer to this question: the input ended".into()),
+        Some(Some(answer)) => Ok(text(&answer)),
+    }
+}
+
+// READ: a file's (or site's) text, or its bytes
+fn read_value(host: &mut dyn Host, name: &Value, bytes: bool) -> Res<Value> {
+    let Value::Text(n) = name else {
+        return oops(format!("a file name is text, not {}", kind_of(name)));
+    };
+    match host.read(n, bytes) {
+        None => oops("this program reads a file, but there are no files here".into()),
+        Some(Err(why)) => oops(format!("can't read '{n}': {why}")),
+        Some(Ok(None)) => oops(format!("there is no file called '{n}'")),
+        Some(Ok(Some(FileData::Text(t)))) => Ok(Value::Text(Rc::from(fits(t)?.as_str()))),
+        Some(Ok(Some(FileData::Bytes(b)))) => Ok(Value::Bytes(Rc::new(RefCell::new(b)))),
+    }
+}
+
+// WRITE: bytes as they are, anything else as `say` shows it
+fn write_value(host: &mut dyn Host, value: &Value, name: &Value) -> Res<()> {
+    let Value::Text(n) = name else {
+        return oops(format!("a file name is text, not {}", kind_of(name)));
+    };
+    let data = match value {
+        Value::Bytes(b) => FileData::Bytes(b.borrow().clone()),
+        other => FileData::Text(shown(other, false)?),
+    };
+    match host.write(n, data) {
+        None => oops("this program writes a file, but there are no files here".into()),
+        Some(Err(why)) => oops(format!("can't write '{n}': {why}")),
+        Some(Ok(())) => Ok(()),
+    }
+}
+
+// EVERY: how often, in milliseconds
+fn every_listener(interval: Value, unit: f64) -> Res<Listener> {
+    match interval {
+        Value::Num(x) if x > 0.0 && x != f64::INFINITY => Ok(Listener { event: "every", interval: Some(x * unit) }),
+        other => oops(format!("'every' needs a number above 0, not {}", described(&other))),
+    }
+}
+
+// RANDOM: `random number from low to high`
+fn random_value(host: &mut dyn Host, low: &Value, high: &Value) -> Res<Value> {
+    let (low, high) = (canon(low), canon(high));
+    for n in [&low, &high] {
+        if !matches!(n, Value::Num(x) if num::is_integer(*x)) {
+            return oops(format!("'random number from' needs whole numbers, not {}", described(n)));
+        }
+    }
+    let (Value::Num(lo), Value::Num(hi)) = (low, high) else { unreachable!() };
+    if lo > hi {
+        return oops(format!("there is no number from {} to {}", num::display(lo), num::display(hi)));
+    }
+    let r = host.random();
+    Ok(Value::Num(lo + (r * (hi - lo + 1.0)).floor()))
+}
+
+// EXPECT: `expect x` (o below 0), or `expect a is b` and the other comparisons, `is not` if negate
+fn expect_yes(v: &Value) -> Res<()> {
+    if !truthy(v) {
+        let shown = shown(v, true)?;
+        return oops(format!("expected yes, but got {shown}"));
+    }
+    Ok(())
+}
+fn expect_that(o: usize, negate: bool, a: &Value, b: &Value) -> Res<()> {
+    if compare(o, a, b)? == negate {
+        let name = COMPARISONS[o];
+        let op_text = if name == "is" { String::new() } else { format!(" {name}") };
+        let (sa, sb) = (shown(a, true)?, shown(b, true)?);
+        return oops(format!("expected {sa} {}to be{op_text} {sb}", if negate { "not " } else { "" }));
+    }
+    Ok(())
+}
+
+// FAIL: `fail with value`, which `try` gets back as it was
+fn fail_with(v: Value) -> Failure {
+    match shown(&v, false) {
+        Ok(message) => Failure { message, value: Some(v), last: false },
+        Err(f) => f,
+    }
+}
+
+// BUILTIN: `bit and`, `bit or` and `bit xor` (7, 8, 9) on whole numbers from 0 to 2^53 - 1 straight away,
+// anything else by builtin()
+fn builtin_value(index: usize, args: &[Value]) -> Res<Value> {
+    if (7..=9).contains(&index) {
+        if let (Value::Num(x), Value::Num(y)) = (&args[0], &args[1]) {
+            let whole = |n: f64| num::is_integer(n) && (0.0..=MAX_BITS).contains(&n);
+            if whole(*x) && whole(*y) {
+                let (a, b) = (*x as u64, *y as u64);
+                return Ok(Value::Num(match index {
+                    7 => a & b,
+                    8 => a | b,
+                    _ => a ^ b,
+                } as f64));
+            }
+        }
+    }
+    builtin(index, args)
+}
+
+// ---------- a compiled program's own code (exe.rs), and what it runs with ----------
+
+// A Moth function as a compiled program's own code: what it runs with, its bytecode (for its constants and
+// places), the environment it was made in, and its inputs, each taken as it starts
+pub type NativeFn = for<'a, 'b> fn(&'a mut Rt<'b>, &Rc<Function>, &Rc<Env>, &mut [Value]) -> Out;
+// what a compiled function gives back: its value, or its mistake (boxed, so a value comes back in registers)
+pub type Out = Result<Value, Box<Fail>>;
+
+// What a compiled program runs with: what the machine has, without the machine
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub struct Rt<'h> {
+    pub host: &'h mut dyn Host,
+    pub turtle: Turtle,
+    pub listeners: Vec<Listener>,
+    pub depth: usize,             // calls in progress
+    pub funcs: Vec<Rc<Function>>, // every function, in the order exe.rs numbers them: their constants and places
+}
+
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+impl<'h> Rt<'h> {
+    pub fn new(host: &'h mut dyn Host, main: &Rc<Function>) -> Rt<'h> {
+        let mut funcs = vec![];
+        fn walk(f: &Rc<Function>, out: &mut Vec<Rc<Function>>) {
+            out.push(f.clone());
+            for c in &f.consts {
+                if let Const::Func(g) = c {
+                    walk(g, out);
+                }
+            }
+        }
+        walk(main, &mut funcs);
+        Rt { host, turtle: Turtle::default(), listeners: vec![], depth: 0, funcs }
+    }
+}
+
+// A mistake in a compiled program: what went wrong, where, and the calls it has come back through so far
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub struct Fail {
+    pub failure: Failure,
+    pub at: Pos,
+    pub calls: Vec<(String, Pos)>,
+}
+
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+impl Fail {
+    // a mistake at instruction `pc` of `func`
+    pub fn at(failure: Failure, func: &Function, pc: usize) -> Box<Fail> {
+        Box::new(Fail { failure, at: func.at[pc].clone().unwrap_or(Pos { line: 0, col: 0, file: None }), calls: vec![] })
+    }
+    // whether `try` can catch it
+    pub fn catchable(&self) -> bool {
+        !self.failure.last
+    }
+    // what `if it fails with why` gets
+    pub fn caught(self) -> Value {
+        match self.failure.value {
+            Some(v) => v,
+            None => text(&self.failure.message),
+        }
+    }
+    // as the machine would have stopped with it
+    pub fn into_error(self) -> MothError {
+        let mut err = MothError::at(&self.at, self.failure.message);
+        err.value = self.failure.value;
+        err.trail = trail_of(self.calls);
+        err
+    }
+}
+
+// a call, from instruction `pc` of `func` (its name is constant `name_at`): checked as the machine checks one
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub fn call(rt: &mut Rt, callee: &Value, args: &mut [Value], func: &Function, name_at: i32, pc: usize) -> Out {
+    let Value::Func(c) = callee else { unreachable!() };
+    if let Err(f) = check_call(c, args, func, name_at) {
+        return Err(Fail::at(f, func, pc));
+    }
+    if rt.depth >= MAX_DEPTH {
+        return Err(Fail::at(
+            Failure { message: "too much recursion: a function kept calling itself".into(), value: None, last: false },
+            func,
+            pc,
+        ));
+    }
+    rt.depth += 1;
+    let made = (c.native.expect("a compiled program's functions are all compiled"))(rt, &c.func, &c.env, args);
+    rt.depth -= 1;
+    made.map_err(|mut e| {
+        e.calls.push((c.func.name.clone(), func.at[pc].clone().unwrap()));
+        e
+    })
+}
+
+// a function made inside a compiled one: its own code, and the environment it was made in
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub fn make_fn(func: &Function, k: usize, env: &Rc<Env>, native: NativeFn) -> Value {
+    let Const::Func(f) = &func.consts[k] else { unreachable!() };
+    Value::Func(Rc::new(Closure { func: f.clone(), env: env.clone(), native: Some(native) }))
+}
+
+// a constant of `func`, as a value
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+// the number in a value exe.rs knows is one
+#[inline]
+pub fn number(v: Value) -> f64 {
+    match v {
+        Value::Num(x) => x,
+        _ => unreachable!("exe.rs knew this was a number"),
+    }
+}
+
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+// a value off a compiled function's stack, or out of its inputs, leaving nothing there
+#[inline]
+pub fn take(v: &mut Value) -> Value {
+    std::mem::replace(v, Value::Nothing)
+}
+
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+#[inline]
+pub fn constant(func: &Function, k: usize) -> Value {
+    let Const::Val(v) = &func.consts[k] else { unreachable!() };
+    v.clone()
+}
+
+// HANDLE and EVERY, in a compiled program: listeners it sets up, which a terminal never calls
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub fn handle(rt: &mut Rt, event: usize) {
+    rt.listeners.push(Listener { event: EVENTS[event], interval: None });
+}
+#[allow(dead_code)] // used by compiled programs (exe.rs)
+pub fn every(rt: &mut Rt, interval: Value, unit: f64) -> Res<()> {
+    let l = every_listener(interval, unit)?;
+    rt.listeners.push(l);
+    Ok(())
+}
+
 // ---------- the machine ----------
 
 pub fn new_env(f: &Function, parent: Option<Rc<Env>>) -> Rc<Env> {
@@ -1021,20 +1498,7 @@ impl<'h> Machine<'h> {
                             slots_of_env = e.slots.borrow_mut();
                             (&mut slots_of_env[..], slot)
                         };
-                        let updated = match (&mut slots[slot], &value) {
-                            (Value::Num(x), Value::Num(y)) => {
-                                *x += y;
-                                None
-                            }
-                            (Value::List(l), _) => {
-                                l.borrow_mut().push(value);
-                                None
-                            }
-                            (current, _) => Some(check!(add_into(current, &value, &func.text($name)))),
-                        };
-                        if let Some(u) = updated {
-                            slots[slot] = u;
-                        }
+                        check!(add_to_value(&mut slots[slot], value, &func, $name));
                     }};
                 }
                 // ADD, SUB, MUL or DIV (by its opcode) of two values
@@ -1114,14 +1578,9 @@ impl<'h> Machine<'h> {
                         }
                     }
                     COMPARE => {
-                        let o = ins.a as usize;
                         let b = pop!();
                         let a = pop!();
-                        let r = match (&a, &b) {
-                            (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => compare_numbers(o, *x, *y),
-                            _ => check!(compare(o, &a, &b)),
-                        };
-                        stack.push(Value::Bool(r));
+                        stack.push(Value::Bool(check!(compare_values(ins.a as usize, &a, &b))));
                     }
                     ADD => {
                         let b = pop!();
@@ -1178,32 +1637,14 @@ impl<'h> Machine<'h> {
                         } else {
                             env_at(&env, d - 1).slots.borrow()[slot].clone()
                         };
-                        match f {
-                            Value::Func(_) => stack.push(f),
-                            Value::Unset => fail!(format!("there is no function called '{}'", func.text(ins.c))),
-                            other => fail!(format!("'{}' is {}, not a function", func.text(ins.c), kind_of(&other))),
-                        }
+                        stack.push(check!(got_fn(f, &func, ins.c)));
                     }
                     CALL => {
                         let argc = ins.a as usize;
                         let name_at = ins.b;
                         let first = stack.len() - argc;
                         let Value::Func(callee) = stack[first - 1].clone() else { unreachable!() };
-                        let n = callee.func.params.len();
-                        if argc != n {
-                            fail!(format!("'{}' needs {} but got {argc}", func.text(name_at), plural(n, "input")));
-                        }
-                        for (i, &k) in callee.func.kinds.iter().enumerate() {
-                            if !fits_kind(k, &stack[first + i]) {
-                                fail!(format!(
-                                    "'{}' needs {} to be {}, not {}",
-                                    func.text(name_at),
-                                    callee.func.params[i],
-                                    crate::parser::KINDS[k as usize],
-                                    kind_of(&stack[first + i])
-                                ));
-                            }
-                        }
+                        check!(check_call(&callee, &stack[first..], &func, name_at));
                         if frames.len() >= MAX_DEPTH {
                             fail!("too much recursion: a function kept calling itself".into());
                         }
@@ -1284,11 +1725,10 @@ impl<'h> Machine<'h> {
                             stack.pop();
                         }
                     }
-                    NEG => match pop!() {
-                        Value::Num(x) => stack.push(Value::Num(-x)),
-                        Value::Qty(x, u) => stack.push(Value::Qty(-x, u)),
-                        other => fail!(format!("'-' needs a number, not {}", kind_of(&other))),
-                    },
+                    NEG => {
+                        let v = pop!();
+                        stack.push(check!(negate_value(v)));
+                    }
                     NOT => {
                         let v = pop!();
                         stack.push(Value::Bool(!truthy(&v)));
@@ -1305,23 +1745,7 @@ impl<'h> Machine<'h> {
                     ITEM => {
                         let n = pop!();
                         let target = pop!();
-                        // the common cases, a whole number in range of a list or bytes, go straight there
-                        let fast = match (&target, &n) {
-                            (Value::List(l), Value::Num(i)) if *i >= 1.0 && *i <= l.borrow().len() as f64 && i.fract() == 0.0 => {
-                                Some(l.borrow()[*i as usize - 1].clone())
-                            }
-                            (Value::Bytes(b), Value::Num(i)) if *i >= 1.0 && *i <= b.borrow().len() as f64 && i.fract() == 0.0 => {
-                                Some(Value::Num(b.borrow()[*i as usize - 1] as f64))
-                            }
-                            _ => None,
-                        };
-                        match fast {
-                            Some(v) => stack.push(v),
-                            None => {
-                                let (seq, i) = check!(item(&target, &n, false));
-                                stack.push(item_at(&seq, &i));
-                            }
-                        }
+                        stack.push(check!(item_value(&target, &n)));
                     }
                     ITEM_REF => {
                         let n = pop!();
@@ -1339,26 +1763,14 @@ impl<'h> Machine<'h> {
                     DICT => {
                         let n = ins.a as usize;
                         let start = stack.len() - n;
-                        let mut d = Dict::default();
-                        for pair in stack[start..].chunks(2) {
-                            let k = check!(dictionary_key(&pair[0]));
-                            d.set(k, pair[1].clone());
-                        }
+                        let d = check!(make_dict(&stack[start..]));
                         stack.truncate(start);
-                        stack.push(Value::Dict(Rc::new(RefCell::new(d))));
+                        stack.push(d);
                     }
                     REMOVE => {
                         let dictionary = pop!();
                         let key = pop!();
-                        let Value::Dict(d) = &dictionary else {
-                            fail!(format!("can only remove from a dictionary, not {}", kind_of(&dictionary)));
-                        };
-                        let k = check!(dictionary_key(&key));
-                        if !d.borrow().has(&k) {
-                            let message = check!(not_in(&d.borrow(), &key));
-                            fail!(message);
-                        }
-                        d.borrow_mut().remove(&k);
+                        check!(remove_key(&key, &dictionary));
                     }
                     ADD_TO => {
                         let value = pop!();
@@ -1386,38 +1798,19 @@ impl<'h> Machine<'h> {
                         let value = got!(ins);
                         set_var!(ins.d, ins.e, value);
                     }
-                    ITER_SET => {
-                        let next = {
-                            let Value::Iter(it) = stack.last().unwrap() else { unreachable!() };
-                            let mut it = it.borrow_mut();
-                            if it.i < it.items.len() {
-                                it.i += 1;
-                                Some(it.items[it.i - 1].clone())
-                            } else {
-                                None
-                            }
-                        };
-                        match next {
-                            Some(v) => set_var!(ins.b, ins.c, v),
-                            None => {
-                                stack.pop();
-                                ip = ins.a as usize;
-                            }
+                    ITER_SET => match iter_next(stack.last().unwrap()) {
+                        Some(v) => set_var!(ins.b, ins.c, v),
+                        None => {
+                            stack.pop();
+                            ip = ins.a as usize;
                         }
-                    }
+                    },
                     GET_GET_COMPARE => {
                         let a = got!(ins);
                         pc = ins.e as usize;
                         let b = got!(code[pc]);
-                        let o = ins.d as usize;
-                        let r = match (&a, &b) {
-                            (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => compare_numbers(o, *x, *y),
-                            _ => {
-                                pc = ins.f as usize;
-                                check!(compare(o, &a, &b))
-                            }
-                        };
-                        stack.push(Value::Bool(r));
+                        pc = ins.f as usize;
+                        stack.push(Value::Bool(check!(compare_values(ins.d as usize, &a, &b))));
                     }
                     GET_GET_MATH => {
                         let a = got!(ins);
@@ -1433,15 +1826,8 @@ impl<'h> Machine<'h> {
                     GET_CONST_COMPARE => {
                         let a = got!(ins);
                         let Const::Val(b) = &func.consts[ins.d as usize] else { unreachable!() };
-                        let o = ins.e as usize;
-                        let r = match (&a, b) {
-                            (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => compare_numbers(o, *x, *y),
-                            _ => {
-                                pc = ins.f as usize;
-                                check!(compare(o, &a, b))
-                            }
-                        };
-                        stack.push(Value::Bool(r));
+                        pc = ins.f as usize;
+                        stack.push(Value::Bool(check!(compare_values(ins.e as usize, &a, b))));
                     }
                     GET_CONST_MATH => {
                         let a = got!(ins);
@@ -1452,21 +1838,14 @@ impl<'h> Machine<'h> {
                     SAY => {
                         let n = ins.a as usize;
                         let start = stack.len() - n;
-                        let mut line = String::new();
-                        for p in &stack[start..] {
-                            line += &check!(shown(p, false));
-                        }
+                        let line = check!(said(&stack[start..]));
                         stack.truncate(start);
-                        let line = check!(fits(line));
                         self.host.print(&line);
                     }
-                    CHECK_REPEAT => match canon(stack.last().unwrap()) {
-                        Value::Num(x) if num::is_integer(x) && x >= 0.0 => *stack.last_mut().unwrap() = Value::Num(x), // 0.1 * 30 is 3 times
-                        other => {
-                            let shown = check!(shown(&other, true));
-                            fail!(format!("repeat needs a whole number of times, not {shown}"));
-                        }
-                    },
+                    CHECK_REPEAT => {
+                        let n = check!(repeat_count(stack.last().unwrap()));
+                        *stack.last_mut().unwrap() = n;
+                    }
                     REPEAT_NEXT => {
                         let exit = ins.a as usize;
                         let top = stack.len() - 1;
@@ -1479,10 +1858,7 @@ impl<'h> Machine<'h> {
                         }
                     }
                     CHECK_RANGE => {
-                        let (from, to) = (&stack[stack.len() - 2], &stack[stack.len() - 1]);
-                        if !matches!((from, to), (Value::Num(_), Value::Num(_))) {
-                            fail!(format!("'from' and 'to' need numbers, not {} and {}", kind_of(from), kind_of(to)));
-                        }
+                        check!(check_range(&stack[stack.len() - 2], &stack[stack.len() - 1]));
                     }
                     RANGE_NEXT => {
                         let exit = ins.a as usize;
@@ -1499,22 +1875,11 @@ impl<'h> Machine<'h> {
                     }
                     ITER => {
                         let v = pop!();
-                        let items = check!(items_of(&v));
-                        stack.push(Value::Iter(Rc::new(RefCell::new(Iter { items, i: 0 }))));
+                        stack.push(check!(iter_of(&v)));
                     }
                     ITER_NEXT => {
                         let exit = ins.a as usize;
-                        let next = {
-                            let Value::Iter(it) = stack.last().unwrap() else { unreachable!() };
-                            let mut it = it.borrow_mut();
-                            if it.i < it.items.len() {
-                                it.i += 1;
-                                Some(it.items[it.i - 1].clone())
-                            } else {
-                                None
-                            }
-                        };
-                        match next {
+                        match iter_next(stack.last().unwrap()) {
                             Some(v) => stack.push(v),
                             None => {
                                 stack.pop();
@@ -1524,86 +1889,39 @@ impl<'h> Machine<'h> {
                     }
                     MAKE_FN => {
                         let Const::Func(f) = &func.consts[ins.a as usize] else { unreachable!() };
-                        stack.push(Value::Func(Rc::new(Closure { func: f.clone(), env: env.clone() })));
+                        stack.push(Value::Func(Rc::new(Closure { func: f.clone(), env: env.clone(), native: None })));
                     }
                     UNDEFINED => fail!(func.text(ins.a).to_string()),
                     RECORD => {
                         let Const::Fields(fields) = &func.consts[ins.a as usize] else { unreachable!() };
                         let start = stack.len() - fields.len();
-                        let mut r = Record::default();
-                        for (f, v) in fields.iter().zip(stack.drain(start..)) {
-                            r.set(f.clone(), v);
-                        }
-                        stack.push(Value::Record(Rc::new(RefCell::new(r))));
+                        let r = make_record(fields, stack.drain(start..));
+                        stack.push(r);
                     }
                     FIELD => {
-                        let k = ins.a;
                         let record = pop!();
-                        let Value::Record(r) = &record else {
-                            fail!(format!("can't take '{}' of {}", func.text(k), kind_of(&record)));
-                        };
-                        let field = func.text(k);
-                        let found = r.borrow().get(&field).cloned();
-                        match found {
-                            Some(v) => stack.push(v),
-                            None => {
-                                let names: Vec<String> = r.borrow().fields.iter().map(|(n, _)| n.to_string()).collect();
-                                let guess = closest(&field, &names).map(|g| format!(". Did you mean '{g}'?")).unwrap_or_default();
-                                fail!(format!("this record has no '{field}'{guess}"));
-                            }
-                        }
+                        stack.push(check!(field_value(&record, func.text(ins.a))));
                     }
                     RECORD_REF => {
-                        let k = ins.a;
-                        let record = stack.last().unwrap();
-                        if !matches!(record, Value::Record(_)) {
-                            fail!(format!("can only change '{}' of a record, not {}", func.text(k), kind_of(record)));
-                        }
+                        check!(record_ref(stack.last().unwrap(), &func.text(ins.a)));
                     }
                     SET_FIELD => {
-                        let field = func.text(ins.a);
                         let value = pop!();
-                        let Value::Record(r) = pop!() else { unreachable!() };
-                        r.borrow_mut().set(field, value);
+                        let record = pop!();
+                        set_field(record, func.text(ins.a), value);
                     }
                     ASK => {
                         let question = pop!();
-                        let q = check!(shown(&question, false));
-                        match self.host.ask(&q) {
-                            None => fail!("this program asks a question, but nothing can answer it here".into()),
-                            Some(None) => fail!("there was no answer to this question: the input ended".into()),
-                            Some(Some(answer)) => stack.push(text(&answer)),
-                        }
+                        stack.push(check!(ask_answer(self.host, &question)));
                     }
                     READ => {
-                        let bytes = ins.a == 1;
                         let name = pop!();
-                        let Value::Text(n) = &name else {
-                            fail!(format!("a file name is text, not {}", kind_of(&name)));
-                        };
-                        match self.host.read(n, bytes) {
-                            None => fail!("this program reads a file, but there are no files here".into()),
-                            Some(Err(why)) => fail!(format!("can't read '{n}': {why}")),
-                            Some(Ok(None)) => fail!(format!("there is no file called '{n}'")),
-                            Some(Ok(Some(FileData::Text(t)))) => stack.push(Value::Text(Rc::from(check!(fits(t)).as_str()))),
-                            Some(Ok(Some(FileData::Bytes(b)))) => stack.push(Value::Bytes(Rc::new(RefCell::new(b)))),
-                        }
+                        stack.push(check!(read_value(self.host, &name, ins.a == 1)));
                     }
                     WRITE => {
                         let name = pop!();
                         let value = pop!();
-                        let Value::Text(n) = &name else {
-                            fail!(format!("a file name is text, not {}", kind_of(&name)));
-                        };
-                        let data = match &value {
-                            Value::Bytes(b) => FileData::Bytes(b.borrow().clone()),
-                            other => FileData::Text(check!(shown(other, false))),
-                        };
-                        match self.host.write(n, data) {
-                            None => fail!("this program writes a file, but there are no files here".into()),
-                            Some(Err(why)) => fail!(format!("can't write '{n}': {why}")),
-                            Some(Ok(())) => {}
-                        }
+                        check!(write_value(self.host, &value, &name));
                     }
                     HANDLE => {
                         let event = EVENTS[ins.a as usize];
@@ -1611,29 +1929,15 @@ impl<'h> Machine<'h> {
                         self.listeners.push(Listener { event, interval: None });
                     }
                     EVERY => {
-                        let unit = ins.a as f64;
                         stack.pop(); // the handler
-                        match pop!() {
-                            Value::Num(x) if x > 0.0 && x != f64::INFINITY => {
-                                self.listeners.push(Listener { event: "every", interval: Some(x * unit) })
-                            }
-                            other => fail!(format!("'every' needs a number above 0, not {}", described(&other))),
-                        }
+                        let interval = pop!();
+                        let l = check!(every_listener(interval, ins.a as f64));
+                        self.listeners.push(l);
                     }
                     RANDOM => {
-                        let high = canon(&pop!());
-                        let low = canon(&pop!());
-                        for n in [&low, &high] {
-                            if !matches!(n, Value::Num(x) if num::is_integer(*x)) {
-                                fail!(format!("'random number from' needs whole numbers, not {}", described(n)));
-                            }
-                        }
-                        let (Value::Num(lo), Value::Num(hi)) = (low, high) else { unreachable!() };
-                        if lo > hi {
-                            fail!(format!("there is no number from {} to {}", num::display(lo), num::display(hi)));
-                        }
-                        let r = self.host.random();
-                        stack.push(Value::Num(lo + (r * (hi - lo + 1.0)).floor()));
+                        let high = pop!();
+                        let low = pop!();
+                        stack.push(check!(random_value(self.host, &low, &high)));
                     }
                     ARGUMENTS => {
                         let args = self.host.args();
@@ -1644,19 +1948,11 @@ impl<'h> Machine<'h> {
                         let negate = ins.b == 1;
                         if o < 0 {
                             let v = pop!();
-                            if !truthy(&v) {
-                                let shown = check!(shown(&v, true));
-                                fail!(format!("expected yes, but got {shown}"));
-                            }
+                            check!(expect_yes(&v));
                         } else {
                             let b = pop!();
                             let a = pop!();
-                            if check!(compare(o as usize, &a, &b)) == negate {
-                                let name = COMPARISONS[o as usize];
-                                let op_text = if name == "is" { String::new() } else { format!(" {name}") };
-                                let (sa, sb) = (check!(shown(&a, true)), check!(shown(&b, true)));
-                                fail!(format!("expected {sa} {}to be{op_text} {sb}", if negate { "not " } else { "" }));
-                            }
+                            check!(expect_that(o as usize, negate, &a, &b));
                         }
                     }
                     TRY => {
@@ -1678,33 +1974,14 @@ impl<'h> Machine<'h> {
                     CAUGHT => stack.push(caught.clone()),
                     BUILTIN => {
                         let index = ins.a as usize;
-                        // `a bit and b`, `bit or`, `bit xor` (7, 8, 9) on whole numbers from 0 to 2^53 - 1: straight here
-                        if (7..=9).contains(&index) {
-                            let top = stack.len();
-                            if let (Value::Num(x), Value::Num(y)) = (&stack[top - 2], &stack[top - 1]) {
-                                let whole = |n: f64| num::is_integer(n) && (0.0..=MAX_BITS).contains(&n);
-                                if whole(*x) && whole(*y) {
-                                    let (a, b) = (*x as u64, *y as u64);
-                                    let made = match index {
-                                        7 => a & b,
-                                        8 => a | b,
-                                        _ => a ^ b,
-                                    };
-                                    stack.truncate(top - 2);
-                                    stack.push(Value::Num(made as f64));
-                                    continue;
-                                }
-                            }
-                        }
                         let start = stack.len() - BUILTINS[index].1;
-                        let made = check!(builtin(index, &stack[start..]));
+                        let made = check!(builtin_value(index, &stack[start..]));
                         stack.truncate(start);
                         stack.push(made);
                     }
                     FAIL => {
                         let v = pop!();
-                        let message = check!(shown(&v, false));
-                        break 'run Failure { message, value: Some(v), last: false };
+                        break 'run fail_with(v);
                     }
                     TURTLE => {
                         let action = ins.a as usize;
