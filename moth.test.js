@@ -146,6 +146,9 @@ const PROGRAMS = [
   ["set d to dictionary where \"a\" is 1\nset item \"me\" of d to d\nsay d", "(dictionary where \"a\" is 1, \"me\" is (...))"],
   ["set a to list of 1\nadd a to a\nset b to list of 1\nadd b to b\nsay a is b\nadd 2 to b\nsay a is b", "yes\nno"],
   ["set shared to list of 1\nsay list of shared, shared", "[[1], [1]]"],
+  // random number from: the same numbers every run unless real ones are given
+  ["set rolls to empty list\nrepeat 10 times\n    add random number from 1 to 6 to rolls\nend\nsay rolls\nsay random number from 5 to 5\nsay random number from -2 to 2 is in list of -2, -1, 0, 1, 2", "[4, 1, 4, 6, 6, 2, 4, 5, 3, 6]\n5\nyes"],
+  ["to random\n    return 4\nend\nsay random() \" \" random number from 1 to 1", "4 1"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -294,6 +297,11 @@ const ERRORS = [
   ["draw \"hi\" at 0, 0 size 0", "line 1: text's size is a number above 0, not 0"],
   ["draw \"hi\"", "line 1: expected 'at' but found the end of the code"],
   ["set clear to 1", "line 1: 'clear' is a Moth word, so it can't be used as a variable name"],
+  // random number from: the same numbers every run unless real ones are given
+  ["say random number from 1 to 2.5", "line 1: 'random number from' needs whole numbers, not 2.5"],
+  ["say random number from \"a\" to 2", "line 1: 'random number from' needs whole numbers, not text"],
+  ["say random number from 6 to 1", "line 1: there is no number from 6 to 1"],
+  ["say random number 1 to 6", "line 1: expected 'of' but found '1'"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -1181,4 +1189,24 @@ test("the turtle draws boxes, circles and text, moves to a spot, and clear wipes
       { x1: 0, y1: 10, x2: 50, y2: 60, color: "red", width: 2 },
     ], engine);
   }
+});
+
+// ---------- random numbers ----------
+
+// Real randomness has to be given; a run handed to the VM gets the same numbers again.
+test("random number from uses the randomness it's given, and a hand-over to the VM gets the same numbers", () => {
+  const counts = new Map();
+  run("repeat 6000 times\n    say random number from 1 to 3\nend", (line) => counts.set(line, (counts.get(line) ?? 0) + 1), { random: Math.random });
+  assert.deepEqual([...counts.keys()].sort(), ["1", "2", "3"]);
+  for (const n of counts.values()) assert.ok(n > 1700 && n < 2300, `${n} of 6000`); // about a third each
+  const deep = "say random number from 1 to 1000000\nto deep with n\n    if n is 0\n        return random number from 1 to 1000000\n    end\n    return deep(n - 1)\nend\nsay deep(3000)";
+  const real = () => Math.random();
+  for (const engine of ENGINES) {
+    const fixed = [0.5, 0.25, 0.75];
+    let i = 0;
+    const random = () => fixed[i++ % fixed.length];
+    assert.equal(output(deep, { engine, random }), "500001\n250001", engine);
+    assert.equal(i, 2, `${engine} asked for ${i} random numbers`); // the VM's second run got them again, not new ones
+  }
+  assert.notEqual(output("say random number from 1 to 1000000000", { random: real }), output("say random number from 1 to 1000000000", { random: real }));
 });

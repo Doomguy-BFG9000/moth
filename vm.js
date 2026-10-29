@@ -114,11 +114,12 @@ export const OPCODES = [
   ["READ", 1], // the operand is 1 to read bytes, 0 to read text
   ["WRITE", 0], ["ARGUMENTS", 0],
   ["EXPECT", 2], // which comparison (COMPARE_OPS), or -1 for just a value that must be yes; and 1 for `is not`
+  ["RANDOM", 0],
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`
@@ -496,6 +497,26 @@ export function askFor(question, answer, error) {
   return String(reply);
 }
 
+// `random number from 1 to 6`: a whole number from low to high, each as likely. `random` is where the
+// randomness comes from: a number from 0 up to (not including) 1, like Math.random.
+export function randomWhole(low, high, random, error) {
+  for (const n of [low, high]) if (!Number.isInteger(n)) error(`'random number from' needs whole numbers, not ${described(n)}`);
+  if (low > high) error(`there is no number from ${show(low)} to ${show(high)}`);
+  return low + Math.floor(random() * (high - low + 1));
+}
+
+// The random numbers a run gets when it isn't given real ones: the same every time, so a run can be
+// repeated exactly (mulberry32, a small fast generator).
+export function seeded(seed = 1) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // `expect a is b`, or any comparison: a mistake if it isn't so, which says what each side was
 export function expectThat(op, negate, a, b, error) {
   if (compare(op, a, b, error) !== negate) return;
@@ -625,9 +646,10 @@ export function newEnv(fn, parent) {
 // Runs bytecode. A Machine keeps its state between run() calls, so a debugger can pause it and carry on later.
 export class Machine {
   // `draw` gets each line the turtle draws (see Turtle), `ask` answers questions (see askFor), `disk` holds
-  // the files `read` and `write` use (see readFile), and `args` is what `arguments` gives: a list of text.
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [] } = {}) {
-    Object.assign(this, { main, print, maxSteps, ask, disk, args, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // the files `read` and `write` use (see readFile), `args` is what `arguments` gives: a list of text, and
+  // `random` gives the random numbers (see randomWhole).
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded() } = {}) {
+    Object.assign(this, { main, print, maxSteps, ask, disk, args, random, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = new Turtle(draw);
@@ -889,6 +911,11 @@ export class Machine {
             writeFile(stack.pop(), name, this.disk, oops);
             break;
           }
+          case RANDOM: {
+            const high = stack.pop();
+            stack.push(randomWhole(stack.pop(), high, this.random, oops));
+            break;
+          }
           case ARGUMENTS:
             stack.push([...this.args]); // a new list each time, so changing one can't change the next
             break;
@@ -982,6 +1009,6 @@ export class Machine {
   }
 }
 
-export function execute(main, print, maxSteps, env, ask, disk, args) {
-  new Machine(main, print, { maxSteps, env, ask, disk, args }).run();
+export function execute(main, print, maxSteps, env, ask, disk, args, random) {
+  new Machine(main, print, { maxSteps, env, ask, disk, args, random }).run();
 }

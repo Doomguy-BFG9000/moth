@@ -12,7 +12,7 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -65,6 +65,7 @@ const IMPORTS = {
   read: [[EQ, I32, I32], [EQ]], // the file's name, 1 for bytes or 0 for text, and a position
   write: [[EQ, EQ, I32], []],
   args: [[], [EQ]],
+  random: [[EQ, EQ, I32], [EQ]], // low, high, a position
   expect: [[I32, I32, EQ, EQ, I32], []], // which comparison, 1 for `is not`, its two sides, and a position
   expectYes: [[EQ, I32], []],
   tryStart: [[], []], // a `try` begins: forget the last mistake
@@ -1089,6 +1090,11 @@ class WasmCompiler extends Scope {
       case "arguments":
         this.e("call", im.args);
         return;
+      case "random":
+        this.expr(e.left);
+        this.expr(e.right);
+        this.e("i32.const", this.pos(e.at)).e("call", im.random);
+        return;
       case "builtin": {
         const index = BUILTINS.findIndex((b) => b.name === e.name);
         const bits = BIT_BUILTINS.indexOf(e.name);
@@ -1176,11 +1182,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask, disk, args) => instantiate(module, made, print, draw, maxSteps, ask, disk, args).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = []) {
+function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = [], chance = seeded()) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1330,6 +1336,7 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
     args: () => toWasm(args),
+    random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
     expect: (op, negate, a, b, k) => expectThat(COMPARE_OPS[op], negate === 1, toJs(a), toJs(b), errors[k]),
     expectYes: (value, k) => expectYes(toJs(value), errors[k]),
   };

@@ -899,6 +899,13 @@ to parse with tokens, reading
         if word("arguments")
             return record with kind "arguments", at t
         end
+        # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
+        if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"
+            set pos to pos + 3
+            set low to additive()
+            expect_word("to")
+            return record with kind "random", left low, right additive(), at t
+        end
         set syntax to builtin_syntax(t)
         if syntax is not nothing
             set pos to pos + 1
@@ -1116,7 +1123,7 @@ to rename with node, alias, top, hidden
     if what is "call" or what is "builtin"
         rename_all(args of node, alias, top, hidden)
     end
-    if what is "math" or what is "compare" or what is "or" or what is "and"
+    if what is "math" or what is "compare" or what is "or" or what is "and" or what is "random"
         rename(left of node, alias, top, hidden)
         rename(right of node, alias, top, hidden)
     end
@@ -1601,6 +1608,9 @@ to js_expr with scope, e
     end
     if what is "arguments"
         return "args()"
+    end
+    if what is "random"
+        return "random(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + remember(at of e) + ")"
     end
     if what is "builtin"
         return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"

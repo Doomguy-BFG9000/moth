@@ -153,7 +153,7 @@ ${askAtTerminal}
   const source = ${JSON.stringify(source)};
   const used = ${JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)))}; // for a mistake in a file it uses
   try {
-    execute(${program}, console.log, Infinity, undefined, askAtTerminal, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2));
+    execute(${program}, console.log, Infinity, undefined, askAtTerminal, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2), Math.random);
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
     console.error((err.file ?? ${JSON.stringify(basename(file))}) + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(err.file ? used[err.file] ?? "" : source, err));
@@ -351,7 +351,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, ...reading(file) });
+      run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, random: Math.random, ...reading(file) });
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));

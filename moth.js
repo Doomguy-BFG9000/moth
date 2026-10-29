@@ -1,13 +1,13 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, seeded, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
-export { MothError, excerpt, describeTrail } from "./vm.js";
+export { MothError, excerpt, describeTrail, seeded } from "./vm.js";
 
 // ---------- tokens ----------
 
@@ -450,6 +450,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "read", bytes, of: additive(), at: t };
     }
     if (word("arguments")) return { kind: "arguments", at: t }; // what the program was started with: `moth run tool.moth a b`
+    // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
+    if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
+      pos += 3;
+      const low = additive();
+      expectWord("to");
+      return { kind: "random", left: low, right: additive(), at: t };
+    }
     const syntax = t.type === "word" && BUILTIN_SYNTAX.get(t.value);
     if (syntax) {
       pos++;
@@ -541,7 +548,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -839,6 +846,11 @@ class Compiler extends Scope {
       case "arguments":
         this.emit(e.at, ARGUMENTS);
         return;
+      case "random":
+        this.expr(e.left);
+        this.expr(e.right);
+        this.emit(e.at, RANDOM);
+        return;
       case "builtin":
         for (const arg of e.args) this.expr(arg);
         this.emit(e.at, BUILTIN, BUILTINS.findIndex((b) => b.name === e.name));
@@ -1002,7 +1014,7 @@ export function format(source) {
 // `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
 // for `use` (see build). `disk` holds the files `read` and `write` use (see readFile in vm.js, and memoryDisk
 // below), and `args` is what `arguments` gives.
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [] } = {}) {
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded() } = {}) {
   const reading = { files, file };
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
   // Kept, so that running it again (below) gets the same, and writes nothing twice.
@@ -1018,6 +1030,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     }
   };
   const answer = ask && kept(ask);
+  const chance = kept(random);
   const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)) };
   let program = null;
   if (engine !== "vm") {
@@ -1027,12 +1040,12 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
   }
-  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer, disk: drive, args }).run();
+  if (!program) return new Machine(compile(source, reading), print, { maxSteps, draw, ask: answer, disk: drive, args, random: chance }).run();
   let said = 0;
   let drawn = 0;
   try {
     // counted once passed on, so a hand-over in the middle of passing one on can't lose it
-    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args);
+    program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance);
   } catch (err) {
     if (!(err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError")) throw err;
     // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value outgrew what
@@ -1047,7 +1060,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       return copy(before.got);
     });
     new Machine(compile(source, reading), (line) => said-- > 0 || print(line), {
-      maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again(answer), disk: drive && { read: again(drive.read), write: again(drive.write) }, args,
+      maxSteps, draw: (line) => drawn-- > 0 || draw?.(line), ask: again(answer), disk: drive && { read: again(drive.read), write: again(drive.write) }, args, random: again(chance),
     }).run();
   }
 }
@@ -1130,15 +1143,15 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args } = {}) {
-  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args });
+export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random } = {}) {
+  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
 // variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
 // (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
 // `answers` answer its questions, in order, each shown after its question as a line of output.
-export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args } = {}) {
+export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args, random } = {}) {
   const said = [];
   const drawn = [];
   let asked = 0;
@@ -1147,7 +1160,7 @@ export function timeline(source, { limit = 10_000, answers = [], files, file, di
     said.push(`${question} ${answers[asked]}`);
     return answers[asked++];
   };
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args });
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args, random });
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;

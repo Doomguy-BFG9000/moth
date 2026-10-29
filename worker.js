@@ -1,6 +1,6 @@
 // Runs one Moth program off the page's main thread, so a loop that never ends can't freeze the page:
 // the page just ends this worker when Stop is pressed.
-import { run, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./moth.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more
 const MAX_LINES = 10_000;
@@ -10,7 +10,7 @@ const MAX_DRAWN = 100_000;
 // program again from the start with every answer so far. It says and draws the same things up to there.
 class Waiting {}
 
-onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
+onmessage = ({ data: { source, engine, answers = [], files = {}, seed = 1 } }) => {
   let lines = [];
   let drawn = [];
   let said = 0;
@@ -50,6 +50,7 @@ onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
       ask,
       files: (name) => files[name],
       disk: memoryDisk(), // a page has no files of its own: `write` makes them, for this run
+      random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
     });
     flush();
     postMessage({ done: true, empty: said === 0 && total === 0, ms: performance.now() - start });

@@ -3,7 +3,7 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile } from "./vm.js";
+  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -92,6 +92,7 @@ class Checker extends Scope {
         return () => "yes/no";
       case "negate":
       case "length":
+      case "random":
         return () => "number";
       case "builtin": {
         const { gives } = BUILTINS.find((b) => b.name === e.name);
@@ -354,6 +355,13 @@ class Checker extends Scope {
       case "ask":
         this.expr(e.question);
         return;
+      case "random": { // only numbers that aren't numbers at all are certain to fail
+        this.expr(e.left);
+        this.expr(e.right);
+        const [low, high] = [this.type(e.left), this.type(e.right)];
+        this.willFail(e.at, () => this.known(low(), high()) && (low() !== "number" || high() !== "number") && randomWhole(this.sample(e.left), this.sample(e.right), Math.random, found));
+        return;
+      }
       case "read": { // as with `write`, only a name that isn't text is certain to fail
         this.expr(e.of);
         const type = this.type(e.of);
