@@ -100,6 +100,59 @@ pub fn show(x: f64) -> String {
     }
 }
 
+// ---------- numbers, as a spreadsheet has them (vm.js's canon, numberOrder and divisible) ----------
+
+// x to 15 significant digits, as Number(x.toPrecision(15)) has it; a whole number (or NaN, or an infinity) is
+// itself. Rust's `{:e}` rounds a tie to the even digit and toPrecision to the higher, and a tie can only
+// happen when x is exactly 16 digits long, the last a 5, so that's rounded up here.
+pub fn canon(x: f64) -> f64 {
+    if !x.is_finite() || x.fract() == 0.0 {
+        return x;
+    }
+    if format!("{:.15e}", x).split_once('e').unwrap().0.ends_with('5') {
+        let (exact, point) = split(&format!("{:.800e}", x.abs())); // every digit a double has
+        if exact.as_bytes()[15] == b'5' && exact[16..].bytes().all(|b| b == b'0') {
+            let up = exact[..15].parse::<u64>().unwrap() + 1;
+            let v = format!("{up}e{}", point - 15).parse::<f64>().unwrap();
+            return if x < 0.0 { -v } else { v };
+        }
+    }
+    format!("{:.14e}", x).parse().unwrap()
+}
+
+// How two numbers compare, as their values to 15 digits do; None if either is NaN. Most pairs don't need
+// canon: two whole numbers, or two numbers further apart than 15 digits can tell.
+pub fn order(a: f64, b: f64) -> Option<std::cmp::Ordering> {
+    if a == b {
+        return Some(std::cmp::Ordering::Equal);
+    }
+    if !(is_integer(a) && is_integer(b)) && (a - b).abs() <= 1e-14 * a.abs().max(b.abs()) {
+        let (a, b) = (canon(a), canon(b));
+        return a.partial_cmp(&b);
+    }
+    a.partial_cmp(&b)
+}
+
+// a count loop's test, `for each i from 1 to n`: i is at most n, to 15 digits
+pub fn at_most(a: f64, b: f64) -> bool {
+    a <= b || order(a, b) == Some(std::cmp::Ordering::Equal)
+}
+
+// `a is divisible by b` (b isn't 0): whole numbers by their remainder, anything else by whether a / b is
+// whole, to 15 digits
+pub fn divisible(a: f64, b: f64) -> bool {
+    if is_integer(a) && is_integer(b) {
+        a % b == 0.0
+    } else {
+        is_integer(canon(a / b))
+    }
+}
+
+// a number as Moth shows it, to 15 digits: 0.1 + 0.2 shows as 0.3 (`show` is every digit, for JSON and drawing)
+pub fn display(x: f64) -> String {
+    show(canon(x))
+}
+
 // (n).toLocaleString("en") for the whole numbers Moth shows that way: steps and counts, with commas
 pub fn grouped(n: f64) -> String {
     let text = show(n);

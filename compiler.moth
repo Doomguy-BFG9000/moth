@@ -1549,7 +1549,7 @@ to js_statement with scope, s
     if what is "count"
         set k to remember(at of s)
         set range to "checkRange(" + js_expr(scope, start of s) + ", " + js_expr(scope, limit of s) + ", " + k + ")"
-        return "for (let [$i, $last] = " + range + "; $i <= $last; $i++) {\n" + ref(scope, name of s) + " = $i;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
+        return "for (let [$i, $last] = " + range + "; atMost($i, $last); $i++) {\n" + ref(scope, name of s) + " = $i;\n" + js_block(scope, body of s) + "\ntick(" + k + ");\n}"
     end
     if what is "each"
         set k to remember(at of s)
@@ -1841,74 +1841,6 @@ set op_random to 52
 set op_handle to 53
 set op_every to 54
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
-set hex_digits to "0123456789abcdef"
-
-# `0x1F` and `0b101` as JavaScript reads them: the whole number, rounded to the nearest float, half to even
-to based_number with digits, bits_per_digit
-    set bits to empty list
-    for each d in digits
-        set value to (position of lowercase of d in hex_digits) - 1
-        for each i from 1 to bits_per_digit
-            add (shift value right by bits_per_digit - i) bit and 1 to bits
-        end
-    end
-    set first to 0
-    set i to 0
-    for each b in bits
-        add 1 to i
-        if first is 0 and b is 1
-            set first to i
-        end
-    end
-    if first is 0
-        return 0
-    end
-    set count to length of bits - first + 1
-    set mantissa to 0
-    set i to 0
-    for each b in bits
-        add 1 to i
-        if i is at least first and i is less than first + 53
-            set mantissa to mantissa * 2 + b
-        end
-    end
-    if count is at most 53
-        return mantissa
-    end
-    set half to item (first + 53) of bits is 1
-    set more to no
-    for each i from first + 54 to length of bits
-        if item i of bits is 1
-            set more to yes
-        end
-    end
-    if half and (more or mantissa bit and 1 is 1)
-        add 1 to mantissa
-    end
-    repeat count - 53 times
-        set mantissa to mantissa * 2
-    end
-    return mantissa
-end
-
-# a number token's value, from the text it was written as
-to number_value with written
-    set digits to ""
-    set k to 0
-    for each c in written
-        add 1 to k
-        if k is greater than 2
-            add c to digits
-        end
-    end
-    if position of "0x" in written is 1
-        return based_number(digits, 4)
-    end
-    if position of "0b" in written is 1
-        return based_number(digits, 1)
-    end
-    return number of written
-end
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
 # where each instruction came from, the loops around the code being compiled (innermost first), and the
@@ -2191,7 +2123,7 @@ to bytecode_expr with fc, e
     if what is "value"
         set literal to record with what type of e, value nothing
         if type of e is "number"
-            set value of literal to number_value(value of e)
+            set value of literal to value of e # as written, so it reads back exactly
         else if type of e is "string"
             set what of literal to "text"
             set value of literal to value of e

@@ -169,6 +169,7 @@ pub struct Function {
     pub code: Vec<i32>,
     pub consts: Vec<Const>,
     pub at: Vec<Option<Pos>>, // where each instruction came from, at the instruction's own index
+    pub written: std::collections::HashMap<usize, Rc<str>>, // each number constant as written, by its place
 }
 
 impl Function {
@@ -252,6 +253,7 @@ impl Compiler {
                 code: vec![],
                 consts: vec![],
                 at: vec![],
+                written: Default::default(),
             },
             slots: HashMap::new(),
             order: vec![],
@@ -600,8 +602,14 @@ impl Compiler {
     fn expr(&mut self, e: &Expr) {
         match e {
             Expr::Value(lit, at) => {
+                if let Lit::Num(n, written) = lit {
+                    let k = self.constant(Value::Num(*n));
+                    self.top().func.written.insert(k as usize, written.clone());
+                    self.emit(Some(at), &[CONST, k]);
+                    return;
+                }
                 let v = match lit {
-                    Lit::Num(n) => Value::Num(*n),
+                    Lit::Num(..) => unreachable!(),
                     Lit::Text(t) => Value::Text(t.clone()),
                     Lit::Bool(b) => Value::Bool(*b),
                     Lit::Nothing => Value::Nothing,

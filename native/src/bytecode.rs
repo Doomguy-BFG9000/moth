@@ -2,14 +2,14 @@
 // compiled again, by this engine or by the same bytecode written by compiler.moth (Moth's compiler, in Moth).
 // The text is the same whoever writes it, so the two compilers can be compared byte for byte:
 //
-//   moth bytecode 1
+//   moth bytecode 2
 //   function "main"            each function: its name,
 //   params                     its inputs,
 //   kinds                      what each says it is (a place in vm.js's KINDS, or -1),
 //   names "total" "f"          the name of each slot from 1,
 //   code 2 0 1 0 1 33          its instructions,
 //   at 1:5 - 1:9 - - -         where each came from in the code (line:col, or line:col:"file"; - for none),
-//   const number 0             and its constants, in order: nothing, yes, no, number, text, fields,
+//   const number 0             and its constants (a number as written), in order: nothing, yes, no, number, text, fields,
 //   const function             or a function made inside it, written out right after,
 //   function "f" ... end
 //   end
@@ -68,11 +68,14 @@ fn write_function(f: &Function, out: &mut Vec<String>) {
             Some(Pos { line, col, file: Some(file) }) => format!("{line}:{col}:{}", quote(file)),
         }),
     ));
-    for c in &f.consts {
+    for (i, c) in f.consts.iter().enumerate() {
         match c {
             Const::Val(Value::Nothing) => out.push("const nothing".into()),
             Const::Val(Value::Bool(b)) => out.push(format!("const {}", if *b { "yes" } else { "no" })),
-            Const::Val(Value::Num(n)) => out.push(format!("const number {}", num::show(*n))),
+            Const::Val(Value::Num(n)) => match f.written.get(&i) {
+                Some(w) => out.push(format!("const number {w}")), // as written: the number reads back exactly
+                None => out.push(format!("const number {}", num::show(*n))),
+            },
             Const::Val(Value::Text(t)) => out.push(format!("const text {}", quote(t))),
             Const::Val(_) => unreachable!("constants are literals"),
             Const::Fields(fields) => out.push(line("const fields", fields.iter().map(|f| quote(f)))),
@@ -86,6 +89,23 @@ fn write_function(f: &Function, out: &mut Vec<String>) {
 }
 
 // ---------- reading it back ----------
+
+// a number constant, as it was written: 12, 1.5, 0x1F or 0b101 (or, from version 1, as JavaScript shows it)
+fn number(w: &str) -> R<f64> {
+    let based = |digits: &str, radix: u32, bits: u32| {
+        if digits.is_empty() || !digits.chars().all(|d| d.is_digit(radix)) {
+            return Err(format!("'{w}' isn't a number"));
+        }
+        Ok(crate::lexer::based(digits, bits))
+    };
+    if let Some(d) = w.strip_prefix("0x") {
+        return based(d, 16, 4);
+    }
+    if let Some(d) = w.strip_prefix("0b") {
+        return based(d, 2, 1);
+    }
+    w.parse::<f64>().map_err(|_| format!("'{w}' isn't a number"))
+}
 
 struct Reader<'t> {
     lines: Vec<&'t str>,
@@ -192,6 +212,7 @@ impl<'t> Reader<'t> {
             return Err(format!("function {name} has {} instructions but {} places", code.len(), at.len()));
         }
         let mut consts = Vec::new();
+        let mut written = std::collections::HashMap::new();
         loop {
             let l = *self.lines.get(self.at).ok_or("the bytecode ends inside a function")?;
             if l == "end" {
@@ -205,7 +226,9 @@ impl<'t> Reader<'t> {
                 "yes" => Const::Val(Value::Bool(true)),
                 "no" => Const::Val(Value::Bool(false)),
                 "number" => {
-                    Const::Val(Value::Num(p.get(1).ok_or("a number constant has no number")?.parse::<f64>().map_err(|e| e.to_string())?))
+                    let w = p.get(1).ok_or("a number constant has no number")?;
+                    written.insert(consts.len(), Rc::from(w.as_str()));
+                    Const::Val(Value::Num(number(w)?))
                 }
                 "text" => Const::Val(Value::Text(Rc::from(unquote(p.get(1).ok_or("a text constant has no text")?)?.as_str()))),
                 "fields" => Const::Fields(Rc::new(p[1..].iter().map(|f| unquote(f).map(|s| Rc::from(s.as_str()))).collect::<R<Vec<_>>>()?)),
@@ -214,7 +237,7 @@ impl<'t> Reader<'t> {
             });
         }
         let nslots = names.len() - 1;
-        Ok(Function { name, params, kinds, nslots, names, code, consts, at })
+        Ok(Function { name, params, kinds, nslots, names, code, consts, at, written })
     }
 }
 

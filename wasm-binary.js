@@ -77,7 +77,7 @@ const OPS = {
   "f64.eq": [0x61], "f64.ne": [0x62], "f64.lt": [0x63], "f64.gt": [0x64], "f64.le": [0x65], "f64.ge": [0x66],
   "i32.add": [0x6a], "i32.sub": [0x6b], "i32.mul": [0x6c], "i32.and": [0x71], "i32.or": [0x72], "i32.xor": [0x73], "i32.shl": [0x74],
   "i32.shr_u": [0x76],
-  "f64.abs": [0x99], "f64.neg": [0x9a], "f64.trunc": [0x9d], "f64.add": [0xa0], "f64.sub": [0xa1], "f64.mul": [0xa2], "f64.div": [0xa3],
+  "f64.abs": [0x99], "f64.neg": [0x9a], "f64.trunc": [0x9d], "f64.add": [0xa0], "f64.sub": [0xa1], "f64.mul": [0xa2], "f64.div": [0xa3], "f64.max": [0xa5],
   "i32.trunc_f64_s": [0xaa], "f64.convert_i32_s": [0xb7], "f64.convert_i32_u": [0xb8],
   "ref.null": [0xd0], "ref.is_null": [0xd1], "ref.func": [0xd2], "ref.eq": [0xd3], "ref.as_non_null": [0xd4],
   "struct.new": [0xfb, 0x00], "struct.get": [0xfb, 0x02], "struct.set": [0xfb, 0x05],

@@ -164,6 +164,12 @@ test("the Rust engine shows numbers, rounds and draws exactly as JavaScript does
     "    set n to n * 7",
     "    say n \" \" 1 / n",
     "end",
+    // to 15 digits: halves of 15-digit numbers are ties, and tenths add up to almost what they should
+    "repeat 2000 times",
+    "    set a to (random number from 100000000000000 to 999999999999999) + 0.5",
+    "    set b to (random number from 1 to 100000) / 10",
+    "    say a \" \" 0 - a \" \" a / 1000000 \" \" b * 3 \" \" b * 3 is b + b + b \" \" b * 3 is less than b + b + b \" \" b * 3 is at least b + b + b \" \" b * 10 is divisible by 1",
+    "end",
   ].join("\n");
   const turtle = [
     "repeat 2000 times",

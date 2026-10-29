@@ -58,7 +58,7 @@ fn text_char(c: char) -> bool {
 }
 
 // `0x...` and `0b...` as JavaScript's Number() reads them: the whole number, rounded to the nearest float
-fn based(digits: &str, bits_per_digit: u32) -> f64 {
+pub fn based(digits: &str, bits_per_digit: u32) -> f64 {
     let mut bits: Vec<u8> = Vec::new();
     for d in digits.chars() {
         let v = d.to_digit(1 << bits_per_digit).unwrap();

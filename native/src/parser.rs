@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum Lit {
-    Num(f64),
+    Num(f64, Rc<str>), // and how it was written
     Text(Rc<str>),
     Bool(bool),
     Nothing,
@@ -799,7 +799,7 @@ impl<'a, 'f> Parser<'a, 'f> {
         let t = self.peek().clone();
         let at = t.pos();
         if let Some(n) = self.matches(Kind::Number) {
-            return Ok(Expr::Value(Lit::Num(n.num), at));
+            return Ok(Expr::Value(Lit::Num(n.num, Rc::from(n.text.as_str())), at));
         }
         if let Some(s) = self.matches(Kind::Str) {
             return Ok(Expr::Value(Lit::Text(Rc::from(s.text.as_str())), at));

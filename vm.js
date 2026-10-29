@@ -78,13 +78,34 @@ export function excerpt(source, { line, col }) {
   return `${text}\n${text.slice(0, col - 1).replace(/\S/g, " ")}^`;
 }
 
+// ---------- numbers, as a spreadsheet has them ----------
+// Moth works to 15 significant digits, like a spreadsheet: 0.1 + 0.2 is 0.3. The arithmetic is the computer's
+// own, fast and binary, but a number is shown, compared, and used as a whole number by its value to 15
+// digits: `canon`. A whole number is always exactly itself.
+export const canon = (x) => (Number.isInteger(x) || !Number.isFinite(x) ? x : Number(x.toPrecision(15)));
+
+// How two numbers compare, as their values to 15 digits do: -1, 0 or 1, or NaN if either is NaN. Most pairs
+// don't need canon: two whole numbers, or two numbers further apart than 15 digits can tell.
+export function numberOrder(a, b) {
+  if (a === b) return 0;
+  if (!(Number.isInteger(a) && Number.isInteger(b)) && Math.abs(a - b) <= 1e-14 * Math.max(Math.abs(a), Math.abs(b))) {
+    [a, b] = [canon(a), canon(b)];
+    if (a === b) return 0;
+  }
+  return a < b ? -1 : a > b ? 1 : NaN;
+}
+export const atMost = (a, b) => a <= b || numberOrder(a, b) === 0; // a count loop's test: `for each i from 1 to n`
+
+// `a is divisible by b`: whole numbers by their remainder, anything else by whether a / b is whole, to 15 digits
+export const divisible = (a, b) => (Number.isInteger(a) && Number.isInteger(b) ? a % b === 0 : Number.isInteger(canon(a / b)));
+
 export const COMPARISONS = {
   "is": (a, b) => equal(a, b),
-  "less than": (a, b) => a < b,
-  "greater than": (a, b) => a > b,
-  "at least": (a, b) => a >= b,
-  "at most": (a, b) => a <= b,
-  "divisible by": (a, b) => a % b === 0,
+  "less than": (a, b) => (typeof a === "number" ? numberOrder(a, b) === -1 : a < b),
+  "greater than": (a, b) => (typeof a === "number" ? numberOrder(a, b) === 1 : a > b),
+  "at least": (a, b) => (typeof a === "number" ? numberOrder(a, b) >= 0 : a >= b),
+  "at most": (a, b) => (typeof a === "number" ? numberOrder(a, b) <= 0 : a <= b),
+  "divisible by": (a, b) => divisible(a, b),
   "in": (a, b) => isIn(a, b),
 };
 export const COMPARE_OPS = Object.keys(COMPARISONS);
@@ -156,6 +177,7 @@ export const truthy = (v) => v !== null && v !== false;
 // pair again, which counts as equal so far, instead of going round for ever.
 export function equal(a, b, comparing = new Map()) {
   if (a === b) return true;
+  if (typeof a === "number" && typeof b === "number") return numberOrder(a, b) === 0;
   if (isBytes(a) && isBytes(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
   const both = (test) => test(a) && test(b);
   if (!both(isList) && !both(isDictionary) && !both(isRecord)) return false;
@@ -196,7 +218,7 @@ export function show(v, nested = false, showing = new Set()) {
   if (typeof v === "string") return nested ? JSON.stringify(v) : v;
   if (v instanceof Closure) return `<function ${v.fn.name}>`;
   if (isBytes(v)) return `(${plural(v.length, "byte")}${v.length ? `: ${v.join(", ")}` : ""})`;
-  if (!isList(v) && !isRecord(v) && !isDictionary(v)) return String(v);
+  if (!isList(v) && !isRecord(v) && !isDictionary(v)) return String(canon(v)); // a number, to 15 digits
   if (showing.has(v)) return isList(v) ? "[...]" : "(...)";
   showing.add(v);
   const inner = (x) => show(x, true, showing);
@@ -221,8 +243,9 @@ export function show(v, nested = false, showing = new Set()) {
 // Where `item n of target` is: [the list (or the text's letters, the bytes or the dictionary), the place in
 // it]. Any key of a dictionary can be set, but one that is read must be there.
 export function item(target, n, writing, error = oops) {
+  if (typeof n === "number") n = canon(n); // 0.1 * 30 is item 3
   if (isDictionary(target)) {
-    dictionaryKey(n, error);
+    n = dictionaryKey(n, error);
     if (!writing && !target.has(n)) error(notIn(target, n));
     return [target, n];
   }
@@ -239,6 +262,7 @@ export function item(target, n, writing, error = oops) {
 }
 
 const byte = (v, error) => {
+  if (typeof v === "number") v = canon(v);
   if (!Number.isInteger(v) || v < 0 || v > 255) error(`a byte is a whole number from 0 to 255, not ${show(v, true)}`);
   return v;
 };
@@ -253,7 +277,7 @@ export function putItem(seq, i, value, error = oops) {
 
 const dictionaryKey = (key, error) => {
   if (typeof key !== "string" && typeof key !== "number") error(`a dictionary's keys are text or numbers, not ${kindOf(key)}`);
-  return key;
+  return typeof key === "number" ? canon(key) : key; // so 0.1 + 0.2 finds the key 0.3
 };
 
 // "there is no "aple" in this dictionary. Did you mean "apple"?"
@@ -273,7 +297,7 @@ export function makeDictionary(items, error, keyOf = (key) => key) {
 // `remove key from dictionary`
 export function removeKey(key, dictionary, error) {
   if (!isDictionary(dictionary)) error(`can only remove from a dictionary, not ${kindOf(dictionary)}`);
-  dictionaryKey(key, error);
+  key = dictionaryKey(key, error);
   if (!dictionary.has(key)) error(notIn(dictionary, key));
   dictionary.delete(key);
 }
@@ -281,8 +305,8 @@ export function removeKey(key, dictionary, error) {
 // `x is in y`: an item of a list or bytes, a key of a dictionary, or a piece of a text
 function isIn(a, b, error = oops) {
   if (isList(b)) return b.some((x) => equal(a, x));
-  if (isBytes(b)) return b.includes(a);
-  if (isDictionary(b)) return b.has(a);
+  if (isBytes(b)) return typeof a === "number" && b.includes(canon(a));
+  if (isDictionary(b)) return b.has(typeof a === "number" ? canon(a) : a);
   if (typeof a !== "string" || typeof b !== "string") error(`can't check if ${kindOf(a)} is in ${kindOf(b)}`);
   return b.includes(a);
 }
@@ -335,8 +359,11 @@ export function addInto(current, value, name, error) {
   return current + value;
 }
 
+// how many times a `repeat` goes round: a whole number, to 15 digits
 export function checkRepeat(n, error) {
+  if (typeof n === "number") n = canon(n);
   if (!Number.isInteger(n) || n < 0) error(`repeat needs a whole number of times, not ${show(n, true)}`);
+  return n;
 }
 
 export function checkRange(from, to, error) {
@@ -411,6 +438,7 @@ const MAX_BITS = 2 ** 53 - 1;
 // a number that's wrong as itself; anything else as what kind it is (as the checker knows only that)
 const described = (v) => (typeof v === "number" ? show(v) : kindOf(v));
 const bits = (what, v, error) => {
+  if (typeof v === "number") v = canon(v);
   if (!Number.isInteger(v) || v < 0) error(`${what} needs whole numbers of 0 or more, not ${described(v)}`);
   if (v > MAX_BITS) error(`${what} works on numbers up to ${MAX_BITS}, not ${show(v)}`);
   return v;
@@ -484,6 +512,7 @@ export const BUILTINS = [
   {
     name: "bytes", needs: [["number"]], gives: "bytes", // `100 bytes`, all 0
     run: ([n], error) => {
+      if (typeof n === "number") n = canon(n);
       if (!Number.isInteger(n) || n < 0) error(`'bytes' needs a whole number in front of it, not ${described(n)}`);
       return new Uint8Array(n);
     },
@@ -527,6 +556,7 @@ export function everyInterval(interval, unit, error) {
 // `random number from 1 to 6`: a whole number from low to high, each as likely. `random` is where the
 // randomness comes from: a number from 0 up to (not including) 1, like Math.random.
 export function randomWhole(low, high, random, error) {
+  [low, high] = [low, high].map((n) => (typeof n === "number" ? canon(n) : n));
   for (const n of [low, high]) if (!Number.isInteger(n)) error(`'random number from' needs whole numbers, not ${described(n)}`);
   if (low > high) error(`there is no number from ${show(low)} to ${show(high)}`);
   return low + Math.floor(random() * (high - low + 1));
@@ -737,7 +767,7 @@ export class Machine {
             const a = stack.pop();
             // two numbers is the common case; compare() handles the rest, divisible by and in (the ops after
             // the ones two numbers can't fail), and the error messages
-            if (typeof a === "number" && typeof b === "number" && op < DIVISIBLE) stack.push(COMPARE_FNS[op](a, b));
+            if (typeof a === "number" && typeof b === "number" && op < DIVISIBLE) stack.push(COMPARE_FNS[op](a, b)); // to 15 digits (see numberOrder)
             else stack.push(compare(COMPARE_OPS[op], a, b));
             break;
           }
@@ -871,7 +901,7 @@ export class Machine {
             break;
           }
           case CHECK_REPEAT:
-            checkRepeat(stack[stack.length - 1], oops);
+            stack[stack.length - 1] = checkRepeat(stack[stack.length - 1], oops); // to 15 digits: 0.1 * 30 is 3 times
             break;
           case REPEAT_NEXT: { // stack: [... times left]
             const exit = code[ip++];
@@ -890,7 +920,7 @@ export class Machine {
             const exit = code[ip++];
             const top = stack.length;
             const next = stack[top - 2];
-            if (next <= stack[top - 1]) {
+            if (atMost(next, stack[top - 1])) {
               stack[top - 2] = next + 1;
               stack.push(next);
             } else {

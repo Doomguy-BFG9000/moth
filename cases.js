@@ -8,6 +8,13 @@ export const PROGRAMS = [
   ["to area with width as a number, height as a number\n    return width * height\nend\nsay area(3, 4)", "12"],
   ["to describe with name as text, age as a number and kind\n    say name \" is \" age \" (\" kind \")\"\nend\ndescribe(\"Rex\", 3, nothing)\ndescribe(\"Tom\", 9, 1)", "Rex is 3 (nothing)\nTom is 9 (1)"],
   ["to f with l as a list, d as a dictionary, b as bytes, ok as yes or no, g as a function, r as a record\n    say length of l \" \" length of d \" \" length of b \" \" ok \" \" g() \" \" x of r\nend\nto two\n    return 2\nend\nf((list of 1), (dictionary where 1 is 2), 3 bytes, no, two, record with x 4)", "1 1 3 no 2 4"],
+  // numbers as a spreadsheet has them: shown, compared and used as whole numbers to 15 digits
+  ["say 0.1 + 0.2\nsay 0.1 + 0.2 is 0.3\nsay 1 / 3\nsay 2 / 3\nsay 0.1 * 3", "0.3\nyes\n0.333333333333333\n0.666666666666667\n0.3"],
+  ["say 0.1 + 0.2 is less than 0.3\nsay 0.1 + 0.2 is at most 0.3\nsay 0.3 is at least 0.1 + 0.2\nsay 0.3 is greater than 0.1 + 0.2\nsay 0.3 is divisible by 0.1\nsay 0.35 is divisible by 0.1", "no\nyes\nyes\nno\nyes\nno"],
+  ["set things to list of \"a\", \"b\", \"c\"\nsay item (0.1 * 30) of things\nset n to 0\nrepeat 0.1 * 30 times\n    add 1 to n\nend\nsay n", "c\n3"],
+  ["set d to dictionary where 0.3 is \"found\"\nsay item (0.1 + 0.2) of d\nsay (0.1 + 0.2) is in d\nset item (0.1 + 0.2) of d to \"again\"\nsay length of d \" \" item 0.3 of d", "found\nyes\n1 again"],
+  ["for each i from 0.1 * 10 to 0.1 * 30\n    say i\nend\nsay 123456789012344.5 \" \" 0 - 123456789012344.5 \" \" 3.141592653589793", "1\n2\n3\n123456789012345 -123456789012345 3.14159265358979"],
+  ["say (0.1 * 30) as hex\nsay (0.1 * 30) bytes\nsay (list of 1, 2, 3) is (list of 0.1 * 10, 0.2 * 10, 0.1 * 30)\nsay 9007199254740993 is 9007199254740992", "3\n(3 bytes: 0, 0, 0)\nyes\nyes"],
   // a `set` inside a function changes a variable the top level also sets
   ["set total to 0\nto bump\n    add 5 to total\nend\nbump\nbump\nsay total", "10"],
   // this is decided when the program is read, so it holds even before the top level's own `set` runs

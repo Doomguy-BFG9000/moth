@@ -11,7 +11,7 @@ import { Scope } from "./scope.js";
 import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
-  lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, noValue, stoppedMessage, makeRecord, fieldOf,
+  lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
@@ -21,6 +21,14 @@ const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has i
 const MATH = ["+", "-", "*", "/"];
 const BIT_BUILTINS = ["bit and", "bit or", "bit xor", "shift left", "shift right"]; // in the order R.bits numbers them
 const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8 };
+// ncmp's answer (-1, 0, 1, or 2 for NaN) made yes or no, for each comparison of two numbers
+const ORDER_TESTS = {
+  "is": (c) => c.emit("i32.eqz"),
+  "less than": (c) => c.emit("i32.const", -1).emit("i32.eq"),
+  "greater than": (c) => c.emit("i32.const", 1).emit("i32.eq"),
+  "at least": (c) => c.emit("i32.const", 1).emit("i32.le_u"), // 0 or 1
+  "at most": (c) => c.emit("i32.const", 1).emit("i32.add").emit("i32.const", 1).emit("i32.le_u"), // -1 or 0
+};
 // each tag as kindOf in vm.js says it, and each of vm.js's KINDS as kindOf says it
 const TAG_KINDS = { 1: "a number", 2: "text", 3: "a list", 4: "a record", 5: "a function", 7: "a dictionary", 8: "bytes" };
 const KIND_TAGS = ["a number", "text", "yes/no", "a list", "a record", "a dictionary", "bytes", "a function"];
@@ -35,6 +43,8 @@ const IMPORTS = {
   negate: [[EQ, I32], []],
   compare: [[I32, EQ, EQ, I32], [I32]],
   remainder: [[F64, F64], [F64]],
+  numberOrder: [[F64, F64], [I32]],
+  divisible: [[F64, F64], [I32]],
   equal: [[EQ, EQ], [I32]],
   sameText: [["externref", "externref"], [I32]],
   text: [[I32], ["externref"]], // the program's text, by number
@@ -52,7 +62,7 @@ const IMPORTS = {
   dictHasText: [["externref", "externref"], [I32]],
   dictHasNum: [["externref", F64], [I32]],
   addInto: [[EQ, EQ, I32, I32], [EQ]],
-  checkRepeat: [[EQ, I32], []],
+  checkRepeat: [[EQ, I32], [F64]],
   checkRange: [[EQ, EQ, I32], []],
   itemsOf: [[EQ, I32], [EQ]],
   callable: [[EQ, I32, I32], []],
@@ -160,13 +170,30 @@ function declareRuntime(m, T, im) {
     c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("unreachable").emit("end");
   });
 
+  // How two numbers compare, to 15 digits (numberOrder in vm.js): -1, 0, 1, or 2 if either is NaN. Two that are
+  // equal, two whole numbers, and two further apart than 15 digits tell are answered here; the rest, which
+  // agree to 15 digits or nearly, in JavaScript.
+  fn("ncmp", [F64, F64], [I32], (c) => {
+    c.emit("local.get", 0).emit("local.get", 1).emit("f64.eq").emit("if").emit("i32.const", 0).emit("return").emit("end");
+    const whole = (x) => c.emit("local.get", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq");
+    whole(0);
+    whole(1);
+    c.emit("i32.and").emit("i32.eqz");
+    c.emit("local.get", 0).emit("local.get", 1).emit("f64.sub").emit("f64.abs");
+    c.emit("local.get", 0).emit("f64.abs").emit("local.get", 1).emit("f64.abs").emit("f64.max").emit("f64.const", 1e-14).emit("f64.mul").emit("f64.le");
+    c.emit("i32.and").emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", im.numberOrder).emit("return").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("f64.lt").emit("if").emit("i32.const", -1).emit("return").emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("f64.gt").emit("if").emit("i32.const", 1).emit("return").emit("end");
+    c.emit("i32.const", 2);
+  });
+
   // `is`: numbers by value, text by its letters, lists, records, dictionaries and bytes (in JavaScript) by
   // what they hold, everything else (yes, no, nothing, functions) by identity
   fn("eq", [EQ, EQ], [I32], (c) => {
     bothNums(c, T, 0, 1).emit("if");
     numOf(c, T, 0);
     numOf(c, T, 1);
-    c.emit("f64.eq").emit("return").emit("end");
+    c.emit("call", R.ncmp).emit("i32.eqz").emit("return").emit("end");
     c.emit("local.get", 0).emit("local.get", 1).emit("ref.eq").emit("if").emit("i32.const", 1).emit("return").emit("end");
     const both = (type) => c.emit("local.get", 0).emit("ref.test", type).emit("local.get", 1).emit("ref.test", type).emit("i32.and");
     both(T.text).emit("if");
@@ -188,7 +215,9 @@ function declareRuntime(m, T, im) {
       bothNums(c, T, 0, 1).emit("if", I32);
       numOf(c, T, 0);
       numOf(c, T, 1);
-      c.emit(["f64.lt", "f64.gt", "f64.ge", "f64.le"][i]).emit("else");
+      c.emit("call", R.ncmp);
+      ORDER_TESTS[["less than", "greater than", "at least", "at most"][i]](c);
+      c.emit("else");
       c.emit("i32.const", i + 1).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.compare).emit("end");
     });
   });
@@ -205,7 +234,7 @@ function declareRuntime(m, T, im) {
     whole(1);
     c.emit("i32.and").emit("if", I32);
     c.emit("local.get", 0).emit("local.get", 0).emit("local.get", 1).emit("f64.div").emit("f64.trunc").emit("local.get", 1).emit("f64.mul").emit("f64.eq");
-    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.remainder).emit("f64.const", 0).emit("f64.eq").emit("end");
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.divisible).emit("end"); // to 15 digits, in JavaScript
   });
 
   fn("dv", [EQ, EQ, I32], [I32], (c) => {
@@ -393,7 +422,7 @@ function declareRuntime(m, T, im) {
     c.emit("local.get", x).emit("f64.const", 0).emit("f64.ge").emit("i32.and");
     c.emit("local.get", x).emit("local.get", x).emit("f64.sub").emit("f64.const", 0).emit("f64.eq").emit("i32.and"); // not infinite
     c.emit("if").emit("local.get", x).emit("return").emit("end").emit("end");
-    c.emit("local.get", 0).emit("local.get", 1).emit("call", im.checkRepeat).emit("unreachable");
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", im.checkRepeat); // whole to 15 digits, or a mistake
   });
 
   // where a field is in a record, or -1
@@ -827,7 +856,7 @@ class WasmCompiler extends Scope {
         this.e("local.set", i);
         numOf(this.c, T, to);
         this.e("local.set", last);
-        return this.loop(k, () => this.e("local.get", i).e("local.get", last).e("f64.le").e("i32.eqz"), () => {
+        return this.loop(k, () => (this.e("local.get", i).e("local.get", last).e("call", R.ncmp), ORDER_TESTS["at most"](this.c), this.e("i32.eqz")), () => {
           const number = this.numberSlot(s.name);
           if (number) this.e("local.get", i), this.setNumber(number);
           else this.store(s.name, () => this.e("local.get", i).e("struct.new", T.num));
@@ -1037,7 +1066,7 @@ class WasmCompiler extends Scope {
           this.exprNum(e.left);
           this.exprNum(e.right);
           if (e.op === "divisible by") this.e("i32.const", this.pos(e.at)).e("call", R.dvf);
-          else this.e({ "is": "f64.eq", "less than": "f64.lt", "greater than": "f64.gt", "at least": "f64.ge", "at most": "f64.le" }[e.op]);
+          else this.e("call", R.ncmp), ORDER_TESTS[e.op](this.c); // to 15 digits
           if (e.negate) this.e("i32.eqz");
           this.e("ref.i31");
           return;
@@ -1329,6 +1358,11 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     negate: (v, k) => negate(toJs(v), errors[k]),
     compare: (op, a, b, k) => (compare(COMPARE_OPS[op], toJs(a), COMPARE_OPS[op] === "in" ? rawOf(b) : toJs(b), errors[k]) ? 1 : 0),
     remainder: (a, b) => a % b,
+    numberOrder: (a, b) => {
+      const order = numberOrder(a, b);
+      return Number.isNaN(order) ? 2 : order;
+    },
+    divisible: (a, b) => (divisible(a, b) ? 1 : 0),
     equal: (a, b) => (equal(toJs(a), toJs(b)) ? 1 : 0),
     sameText: (a, b) => (a === b ? 1 : 0),
     text: (i) => texts[i],
@@ -1345,15 +1379,15 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       putItem(seq, i, seq instanceof Map ? value : toJs(value), errors[k]);
     },
     dictGetText: (map, key, k) => (map.has(key) ? map.get(key) : item(map, key, false, errors[k])),
-    dictGetNum: (map, key, k) => (map.has(key) ? map.get(key) : item(map, key, false, errors[k])),
+    dictGetNum: (map, key, k) => (map.has(canon(key)) ? map.get(canon(key)) : item(map, key, false, errors[k])), // keys to 15 digits
     dictSetText: (map, key, value) => void map.set(key, value),
-    dictSetNum: (map, key, value) => void map.set(key, value),
+    dictSetNum: (map, key, value) => void map.set(canon(key), value),
     dictHasText: (map, key) => (map.has(key) ? 1 : 0),
-    dictHasNum: (map, key) => (map.has(key) ? 1 : 0),
+    dictHasNum: (map, key) => (map.has(canon(key)) ? 1 : 0),
     dict: (list, k) => x.makeHost(makeDictionary(Array.from({ length: x.listLength(list) }, (_, i) => x.listItem(list, i)), errors[k], toJs), TAGS.dictionary),
     remove: (key, target, k) => removeKey(toJs(key), rawOf(target), errors[k]),
     addInto: (current, value, name, k) => toWasm(addInto(toJs(current), toJs(value), names[name], errors[k])),
-    checkRepeat: (n, k) => checkRepeat(toJs(n), errors[k]),
+    checkRepeat: (n, k) => checkRepeat(toJs(n), errors[k]), // a count that's whole to 15 digits comes back whole
     checkRange: (from, to, k) => checkRange(toJs(from), toJs(to), errors[k]),
     itemsOf: (v, k) => toWasm(itemsOf(rawOf(v), errors[k])),
     callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),

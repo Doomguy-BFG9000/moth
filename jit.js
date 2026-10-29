@@ -3,7 +3,7 @@
 // run thousands of random programs through both and require the same output, drawings and errors.
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
-  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
+  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, numberOrder, atMost, divisible, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
@@ -81,7 +81,7 @@ class JsCompiler extends Scope {
       case "count": {
         const k = this.pos(s.at);
         const range = `checkRange(${this.expr(s.from)}, ${this.expr(s.to)}, ${k})`;
-        return `for (let [$i, $last] = ${range}; $i <= $last; $i++) {\n${this.ref(s.name)} = $i;\n${this.block(s.body)}\ntick(${k});\n}`;
+        return `for (let [$i, $last] = ${range}; atMost($i, $last); $i++) {\n${this.ref(s.name)} = $i;\n${this.block(s.body)}\ntick(${k});\n}`;
       }
       case "each": {
         const k = this.pos(s.at);
@@ -265,11 +265,12 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     div: (a, b, k) => (typeof a === "number" && typeof b === "number" && b !== 0 ? a / b : arithmetic("/", a, b, errors[k])),
     neg: (v, k) => (typeof v === "number" ? -v : negate(v, errors[k])),
     eq: (a, b) => equal(a, b),
-    lt: ordered("less than", (a, b) => a < b),
-    gt: ordered("greater than", (a, b) => a > b),
-    ge: ordered("at least", (a, b) => a >= b),
-    le: ordered("at most", (a, b) => a <= b),
-    dv: (a, b, k) => (typeof a === "number" && typeof b === "number" && b !== 0 ? a % b === 0 : compare("divisible by", a, b, errors[k])),
+    lt: ordered("less than", (a, b) => numberOrder(a, b) === -1), // numbers to 15 digits, as in vm.js
+    gt: ordered("greater than", (a, b) => numberOrder(a, b) === 1),
+    ge: ordered("at least", (a, b) => numberOrder(a, b) >= 0),
+    le: ordered("at most", (a, b) => numberOrder(a, b) <= 0),
+    dv: (a, b, k) => (typeof a === "number" && typeof b === "number" && b !== 0 ? divisible(a, b) : compare("divisible by", a, b, errors[k])),
+    atMost,
     isIn: (a, b, k) => compare("in", a, b, errors[k]),
     lengthOf: (v, k) => lengthOf(v, errors[k]),
     item: (target, n, k) => {
@@ -283,7 +284,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     removeKey: (key, target, k) => removeKey(key, target, errors[k]),
     addInto: (current, value, name, k) => (typeof current === "number" && typeof value === "number" ? current + value : addInto(current, value, name, errors[k])),
     say: (parts) => print(parts.map((p) => show(p)).join("")),
-    checkRepeat: (n, k) => (checkRepeat(n, errors[k]), n),
+    checkRepeat: (n, k) => checkRepeat(n, errors[k]),
     checkRange: (from, to, k) => (checkRange(from, to, errors[k]), [from, to]),
     itemsOf: (v, k) => itemsOf(v, errors[k]),
     turtle: (action, value, k) => turtle.act(action, value, errors[k]),

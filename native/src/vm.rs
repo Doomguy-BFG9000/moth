@@ -83,8 +83,15 @@ fn no_value(name: &str) -> String {
 }
 fn described(v: &Value) -> String {
     match v {
-        Value::Num(n) => num::show(*n),
+        Value::Num(n) => num::display(*n),
         _ => kind_of(v).into(),
+    }
+}
+// a number to 15 digits (see num::canon); anything else as it is
+fn canon(v: &Value) -> Value {
+    match v {
+        Value::Num(n) => Value::Num(num::canon(*n)),
+        _ => v.clone(),
     }
 }
 fn chars_of(t: &str) -> Vec<Value> {
@@ -121,6 +128,7 @@ fn not_in(d: &Dict, key: &Value) -> Res<String> {
 
 // Where `item n of target` is: the list (or the bytes, or the dictionary, or a text's letters) and the place
 fn item(target: &Value, n: &Value, writing: bool) -> Res<(Value, Value)> {
+    let n = &canon(n); // 0.1 * 30 is item 3
     if let Value::Dict(d) = target {
         let k = dictionary_key(n)?;
         if !writing && !d.borrow().has(&k) {
@@ -151,14 +159,14 @@ fn item(target: &Value, n: &Value, writing: bool) -> Res<(Value, Value)> {
         _ => return oops(format!("item numbers must be whole numbers, not {}", shown(n, true)?)),
     };
     if i < 1.0 {
-        return oops(format!("there is no item {}, items are counted from 1", num::show(i)));
+        return oops(format!("there is no item {}, items are counted from 1", num::display(i)));
     }
     if i > len as f64 {
         if is_bytes {
-            return oops(format!("there is no item {}, there are only {}", num::show(i), plural_n(len, "byte")));
+            return oops(format!("there is no item {}, there are only {}", num::display(i), plural_n(len, "byte")));
         }
         let (what, unit) = if is_list { ("list", "item") } else { ("text", "letter") };
-        return oops(format!("there is no item {}, the {what} only has {}", num::show(i), plural_n(len, unit)));
+        return oops(format!("there is no item {}, the {what} only has {}", num::display(i), plural_n(len, unit)));
     }
     Ok((seq, Value::Num(i - 1.0)))
 }
@@ -173,7 +181,7 @@ fn item_at(seq: &Value, i: &Value) -> Value {
 }
 
 fn byte(v: &Value) -> Res<u8> {
-    match v {
+    match &canon(v) {
         Value::Num(n) if num::is_integer(*n) && *n >= 0.0 && *n <= 255.0 => Ok(*n as u8),
         _ => oops(format!("a byte is a whole number from 0 to 255, not {}", shown(v, true)?)),
     }
@@ -204,7 +212,7 @@ fn is_in(a: &Value, b: &Value) -> Res<bool> {
             Ok(false)
         }
         Value::Bytes(bytes) => Ok(match a {
-            Value::Num(n) => bytes.borrow().iter().any(|&x| x as f64 == *n),
+            Value::Num(n) => bytes.borrow().iter().any(|&x| x as f64 == num::canon(*n)),
             _ => false,
         }),
         Value::Dict(d) => Ok(Key::of(a).is_some_and(|k| d.borrow().has(&k))),
@@ -247,14 +255,16 @@ fn compare(op: usize, a: &Value, b: &Value) -> Res<bool> {
     })
 }
 
+// numbers compare to 15 digits (see num::order)
 fn compare_numbers(op: usize, a: f64, b: f64) -> bool {
+    use std::cmp::Ordering::*;
     match op {
-        0 => a == b,
-        1 => a < b,
-        2 => a > b,
-        3 => a >= b,
-        4 => a <= b,
-        _ => a % b == 0.0,
+        0 => num::order(a, b) == Some(Equal),
+        1 => num::order(a, b) == Some(Less),
+        2 => num::order(a, b) == Some(Greater),
+        3 => matches!(num::order(a, b), Some(Greater | Equal)),
+        4 => matches!(num::order(a, b), Some(Less | Equal)),
+        _ => num::divisible(a, b),
     }
 }
 
@@ -327,10 +337,10 @@ fn need_text<'v>(what: &str, v: &'v Value) -> Res<&'v str> {
 }
 
 fn bits(what: &str, v: &Value) -> Res<f64> {
-    match v {
+    match &canon(v) {
         Value::Num(n) if num::is_integer(*n) && *n >= 0.0 => {
             if *n > MAX_BITS {
-                return oops(format!("{what} works on numbers up to {}, not {}", num::show(MAX_BITS), num::show(*n)));
+                return oops(format!("{what} works on numbers up to {}, not {}", num::display(MAX_BITS), num::display(*n)));
             }
             Ok(*n)
         }
@@ -429,9 +439,9 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
             if shifted > MAX_BITS {
                 return oops(format!(
                     "{} shifted left by {} is too big: bits work on numbers up to {}",
-                    num::show(x),
-                    num::show(n),
-                    num::show(MAX_BITS)
+                    num::display(x),
+                    num::display(n),
+                    num::display(MAX_BITS)
                 ));
             }
             Ok(Value::Num(shifted))
@@ -441,7 +451,7 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
             let n = bits("'shift ... by'", &args[1])?;
             Ok(Value::Num((x / num::power_of_two(n)).floor()))
         }
-        "bytes" => match &args[0] {
+        "bytes" => match &canon(&args[0]) {
             Value::Num(n) if num::is_integer(*n) && *n >= 0.0 => {
                 let mut block = Vec::new();
                 if *n > 4294967296.0 || block.try_reserve_exact(*n as usize).is_err() {
@@ -570,7 +580,7 @@ impl Turtle {
             "circle" => {
                 let p = numbers("'draw circle'", &items())?;
                 if p[2] < 0.0 {
-                    return oops(format!("a circle's size is 0 or more, not {}", num::show(p[2])));
+                    return oops(format!("a circle's size is 0 or more, not {}", num::display(p[2])));
                 }
                 host.draw(Drawn::Circle { x: p[0], y: p[1], radius: p[2], color: self.color.clone() });
             }
@@ -582,7 +592,7 @@ impl Turtle {
                 }
                 let p = numbers("'draw ... at'", &rest)?;
                 if p[2] <= 0.0 {
-                    return oops(format!("text's size is a number above 0, not {}", num::show(p[2])));
+                    return oops(format!("text's size is a number above 0, not {}", num::display(p[2])));
                 }
                 host.draw(Drawn::Text { text: shown(&all[0], false)?, x: p[0], y: p[1], size: p[2], color: self.color.clone() });
             }
@@ -975,10 +985,10 @@ impl<'h> Machine<'h> {
                         let line = check!(fits(line));
                         self.host.print(&line);
                     }
-                    CHECK_REPEAT => match stack.last().unwrap() {
-                        Value::Num(x) if num::is_integer(*x) && *x >= 0.0 => {}
+                    CHECK_REPEAT => match canon(stack.last().unwrap()) {
+                        Value::Num(x) if num::is_integer(x) && x >= 0.0 => *stack.last_mut().unwrap() = Value::Num(x), // 0.1 * 30 is 3 times
                         other => {
-                            let shown = check!(shown(other, true));
+                            let shown = check!(shown(&other, true));
                             fail!(format!("repeat needs a whole number of times, not {shown}"));
                         }
                     },
@@ -1006,7 +1016,7 @@ impl<'h> Machine<'h> {
                         let top = stack.len();
                         let (Value::Num(next), Value::Num(last)) = (&stack[top - 2], &stack[top - 1]) else { unreachable!() };
                         let (next, last) = (*next, *last);
-                        if next <= last {
+                        if num::at_most(next, last) {
                             stack[top - 2] = Value::Num(next + 1.0);
                             stack.push(Value::Num(next));
                         } else {
@@ -1147,8 +1157,8 @@ impl<'h> Machine<'h> {
                         }
                     }
                     RANDOM => {
-                        let high = pop!();
-                        let low = pop!();
+                        let high = canon(&pop!());
+                        let low = canon(&pop!());
                         for n in [&low, &high] {
                             if !matches!(n, Value::Num(x) if num::is_integer(*x)) {
                                 fail!(format!("'random number from' needs whole numbers, not {}", described(n)));
@@ -1156,7 +1166,7 @@ impl<'h> Machine<'h> {
                         }
                         let (Value::Num(lo), Value::Num(hi)) = (low, high) else { unreachable!() };
                         if lo > hi {
-                            fail!(format!("there is no number from {} to {}", num::show(lo), num::show(hi)));
+                            fail!(format!("there is no number from {} to {}", num::display(lo), num::display(hi)));
                         }
                         let r = self.host.random();
                         stack.push(Value::Num(lo + (r * (hi - lo + 1.0)).floor()));

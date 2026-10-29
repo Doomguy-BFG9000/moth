@@ -85,7 +85,7 @@ impl Key {
             } else if n.is_nan() {
                 f64::NAN.to_bits()
             } else {
-                n.to_bits()
+                num::canon(*n).to_bits() // to 15 digits: 0.1 + 0.2 finds the key 0.3
             })),
             Value::Text(t) => Some(Key::Text(t.clone())),
             _ => None,
@@ -231,7 +231,7 @@ fn show_into(v: &Value, nested: bool, showing: &mut HashSet<usize>, out: &mut St
                 out.push_str(t)
             }
         }
-        Value::Num(n) => out.push_str(&num::show(*n)),
+        Value::Num(n) => out.push_str(&num::display(*n)), // to 15 digits
         Value::Func(c) => out.push_str(&format!("<function {}>", c.func.name)),
         Value::Bytes(b) => {
             let b = b.borrow();
@@ -336,7 +336,7 @@ fn equal_in(a: &Value, b: &Value, comparing: &mut HashSet<(usize, usize)>, depth
     match (a, b) {
         (Value::Nothing, Value::Nothing) => return Ok(true),
         (Value::Bool(x), Value::Bool(y)) => return Ok(x == y),
-        (Value::Num(x), Value::Num(y)) => return Ok(x == y),
+        (Value::Num(x), Value::Num(y)) => return Ok(num::order(*x, *y) == Some(std::cmp::Ordering::Equal)), // to 15 digits
         (Value::Text(x), Value::Text(y)) => return Ok(x == y),
         _ => {}
     }
