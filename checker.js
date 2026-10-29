@@ -262,6 +262,7 @@ class Checker extends Scope {
         if (!s.value) return;
         this.expr(s.value);
         const action = TURTLE_ACTIONS.indexOf(s.action);
+        if (s.value.kind === "list" && s.action !== "forward") return; // `move to`, `draw ...`: what's in the list isn't known
         const value = this.type(s.value);
         // the width check depends on the value, so it only runs when the width is written out
         if (s.action === "width" ? s.value.kind === "value" : true) {

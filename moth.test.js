@@ -194,7 +194,7 @@ const ERRORS = [
   ["turn left yes", "line 1: 'turn left' needs a number, not yes/no"],
   ["pen color 5", "line 1: 'pen color' needs text like \"red\", not a number"],
   ["pen width 0", "line 1: 'pen width' needs a number above 0, not 0"],
-  ["move sideways 5", "line 1: expected 'forward' or 'back' but found 'sideways'"],
+  ["move sideways 5", "line 1: expected 'forward' or 'back' or 'to' but found 'sideways'"],
   ["set pen to 1", "line 1: 'pen' is a Moth word, so it can't be used as a variable name"],
   ['set p to record with name "Sam"\nsay nmae of p', "line 2: this record has no 'nmae'. Did you mean 'name'?"],
   ["say name of 5", "line 1: can't take 'name' of a number"],
@@ -285,6 +285,15 @@ const ERRORS = [
   ["set expect to 1", "line 1: 'expect' is a Moth word, so it can't be used as a variable name"],
   ["expect", "line 1: expected a value but found the end of the code"],
   ["to check with n\n    expect n is greater than 0\nend\ncheck(-1)", "line 2: expected -1 to be greater than 0"],
+  // drawing for apps: move to, clear, and boxes, circles and text
+  ["move to 1", "line 1: expected ',' but found the end of the code"],
+  ["move to \"a\", 2", "line 1: 'move to' needs numbers, not text"],
+  ["draw box at 1, 2 size 3", "line 1: expected 'by' but found the end of the code"],
+  ["draw box at \"a\", 1 size 2 by 2", "line 1: 'draw box' needs numbers, not text"],
+  ["draw circle at 0, 0 size -1", "line 1: a circle's size is 0 or more, not -1"],
+  ["draw \"hi\" at 0, 0 size 0", "line 1: text's size is a number above 0, not 0"],
+  ["draw \"hi\"", "line 1: expected 'at' but found the end of the code"],
+  ["set clear to 1", "line 1: 'clear' is a Moth word, so it can't be used as a variable name"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -1142,4 +1151,34 @@ test("generated programs: the engines, the compiler in Moth, the formatter and t
     }
   });
   assert.ok(finished > 20, `only ${finished} programs finished`);
+});
+
+// ---------- drawing for apps ----------
+
+test("the turtle draws boxes, circles and text, moves to a spot, and clear wipes the picture, on all three engines", () => {
+  const source = [
+    "move forward 10",
+    "clear",
+    'pen color "red"',
+    "draw box at 10, 20 size 30 by 40",
+    "draw circle at 0, 0 size 5",
+    'draw "Score: " + 3 at -50, 100',
+    'draw "Big" at 0, 0 size 30',
+    "move to 50, 60",
+    "pen up",
+    "move to 0, 0",
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const drawn = [];
+    run(source, () => {}, { engine, draw: (d) => drawn.push(d) });
+    assert.deepEqual(drawn, [
+      { x1: 0, y1: 0, x2: 0, y2: 10, color: "#4f8ff7", width: 2 },
+      { clear: true },
+      { shape: "box", x: 10, y: 20, width: 30, height: 40, color: "red" },
+      { shape: "circle", x: 0, y: 0, radius: 5, color: "red" },
+      { shape: "text", text: "Score: 3", x: -50, y: 100, size: 16, color: "red" },
+      { shape: "text", text: "Big", x: 0, y: 0, size: 30, color: "red" },
+      { x1: 0, y1: 10, x2: 50, y2: 60, color: "red", width: 2 },
+    ], engine);
+  }
 });

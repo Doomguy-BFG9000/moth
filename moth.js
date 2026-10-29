@@ -79,7 +79,7 @@ const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
   "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-  "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect"]);
+  "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -89,7 +89,7 @@ const BIT_WORDS = ["and", "or", "xor"];
 // what `as` turns a value into: `block as text`, `"hi" as bytes`, `255 as hex`
 const AS_WORDS = ["bytes", "text", "hex", "binary"];
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
-const TURTLE_WORDS = new Map([["move", ["forward", "back"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
+const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
 // Every node keeps the token it came from (`at`), so errors can point at it. `reading` is shared with the
 // files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
@@ -291,7 +291,24 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const action = turtle.find(isWord);
       if (!action) expected(turtle.map((w) => `'${w}'`).join(" or "));
       pos++;
+      if (action === "to") return { kind: "turtle", action, value: several(2, t), at: t }; // `move to x, y`
       return { kind: "turtle", action, value: action === "up" || action === "down" ? null : expression(), at: t };
+    }
+    if (word("clear")) return { kind: "turtle", action: "clear", value: null, at: t }; // wipe the picture
+    if (word("draw")) { // `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
+      const shape = ["box", "circle"].find((w) => isWord(w) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "at");
+      if (shape) {
+        pos += 2;
+        const place = several(2, t);
+        expectWord("size");
+        const sizes = shape === "box" ? [additive(), (expectWord("by"), expression())] : [expression()];
+        return { kind: "turtle", action: shape, value: { ...place, items: [...place.items, ...sizes] }, at: t };
+      }
+      const text = expression();
+      expectWord("at");
+      const place = several(2, t);
+      const size = word("size") ? expression() : { kind: "value", value: null, at: t }; // no size: the usual one
+      return { kind: "turtle", action: "text", value: { ...place, items: [text, ...place.items, size] }, at: t };
     }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
@@ -473,6 +490,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "name", name: full, at: t };
     }
     expected("a value");
+  }
+
+  // `n` values with commas between them, as a list: the x, y of `move to x, y` and the like
+  function several(n, t) {
+    const items = [expression()];
+    while (items.length < n) {
+      if (!match(",")) expected("','");
+      items.push(expression());
+    }
+    return { kind: "list", items, at: t };
   }
 
   function argList() {

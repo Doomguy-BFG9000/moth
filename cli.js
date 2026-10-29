@@ -100,17 +100,28 @@ function checkFile(file, source) {
 }
 
 // The turtle's lines as an SVG picture, framed to fit them. Moth's y goes up and SVG's goes down, so y is flipped.
-function svg(lines) {
+// What's left after the last `clear` is the picture; boxes, circles and text go in it too.
+function svg(drawn) {
+  const items = drawn.slice(drawn.findLastIndex((d) => d.clear) + 1);
   let [left, right, bottom, top] = [Infinity, -Infinity, Infinity, -Infinity];
-  for (const l of lines) {
-    const pad = l.width / 2 + 10;
-    left = Math.min(left, l.x1 - pad, l.x2 - pad);
-    right = Math.max(right, l.x1 + pad, l.x2 + pad);
-    bottom = Math.min(bottom, l.y1 - pad, l.y2 - pad);
-    top = Math.max(top, l.y1 + pad, l.y2 + pad);
+  const reach = (x1, y1, x2, y2, pad) => {
+    [left, right] = [Math.min(left, x1 - pad, x2 - pad), Math.max(right, x1 + pad, x2 + pad)];
+    [bottom, top] = [Math.min(bottom, y1 - pad, y2 - pad), Math.max(top, y1 + pad, y2 + pad)];
+  };
+  for (const d of items) {
+    if (d.shape === "box") reach(d.x, d.y, d.x + d.width, d.y + d.height, 10);
+    else if (d.shape === "circle") reach(d.x, d.y, d.x, d.y, d.radius + 10);
+    else if (d.shape === "text") reach(d.x, d.y, d.x + d.text.length * d.size * 0.6, d.y + d.size, 10); // about how wide text is
+    else reach(d.x1, d.y1, d.x2, d.y2, d.width / 2 + 10);
   }
-  const attr = (text) => String(text).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`); // colors are the program's own text
-  const body = lines.map((l) => `  <line x1="${l.x1}" y1="${-l.y1}" x2="${l.x2}" y2="${-l.y2}" stroke="${attr(l.color)}" stroke-width="${l.width}"/>`);
+  if (!items.length) [left, right, bottom, top] = [-10, 10, -10, 10];
+  const attr = (text) => String(text).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`); // colors and text are the program's own
+  const body = items.map((d) => {
+    if (d.shape === "box") return `  <rect x="${Math.min(d.x, d.x + d.width)}" y="${-Math.max(d.y, d.y + d.height)}" width="${Math.abs(d.width)}" height="${Math.abs(d.height)}" fill="${attr(d.color)}"/>`;
+    if (d.shape === "circle") return `  <circle cx="${d.x}" cy="${-d.y}" r="${d.radius}" fill="${attr(d.color)}"/>`;
+    if (d.shape === "text") return `  <text x="${d.x}" y="${-d.y}" font-size="${d.size}" font-family="sans-serif" fill="${attr(d.color)}">${attr(d.text)}</text>`;
+    return `  <line x1="${d.x1}" y1="${-d.y1}" x2="${d.x2}" y2="${-d.y2}" stroke="${attr(d.color)}" stroke-width="${d.width}"/>`;
+  });
   const box = [left, -top, right - left, top - bottom].map((n) => Math.round(n * 100) / 100);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${box.join(" ")}" stroke-linecap="round">\n${body.join("\n")}\n</svg>\n`;
 }

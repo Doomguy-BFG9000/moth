@@ -239,7 +239,7 @@ end
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
     "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-    "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect"
+    "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
@@ -461,7 +461,7 @@ to parse with tokens, reading
             return nothing
         end
         if value of t is "move"
-            return list of "forward", "back"
+            return list of "forward", "back", "to"
         end
         if value of t is "turn"
             return list of "left", "right"
@@ -621,10 +621,50 @@ to parse with tokens, reading
                 expected(joined(choices, " or "))
             end
             set pos to pos + 1
+            if action is "to" # `move to x, y`
+                return record with kind "turtle", action action, value several(2, t), at t
+            end
             if action is "up" or action is "down"
                 return record with kind "turtle", action action, value nothing, at t
             end
             return record with kind "turtle", action action, value expression(), at t
+        end
+        if word("clear") # wipe the picture
+            return record with kind "turtle", action "clear", value nothing, at t
+        end
+        if word("draw") # `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
+            set shape to ""
+            for each w in list of "box", "circle"
+                if shape is "" and is_word(w) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "at"
+                    set shape to w
+                end
+            end
+            if shape is not ""
+                set pos to pos + 2
+                set spot to several(2, t)
+                expect_word("size")
+                set coords to items of spot
+                if shape is "box"
+                    add additive() to coords
+                    expect_word("by")
+                end
+                add expression() to coords
+                return record with kind "turtle", action shape, value spot, at t
+            end
+            set drawn_text to expression()
+            expect_word("at")
+            set spot to several(2, t)
+            set coords to list of drawn_text
+            for each n in items of spot
+                add n to coords
+            end
+            if word("size")
+                add expression() to coords
+            else
+                add record with kind "value", type "nothing", value nothing, at t to coords # no size: the usual one
+            end
+            set listed to record with kind "list", items coords, at t
+            return record with kind "turtle", action "text", value listed, at t
         end
         if type of t is "word" and not contains(reserved, value of t)
             # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
@@ -916,6 +956,18 @@ to parse with tokens, reading
             return record with kind "name", name full, at t
         end
         expected("a value")
+    end
+
+    # `n` values with commas between them, as a list: the x, y of `move to x, y` and the like
+    to several with n, t
+        set made to list of expression()
+        repeat while length of made is less than n
+            if not match(",")
+                expected("','")
+            end
+            add expression() to made
+        end
+        return record with kind "list", items made, at t
     end
 
     to arg_list
@@ -1256,7 +1308,7 @@ end
 # ---------- JavaScript ----------
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
-set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width"
+set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"

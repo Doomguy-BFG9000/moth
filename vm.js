@@ -120,7 +120,10 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
-export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
+export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
+  "to", "clear", "box", "circle", "text"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`
+// the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
+export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
 // ---------- values ----------
 
@@ -543,17 +546,43 @@ export class Turtle {
     Object.assign(this, { draw, x: 0, y: 0, heading: 90, pen: true, color: "#4f8ff7", width: 2 });
   }
 
+  // Besides lines, the turtle reports { clear: true } when the picture is wiped, and filled shapes:
+  // { shape: "box", x, y, width, height, color } (x, y its bottom left corner), { shape: "circle", x, y,
+  // radius, color } and { shape: "text", text, x, y, size, color }.
   act(action, value, error = oops) {
     const name = TURTLE_ACTIONS[action];
     if (action < 4 && typeof value !== "number") error(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
-    if (name === "forward" || name === "back") {
-      const steps = name === "forward" ? value : -value;
-      const angle = (this.heading * Math.PI) / 180;
-      const x = this.x + steps * Math.cos(angle);
-      const y = this.y + steps * Math.sin(angle);
-      const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
+    const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
+    const numbers = (what, list) => {
+      for (const n of list) if (typeof n !== "number") error(`${what} needs numbers, not ${kindOf(n)}`);
+      return list.map(round);
+    };
+    if (name === "forward" || name === "back" || name === "to") {
+      let x;
+      let y;
+      if (name === "to") [x, y] = numbers("'move to'", value);
+      else {
+        const steps = name === "forward" ? value : -value;
+        const angle = (this.heading * Math.PI) / 180;
+        x = this.x + steps * Math.cos(angle);
+        y = this.y + steps * Math.sin(angle);
+      }
       if (this.pen) this.draw({ x1: round(this.x), y1: round(this.y), x2: round(x), y2: round(y), color: this.color, width: this.width });
       Object.assign(this, { x, y });
+    } else if (name === "clear") {
+      this.draw({ clear: true });
+    } else if (name === "box") {
+      const [x, y, width, height] = numbers("'draw box'", value);
+      this.draw({ shape: "box", x, y, width, height, color: this.color });
+    } else if (name === "circle") {
+      const [x, y, radius] = numbers("'draw circle'", value);
+      if (radius < 0) error(`a circle's size is 0 or more, not ${show(radius)}`);
+      this.draw({ shape: "circle", x, y, radius, color: this.color });
+    } else if (name === "text") {
+      const [text, ...rest] = value;
+      const [x, y, size] = numbers("'draw ... at'", rest.map((n, i) => (i === 2 && n === null ? 16 : n))); // 16 when no size is given
+      if (size <= 0) error(`text's size is a number above 0, not ${show(size)}`);
+      this.draw({ shape: "text", text: show(text), x, y, size, color: this.color });
     } else if (name === "left" || name === "right") {
       this.heading += name === "left" ? value : -value;
     } else if (name === "color") {
@@ -892,7 +921,7 @@ export class Machine {
             break;
           case TURTLE: {
             const action = code[ip++];
-            this.turtle.act(action, action < 4 || action > 5 ? stack.pop() : null); // pen up and pen down take no value
+            this.turtle.act(action, TURTLE_BARE.has(action) ? null : stack.pop());
             break;
           }
           case LINE:
