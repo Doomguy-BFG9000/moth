@@ -677,3 +677,28 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   list 2,000 deep), and those limits change with the stack's size, so they
   already differed between the command line and the playground. The Rust
   engine goes further, then stops with the same message.
+- **WebAssembly with no JavaScript.** The same Rust code builds for WASI, the
+  standard system interface of WebAssembly, into one 750 KB file whose only
+  imports are 17 WASI calls (files, the clock, standard input and output,
+  random numbers, arguments), so a WebAssembly runtime runs it with no
+  JavaScript anywhere. The one change is the stack: a runtime may give
+  WebAssembly as little as half a megabyte, so that build stops code nested
+  past 500 levels and values past 1,000 with Moth's own message, where the
+  stack would have run out with a crash. The tests run it under Node's WASI, which is written in C.
+- **Moth builds itself without JavaScript.** compiler.moth gained a second back
+  end, about 500 lines of Moth, that writes the bytecode moth.js's compiler
+  makes, in a text format both it and the Rust engine read and write
+  (`moth-native build`, `moth-native run x.mothc`). Its first run matched the
+  Rust compiler byte for byte on compiler.moth's own 283,823 bytes, and the
+  tests hold it to that on 630 programs and 1,500 broken ones. Then `moth-native
+  bootstrap` runs compiler.moth on the Rust engine to compile itself, runs what
+  that made to do it again, and again: Moth's compiler, written in Moth, run by
+  Rust, building itself, with JavaScript nowhere in the loop.
+- **Numbers as written, as JavaScript reads them.** compiler.moth keeps number
+  tokens as text, so the bytecode back end has to make numbers of them the way
+  JavaScript's `Number()` does. Decimals go through `number of`; `0x` and `0b`
+  numbers past 2^53 are rounded by hand, half to even, from their bits.
+- **The old trap, once more.** In Moth a `set` inside a function changes a
+  variable of the top level with the same name, and defining a function counts.
+  The new back end's helper `here` would have been overwritten by `resolve`'s
+  own `set here to scope`, as `place` was before: it's `code_length` instead.

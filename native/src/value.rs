@@ -190,7 +190,7 @@ pub fn json_string(s: &str) -> String {
 
 // How deep a value may hold values before showing or comparing it gives up: JavaScript gives up somewhere
 // past 1,000 levels; this engine goes at least as far.
-pub const MAX_DEPTH: usize = 100_000;
+pub const MAX_DEPTH: usize = if cfg!(target_family = "wasm") { 1_000 } else { 100_000 }; // a WebAssembly runtime's stack is smaller
 
 pub struct TooBig; // a value too big (or too deep) to show
 

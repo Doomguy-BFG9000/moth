@@ -1733,3 +1733,562 @@ to compile with source, files
     end
     return record with js code of main + "\nreturn [" + joined(slots, ", ") + "];", ats ats, names names of scope of main
 end
+
+# ---------- bytecode ----------
+
+# The other back end: the bytecode moth.js's compiler makes for its virtual machine, which the Rust engine
+# (native/) runs too, as text (native/src/bytecode.rs shows the shape). Instruction for instruction and
+# constant for constant it is what both of those compilers make, so the Rust engine can run Moth's compiler
+# compiling itself, with no JavaScript anywhere.
+
+# each instruction's number, in the order of OPCODES in vm.js
+set op_get to 0
+set op_set to 1
+set op_const to 2
+set op_jump to 3
+set op_jump_if_false to 4
+set op_compare to 5
+set op_add to 6
+set op_sub to 7
+set op_mul to 8
+set op_div to 9
+set op_call to 10
+set op_get_fn to 11
+set op_return to 12
+set op_pop to 13
+set op_and to 14
+set op_or to 15
+set op_neg to 16
+set op_not to 17
+set op_list to 18
+set op_length to 19
+set op_item to 20
+set op_item_ref to 21
+set op_set_item to 22
+set op_add_to to 23
+set op_say to 24
+set op_check_repeat to 25
+set op_repeat_next to 26
+set op_check_range to 27
+set op_range_next to 28
+set op_iter to 29
+set op_iter_next to 30
+set op_make_fn to 31
+set op_undefined to 32
+set op_halt to 33
+set op_turtle to 35
+set op_record to 36
+set op_field to 37
+set op_record_ref to 38
+set op_set_field to 39
+set op_fail to 40
+set op_builtin to 41
+set op_ask to 42
+set op_try to 43
+set op_end_try to 44
+set op_caught to 45
+set op_dict to 46
+set op_remove to 47
+set op_read to 48
+set op_write to 49
+set op_arguments to 50
+set op_expect to 51
+set op_random to 52
+set op_handle to 53
+set op_every to 54
+set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
+set hex_digits to "0123456789abcdef"
+
+# `0x1F` and `0b101` as JavaScript reads them: the whole number, rounded to the nearest float, half to even
+to based_number with digits, bits_per_digit
+    set bits to empty list
+    for each d in digits
+        set value to (position of lowercase of d in hex_digits) - 1
+        for each i from 1 to bits_per_digit
+            add (shift value right by bits_per_digit - i) bit and 1 to bits
+        end
+    end
+    set first to 0
+    set i to 0
+    for each b in bits
+        add 1 to i
+        if first is 0 and b is 1
+            set first to i
+        end
+    end
+    if first is 0
+        return 0
+    end
+    set count to length of bits - first + 1
+    set mantissa to 0
+    set i to 0
+    for each b in bits
+        add 1 to i
+        if i is at least first and i is less than first + 53
+            set mantissa to mantissa * 2 + b
+        end
+    end
+    if count is at most 53
+        return mantissa
+    end
+    set half to item (first + 53) of bits is 1
+    set more to no
+    for each i from first + 54 to length of bits
+        if item i of bits is 1
+            set more to yes
+        end
+    end
+    if half and (more or mantissa bit and 1 is 1)
+        add 1 to mantissa
+    end
+    repeat count - 53 times
+        set mantissa to mantissa * 2
+    end
+    return mantissa
+end
+
+# a number token's value, from the text it was written as
+to number_value with written
+    set digits to ""
+    set k to 0
+    for each c in written
+        add 1 to k
+        if k is greater than 2
+            add c to digits
+        end
+    end
+    if position of "0x" in written is 1
+        return based_number(digits, 4)
+    end
+    if position of "0b" in written is 1
+        return based_number(digits, 1)
+    end
+    return number of written
+end
+
+# The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
+# where each instruction came from, the loops around the code being compiled (innermost first), and the
+# `try`s around it in this function.
+to bytecode_function with outer, name, params, body
+    set parent_scope to nothing
+    if outer is not nothing
+        set parent_scope to scope of outer
+    end
+    set fc to record with scope new_scope(parent_scope, params, body), name name, params params, code empty list, consts empty list, places empty list, loops nothing, tries 0
+    for each s in body
+        bytecode_statement(fc, s)
+    end
+    if outer is nothing
+        emit(fc, nothing, list of op_halt)
+    else
+        set k to constant(fc, record with what "nothing", value nothing)
+        emit(fc, nothing, list of op_const, k, op_return)
+    end
+    return fc
+end
+
+# an instruction and its operands; where it came from is kept at its own place
+to emit with fc, at, codes
+    set code to code of fc
+    set places to places of fc
+    add at to places
+    for each n from 2 to length of codes
+        add nothing to places
+    end
+    for each c in codes
+        add c to code
+    end
+end
+
+to constant with fc, made
+    set consts to consts of fc
+    add made to consts
+    return length of consts - 1
+end
+
+to text_constant with fc, text
+    return constant(fc, record with what "text", value text)
+end
+
+to code_length with fc
+    return length of code of fc
+end
+
+# a jump whose target comes later: where to put it, for patch
+to jump with fc, at, op, target
+    emit(fc, at, list of op, target)
+    return code_length(fc) - 1
+end
+
+to patch with fc, i
+    set item (i + 1) of code of fc to code_length(fc)
+end
+
+to undefined_code with fc, wanted, at, call, statement
+    set message to undefined_message(scope of fc, wanted, call, statement)
+    emit(fc, at, list of op_undefined, text_constant(fc, message))
+end
+
+to load with fc, wanted, at
+    set found to resolve(scope of fc, wanted)
+    if found is nothing
+        undefined_code(fc, wanted, at, no, no)
+    else
+        emit(fc, at, list of op_get, depth of found, slot of found, text_constant(fc, wanted))
+    end
+end
+
+to store with fc, wanted, at
+    set found to resolve(scope of fc, wanted)
+    emit(fc, at, list of op_set, depth of found, slot of found)
+end
+
+# a loop's body: `state` is how many values the loop keeps on the stack while it runs, which a `stop` takes off
+to loop_statements with fc, body, state
+    set loops of fc to record with state state, stops empty list, tries tries of fc, outer loops of fc
+    for each s in body
+        bytecode_statement(fc, s)
+    end
+end
+
+to patch_stops with fc
+    for each i in stops of loops of fc
+        patch(fc, i)
+    end
+    set loops of fc to outer of loops of fc
+end
+
+to looped with fc, s, loop_name, next, state
+    set top to code_length(fc)
+    set exit to jump(fc, at of s, next, -1)
+    if loop_name is not nothing
+        store(fc, loop_name, at of s)
+    end
+    loop_statements(fc, body of s, state)
+    jump(fc, at of s, op_jump, top)
+    patch(fc, exit)
+    patch_stops(fc)
+end
+
+to bytecode_call with fc, e, statement
+    set found to resolve(scope of fc, name of e)
+    if found is nothing
+        undefined_code(fc, name of e, at of e, yes, statement)
+    else
+        emit(fc, at of e, list of op_get_fn, depth of found, slot of found, text_constant(fc, name of e))
+    end
+    for each arg in args of e
+        bytecode_expr(fc, arg)
+    end
+    emit(fc, at of e, list of op_call, length of args of e, text_constant(fc, name of e))
+end
+
+to bytecode_child with fc, d
+    set made to bytecode_function(fc, name of d, params of d, body of d)
+    return constant(fc, record with what "function", value made)
+end
+
+to bytecode_statement with fc, s
+    set what to kind of s
+    if what is "set"
+        bytecode_expr(fc, value of s)
+        store(fc, name of s, at of s)
+    else if what is "setItem"
+        set target to target of s
+        bytecode_expr(fc, subject of target)
+        bytecode_expr(fc, index of target)
+        emit(fc, at of target, list of op_item_ref)
+        bytecode_expr(fc, value of s)
+        emit(fc, at of target, list of op_set_item)
+    else if what is "add"
+        bytecode_expr(fc, value of s)
+        set found to resolve(scope of fc, name of s)
+        if found is nothing
+            undefined_code(fc, name of s, at of s, no, no)
+        else
+            emit(fc, at of s, list of op_add_to, depth of found, slot of found, text_constant(fc, name of s))
+        end
+    else if what is "say"
+        for each part in parts of s
+            bytecode_expr(fc, part)
+        end
+        emit(fc, at of s, list of op_say, length of parts of s)
+    else if what is "if"
+        bytecode_expr(fc, cond of s)
+        set to_else to jump(fc, at of s, op_jump_if_false, -1)
+        for each inner in then of s
+            bytecode_statement(fc, inner)
+        end
+        set to_end to jump(fc, at of s, op_jump, -1)
+        patch(fc, to_else)
+        for each inner in otherwise of s
+            bytecode_statement(fc, inner)
+        end
+        patch(fc, to_end)
+    else if what is "while"
+        set top to code_length(fc)
+        bytecode_expr(fc, cond of s)
+        set exit to jump(fc, at of s, op_jump_if_false, -1)
+        loop_statements(fc, body of s, 0)
+        jump(fc, at of s, op_jump, top)
+        patch(fc, exit)
+        patch_stops(fc)
+    else if what is "repeat"
+        bytecode_expr(fc, count of s)
+        emit(fc, at of s, list of op_check_repeat)
+        looped(fc, s, nothing, op_repeat_next, 1)
+    else if what is "count"
+        bytecode_expr(fc, start of s)
+        bytecode_expr(fc, limit of s)
+        emit(fc, at of s, list of op_check_range)
+        looped(fc, s, name of s, op_range_next, 2)
+    else if what is "each"
+        bytecode_expr(fc, over of s)
+        emit(fc, at of s, list of op_iter)
+        looped(fc, s, name of s, op_iter_next, 1)
+    else if what is "define"
+        emit(fc, at of s, list of op_make_fn, bytecode_child(fc, s))
+        store(fc, name of s, at of s)
+    else if what is "when" # a handler is a function of its own, made and handed over, not kept in a variable
+        emit(fc, at of s, list of op_make_fn, bytecode_child(fc, fn of s))
+        emit(fc, at of s, list of op_handle, slot_of(event_names, event of s) - 1)
+    else if what is "every"
+        set d to fn of s
+        set made to bytecode_function(fc, name of d, params of d, body of d)
+        bytecode_expr(fc, interval of s)
+        emit(fc, at of s, list of op_make_fn, constant(fc, record with what "function", value made))
+        emit(fc, at of s, list of op_every, unit of s)
+    else if what is "return"
+        if value of s is nothing
+            emit(fc, at of s, list of op_const, constant(fc, record with what "nothing", value nothing))
+        else
+            bytecode_expr(fc, value of s)
+        end
+        emit(fc, at of s, list of op_return)
+    else if what is "call"
+        bytecode_call(fc, s, yes)
+        emit(fc, at of s, list of op_pop)
+    else if what is "turtle"
+        if value of s is not nothing
+            bytecode_expr(fc, value of s)
+        end
+        emit(fc, at of s, list of op_turtle, slot_of(turtle_actions, action of s) - 1)
+    else if what is "setField"
+        bytecode_expr(fc, target of s)
+        emit(fc, at of s, list of op_record_ref, text_constant(fc, name of s))
+        bytecode_expr(fc, value of s)
+        emit(fc, at of s, list of op_set_field, text_constant(fc, name of s))
+    else if what is "fail"
+        bytecode_expr(fc, value of s)
+        emit(fc, at of s, list of op_fail)
+    else if what is "remove"
+        bytecode_expr(fc, key of s)
+        bytecode_expr(fc, target of s)
+        emit(fc, at of s, list of op_remove)
+    else if what is "write"
+        bytecode_expr(fc, value of s)
+        bytecode_expr(fc, target of s)
+        emit(fc, at of s, list of op_write)
+    else if what is "expect" # a comparison keeps both its sides, to say what they were
+        set c to cond of s
+        if kind of c is "compare"
+            bytecode_expr(fc, left of c)
+            bytecode_expr(fc, right of c)
+            set negated to 0
+            if negate of c
+                set negated to 1
+            end
+            emit(fc, at of s, list of op_expect, slot_of(comparisons, op of c) - 1, negated)
+        else
+            bytecode_expr(fc, c)
+            emit(fc, at of s, list of op_expect, -1, 0)
+        end
+    else if what is "try"
+        set to_handler to jump(fc, at of s, op_try, -1)
+        set tries of fc to tries of fc + 1
+        for each inner in body of s
+            bytecode_statement(fc, inner)
+        end
+        set tries of fc to tries of fc - 1
+        emit(fc, at of s, list of op_end_try)
+        set to_end to jump(fc, at of s, op_jump, -1)
+        patch(fc, to_handler)
+        emit(fc, at of s, list of op_caught)
+        if name of s is not nothing
+            store(fc, name of s, at of s)
+        else
+            emit(fc, at of s, list of op_pop)
+        end
+        for each inner in handler of s
+            bytecode_statement(fc, inner)
+        end
+        patch(fc, to_end)
+    else if what is "stop" # leave the tries inside the loop, take its own values off the stack, and jump to its end
+        set innermost to loops of fc
+        for each n from tries of innermost to tries of fc - 1
+            emit(fc, at of s, list of op_end_try)
+        end
+        repeat state of innermost times
+            emit(fc, at of s, list of op_pop)
+        end
+        set stops to stops of innermost
+        add jump(fc, at of s, op_jump, -1) to stops
+    end
+end
+
+to bytecode_list with fc, nodes
+    for each node in nodes
+        bytecode_expr(fc, node)
+    end
+end
+
+to bytecode_expr with fc, e
+    set what to kind of e
+    if what is "value"
+        set literal to record with what type of e, value nothing
+        if type of e is "number"
+            set value of literal to number_value(value of e)
+        else if type of e is "string"
+            set what of literal to "text"
+            set value of literal to value of e
+        end
+        emit(fc, at of e, list of op_const, constant(fc, literal))
+    else if what is "name"
+        load(fc, name of e, at of e)
+    else if what is "call"
+        bytecode_call(fc, e, no)
+    else if what is "math"
+        bytecode_expr(fc, left of e)
+        bytecode_expr(fc, right of e)
+        emit(fc, at of e, list of look_up(op of e, math_signs, math_ops))
+    else if what is "compare"
+        bytecode_expr(fc, left of e)
+        bytecode_expr(fc, right of e)
+        emit(fc, at of e, list of op_compare, slot_of(comparisons, op of e) - 1)
+        if negate of e
+            emit(fc, at of e, list of op_not)
+        end
+    else if what is "and" or what is "or"
+        bytecode_expr(fc, left of e)
+        set op to op_or
+        if what is "and"
+            set op to op_and
+        end
+        set to_end to jump(fc, at of e, op, -1)
+        bytecode_expr(fc, right of e)
+        patch(fc, to_end)
+    else if what is "not"
+        bytecode_expr(fc, operand of e)
+        emit(fc, at of e, list of op_not)
+    else if what is "negate"
+        bytecode_expr(fc, operand of e)
+        emit(fc, at of e, list of op_neg)
+    else if what is "list"
+        bytecode_list(fc, items of e)
+        emit(fc, at of e, list of op_list, length of items of e)
+    else if what is "length"
+        bytecode_expr(fc, subject of e)
+        emit(fc, at of e, list of op_length)
+    else if what is "item"
+        bytecode_expr(fc, subject of e)
+        bytecode_expr(fc, index of e)
+        emit(fc, at of e, list of op_item)
+    else if what is "record"
+        bytecode_list(fc, values of e)
+        emit(fc, at of e, list of op_record, constant(fc, record with what "fields", value fields of e))
+    else if what is "dictionary"
+        bytecode_list(fc, items of e)
+        emit(fc, at of e, list of op_dict, length of items of e)
+    else if what is "field"
+        bytecode_expr(fc, subject of e)
+        emit(fc, at of e, list of op_field, text_constant(fc, name of e))
+    else if what is "ask"
+        bytecode_expr(fc, question of e)
+        emit(fc, at of e, list of op_ask)
+    else if what is "read"
+        bytecode_expr(fc, subject of e)
+        set flag to 0
+        if binary of e
+            set flag to 1
+        end
+        emit(fc, at of e, list of op_read, flag)
+    else if what is "arguments"
+        emit(fc, at of e, list of op_arguments)
+    else if what is "random"
+        bytecode_expr(fc, left of e)
+        bytecode_expr(fc, right of e)
+        emit(fc, at of e, list of op_random)
+    else if what is "builtin"
+        bytecode_list(fc, args of e)
+        emit(fc, at of e, list of op_builtin, slot_of(builtin_names, name of e) - 1)
+    end
+end
+
+# where an instruction came from, as the text has it: line:col, line:col:"file", or - for nowhere
+to place_text with at
+    if at is nothing
+        return "-"
+    end
+    if file of at is ""
+        return "" + line of at + ":" + col of at
+    end
+    return "" + line of at + ":" + col of at + ":" + quote(file of at)
+end
+
+# a line of the text: a word, then each piece after a space
+to text_line with head, pieces
+    set out to head
+    for each piece in pieces
+        add " " + piece to out
+    end
+    return out
+end
+
+to function_lines with fc, lines
+    add "function " + quote(name of fc) to lines
+    set quoted to empty list
+    for each p in params of fc
+        add quote(p) to quoted
+    end
+    add text_line("params", quoted) to lines
+    set quoted to empty list
+    for each n in names of scope of fc
+        add quote(n) to quoted
+    end
+    add text_line("names", quoted) to lines
+    add text_line("code", code of fc) to lines
+    set where to empty list
+    for each at in places of fc
+        add place_text(at) to where
+    end
+    add text_line("at", where) to lines
+    for each c in consts of fc
+        set made to what of c
+        if made is "number"
+            add "const number " + value of c to lines
+        else if made is "text"
+            add "const text " + quote(value of c) to lines
+        else if made is "fields"
+            set quoted to empty list
+            for each f in value of c
+                add quote(f) to quoted
+            end
+            add text_line("const fields", quoted) to lines
+        else if made is "function"
+            add "const function" to lines
+            function_lines(value of c, lines)
+        else
+            add "const " + made to lines # nothing, yes or no
+        end
+    end
+    add "end" to lines
+end
+
+# Moth source, and the files it may use (records with a name and a text); out comes its bytecode, as text
+to compile_bytecode with source, files
+    set reading to record with files files, loaded empty list, open empty list, within ""
+    set main to bytecode_function(nothing, "main", empty list, parse(tokenize(source, ""), reading))
+    set lines to list of "moth bytecode 1"
+    function_lines(main, lines)
+    return joined(lines, "\n") + "\n"
+end

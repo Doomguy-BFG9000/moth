@@ -41,7 +41,7 @@ function onJs(job) {
     error = { message: err.message, col: err.col, trail: err.trail.map(({ name, line, col, file, times }) => ({ name, line, col, file: file ?? null, times })) };
   }
   const left = disk && Object.fromEntries([...disk.files].map(([name, data]) => [name, typeof data === "string" ? { text: data } : { bytes: [...data] }]));
-  return JSON.parse(JSON.stringify({ said, drawn, error, disk: left ?? null, app, bytecode })); // as JSON has it: Infinity is null
+  return JSON.parse(JSON.stringify({ said, drawn, error, disk: left ?? null, app, bytecode, mothc: null })); // as JSON has it: Infinity is null
 }
 
 // Many jobs at once on the Rust engine, one line of JSON each way
@@ -106,6 +106,51 @@ test("the Rust engine runs Moth's compiler written in Moth, which compiles itsel
   assert.ok(rust.said.join("\n").length > 100_000);
 });
 
+// compiler.moth's bytecode back end, run on the Rust engine, against the Rust compiler: the same bytecode file,
+// byte for byte, or the same mistake at the same spot
+function bothCompilers(sources) {
+  const disk = Object.fromEntries(sources.map((source, i) => [`p${i + 1}.moth`, { text: source }]));
+  const driver = [
+    `for each i from 1 to ${sources.length}`,
+    "    try",
+    '        say compile_bytecode(read "p" + i + ".moth", empty list)',
+    "    if it fails with why",
+    "        try",
+    '            say "error " + line of at of why + ":" + col of at of why + " " + reason of why',
+    "        if it fails",
+    '            say "crashed: " + why',
+    "        end",
+    "    end",
+    "end",
+  ].join("\n");
+  const [moth] = onRust([{ source: `${here("compiler.moth")}\n${driver}`, disk }]);
+  assert.equal(moth.error, null);
+  const rust = onRust(sources.map((source) => ({ source, mothc: true, maxSteps: 1_000 }))); // some generated programs never end
+  sources.forEach((source, i) => {
+    const error = rust[i].error && rust[i].error.message.match(/^line (\d+): (.*)$/s);
+    const expected = rust[i].mothc ?? `error ${error[1]}:${rust[i].error.col} ${error[2]}`;
+    assert.equal(moth.said[i], expected, source.slice(0, 2000));
+  });
+}
+
+test("Moth's compiler, written in Moth, writes the same bytecode as the Rust compiler, byte for byte", { skip }, () => {
+  // numbers past 2^53 written in hex and binary, which have to be rounded, half to even
+  const big = "say 0x20000000000001, 0x20000000000003, 0x1FFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFF800, 0xFFFFFFFFFFFFFC00, 0x8000000000000400\n"
+    + `say 0b${"1".repeat(60)}, 0b1${"0".repeat(52)}1, 0x${"F".repeat(300)}, 123456789012345678901234567890, 0.1, 007, 1.50`;
+  const sources = [big, ...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s), ...generatePrograms(31, 400)];
+  bothCompilers(sources.filter((source) => whole({ source })));
+});
+
+test("...and on 1,500 randomly broken programs, stops at the same mistakes", { skip }, () => {
+  bothCompilers(brokenPrograms(5, 1500).filter((source) => whole({ source })));
+});
+
+test("moth-native bootstrap builds the compiler written in Moth with itself, with no JavaScript", { skip }, () => {
+  const ran = spawnSync(BINARY, ["bootstrap", fileURLToPath(new URL("./compiler.moth", import.meta.url))], { encoding: "utf8" });
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.equal(ran.stdout.match(/the same bytecode/g).length, 3);
+});
+
 test("the Rust engine shows numbers, rounds and draws exactly as JavaScript does", { skip }, () => {
   const numbers = [
     "set x to 1",
@@ -150,6 +195,46 @@ test("the Rust engine treats text as JavaScript does: every character's upper an
     jobs.push({ source: `set b to list of ${bytes.join(", ")}\nsay b as bytes as text\nsay length of (b as bytes as text)` });
   }
   agree(jobs, "text");
+});
+
+// ---------- WebAssembly ----------
+
+// moth-native built for WASI (cargo build --release --target wasm32-wasip1), run here by Node's own WASI; any
+// WebAssembly runtime with WASI runs it the same way, with no JavaScript at all
+const WASM = fileURLToPath(new URL("./native/target/wasm32-wasip1/release/moth-native.wasm", import.meta.url));
+const noWasm = existsSync(WASM) ? false : "the WebAssembly build isn't made (cargo build --release --target wasm32-wasip1 in native/)";
+const WASI_RUNNER = `
+import { readFileSync } from "node:fs";
+import { WASI } from "node:wasi";
+const wasi = new WASI({ version: "preview1", args: ["moth-native", ...process.argv.slice(1)], env: {}, preopens: { ".": "." }, returnOnExit: true });
+const module = await WebAssembly.compile(readFileSync(${JSON.stringify(WASM)}));
+process.exitCode = wasi.start(await WebAssembly.instantiate(module, wasi.getImportObject()));
+`;
+const onWasm = (args, options) => spawnSync(process.execPath, ["--no-warnings", "--input-type=module", "-e", WASI_RUNNER, "--", ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options });
+
+test("moth-native as WebAssembly needs nothing but WASI, and agrees with the JavaScript VM on the test and broken programs", { skip: skip || noWasm }, () => {
+  const imports = WebAssembly.Module.imports(new WebAssembly.Module(readFileSync(WASM)));
+  assert.deepEqual([...new Set(imports.map((i) => i.module))], ["wasi_snapshot_preview1"]); // no JavaScript to call
+  const sources = [...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s)];
+  const jobs = [...sources.map((source) => ({ source, bytecode: true, answers: ["50", "25", "37"] })), ...brokenPrograms(42, 1000).map((source) => ({ source, maxSteps: 10_000 }))].filter(whole);
+  const ran = onWasm(["conform"], { input: jobs.map((job) => JSON.stringify(job)).join("\n") + "\n" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trim().split("\n");
+  assert.equal(lines.length, jobs.length);
+  jobs.forEach((job, i) => assert.deepEqual(JSON.parse(lines[i]), onJs(job), job.source.slice(0, 2000)));
+});
+
+test("moth-native as WebAssembly runs a program's files, its answers and its mistakes, and builds Moth's compiler with itself", { skip: skip || noWasm }, (t) => {
+  const dir = tempDir(t);
+  writeFileSync(join(dir, "main.moth"), 'set name to ask "Name?"\nwrite "hi " + name to "out.txt"\nsay read "out.txt"\nsay item 9 of list of 1');
+  const ran = onWasm(["run", "main.moth"], { cwd: dir, input: "Sam\n" });
+  assert.equal(ran.stdout, "Name? Sam\nhi Sam\n");
+  assert.equal(ran.stderr, "main.moth:4:5: there is no item 9, the list only has 1 item\nsay item 9 of list of 1\n    ^\n");
+  assert.equal(ran.status, 1);
+  writeFileSync(join(dir, "compiler.moth"), here("compiler.moth"));
+  const built = onWasm(["bootstrap", "compiler.moth"], { cwd: dir });
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  assert.equal(built.stdout.match(/the same bytecode/g).length, 3);
 });
 
 // ---------- the command line ----------

@@ -1,5 +1,6 @@
 // moth-native: Moth with no JavaScript anywhere. Its own lexer, parser, compiler and virtual machine, which
 // run every program exactly as the JavaScript engines do (the tests check that on thousands of programs).
+mod bytecode;
 mod compiler;
 mod error;
 mod json;
@@ -16,6 +17,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use vm::{Drawn, FileData, Host, Machine};
 
 const USAGE: &str = "usage:
@@ -24,8 +26,13 @@ const USAGE: &str = "usage:
                               the file is the program's arguments
   moth-native test [files...] run the tests: each function named test_..., on its own; with no file,
                               every file ending in .test.moth here and in the folders inside
+  moth-native build <file.moth>
+                              compile it to <file>.mothc, bytecode moth-native runs without compiling again
   moth-native bytecode <file.moth>
-                              show the bytecode the compiler makes, the same as `moth bytecode`";
+                              show the bytecode the compiler makes, the same as `moth bytecode`
+  moth-native bootstrap <compiler.moth>
+                              build Moth's compiler written in Moth with itself, three times over, with no
+                              JavaScript anywhere";
 
 // ---------- randomness ----------
 
@@ -308,7 +315,7 @@ fn read_program(file: &str) -> Result<String, String> {
 }
 
 fn run_command(file: &str, args: Vec<String>) -> i32 {
-    let source = match read_program(file) {
+    let mut source = match read_program(file) {
         Ok(s) => s,
         Err(message) => {
             eprintln!("{message}");
@@ -318,7 +325,23 @@ fn run_command(file: &str, args: Vec<String>) -> i32 {
     let sources = Sources::beside(file);
     let mut real = Real::new();
     let mut terminal = Terminal::new(args, Box::new(move || real.number()));
-    let result = run_source(&source, &sources, file, &mut terminal, f64::INFINITY);
+    let result = if bytecode::is_bytecode(&source) {
+        // compiled already: the program's own source, if it's beside it, is only for showing mistakes
+        let program = match bytecode::read(&source) {
+            Ok(p) => Rc::new(p),
+            Err(why) => {
+                eprintln!("moth-native: {file}: {why}");
+                return 1;
+            }
+        };
+        source =
+            std::fs::read(format!("{}.moth", strip_moth_c(file))).map(|d| String::from_utf8_lossy(&d).into_owned()).unwrap_or_default();
+        let env = vm::new_env(&program, None);
+        let mut machine = Machine::new(&mut terminal, f64::INFINITY);
+        machine.run(program, env).map(|()| !machine.listeners.is_empty())
+    } else {
+        run_source(&source, &sources, file, &mut terminal, f64::INFINITY)
+    };
     let _ = terminal.out.flush();
     match result {
         Err(err) => {
@@ -344,6 +367,113 @@ fn run_command(file: &str, args: Vec<String>) -> i32 {
             0
         }
     }
+}
+
+fn strip_moth_c(file: &str) -> &str {
+    if file.len() >= 6 && file[file.len() - 6..].eq_ignore_ascii_case(".mothc") {
+        &file[..file.len() - 6]
+    } else {
+        strip_moth(file)
+    }
+}
+
+// `moth-native build`: the program's bytecode, as a file to run later without compiling it again
+fn build_command(file: &str) -> i32 {
+    let source = match read_program(file) {
+        Ok(s) => s,
+        Err(message) => {
+            eprintln!("{message}");
+            return 1;
+        }
+    };
+    let sources = Sources::beside(file);
+    match compile(&source, &|name| sources.get(name), Some(&basename(file))) {
+        Ok(main) => {
+            let out = format!("{}.mothc", strip_moth(file));
+            if let Err(e) = std::fs::write(&out, bytecode::write(&main)) {
+                eprintln!("moth-native: can't write {out} ({e})");
+                return 1;
+            }
+            println!("compiled {file} -> {out}");
+            0
+        }
+        Err(err) => {
+            eprintln!("{}", report(&err, &source, file, &sources));
+            1
+        }
+    }
+}
+
+// `moth-native bootstrap`: compiler.moth, with a line that compiles the program it's part of, compiled by this
+// engine's compiler; then that bytecode, run, compiles it again with compiler.moth's own bytecode back end;
+// then what that made does the same, and again. Each must make exactly the bytecode this engine's compiler
+// made: the compiler written in Moth builds itself, with Rust running it and no JavaScript anywhere.
+fn bootstrap_command(file: &str) -> i32 {
+    let compiler = match read_program(file) {
+        Ok(s) => s,
+        Err(message) => {
+            eprintln!("{message}");
+            return 1;
+        }
+    };
+    let whole = format!("{}\nwrite compile_bytecode(read \"self.moth\", empty list) to \"self.mothc\"\n", compiler.trim_end());
+    let first = match compile(&whole, &|_| None, None) {
+        Ok(main) => bytecode::write(&main),
+        Err(err) => {
+            eprintln!("{}", report(&err, &whole, file, &Sources::beside(file)));
+            return 1;
+        }
+    };
+    println!(
+        "{}: {} lines of Moth, which moth-native's compiler (in Rust) makes into {} bytes of bytecode",
+        basename(file),
+        compiler.lines().count(),
+        first.len()
+    );
+    let mut current = first.clone();
+    for stage in 1..=3 {
+        let program = match bytecode::read(&current) {
+            Ok(p) => Rc::new(p),
+            Err(why) => {
+                eprintln!("moth-native: stage {stage}'s bytecode: {why}");
+                return 1;
+            }
+        };
+        let mut host = Conform {
+            said: vec![],
+            drawn: vec![],
+            answers: None,
+            disk: Some(BTreeMap::from([("self.moth".to_string(), FileData::Text(whole.clone()))])),
+            args: vec![],
+            random: Seeded(1),
+        };
+        let start = std::time::Instant::now();
+        let ran = Machine::new(&mut host, f64::INFINITY).run(program.clone(), vm::new_env(&program, None));
+        let ms = start.elapsed().as_millis();
+        if let Err(err) = ran {
+            eprintln!("stage {stage} failed: {}", err.message());
+            return 1;
+        }
+        let made = match host.disk.as_ref().and_then(|d| d.get("self.mothc")) {
+            Some(FileData::Text(t)) => t.clone(),
+            _ => {
+                eprintln!("stage {stage} made no bytecode");
+                return 1;
+            }
+        };
+        let by = if stage == 1 { "moth-native's compiler".to_string() } else { format!("stage {}", stage - 1) };
+        let same = made == first;
+        println!(
+            "stage {stage}, made by {by}, compiles compiler.moth: {} ({ms} ms)",
+            if same { "the same bytecode" } else { "DIFFERENT bytecode" }
+        );
+        if !same {
+            return 1;
+        }
+        current = made;
+    }
+    println!("fixed point: the compiler written in Moth builds itself to exactly what moth-native's compiler makes, with no JavaScript");
+    0
 }
 
 fn strip_moth(file: &str) -> &str {
@@ -583,11 +713,15 @@ fn conform_one(line: &str) -> String {
     let max_steps = request.get("maxSteps").and_then(|s| s.num()).unwrap_or(f64::INFINITY);
     let read = |name: &str| files.get(name).cloned();
     let mut bytecode = "null".to_string();
+    let mut mothc = "null".to_string();
     let mut app = Vec::new();
     let result = (|| -> Result<(), MothError> {
         let main = compile(&source, &read, None)?;
         if matches!(request.get("bytecode"), Some(json::Json::Bool(true))) {
             bytecode = t(&disassemble(&main));
+        }
+        if matches!(request.get("mothc"), Some(json::Json::Bool(true))) {
+            mothc = t(&bytecode::write(&main));
         }
         let env = vm::new_env(&main, None);
         let mut machine = Machine::new(&mut host, max_steps);
@@ -643,6 +777,7 @@ fn conform_one(line: &str) -> String {
         ("disk", disk),
         ("app", arr(&app)),
         ("bytecode", bytecode),
+        ("mothc", mothc),
     ])
 }
 
@@ -686,6 +821,8 @@ fn real_main() -> i32 {
     match args.first().map(String::as_str) {
         Some("run") if args.len() >= 2 => run_command(&args[1], args[2..].to_vec()),
         Some("bytecode") if args.len() == 2 => bytecode_command(&args[1]),
+        Some("build") if args.len() == 2 => build_command(&args[1]),
+        Some("bootstrap") if args.len() == 2 => bootstrap_command(&args[1]),
         Some("test") => test_command(args[1..].to_vec()),
         Some("conform") => conform_command(),
         Some("bench") => bench_command(),
@@ -702,7 +839,10 @@ fn real_main() -> i32 {
 
 fn main() {
     // the parser and compiler go as deep as the code is nested, and showing a value as deep as it holds
-    // values, so they get a big stack of their own
+    // values, so they get a big stack of their own (in WebAssembly, the linker sets it: see .cargo/config.toml)
+    #[cfg(not(target_family = "wasm"))]
     let code = std::thread::Builder::new().stack_size(1 << 30).spawn(real_main).unwrap().join().unwrap_or(101);
+    #[cfg(target_family = "wasm")]
+    let code = real_main();
     std::process::exit(code);
 }

@@ -156,7 +156,7 @@ fn turtle_words(w: &str) -> Option<&'static [&'static str]> {
 
 // How deep the parser may go: JavaScript's own stack runs out somewhere between 900 and 3,750 levels,
 // depending on what is nested; this engine always goes at least as deep, then stops the same way.
-const MAX_NESTING: u32 = 12_000;
+const MAX_NESTING: u32 = if cfg!(target_family = "wasm") { 500 } else { 12_000 }; // a WebAssembly runtime's stack is smaller
 
 // What files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is
 // read once for each set of names), `open` the files being read right now, `within` the alias they're read as.

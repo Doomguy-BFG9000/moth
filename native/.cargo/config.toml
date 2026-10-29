@@ -1,0 +1,4 @@
+# moth-native as WebAssembly (cargo build --release --target wasm32-wasip1, run in this folder) gets a 64 MB
+# stack, so code and values can nest as deep as its limits let them: MAX_NESTING in parser.rs, MAX_DEPTH in value.rs
+[target.wasm32-wasip1]
+rustflags = ["-C", "link-arg=-zstack-size=67108864"]
