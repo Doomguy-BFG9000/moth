@@ -39,6 +39,33 @@ for each i from 1 to 200000
 end
 say total`,
 
+  "1,000,000 bytes, filled and summed": `set block to 1000000 bytes
+for each i from 1 to 1000000
+    set byte i of block to i bit and 255
+end
+set total to 0
+for each i from 1 to 1000000
+    add byte i of block to total
+end
+say total`,
+
+  "200,000 words counted, dictionary": `set counts to empty dictionary
+set words to list of "apple", "pear", "fig", "kiwi", "plum", "lime", "date"
+set k to 0
+repeat 200000 times
+    add 1 to k
+    if k is greater than 7
+        set k to 1
+    end
+    set w to item k of words
+    if w is in counts
+        set item w of counts to item w of counts + 1
+    else
+        set item w of counts to 1
+    end
+end
+say item "fig" of counts`,
+
   "recursion 10,000 deep": `to sum with n
     if n is 0
         return 0

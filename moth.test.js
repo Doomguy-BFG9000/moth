@@ -907,3 +907,36 @@ test("a mistake inside functions shows the calls that led to it, the same on all
   assert.equal(deep.reason, "too much recursion: a function kept calling itself");
   assert.equal(describeTrail(deep.trail), "  in 'dive', called from line 2 (99,999 times)\n  in 'dive', called from line 4");
 });
+
+// ---------- fast paths ----------
+
+// WebAssembly does bytes, bits and dictionary lookups itself where it can, and hands everything else to the
+// shared code. Right at the edges of what it does itself, all three engines must still agree.
+test("WebAssembly's fast paths for bytes, bits and dictionaries agree with the other engines at their edges", () => {
+  const programs = [];
+  const pairs = [[0, 0], [5, 3], [2147483647, 1], [2147483648, 1], [2147483647, 2147483647], [4294967295, 65535],
+    [9007199254740991, 255], [9007199254740992, 1], [1.5, 1], [-1, 1], ['"a"', 1], ["yes", 1]];
+  for (const [a, b] of pairs) for (const op of ["bit and", "bit or", "bit xor"]) programs.push(`say ${a} ${op} ${b}\nsay ${b} ${op} ${a}`);
+  const shifts = [[1, 0], [1, 21], [1, 22], [3, 21], [2147483647, 21], [2147483647, 22], [1, 52], [1, 53], [0, 5000],
+    [5, 31], [5, 32], [2147483647, 31], [4294967296, 1], [1, -1], [1, 0.5], ['"a"', 1]];
+  for (const [x, n] of shifts) for (const way of ["left", "right"]) programs.push(`say shift ${x} ${way} by ${n}`);
+  for (const v of ["0", "255", "256", "-1", "0.5", "-0", "yes", '"a"', "nothing", "list of 1"]) programs.push(`set b to 3 bytes\nset byte 2 of b to ${v}\nsay b`);
+  for (const i of ["0", "1", "3", "4", "1.5", '"a"', "-0"]) {
+    programs.push(`set b to (list of 7, 8, 9) as bytes\nsay byte ${i} of b`);
+    programs.push(`set b to (list of 7, 8, 9) as bytes\nset byte ${i} of b to 1\nsay b`);
+  }
+  for (const n of ["0", "5", "-1", "1.5", '"a"']) programs.push(`set b to ${n} bytes\nsay length of b`);
+  programs.push("set b to 3 bytes\nsay length of b\nfor each x in b\n    say x\nend\nsay b is 3 bytes\nsay 0 is in b\nsay 1 is in b\nsay b is (list of 0, 0, 0) as bytes\nsay b is list of 0, 0, 0");
+  for (const key of ["1", "-0", "0", "1.5", '"1"', '""', "yes", "list of 1", "nothing", "3 bytes"]) {
+    programs.push(`set d to empty dictionary\nset item ${key} of d to "v"\nsay d\nsay item ${key} of d\nsay ${key} is in d`);
+    programs.push(`set d to dictionary where 1 is "one", "1" is "text one"\nsay ${key} is in d\nsay item ${key} of d`);
+  }
+  programs.push('set d to dictionary where 0 is "zero"\nsay item -0 of d\nsay -0 is in d\nsay "0" is in d');
+  programs.push('set d to dictionary where "a" is yes, "b" is nothing, "c" is list of 1\nsay item "a" of d " " item "b" of d " " item "c" of d\nset l to item "c" of d\nadd 2 to l\nsay d\nsay item "a" of d is yes');
+  programs.push('set d to dictionary where "a" is 1\nset item "a" of d to item "a" of d + 1\nsay d\nsay item "b" of d');
+  for (const source of programs) {
+    const vm = outcome(source, "vm");
+    assert.deepEqual(outcome(source, "jit"), vm, `jit: ${source}`);
+    assert.deepEqual(outcome(source, "wasm"), vm, `wasm: ${source}`);
+  }
+});
