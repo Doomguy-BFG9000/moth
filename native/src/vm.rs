@@ -474,6 +474,21 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
     }
 }
 
+// whether a value is what an input says it is (a place in KINDS; -1 says nothing)
+fn fits_kind(kind: i32, v: &Value) -> bool {
+    match kind {
+        0 => matches!(v, Value::Num(_)),
+        1 => matches!(v, Value::Text(_)),
+        2 => matches!(v, Value::Bool(_)),
+        3 => matches!(v, Value::List(_)),
+        4 => matches!(v, Value::Record(_)),
+        5 => matches!(v, Value::Dict(_)),
+        6 => matches!(v, Value::Bytes(_)),
+        7 => matches!(v, Value::Func(_)),
+        _ => true,
+    }
+}
+
 // ---------- the turtle ----------
 
 pub struct Turtle {
@@ -780,6 +795,17 @@ impl<'h> Machine<'h> {
                         let n = callee.func.params.len();
                         if argc != n {
                             fail!(format!("'{}' needs {} but got {argc}", func.text(name_at), plural(n, "input")));
+                        }
+                        for (i, &k) in callee.func.kinds.iter().enumerate() {
+                            if !fits_kind(k, &stack[first + i]) {
+                                fail!(format!(
+                                    "'{}' needs {} to be {}, not {}",
+                                    func.text(name_at),
+                                    callee.func.params[i],
+                                    crate::parser::KINDS[k as usize],
+                                    kind_of(&stack[first + i])
+                                ));
+                            }
                         }
                         if frames.len() >= MAX_DEPTH {
                             fail!("too much recursion: a function kept calling itself".into());

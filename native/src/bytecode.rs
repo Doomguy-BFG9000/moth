@@ -5,6 +5,7 @@
 //   moth bytecode 1
 //   function "main"            each function: its name,
 //   params                     its inputs,
+//   kinds                      what each says it is (a place in vm.js's KINDS, or -1),
 //   names "total" "f"          the name of each slot from 1,
 //   code 2 0 1 0 1 33          its instructions,
 //   at 1:5 - 1:9 - - -         where each came from in the code (line:col, or line:col:"file"; - for none),
@@ -18,7 +19,8 @@ use crate::num;
 use crate::value::Value;
 use std::rc::Rc;
 
-pub const HEADER: &str = "moth bytecode 1";
+pub const HEADER: &str = "moth bytecode 2";
+const HEADER_1: &str = "moth bytecode 1"; // before inputs could say what they are: read, but no longer written
 
 // text in double quotes, as compiler.moth's quote() writes it: \" \\ \n \t, and nothing else escaped
 fn quote(s: &str) -> String {
@@ -55,6 +57,7 @@ pub fn write(main: &Function) -> String {
 fn write_function(f: &Function, out: &mut Vec<String>) {
     out.push(format!("function {}", quote(&f.name)));
     out.push(line("params", f.params.iter().map(|p| quote(p))));
+    out.push(line("kinds", (0..f.params.len()).map(|i| f.kinds.get(i).copied().unwrap_or(-1).to_string())));
     out.push(line("names", f.names[1..].iter().map(|n| quote(n))));
     out.push(line("code", f.code.iter().map(|c| c.to_string())));
     out.push(line(
@@ -87,6 +90,7 @@ fn write_function(f: &Function, out: &mut Vec<String>) {
 struct Reader<'t> {
     lines: Vec<&'t str>,
     at: usize,
+    version: u32,
 }
 
 type R<T> = Result<T, String>;
@@ -157,6 +161,16 @@ impl<'t> Reader<'t> {
     fn function(&mut self) -> R<Function> {
         let name = unquote(self.next("function")?.first().ok_or("a function has no name")?)?;
         let params = self.next("params")?.iter().map(|p| unquote(p)).collect::<R<Vec<_>>>()?;
+        let mut kinds = Vec::new();
+        if self.version > 1 {
+            kinds = self.next("kinds")?.iter().map(|k| k.parse::<i32>().map_err(|e| e.to_string())).collect::<R<Vec<_>>>()?;
+            if kinds.len() != params.len() || kinds.iter().any(|&k| !(-1..8).contains(&k)) {
+                return Err(format!("function {name} has inputs that say what they are wrongly"));
+            }
+            if kinds.iter().all(|&k| k < 0) {
+                kinds.clear(); // none of its inputs say
+            }
+        }
         let mut names = vec![String::new()];
         for n in self.next("names")? {
             names.push(unquote(&n)?);
@@ -200,18 +214,20 @@ impl<'t> Reader<'t> {
             });
         }
         let nslots = names.len() - 1;
-        Ok(Function { name, params, nslots, names, code, consts, at })
+        Ok(Function { name, params, kinds, nslots, names, code, consts, at })
     }
 }
 
 pub fn is_bytecode(text: &str) -> bool {
-    text.starts_with(HEADER)
+    text.starts_with(HEADER) || text.starts_with(HEADER_1)
 }
 
 pub fn read(text: &str) -> R<Function> {
-    let mut r = Reader { lines: text.lines().collect(), at: 0 };
-    if r.lines.first() != Some(&HEADER) {
-        return Err(format!("this isn't Moth bytecode: it should start with '{HEADER}'"));
+    let mut r = Reader { lines: text.lines().collect(), at: 0, version: 2 };
+    match r.lines.first() {
+        Some(&HEADER) => {}
+        Some(&HEADER_1) => r.version = 1,
+        _ => return Err(format!("this isn't Moth bytecode: it should start with '{HEADER}'")),
     }
     r.at = 1;
     let main = r.function()?;

@@ -244,6 +244,9 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
 set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is still a name
+# what an input can say it is, `with width as a number`, in the order of KINDS in vm.js
+set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
+    (list of "a", "record"), (list of "a", "dictionary"), (list of "bytes"), (list of "a", "function")
 set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
@@ -529,13 +532,22 @@ to parse with tokens, reading
         if word("to")
             set fn_name to take_name("a function name")
             set params to empty list
+            set kinds to empty list # what each input says it is: `with width as a number`
             if word("with")
-                add take_name("an input name") to params
-                repeat while match(",") or word("and")
+                set another to yes
+                repeat while another
                     add take_name("an input name") to params
+                    if word("as")
+                        add input_kind() to kinds
+                    else
+                        add -1 to kinds
+                    end
+                    set another to match(",") or word("and")
                 end
             end
-            return func(fn_name, params, t)
+            set made to func(fn_name, params, t)
+            set kinds of made to kinds
+            return made
         end
         if word("when") # `when a key is pressed with key`, `when the mouse is clicked with x and y`
             set start to pos
@@ -743,6 +755,32 @@ to parse with tokens, reading
     end
 
     # the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
+    # `a number`, `text`, `yes or no`...: what an input says it is, by its place in kind_phrases, after its `as`
+    to input_kind
+        set found to -1
+        set n to 0
+        for each phrase in kind_phrases
+            set fits to yes
+            set i to 0
+            for each w in phrase
+                if fits
+                    set ahead to item (pos + i) of tokens
+                    set fits to type of ahead is "word" and value of ahead is w
+                end
+                add 1 to i
+            end
+            if found is -1 and fits
+                set found to n
+            end
+            add 1 to n
+        end
+        if found is -1
+            expected("what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function')")
+        end
+        set pos to pos + length of item (found + 1) of kind_phrases
+        return found
+    end
+
     to func with fn_name, params, t
         set outside_loops to loop_depth
         set fn_depth to fn_depth + 1
@@ -750,7 +788,7 @@ to parse with tokens, reading
         set body to block_end(t)
         set fn_depth to fn_depth - 1
         set loop_depth to outside_loops
-        return record with kind "define", name fn_name, params params, body body, at t
+        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t
     end
 
     to if_rest with t
@@ -1590,7 +1628,13 @@ to closure_code with scope, d
         add v(n, level of scope of inner) to inputs
     end
     set head to "fn(" + quote(name of d) + ", " + quote_list(params of d) + ", function (" + joined(inputs, ", ") + ") {\n"
-    return head + code of inner + "\nreturn null;\n})"
+    set typed to "" # what each input says it is, if any does
+    for each k in kinds of d
+        if k is not -1
+            set typed to ", [" + joined(kinds of d, ", ") + "]"
+        end
+    end
+    return head + code of inner + "\nreturn null;\n}" + typed + ")"
 end
 
 # The function is looked up before its inputs are worked out, and checked after, as in the VM.
@@ -1869,12 +1913,12 @@ end
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
 # where each instruction came from, the loops around the code being compiled (innermost first), and the
 # `try`s around it in this function.
-to bytecode_function with outer, name, params, body
+to bytecode_function with outer, name, params, kinds, body
     set parent_scope to nothing
     if outer is not nothing
         set parent_scope to scope of outer
     end
-    set fc to record with scope new_scope(parent_scope, params, body), name name, params params, code empty list, consts empty list, places empty list, loops nothing, tries 0
+    set fc to record with scope new_scope(parent_scope, params, body), name name, params params, kinds kinds, code empty list, consts empty list, places empty list, loops nothing, tries 0
     for each s in body
         bytecode_statement(fc, s)
     end
@@ -1984,7 +2028,7 @@ to bytecode_call with fc, e, statement
 end
 
 to bytecode_child with fc, d
-    set made to bytecode_function(fc, name of d, params of d, body of d)
+    set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d)
     return constant(fc, record with what "function", value made)
 end
 
@@ -2054,7 +2098,7 @@ to bytecode_statement with fc, s
         emit(fc, at of s, list of op_handle, slot_of(event_names, event of s) - 1)
     else if what is "every"
         set d to fn of s
-        set made to bytecode_function(fc, name of d, params of d, body of d)
+        set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d)
         bytecode_expr(fc, interval of s)
         emit(fc, at of s, list of op_make_fn, constant(fc, record with what "function", value made))
         emit(fc, at of s, list of op_every, unit of s)
@@ -2251,6 +2295,17 @@ to function_lines with fc, lines
         add quote(p) to quoted
     end
     add text_line("params", quoted) to lines
+    set quoted to empty list # what each input says it is, -1 for one that doesn't
+    set i to 0
+    for each p in params of fc
+        add 1 to i
+        set k to -1
+        if i is at most length of kinds of fc
+            set k to item i of kinds of fc
+        end
+        add "" + k to quoted
+    end
+    add text_line("kinds", quoted) to lines
     set quoted to empty list
     for each n in names of scope of fc
         add quote(n) to quoted
@@ -2287,8 +2342,8 @@ end
 # Moth source, and the files it may use (records with a name and a text); out comes its bytecode, as text
 to compile_bytecode with source, files
     set reading to record with files files, loaded empty list, open empty list, within ""
-    set main to bytecode_function(nothing, "main", empty list, parse(tokenize(source, ""), reading))
-    set lines to list of "moth bytecode 1"
+    set main to bytecode_function(nothing, "main", empty list, empty list, parse(tokenize(source, ""), reading))
+    set lines to list of "moth bytecode 2"
     function_lines(main, lines)
     return joined(lines, "\n") + "\n"
 end

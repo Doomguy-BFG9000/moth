@@ -3,7 +3,7 @@
 // run thousands of random programs through both and require the same output, drawings and errors.
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
-  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
+  addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
@@ -129,7 +129,8 @@ class JsCompiler extends Scope {
   closure(d) {
     const inner = new JsCompiler(this, d.name, d.params, d.body, this.ats);
     const params = d.params.map((_, i) => inner.v(i + 1)).join(", ");
-    return `fn(${q(d.name)}, ${q(d.params)}, function (${params}) {\n${inner.code}\nreturn null;\n})`;
+    const kinds = d.kinds?.some((k) => k >= 0) ? `, [${d.kinds.join(", ")}]` : ""; // what each input says it is, if any does
+    return `fn(${q(d.name)}, ${q(d.params)}, function (${params}) {\n${inner.code}\nreturn null;\n}${kinds})`;
   }
 
   // The function is looked up before its inputs are worked out, and checked after, as in the VM.
@@ -228,8 +229,9 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
       fail(ats[k], stoppedMessage(maxSteps), undefined, true, calls); // final: no try catches it
     }
   };
-  const enter = (f, argc, name, k) => {
+  const enter = (f, argc, name, k, args) => {
     checkInputs(f, argc, name, errors[k]);
+    if (args) checkKinds(f, args, name, errors[k]); // only a function whose inputs say what they are gets them
     tick(k);
     if (depth >= MAX_DEPTH) {
       depth = 0;
@@ -250,13 +252,13 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     tick,
     fail: (message, k) => errors[k](message),
     unset: (name, k) => errors[k](noValue(name)),
-    fn: (name, params, run) => new Closure({ name, params, run }, null),
+    fn: (name, params, run, kinds) => new Closure(kinds ? { name, params, run, kinds } : { name, params, run }, null),
     callable: (f, name, k) => callable(f, name, errors[k]),
     call0: (f, name, k) => (enter(f, 0, name, k), leave(f.fn.run())),
-    call1: (f, a, name, k) => (enter(f, 1, name, k), leave(f.fn.run(a))),
-    call2: (f, a, b, name, k) => (enter(f, 2, name, k), leave(f.fn.run(a, b))),
-    call3: (f, a, b, c, name, k) => (enter(f, 3, name, k), leave(f.fn.run(a, b, c))),
-    callN: (f, args, name, k) => (enter(f, args.length, name, k), leave(f.fn.run(...args))),
+    call1: (f, a, name, k) => (enter(f, 1, name, k, f.fn.kinds && [a]), leave(f.fn.run(a))),
+    call2: (f, a, b, name, k) => (enter(f, 2, name, k, f.fn.kinds && [a, b]), leave(f.fn.run(a, b))),
+    call3: (f, a, b, c, name, k) => (enter(f, 3, name, k, f.fn.kinds && [a, b, c]), leave(f.fn.run(a, b, c))),
+    callN: (f, args, name, k) => (enter(f, args.length, name, k, f.fn.kinds && args), leave(f.fn.run(...args))),
     add: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a + b : plus(a, b, errors[k])),
     sub: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a - b : arithmetic("-", a, b, errors[k])),
     mul: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a * b : arithmetic("*", a, b, errors[k])),

@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, seeded, EVENTS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -242,8 +242,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (word("to")) {
       const fnName = name("a function name");
       const params = [];
-      if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
-      return func(fnName, params, t);
+      const kinds = []; // what each input says it is: `with width as a number`
+      if (word("with")) {
+        do {
+          params.push(name("an input name"));
+          kinds.push(word("as") ? kind() : -1);
+        } while (match(",") || word("and"));
+      }
+      return { ...func(fnName, params, t), kinds };
     }
     if (word("when")) { // `when a key is pressed with key`, `when the mouse is clicked with x and y`
       const start = pos;
@@ -343,6 +349,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "call", name: called, args, at: t };
     }
     fail(t, `a line can't start with ${describe(t)}`);
+  }
+
+  // `a number`, `text`, `yes or no`...: what an input says it is (one of KINDS in vm.js), after its `as`
+  function kind() {
+    const phrases = KINDS.map((k) => k.split(" "));
+    const at = phrases.findIndex((words) => words.every((w, i) => tokens[pos + i].type === "word" && tokens[pos + i].value === w));
+    if (at < 0) expected(`what kind of value it is (${KINDS.map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")})`);
+    pos += phrases[at].length;
+    return at;
   }
 
   // the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
@@ -733,6 +748,7 @@ class Compiler extends Scope {
         return;
       case "define": {
         const fn = new Compiler(this, s.name, s.params, s.body).fn;
+        if (s.kinds.some((k) => k >= 0)) fn.kinds = s.kinds; // checked at each call (see checkKinds in vm.js)
         this.emit(s.at, MAKE_FN, this.constant(fn));
         this.store(s.name, s.at);
         return;
@@ -927,7 +943,8 @@ function note(fn, op, args, scopes) {
 
 // Bytecode as readable text, for `moth bytecode` and the playground.
 export function disassemble(fn, scopes = [fn], out = []) {
-  out.push(`${fn.name}${fn.params.length ? ` with ${fn.params.join(", ")}` : ""}:`);
+  const inputs = fn.params.map((p, i) => (fn.kinds?.[i] >= 0 ? `${p} as ${KINDS[fn.kinds[i]]}` : p));
+  out.push(`${fn.name}${inputs.length ? ` with ${inputs.join(", ")}` : ""}:`);
   for (let i = 0; i < fn.code.length; ) {
     const [op, count] = OPCODES[fn.code[i]];
     const args = fn.code.slice(i + 1, i + 1 + count);

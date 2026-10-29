@@ -40,6 +40,7 @@ pub enum Expr {
 pub struct Func {
     pub name: String,
     pub params: Vec<String>,
+    pub kinds: Vec<i32>, // what each input says it is (`with width as a number`), by its place in KINDS; -1 if it doesn't
     pub body: Vec<Stmt>,
     pub at: Pos,
 }
@@ -144,6 +145,8 @@ fn builtin_syntax(w: &str) -> Option<(Option<&'static str>, Option<&'static str>
     })
 }
 const BIT_WORDS: [&str; 3] = ["and", "or", "xor"];
+// what an input can say it is, in the order of KINDS in vm.js
+pub const KINDS: [&str; 8] = ["a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"];
 const AS_WORDS: [&str; 4] = ["bytes", "text", "hex", "binary"];
 fn turtle_words(w: &str) -> Option<&'static [&'static str]> {
     match w {
@@ -445,15 +448,19 @@ impl<'a, 'f> Parser<'a, 'f> {
         if self.word("to").is_some() {
             let fn_name = self.name("a function name")?;
             let mut params = Vec::new();
+            let mut kinds = Vec::new(); // what each input says it is: `with width as a number`
             if self.word("with").is_some() {
                 loop {
                     params.push(self.name("an input name")?);
+                    kinds.push(if self.word("as").is_some() { self.kind()? } else { -1 });
                     if self.sym(",").is_none() && self.word("and").is_none() {
                         break;
                     }
                 }
             }
-            return one(Stmt::Define(self.func(fn_name, params, &t)?));
+            let mut f = self.func(fn_name, params, &t)?;
+            f.kinds = kinds;
+            return one(Stmt::Define(f));
         }
         if self.word("when").is_some() {
             let start = self.pos;
@@ -625,6 +632,20 @@ impl<'a, 'f> Parser<'a, 'f> {
         self.fail(&t, format!("a line can't start with {}", Self::describe(&t)))
     }
 
+    // `a number`, `text`, `yes or no`...: what an input says it is (its place in KINDS), after its `as`
+    fn kind(&mut self) -> R<i32> {
+        for (k, phrase) in KINDS.iter().enumerate() {
+            let words: Vec<&str> = phrase.split(' ').collect();
+            if words.iter().enumerate().all(|(i, w)| self.ahead(i).is_some_and(|t| t.is_word(w))) {
+                self.pos += words.len();
+                return Ok(k as i32);
+            }
+        }
+        self.expected(
+            "what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function')",
+        )
+    }
+
     // the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
     fn func(&mut self, name: String, params: Vec<String>, t: &Token) -> R<Func> {
         let outside = self.loop_depth;
@@ -633,7 +654,7 @@ impl<'a, 'f> Parser<'a, 'f> {
         let body = self.block_end(t)?;
         self.fn_depth -= 1;
         self.loop_depth = outside;
-        Ok(Func { name, params, body, at: t.pos() })
+        Ok(Func { name, params, kinds: vec![], body, at: t.pos() })
     }
 
     fn if_rest(&mut self, t: &Token) -> R<Stmt> {

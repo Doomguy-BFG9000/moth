@@ -27,7 +27,8 @@ export function generatePrograms(seed, count) {
       const name = ["f", "g", "h"][functions.length];
       const params = ["p", "q"].slice(0, random(3));
       functions.push([name, params.length]);
-      lines.push(`to ${name}${params.length ? ` with ${params.join(", ")}` : ""}`);
+      const kinds = params.map((p) => (chance(0.3) ? `${p} as ${pick(["a number", "text", "a list", "yes or no", "a record"])}` : p)); // what some inputs say they are
+      lines.push(`to ${name}${params.length ? ` with ${kinds.join(", ")}` : ""}`);
       if (params.length && chance(0.6)) { // a way out, for recursion
         lines.push(`    if ${params[0]} is at most 0`, `        return ${atom(params)}`, "    end");
       }

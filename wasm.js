@@ -11,7 +11,7 @@ import { Scope } from "./scope.js";
 import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
-  lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
+  lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
@@ -21,6 +21,9 @@ const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has i
 const MATH = ["+", "-", "*", "/"];
 const BIT_BUILTINS = ["bit and", "bit or", "bit xor", "shift left", "shift right"]; // in the order R.bits numbers them
 const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8 };
+// each tag as kindOf in vm.js says it, and each of vm.js's KINDS as kindOf says it
+const TAG_KINDS = { 1: "a number", 2: "text", 3: "a list", 4: "a record", 5: "a function", 7: "a dictionary", 8: "bytes" };
+const KIND_TAGS = ["a number", "text", "yes/no", "a list", "a record", "a dictionary", "bytes", "a function"];
 
 // What the module imports: the checks and actions it leaves to JavaScript. Most only ever throw.
 const IMPORTS = {
@@ -54,6 +57,7 @@ const IMPORTS = {
   itemsOf: [[EQ, I32], [EQ]],
   callable: [[EQ, I32, I32], []],
   checkInputs: [[EQ, I32, I32, I32], []],
+  checkKind: [[I32, I32, EQ, I32, I32], []],
   stopped: [[I32], []],
   tooDeep: [[], []],
   turtle: [[I32, EQ, I32], []],
@@ -87,7 +91,7 @@ function declareTypes(m) {
   T.record = m.type({ kind: "struct", fields: [{ type: ref(T.ids), mutable: true }, { type: ref(T.items), mutable: true }, { type: I32, mutable: true }] });
   T.env = m.types.length; // a scope: the one it was made in, and its variables' slots
   m.type({ kind: "struct", fields: [{ type: refNull(T.env) }, { type: ref(T.items) }] });
-  T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }] });
+  T.closure = m.type({ kind: "struct", fields: [{ type: "funcref" }, { type: refNull(T.env) }, { type: I32 }, { type: I32 }, { type: I32 }] });
   T.unset = m.type({ kind: "struct", fields: [] });
   // A value JavaScript keeps, and its tag: a dictionary, which is a Map from keys as JavaScript values to the
   // module's own values.
@@ -953,7 +957,8 @@ class WasmCompiler extends Scope {
     const { T } = this.ctx;
     const inner = new WasmCompiler(this, d.name, d.params, d.body, this.ctx);
     this.ctx.m.declared.add(inner.f.index);
-    return () => this.e("ref.func", inner.f.index).e("local.get", this.envLocal).e("i32.const", d.params.length).e("i32.const", this.id(d.name)).e("struct.new", T.closure);
+    const kinds = d.kinds?.some((k) => k >= 0) ? this.ctx.kinds.push({ params: d.params, kinds: d.kinds }) - 1 : 0;
+    return () => this.e("ref.func", inner.f.index).e("local.get", this.envLocal).e("i32.const", d.params.length).e("i32.const", this.id(d.name)).e("i32.const", kinds).e("struct.new", T.closure);
   }
 
   // The function is looked up before its inputs are worked out, and checked after, as in the other engines.
@@ -972,6 +977,14 @@ class WasmCompiler extends Scope {
     });
     this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 2).e("i32.const", args.length).e("i32.ne");
     this.e("if").e("local.get", f).e("i32.const", args.length).e("i32.const", this.id(e.name)).e("i32.const", k).e("call", im.checkInputs).e("unreachable").e("end");
+    if (args.length) { // a function whose inputs say what they are: each one checked
+      this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 4).e("if");
+      args.forEach((a, i) => {
+        this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 4).e("i32.const", i).e("local.get", a);
+        this.e("i32.const", this.id(e.name)).e("i32.const", k).e("call", im.checkKind);
+      });
+      this.e("end");
+    }
     this.tick(k);
     this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.add").e("global.set", ctx.depth).e("global.get", ctx.depth).e("i32.const", MAX_DEPTH).e("i32.gt_s");
     this.e("if").e("call", im.tooDeep).e("unreachable").e("end");
@@ -1157,6 +1170,7 @@ export function compileToWasmModule(program) {
   const named = (name, global) => ((m.globalNames[global] = name), global);
   const ctx = {
     m, T, R, im, ats: [], names, messages, captured: findCaptured(program),
+    kinds: [null], // what the inputs of each function whose inputs say so are (see closure())
     unset: named("unset", m.global(ref(T.unset), false, new Code().emit("struct.new", T.unset))),
     steps: named("steps", m.global(F64, true, new Code().emit("f64.const", 0))),
     maxSteps: named("maxSteps", m.global(F64, true, new Code().emit("f64.const", Infinity))),
@@ -1211,7 +1225,7 @@ export function compileToWasmModule(program) {
   const restart = m.func("restart", [], []);
   restart.code.emit("f64.const", 0).emit("global.set", ctx.steps).emit("i32.const", 0).emit("global.set", ctx.depth);
   m.export("restart", restart.index);
-  return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts };
+  return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts, kinds: ctx.kinds };
 }
 
 // Compiles a parsed program: { bytes, listing, run(print, draw, maxSteps) }, like jit() in jit.js.
@@ -1222,7 +1236,7 @@ export function wasm(program) {
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
+function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1344,6 +1358,12 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     itemsOf: (v, k) => toWasm(itemsOf(rawOf(v), errors[k])),
     callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),
     checkInputs: (f, argc, name, k) => checkInputs(toJs(f), argc, names[name], errors[k]),
+    // input i of a function whose inputs say what they are: its kind from its tag, so a big list isn't copied
+    checkKind: (id, i, v, name, k) => {
+      const wanted = kinds[id].kinds[i];
+      const kind = v === null ? "nothing" : typeof v === "number" ? "yes/no" : TAG_KINDS[x.tag(v)];
+      if (wanted >= 0 && kind !== KIND_TAGS[wanted]) errors[k](`'${names[name]}' needs ${kinds[id].params[i]} to be ${KINDS[wanted]}, not ${kind}`);
+    },
     stopped: (k) => {
       const err = new MothError(ats[k], stoppedMessage(maxSteps), undefined, trail());
       err.final = true; // no try catches it

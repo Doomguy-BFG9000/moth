@@ -726,7 +726,8 @@ fn conform_one(line: &str) -> String {
         let env = vm::new_env(&main, None);
         let mut machine = Machine::new(&mut host, max_steps);
         let ran = machine.run(main, env);
-        for l in &machine.listeners {
+        // an app only when it set up without a mistake, as run() in moth.js gives one
+        for l in machine.listeners.iter().filter(|_| ran.is_ok()) {
             let mut fields = vec![("event", t(l.event))];
             if let Some(i) = l.interval {
                 fields.push(("interval", n(i)));

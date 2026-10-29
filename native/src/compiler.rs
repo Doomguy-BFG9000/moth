@@ -163,6 +163,7 @@ pub enum Const {
 pub struct Function {
     pub name: String,
     pub params: Vec<String>,
+    pub kinds: Vec<i32>, // what each input says it is, by its place in KINDS, or -1; none at all if no input says
     pub nslots: usize,
     pub names: Vec<String>, // each slot's name; slot 0 links to the scope the function was made in
     pub code: Vec<i32>,
@@ -245,6 +246,7 @@ impl Compiler {
             func: Function {
                 name,
                 params: params.clone(),
+                kinds: vec![],
                 nslots: 0,
                 names: vec![String::new()],
                 code: vec![],
@@ -588,7 +590,11 @@ impl Compiler {
     }
 
     fn child(&mut self, f: &Func) -> Rc<Function> {
-        Rc::new(self.function(f.name.clone(), f.params.clone(), &f.body))
+        let mut made = self.function(f.name.clone(), f.params.clone(), &f.body);
+        if f.kinds.iter().any(|&k| k >= 0) {
+            made.kinds = f.kinds.clone(); // checked at each call
+        }
+        Rc::new(made)
     }
 
     fn expr(&mut self, e: &Expr) {
@@ -758,7 +764,16 @@ pub fn disassemble(f: &Function) -> String {
 }
 
 fn disassemble_into<'a>(f: &'a Function, scopes: &mut Vec<&'a Function>, out: &mut Vec<String>) {
-    let with = if f.params.is_empty() { String::new() } else { format!(" with {}", f.params.join(", ")) };
+    let inputs: Vec<String> = f
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| match f.kinds.get(i) {
+            Some(&k) if k >= 0 => format!("{p} as {}", crate::parser::KINDS[k as usize]),
+            _ => p.clone(),
+        })
+        .collect();
+    let with = if inputs.is_empty() { String::new() } else { format!(" with {}", inputs.join(", ")) };
     out.push(format!("{}{}:", f.name, with));
     let mut i = 0;
     while i < f.code.len() {

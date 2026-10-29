@@ -362,6 +362,21 @@ export function checkInputs(f, argc, name, error) {
   if (argc !== n) error(`'${name}' needs ${plural(n, "input")} but got ${argc}`);
 }
 
+// Inputs that say what they are: `to area with width as a number`. A function's `kinds` has one of these for
+// each input that says, by its number here, and -1 for the others; a function whose inputs say nothing has none.
+export const KINDS = ["a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"];
+const KIND_TESTS = [(v) => typeof v === "number", (v) => typeof v === "string", (v) => typeof v === "boolean", isList, isRecord, isDictionary, isBytes,
+  (v) => v instanceof Closure];
+export const fitsKind = (kind, v) => kind < 0 || KIND_TESTS[kind](v);
+
+// Checked at the call, after the number of inputs: `args[from + i]` is input i
+export function checkKinds(f, args, name, error, from = 0) {
+  const { kinds, params } = f.fn;
+  for (let i = 0; i < kinds.length; i++) {
+    if (!fitsKind(kinds[i], args[from + i])) error(`'${name}' needs ${params[i]} to be ${KINDS[kinds[i]]}, not ${kindOf(args[from + i])}`);
+  }
+}
+
 // `record with name "Sam", age 20`
 export function makeRecord(fields, values) {
   const record = new Record();
@@ -755,6 +770,7 @@ export class Machine {
             const first = stack.length - argc;
             const callee = stack[first - 1];
             checkInputs(callee, argc, name, oops);
+            if (callee.fn.kinds) checkKinds(callee, stack, name, oops, first);
             if (frames.length >= MAX_DEPTH) oops("too much recursion: a function kept calling itself");
             if (++steps > maxSteps) stopped(maxSteps);
             const inner = newEnv(callee.fn, callee.env);

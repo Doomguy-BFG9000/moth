@@ -4,6 +4,10 @@
 import examples from "./examples.js";
 
 export const PROGRAMS = [
+  // inputs that say what they are: each call checks them
+  ["to area with width as a number, height as a number\n    return width * height\nend\nsay area(3, 4)", "12"],
+  ["to describe with name as text, age as a number and kind\n    say name \" is \" age \" (\" kind \")\"\nend\ndescribe(\"Rex\", 3, nothing)\ndescribe(\"Tom\", 9, 1)", "Rex is 3 (nothing)\nTom is 9 (1)"],
+  ["to f with l as a list, d as a dictionary, b as bytes, ok as yes or no, g as a function, r as a record\n    say length of l \" \" length of d \" \" length of b \" \" ok \" \" g() \" \" x of r\nend\nto two\n    return 2\nend\nf((list of 1), (dictionary where 1 is 2), 3 bytes, no, two, record with x 4)", "1 1 3 no 2 4"],
   // a `set` inside a function changes a variable the top level also sets
   ["set total to 0\nto bump\n    add 5 to total\nend\nbump\nbump\nsay total", "10"],
   // this is decided when the program is read, so it holds even before the top level's own `set` runs
@@ -105,6 +109,12 @@ export const PROGRAMS = [
 ];
 
 export const ERRORS = [
+  ["to area with width as a number, height as a number\n    return width * height\nend\nsay area(3, \"4\")", "line 4: 'area' needs height to be a number, not text"],
+  ["to shout with words as text\n    say uppercase of words\nend\nshout(nothing)", "line 4: 'shout' needs words to be text, not nothing"],
+  ["to f with ok as yes or no\n    say ok\nend\nf(1)", "line 4: 'f' needs ok to be yes or no, not a number"],
+  ["to f with l as a list\n    say l\nend\nto g\n    f(\"a\")\nend\ng()", "line 5: 'f' needs l to be a list, not text"],
+  ["to f with x as a thing\n    say x\nend", "line 1: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'a'"],
+  ["to f with x as\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'say'"],
   ["\n\nsay totl", "line 3: 'totl' has no value yet (give it one with 'set totl to ...')"],
   ["to f\n    set secret to 1\nend\nf\nsay secret", "line 5: 'secret' has no value yet (give it one with 'set secret to ...')"],
   ["say x\nset x to 1", "line 1: 'x' has no value yet (give it one with 'set x to ...')"],

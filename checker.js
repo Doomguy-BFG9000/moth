@@ -3,11 +3,14 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval } from "./vm.js";
+  callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
-const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0) };
+const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0),
+  function: new Closure({ name: "f", params: [] }, null) };
+// what an input that says what it is (`as a number`) holds, by its number in vm.js's KINDS
+const KIND_TYPES = ["number", "text", "yes/no", "list", "record", "dictionary", "bytes", "function"];
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
 
 class Found {
@@ -22,12 +25,13 @@ const found = (message) => {
 // One function (or the program). Types are worked out for the whole program at once: a variable's type is
 // what every `set` of it agrees on. `undefined` means "nothing known yet", `null` means "could be several".
 class Checker extends Scope {
-  constructor(parent, name, params, body, all) {
+  constructor(parent, name, params, body, all, kinds = []) {
     super(parent, name, params, body);
     this.all = all;
     this.id = all.scopes++;
     this.maybeSkipped = 0; // inside the right side of `and`/`or`, which might not run, so nothing is certain
-    for (const p of params) this.source(p, () => null); // inputs could be anything
+    // inputs could be anything, but one that says what it is is that: each call checks it before the function runs
+    params.forEach((p, i) => this.source(p, () => (kinds[i] >= 0 ? KIND_TYPES[kinds[i]] : null)));
     this.block(body);
   }
 
@@ -207,8 +211,8 @@ class Checker extends Scope {
         const key = this.source(s.name, () => "function");
         const isTest = !this.parent && s.name.startsWith("test_"); // `moth test` calls it
         if (!this.all.made.has(key) && !isTest) this.all.made.set(key, { at: s.at, message: `'${s.name}' is made but never used` });
-        this.all.defines.set(key, [...(this.all.defines.get(key) ?? []), s.params.length]);
-        new Checker(this, s.name, s.params, s.body, this.all);
+        this.all.defines.set(key, [...(this.all.defines.get(key) ?? []), { params: s.params, kinds: s.kinds }]);
+        new Checker(this, s.name, s.params, s.body, this.all, s.kinds);
         return;
       }
       case "every": { // how often must be a number
@@ -289,13 +293,18 @@ class Checker extends Scope {
     const key = this.key(e.name);
     this.all.used.add(key);
     for (const arg of e.args) this.expr(arg);
+    const types = e.args.map((arg) => this.type(arg));
     this.willFail(e.at, () => {
       const type = this.slotType(key);
       if (this.known(type)) callable(SAMPLES[type], e.name, found); // not a function at all
-      const arities = this.all.defines.get(key);
+      const made = this.all.defines.get(key);
       // the number of inputs is only certain when the name is a function made exactly once, and never anything else
-      if (type === "function" && arities?.length === 1 && this.all.sources.get(key).length === 1) {
-        checkInputs({ fn: { params: { length: arities[0] } } }, e.args.length, e.name, found);
+      if (type === "function" && made?.length === 1 && this.all.sources.get(key).length === 1) {
+        const { params, kinds } = made[0];
+        checkInputs({ fn: { params } }, e.args.length, e.name, found);
+        // and an input that says what it is must get that, where the checker knows what it gets
+        const sure = kinds.map((k, i) => (types[i]() === undefined || types[i]() === null ? -1 : k));
+        checkKinds({ fn: { params, kinds: sure } }, e.args.map((arg, i) => (sure[i] >= 0 ? this.sample(arg, types[i]()) : null)), e.name, found);
       }
     });
   }
