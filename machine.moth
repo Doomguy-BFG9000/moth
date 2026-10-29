@@ -6975,6 +6975,19 @@ to emit_utf8 with a
     pop_r(a, r12)
     pop_r(a, rbx)
     ret(a)
+
+    # rt_decode_bytes: rsi, rcx: those bytes read as UTF-8 into the builder, as rt_decode_utf8 reads them, but
+    # with a byte order mark at the start kept, as Rust's from_utf8_lossy and Node's toString keep it
+    mark(a, "rt_decode_bytes")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    call_to(a, "rt_b_reset")
+    mov_rr(a, rbx, rsi)
+    mov_rr(a, r12, rcx)
+    alu(a, "add", r12, rbx)
+    jmp_to(a, loop)
 end
 
 # rt_parse_number: rax text (untagged): as a number in xmm0 with rax 0, or rax 1 if it isn't one. The
@@ -8626,6 +8639,10 @@ end
 
 to emit_linux with a
     mark(a, "start")
+    load(a, rax, mem(rsp, 0)) # what it was started with, for `arguments`
+    store(a, rip("arg_count"), rax)
+    lea(a, rax, mem(rsp, 8))
+    store(a, rip("arg_vector"), rax)
     lea(a, rsp, rip_plus("stack", stack_size))
     for each stream in list of 1, 2 # a terminal answers TCGETS
         movi(a, rdi, stream)
@@ -8693,6 +8710,7 @@ to emit_runtime with st
     emit_records(a)
     emit_builtins(a)
     emit_functions(a)
+    emit_files(a, target of st, allowed of st)
     emit_gc_tables(a)
     if uses_case of st
         emit_cases(a)
@@ -8723,7 +8741,8 @@ to emit_runtime with st
         "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev",
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
-        "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d"
+        "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d",
+        "err_file", "err_reason", "asked"
         reserve(a, name, 8, 8)
     end
     reserve(a, "scratch", 64, 16)
@@ -8799,16 +8818,2569 @@ to table_of_texts with a, name, labels
     end
 end
 
+# ---------- the runtime: files, arguments and asking ----------
+# `read`, `write`, `ask` and `arguments`, as a program `moth-native build --exe` makes has them. A file is read
+# or written, or a site read, only once the program may: the --allow flags it was built with say what it may
+# do without asking (allow_all: 1 to read, 2 to write and 4 to go online, added up), and otherwise a person at
+# a terminal is asked, once for each file or site, or for all of them with 'a'; anywhere else the answer is
+# no. Machine code can't go online yet, so a site it may read can't be reached. The input comes a line at a
+# time through in_buf, which keeps what came after a line for the next one. What went wrong is in err_why,
+# with the file's name in err_file and why in err_reason, both as text.
+
+set file_imports to list of "ReadFile", "ReadConsoleW", "CreateFileW", "CloseHandle", "GetLastError", "GetFileAttributesW",
+    "GetCommandLineW", "WideCharToMultiByte", "FormatMessageW", "GetFullPathNameW",
+    "GetFinalPathNameByHandleW"
+set in_size to 4096 # bytes of input read at a time
+# for each kind of thing a program may do (read a file, write one, go online): how a question puts it, and
+# how a refusal puts it
+set permission_words to list of (list of "read", "this program isn't allowed to read files (start it with --allow-read)"),
+    (list of "write", "this program isn't allowed to write files (start it with --allow-write)"),
+    (list of "go online to", "this program isn't allowed to go online (start it with --allow-net)")
+# what Linux's error numbers mean, as glibc's strerror, and so Rust's io::Error, says it
+set errno_words to list of (list of 1, "Operation not permitted"), (list of 2, "No such file or directory"),
+    (list of 4, "Interrupted system call"), (list of 5, "Input/output error"), (list of 6, "No such device or address"),
+    (list of 9, "Bad file descriptor"), (list of 11, "Resource temporarily unavailable"), (list of 12, "Cannot allocate memory"),
+    (list of 13, "Permission denied"), (list of 16, "Device or resource busy"), (list of 17, "File exists"),
+    (list of 19, "No such device"), (list of 20, "Not a directory"), (list of 21, "Is a directory"), (list of 22, "Invalid argument"),
+    (list of 23, "Too many open files in system"), (list of 24, "Too many open files"), (list of 26, "Text file busy"),
+    (list of 27, "File too large"), (list of 28, "No space left on device"), (list of 30, "Read-only file system"),
+    (list of 36, "File name too long"), (list of 40, "Too many levels of symbolic links"), (list of 122, "Disk quota exceeded")
+
+# what the --allow flags a program is built with let it do without asking, as moth-native's add_allow reads
+# them: `bits` what it may do to everything (1 to read, 2 to write and 4 to go online, added up), and `names`,
+# for each of those three, the files, folders or sites it may (a site's in lowercase, as it's matched)
+to allowed_of with flags
+    set made_bits to 0
+    set named to list of (empty list), (empty list), (empty list)
+    for each flag in flags
+        set head to ""
+        set flag_word to ""
+        set listed to nothing
+        set seen to 0
+        for each c in flag
+            add 1 to seen
+            if seen is at most 8
+                add c to head
+            else if listed is nothing and c is "="
+                set listed to ""
+            else if listed is nothing
+                add c to flag_word
+            else
+                add c to listed
+            end
+        end
+        set kind_nums to empty list
+        if head is "--allow-"
+            if flag_word is "read"
+                set kind_nums to list of 1
+            else if flag_word is "write"
+                set kind_nums to list of 2
+            else if flag_word is "net"
+                set kind_nums to list of 3
+            else if flag_word is "all" and listed is nothing
+                set kind_nums to list of 1, 2, 3
+            end
+        end
+        if length of kind_nums is 0
+            fail with front's problem(front's place(1, 1, ""), "'" + flag + "' isn't an --allow flag")
+        end
+        for each k in kind_nums
+            if listed is nothing
+                set made_bits to made_bits bit or (item k of (list of 1, 2, 4))
+            else
+                set these to item k of named
+                for each one in split listed by ","
+                    if one is not "" and k is 3
+                        add ascii_lowered(one) to these
+                    else if one is not ""
+                        add one to these
+                    end
+                end
+            end
+        end
+    end
+    return record with bits made_bits, names named
+end
+
+# A to Z as a to z, and nothing else changed, as Rust's to_ascii_lowercase has it
+to ascii_lowered with t
+    set made to ""
+    for each c in t
+        set at_upper to position of c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if at_upper is greater than 0
+            add item at_upper of "abcdefghijklmnopqrstuvwxyz" to made
+        else
+            add c to made
+        end
+    end
+    return made
+end
+
+# a call into kernel32 from the runtime: a frame of its own, 16-aligned, with the shadow space a call needs
+# and room for more inputs and answers from rsp + 32 up to rsp + 96
+to win_enter with a
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    alui(a, "and", rsp, -16)
+    alui(a, "sub", rsp, 96)
+end
+
+to win_leave with a
+    mov_rr(a, rsp, rbp)
+    pop_r(a, rbp)
+end
+
+# a Linux system call: its inputs in rdi, rsi, rdx, r10, r8 and r9, and what it gives in rax; rcx and r11 change
+to sys_call with a, n
+    movi(a, rax, n)
+    raw(a, list of 0x0F, 0x05)
+end
+
+# 16 bits from memory, made 64
+to load16 with a, dst, at
+    enc(a, empty list, no, (list of 0x0F, 0xB7), dst, at, empty list)
+end
+
+# 16 bits into memory
+to store16i with a, at, v
+    set two to empty list
+    put16(two, v)
+    enc(a, (list of 0x66), no, (list of 0xC7), 0, at, two)
+end
+
+# jumps to `label` if the UTF-16 units from register base on are `wanted`; uses rax
+to units_jump with a, base, wanted, label
+    set differ to new_label(a)
+    set k to 0
+    for each u in wanted
+        load16(a, rax, mem(base, 2 * k))
+        alui(a, "cmp", rax, u)
+        jcc(a, cc_ne, differ)
+        add 1 to k
+    end
+    jmp_to(a, label)
+    mark(a, differ)
+end
+
+# jumps to `label` if the UTF-16 unit in register r is \ or /
+to sep_jump with a, r, label
+    alui(a, "cmp", r, 92)
+    jcc(a, cc_e, label)
+    alui(a, "cmp", r, 47)
+    jcc(a, cc_e, label)
+end
+
+# jumps to `differ` unless the bytes at rsi start with `word`, its letters (written in lowercase) in either
+# case; uses rax
+to ascii_prefix with a, word, differ
+    set k to 0
+    for each c in word
+        set got to c as bytes
+        set want to byte 1 of got
+        load8(a, rax, mem(rsi, k))
+        if want is at least 97 and want is at most 122
+            alui(a, "or", rax, 32)
+        end
+        alui(a, "cmp", rax, want)
+        jcc(a, cc_ne, differ)
+        add 1 to k
+    end
+end
+
+# jumps to `label` if the byte in register r is a tab, a line break or a space; changes r
+to ascii_space_jump with a, r, label
+    alui(a, "cmp", r, 32)
+    jcc(a, cc_e, label)
+    alui(a, "sub", r, 9)
+    alui(a, "cmp", r, 4)
+    jcc(a, cc_be, label)
+end
+
+# jumps to `missing` if the system's code in rdx means there is no such file, as Rust's NotFound has it
+to missing_jump with a, target, missing
+    alui(a, "cmp", rdx, 2)
+    jcc(a, cc_e, missing)
+    if target is "windows"
+        alui(a, "cmp", rdx, 3)
+        jcc(a, cc_e, missing)
+    end
+end
+
+# jumps to `denied` if the system's code in rdx means the program may not, as Rust's PermissionDenied has it
+to denied_jump with a, target, denied
+    if target is "windows"
+        alui(a, "cmp", rdx, 5)
+        jcc(a, cc_e, denied)
+    else
+        alui(a, "cmp", rdx, 13)
+        jcc(a, cc_e, denied)
+        alui(a, "cmp", rdx, 1)
+        jcc(a, cc_e, denied)
+    end
+end
+
+# err_file's bytes into the builder
+to file_name_text with a
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+end
+
+# err_reason's bytes into the builder
+to reason_text with a
+    load(a, rax, rip("err_reason"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+end
+
+# err_reason: what Rust says of a file's name with a 0 in it
+to nul_reason with a, target
+    call_to(a, "rt_b_reset")
+    if target is "windows"
+        b_text(a, "strings passed to WinAPI cannot contain NULs")
+    else
+        b_text(a, "file name contained an unexpected NUL byte")
+    end
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+end
+
+to emit_files with a, target, allowed
+    pad_to(data of a, 8)
+    data_here(a, "allow_all")
+    put64(data of a, bits of allowed)
+    set tables to empty list # for each kind, the names the flags allow it for: how many, then where each is
+    for each these in names of allowed
+        set objects to empty list
+        for each one in these
+            add text_object(a, one) to objects
+        end
+        add objects to tables
+    end
+    set ro to rodata of a
+    pad_to(ro, 8)
+    set k to 0
+    for each objects in tables
+        rodata_here(a, "allow_names_" + k)
+        put64(ro, length of objects)
+        for each label in objects
+            absolute(a, "rodata", length of ro, label, 0)
+            put64(ro, 0)
+        end
+        add 1 to k
+    end
+    for each slot_name in list of "in_ready", "in_tty", "in_handle", "in_at", "in_end", "arg_count", "arg_vector", "f_room", "f_used",
+        "host_len", "host_name_len"
+        reserve(a, slot_name, 8, 8)
+    end
+    reserve(a, "in_buf", in_size, 16)
+    reserve(a, "real_a", 65536, 16)
+    reserve(a, "real_b", 65536, 16)
+    reserve(a, "host_buf", 4096, 16)
+    reserve(a, "proc_buf", 32, 16)
+    reserve(a, "stat_buf", 256, 16)
+    if target is "windows"
+        reserve(a, "in_wide", 2048, 16)
+        reserve(a, "msg_wide", 4096, 16)
+        reserve(a, "msg_utf8", 6144, 16)
+    end
+    emit_input(a, target)
+    emit_permits(a)
+    emit_file_io(a, target)
+    emit_named(a, target)
+    emit_reading(a, target)
+    emit_writing(a, target)
+    emit_arguments(a, target)
+    emit_file_why(a)
+end
+
+to emit_input with a, target
+    # rt_in_setup: in_handle, and in_tty, whether the input is a terminal, found the first time; uses rax,
+    # rcx, rdx, rsi, rdi and r8 to r11
+    set ready to new_label(a)
+    mark(a, "rt_in_setup")
+    load(a, rax, rip("in_ready"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, ready)
+    storei(a, rip("in_ready"), 1)
+    if target is "windows"
+        win_enter(a)
+        movi(a, rcx, -10)
+        call_import(a, "imp_GetStdHandle")
+        store(a, rip("in_handle"), rax)
+        mov_rr(a, rcx, rax)
+        lea(a, rdx, rip("scratch"))
+        call_import(a, "imp_GetConsoleMode")
+        test32(a, rax)
+        setcc(a, cc_ne, rax)
+        movzx8(a, rax, rax)
+        store(a, rip("in_tty"), rax)
+        win_leave(a)
+    else
+        movi(a, rdi, 0) # a terminal answers TCGETS
+        movi(a, rsi, 0x5401)
+        lea(a, rdx, rip("scratch"))
+        sys_call(a, 16)
+        test_rr(a, rax, rax)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        store(a, rip("in_tty"), rax)
+    end
+    mark(a, ready)
+    ret(a)
+
+    # rt_in_fill: more of the input, into in_buf from its start: rax how many bytes came, 0 at its end
+    set filled to new_label(a)
+    set nothing_more to new_label(a)
+    mark(a, "rt_in_fill")
+    storei(a, rip("in_at"), 0)
+    storei(a, rip("in_end"), 0)
+    if target is "windows"
+        set console to new_label(a)
+        set kept to new_label(a)
+        win_enter(a)
+        load(a, rax, rip("in_tty"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, console)
+        load(a, rcx, rip("in_handle"))
+        lea(a, rdx, rip("in_buf"))
+        movi(a, r8, in_size)
+        lea(a, r9, mem(rsp, 48))
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 32), 0)
+        call_import(a, "imp_ReadFile")
+        test32(a, rax)
+        jcc(a, cc_e, nothing_more) # a pipe whose other end has closed, or no input at all
+        load32(a, rax, mem(rsp, 48))
+        jmp_to(a, filled)
+        mark(a, console) # a console's characters, as UTF-8; a Ctrl-Z ends what's typed, as it does for Rust
+        load(a, rcx, rip("in_handle"))
+        lea(a, rdx, rip("in_wide"))
+        movi(a, r8, 1024)
+        lea(a, r9, mem(rsp, 48))
+        storei(a, mem(rsp, 48), 0)
+        lea(a, rax, mem(rsp, 64))
+        store(a, mem(rsp, 32), rax)
+        storei(a, mem(rsp, 64), 16) # how big this is, and no characters typed already
+        movi(a, rax, 67108864) # a Ctrl-Z (26) ends a read, and no keys are held
+        store(a, mem(rsp, 72), rax)
+        call_import(a, "imp_ReadConsoleW")
+        test32(a, rax)
+        jcc(a, cc_e, nothing_more)
+        load32(a, r9, mem(rsp, 48))
+        test_rr(a, r9, r9)
+        jcc(a, cc_e, nothing_more)
+        mov_rr(a, rax, r9)
+        alu(a, "add", rax, rax)
+        lea(a, rdx, rip("in_wide"))
+        alu(a, "add", rax, rdx)
+        load16(a, rax, mem(rax, -2))
+        alui(a, "cmp", rax, 26)
+        jcc(a, cc_ne, kept)
+        dec_r(a, r9)
+        jcc(a, cc_e, nothing_more)
+        mark(a, kept)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        lea(a, r8, rip("in_wide"))
+        lea(a, rax, rip("in_buf"))
+        store(a, mem(rsp, 32), rax)
+        storei(a, mem(rsp, 40), in_size)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        call_import(a, "imp_WideCharToMultiByte")
+        mov32_rr(a, rax, rax)
+        mark(a, filled)
+        win_leave(a)
+        store(a, rip("in_end"), rax)
+        ret(a)
+        mark(a, nothing_more)
+        win_leave(a)
+        movi(a, rax, 0)
+        ret(a)
+    else
+        set again to new_label(a)
+        mark(a, again)
+        movi(a, rdi, 0)
+        lea(a, rsi, rip("in_buf"))
+        movi(a, rdx, in_size)
+        sys_call(a, 0)
+        alui(a, "cmp", rax, -4) # interrupted: again
+        jcc(a, cc_e, again)
+        test_rr(a, rax, rax)
+        jcc(a, cc_le, nothing_more)
+        store(a, rip("in_end"), rax)
+        ret(a)
+        mark(a, nothing_more)
+        movi(a, rax, 0)
+        ret(a)
+    end
+
+    # rt_read_line: the next line of the input, without the "\n" or "\r\n" that ends it, as text in rax; rax 0
+    # at the end of the input. What isn't UTF-8 in it becomes U+FFFD. Uses the builder; keeps rbx and r12 to r15.
+    set scan to new_label(a)
+    set fresh to new_label(a)
+    set seek to new_label(a)
+    set got_line to new_label(a)
+    set put_line to new_label(a)
+    set no_newline to new_label(a)
+    set put_rest to new_label(a)
+    set more to new_label(a)
+    set ended to new_label(a)
+    set none_left to new_label(a)
+    set as_text to new_label(a)
+    set held_cr to new_label(a)
+    mark(a, "rt_read_line")
+    push_r(a, rbx)
+    push_r(a, r12)
+    call_to(a, "rt_in_setup")
+    call_to(a, "rt_b_reset")
+    movi(a, rbx, 0) # 1 while a "\r" that came last waits to see whether a "\n" follows it
+    mark(a, scan)
+    load(a, rcx, rip("in_at"))
+    alu_load(a, "cmp", rcx, rip("in_end"))
+    jcc(a, cc_ae, more)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, fresh)
+    movi(a, rbx, 0)
+    lea(a, rax, rip("in_buf"))
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 10)
+    jcc(a, cc_ne, held_cr)
+    inc_r(a, rcx) # "\r\n": the line ends
+    store(a, rip("in_at"), rcx)
+    jmp_to(a, as_text)
+    mark(a, held_cr) # just a "\r", which is the line's own
+    movi(a, rax, 13)
+    call_to(a, "rt_b_byte")
+    load(a, rcx, rip("in_at"))
+    mark(a, fresh) # a "\n" from rcx on?
+    mov_rr(a, r12, rcx)
+    mark(a, seek)
+    alu_load(a, "cmp", r12, rip("in_end"))
+    jcc(a, cc_ae, no_newline)
+    lea(a, rax, rip("in_buf"))
+    alu(a, "add", rax, r12)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 10)
+    jcc(a, cc_e, got_line)
+    inc_r(a, r12)
+    jmp_to(a, seek)
+    mark(a, got_line) # the bytes before it, but for a "\r" just before it
+    lea(a, rsi, rip("in_buf"))
+    alu(a, "add", rsi, rcx)
+    mov_rr(a, rax, r12)
+    alu(a, "sub", rax, rcx)
+    mov_rr(a, rcx, rax)
+    lea(a, rax, mem(r12, 1))
+    store(a, rip("in_at"), rax)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, put_line)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, -1))
+    alui(a, "cmp", rax, 13)
+    jcc(a, cc_ne, put_line)
+    dec_r(a, rcx)
+    mark(a, put_line)
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, as_text)
+    mark(a, no_newline) # all of it, but for a "\r" at its end, which waits
+    lea(a, rsi, rip("in_buf"))
+    alu(a, "add", rsi, rcx)
+    load(a, rax, rip("in_end"))
+    store(a, rip("in_at"), rax)
+    alu(a, "sub", rax, rcx)
+    mov_rr(a, rcx, rax)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, more)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, -1))
+    alui(a, "cmp", rax, 13)
+    jcc(a, cc_ne, put_rest)
+    dec_r(a, rcx)
+    movi(a, rbx, 1)
+    mark(a, put_rest)
+    call_to(a, "rt_b_bytes")
+    mark(a, more)
+    call_to(a, "rt_in_fill")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, scan)
+    test_rr(a, rbx, rbx) # the end of the input: a "\r" that waited is the line's own
+    jcc(a, cc_e, ended)
+    movi(a, rax, 13)
+    call_to(a, "rt_b_byte")
+    mark(a, ended)
+    load(a, rax, rip("b_len"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, none_left)
+    mark(a, as_text)
+    call_to(a, "rt_b_utf8_text")
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, none_left)
+    movi(a, rax, 0)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_b_utf8_text: what the builder holds, read as UTF-8 (U+FFFD for what isn't), as a new text in rax
+    set check_byte to new_label(a)
+    set all_ascii to new_label(a)
+    set not_ascii to new_label(a)
+    mark(a, "rt_b_utf8_text")
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    mark(a, check_byte)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, all_ascii)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 0x80)
+    jcc(a, cc_ae, not_ascii)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, check_byte)
+    mark(a, all_ascii)
+    jmp_to(a, "rt_b_text")
+    mark(a, not_ascii) # a copy, read back into the builder
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    push_r(a, rax)
+    push_r(a, rcx)
+    rep_movsb(a)
+    pop_r(a, rcx)
+    pop_r(a, rsi)
+    call_to(a, "rt_decode_bytes")
+    jmp_to(a, "rt_b_text")
+
+    # rt_ask: xmm0, a question, shown as `say` shows it with a space after it, then a line of the input: the
+    # answer, as text, into xmm0 with rax 0; or rax 2 (err_why 26) at the end of the input. An answer piped in
+    # is shown after its question, as if it were typed.
+    set answered to new_label(a)
+    set typed to new_label(a)
+    mark(a, "rt_ask")
+    push_r(a, rbx)
+    call_to(a, "rt_b_reset")
+    movq_rx(a, rax, xmm0)
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    movi(a, rax, 32)
+    call_to(a, "rt_b_byte")
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_flush_out")
+    call_to(a, "rt_read_line")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, answered)
+    call_to(a, "rt_out_line") # no answer: the mistake starts on a line of its own
+    storei(a, rip("err_why"), 26)
+    movi(a, rax, 2)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, answered)
+    mov_rr(a, rbx, rax)
+    load(a, rcx, rip("in_tty"))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, typed)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_out_line")
+    mark(a, typed)
+    movq_xr(a, xmm0, rbx)
+    movi(a, rax, 0)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_permits with a
+    # rt_permit: rcx what the program would do (0 read a file, 1 write one, 2 go online), err_file to which file
+    # or site: rax 0 if it may, or 1 if it may not, with err_reason why. What a person answers is kept in
+    # `asked`, by what it was and to what.
+    set allowed to new_label(a)
+    set refused to new_label(a)
+    set have_asked to new_label(a)
+    set ask_person to new_label(a)
+    set worded to new_label(a)
+    set not_all to new_label(a)
+    set put_answer to new_label(a)
+    set said to new_label(a)
+    set decided to new_label(a)
+    mark(a, "rt_permit")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rcx)
+    load(a, rax, rip("allow_all"))
+    shift_cl(a, "shr", rax)
+    alui(a, "and", rax, 1)
+    jcc(a, cc_ne, allowed)
+    mov_rr(a, rcx, rbx)
+    call_to(a, "rt_named_allows")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, allowed)
+    call_to(a, "rt_b_reset") # what it would do, and to what: a key of `asked`
+    lea(a, rax, mem(rbx, 48))
+    call_to(a, "rt_b_byte")
+    file_name_text(a)
+    call_to(a, "rt_b_text")
+    mov_rr(a, r12, rax)
+    load(a, rax, rip("asked"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_asked)
+    call_to(a, "rt_dict_new")
+    movi64(a, rcx, tag_dict)
+    alu(a, "or", rax, rcx)
+    store(a, rip("asked"), rax)
+    mark(a, have_asked)
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_key")
+    load(a, rax, rip("asked"))
+    untag(a, rax)
+    call_to(a, "rt_dict_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, ask_person)
+    load(a, rax, mem(rax, 8)) # asked already: what the person said then
+    movi64(a, rcx, bits_yes)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, allowed)
+    jmp_to(a, refused)
+    mark(a, ask_person) # only a person at a terminal is asked
+    call_to(a, "rt_in_setup")
+    load(a, rax, rip("in_tty"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, refused)
+    load32(a, rax, rip("err_tty"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, refused)
+    call_to(a, "rt_flush_out")
+    call_to(a, "rt_b_reset")
+    b_text(a, "moth: let this program ")
+    set k to 0
+    for each words in permission_words
+        set other to new_label(a)
+        alui(a, "cmp", rbx, k)
+        jcc(a, cc_ne, other)
+        b_text(a, item 1 of words)
+        jmp_to(a, worded)
+        mark(a, other)
+        add 1 to k
+    end
+    mark(a, worded)
+    b_text(a, " '")
+    load(a, rax, rip("err_file"))
+    call_to(a, "rt_b_shown_name")
+    b_text(a, "'? (y = yes, a = yes to all, n = no) ")
+    movi(a, rdi, 2)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rdx, rip("b_len"))
+    call_to(a, "rt_write")
+    call_to(a, "rt_read_line")
+    call_to(a, "rt_answer")
+    push_r(a, rax)
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_ne, not_all)
+    movi(a, rax, 1) # yes to all of this kind
+    mov_rr(a, rcx, rbx)
+    shift_cl(a, "shl", rax)
+    alu_store(a, "or", rip("allow_all"), rax)
+    mark(a, not_all)
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_key")
+    load(a, rcx, mem(rsp, 0))
+    movi64(a, r10, bits_no)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, put_answer)
+    movi64(a, r10, bits_yes)
+    mark(a, put_answer)
+    load(a, rax, rip("asked"))
+    untag(a, rax)
+    call_to(a, "rt_dict_set")
+    pop_r(a, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, allowed)
+    mark(a, refused)
+    call_to(a, "rt_b_reset")
+    set k to 0
+    for each words in permission_words
+        set other to new_label(a)
+        alui(a, "cmp", rbx, k)
+        jcc(a, cc_ne, other)
+        b_text(a, item 2 of words)
+        jmp_to(a, said)
+        mark(a, other)
+        add 1 to k
+    end
+    mark(a, said)
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    movi(a, rax, 1)
+    jmp_to(a, decided)
+    mark(a, allowed)
+    movi(a, rax, 0)
+    mark(a, decided)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_answer: rax a line typed (or 0): rax 1 if it says yes ("y" or "yes"), 2 if yes to all ("a" or
+    # "all"), else 0; letters in either case, with space around them or not
+    set trim_front to new_label(a)
+    set front_space to new_label(a)
+    set trim_back to new_label(a)
+    set back_space to new_label(a)
+    set trimmed to new_label(a)
+    set three to new_label(a)
+    set not_y to new_label(a)
+    set not_yes to new_label(a)
+    set say_no to new_label(a)
+    set say_yes to new_label(a)
+    set say_all to new_label(a)
+    mark(a, "rt_answer")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, say_no)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    mark(a, trim_front)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, say_no)
+    load8(a, rdx, mem(rsi, 0))
+    ascii_space_jump(a, rdx, front_space)
+    jmp_to(a, trim_back)
+    mark(a, front_space)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, trim_front)
+    mark(a, trim_back)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, rcx)
+    load8(a, rdx, mem(rax, -1))
+    ascii_space_jump(a, rdx, back_space)
+    jmp_to(a, trimmed)
+    mark(a, back_space)
+    dec_r(a, rcx)
+    jmp_to(a, trim_back)
+    mark(a, trimmed)
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_ne, three)
+    ascii_prefix(a, "y", not_y)
+    jmp_to(a, say_yes)
+    mark(a, not_y)
+    ascii_prefix(a, "a", say_no)
+    jmp_to(a, say_all)
+    mark(a, three)
+    alui(a, "cmp", rcx, 3)
+    jcc(a, cc_ne, say_no)
+    ascii_prefix(a, "yes", not_yes)
+    jmp_to(a, say_yes)
+    mark(a, not_yes)
+    ascii_prefix(a, "all", say_no)
+    mark(a, say_all)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, say_yes)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, say_no)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_b_shown_name: rax a file's or site's name: into the builder as a question shows it, with ? for each
+    # character that could move the cursor or turn the text around (control characters, zero-width ones and
+    # those that change the text's direction)
+    set each_char to new_label(a)
+    set hidden to new_label(a)
+    set names_done to new_label(a)
+    mark(a, "rt_b_shown_name")
+    push_r(a, rbx)
+    push_r(a, r12)
+    untag(a, rax)
+    load(a, rbx, mem(rax, 16))
+    load(a, r12, mem(rax, 0))
+    alu(a, "add", r12, rbx)
+    mark(a, each_char)
+    alu(a, "cmp", rbx, r12)
+    jcc(a, cc_ae, names_done)
+    mov_rr(a, rsi, rbx)
+    char_size(a)
+    push_r(a, rdx)
+    call_to(a, "rt_decode")
+    pop_r(a, rdx)
+    for each span in list of (list of 0, 0x1F), (list of 0x7F, 0x9F), (list of 0x200B, 0x200F), (list of 0x2028, 0x202E),
+        (list of 0x2066, 0x2069)
+        mov_rr(a, rcx, rax)
+        alui(a, "sub", rcx, item 1 of span)
+        alui(a, "cmp", rcx, (item 2 of span) - (item 1 of span))
+        jcc(a, cc_be, hidden)
+    end
+    mov_rr(a, rsi, rbx)
+    mov_rr(a, rcx, rdx)
+    alu(a, "add", rbx, rdx)
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, each_char)
+    mark(a, hidden)
+    alu(a, "add", rbx, rdx)
+    movi(a, rax, 63)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, each_char)
+    mark(a, names_done)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_file_io with a, target
+    # rt_file_path: err_file as the system takes a file's name, in memory of its own, in rax: UTF-16 on
+    # Windows and UTF-8 on Linux, with a 0 after it. On Windows it is the path Rust's std::fs opens: a name
+    # that isn't already a whole path from a drive, or one starting \\, is made one by GetFullPathNameW, with
+    # \\?\ before it (maybe_verbatim in Rust's library), so a name ending in / or a dot means what it does there.
+    mark(a, "rt_file_path")
+    load(a, rax, rip("err_file"))
+    mark(a, "rt_path_of") # rax a text: the same for it
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    untag(a, rax)
+    load(a, r12, mem(rax, 16))
+    load(a, r13, mem(rax, 0))
+    if target is "windows"
+        set sized to new_label(a)
+        set converted to new_label(a)
+        movi(a, rbx, 0)
+        test_rr(a, r13, r13)
+        jcc(a, cc_e, sized)
+        win_enter(a)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        mov_rr(a, r8, r12)
+        mov_rr(a, r9, r13)
+        storei(a, mem(rsp, 32), 0)
+        storei(a, mem(rsp, 40), 0)
+        call_import(a, "imp_MultiByteToWideChar")
+        mov32_rr(a, rbx, rax)
+        win_leave(a)
+        mark(a, sized)
+        mov_rr(a, rcx, rbx)
+        alu(a, "add", rcx, rcx)
+        alui(a, "add", rcx, 2)
+        call_to(a, "rt_alloc_raw")
+        test_rr(a, rbx, rbx)
+        jcc(a, cc_e, converted)
+        push_r(a, rax)
+        win_enter(a)
+        store(a, mem(rsp, 32), rax)
+        store(a, mem(rsp, 40), rbx)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        mov_rr(a, r8, r12)
+        mov_rr(a, r9, r13)
+        call_import(a, "imp_MultiByteToWideChar")
+        win_leave(a)
+        pop_r(a, rax)
+        mark(a, converted)
+        set as_is to new_label(a)
+        set not_prefixed to new_label(a)
+        set not_drive to new_label(a)
+        set first_sep to new_label(a)
+        set full to new_label(a)
+        set drive_full to new_label(a)
+        set not_drive_full to new_label(a)
+        set device_path to new_label(a)
+        set unc_path to new_label(a)
+        set prefixed to new_label(a)
+        mov_rr(a, r12, rax) # its units, rbx of them
+        test_rr(a, rbx, rbx)
+        jcc(a, cc_e, as_is)
+        alui(a, "cmp", rbx, 4) # \\?\ or \??\ already
+        jcc(a, cc_b, not_prefixed)
+        units_jump(a, r12, (list of 92, 92, 63, 92), as_is)
+        units_jump(a, r12, (list of 92, 63, 63, 92), as_is)
+        mark(a, not_prefixed)
+        alui(a, "cmp", rbx, 247) # short, and whole already: from a drive, or starting \\
+        jcc(a, cc_ae, full)
+        alui(a, "cmp", rbx, 2)
+        jcc(a, cc_b, full)
+        load16(a, rax, mem(r12, 2))
+        alui(a, "cmp", rax, 58)
+        jcc(a, cc_ne, not_drive)
+        load16(a, rax, mem(r12, 0))
+        sep_jump(a, rax, not_drive)
+        alui(a, "cmp", rbx, 2)
+        jcc(a, cc_e, as_is)
+        load16(a, rax, mem(r12, 4))
+        sep_jump(a, rax, as_is)
+        jmp_to(a, full)
+        mark(a, not_drive)
+        load16(a, rax, mem(r12, 0))
+        sep_jump(a, rax, first_sep)
+        jmp_to(a, full)
+        mark(a, first_sep)
+        load16(a, rax, mem(r12, 2))
+        sep_jump(a, rax, as_is)
+        mark(a, full) # how much room the whole path takes, then the path, after room for a prefix
+        win_enter(a)
+        mov_rr(a, rcx, r12)
+        movi(a, rdx, 0)
+        movi(a, r8, 0)
+        movi(a, r9, 0)
+        call_import(a, "imp_GetFullPathNameW")
+        mov32_rr(a, rbx, rax)
+        win_leave(a)
+        test_rr(a, rbx, rbx)
+        jcc(a, cc_e, as_is)
+        lea(a, rcx, mem(rbx, 8))
+        alu(a, "add", rcx, rcx)
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, r14, rax)
+        win_enter(a)
+        mov_rr(a, rcx, r12)
+        mov_rr(a, rdx, rbx)
+        lea(a, r8, mem(r14, 16))
+        movi(a, r9, 0)
+        call_import(a, "imp_GetFullPathNameW")
+        mov32_rr(a, r13, rax)
+        win_leave(a)
+        test_rr(a, r13, r13)
+        jcc(a, cc_e, as_is)
+        alu(a, "cmp", r13, rbx)
+        jcc(a, cc_ae, as_is)
+        lea(a, rsi, mem(r14, 16)) # rsi where it starts, r13 how long: C:\ becomes \\?\C:\
+        alui(a, "cmp", r13, 3)
+        jcc(a, cc_b, drive_full)
+        load16(a, rax, mem(r14, 18))
+        alui(a, "cmp", rax, 58)
+        jcc(a, cc_ne, drive_full)
+        load16(a, rax, mem(r14, 20))
+        alui(a, "cmp", rax, 92)
+        jcc(a, cc_ne, drive_full)
+        lea(a, rsi, mem(r14, 8))
+        store16i(a, mem(rsi, 0), 92)
+        store16i(a, mem(rsi, 2), 92)
+        store16i(a, mem(rsi, 4), 63)
+        store16i(a, mem(rsi, 6), 92)
+        alui(a, "add", r13, 4)
+        jmp_to(a, prefixed)
+        mark(a, drive_full) # \\?\ and \??\ stay, \\.\ becomes \\?\, and \\server becomes \\?\UNC\server
+        alui(a, "cmp", r13, 4)
+        jcc(a, cc_b, not_drive_full)
+        units_jump(a, rsi, (list of 92, 92, 63, 92), prefixed)
+        units_jump(a, rsi, (list of 92, 63, 63, 92), prefixed)
+        units_jump(a, rsi, (list of 92, 92, 46, 92), device_path)
+        mark(a, not_drive_full)
+        alui(a, "cmp", r13, 2)
+        jcc(a, cc_b, prefixed)
+        units_jump(a, rsi, (list of 92, 92), unc_path)
+        jmp_to(a, prefixed)
+        mark(a, device_path)
+        store16i(a, mem(rsi, 4), 63)
+        jmp_to(a, prefixed)
+        mark(a, unc_path)
+        lea(a, rsi, mem(r14, 4))
+        set k to 0
+        for each u in list of 92, 92, 63, 92, 85, 78, 67, 92
+            store16i(a, mem(rsi, 2 * k), u)
+            add 1 to k
+        end
+        alui(a, "add", r13, 6)
+        mark(a, prefixed) # then to the start of its memory, with the 0 after it
+        mov_rr(a, rdi, r14)
+        lea(a, rcx, mem(r13, 1))
+        raw(a, list of 0x66, 0xF3, 0xA5)
+        mov_rr(a, r12, r14)
+        mark(a, as_is)
+        mov_rr(a, rax, r12)
+    else
+        lea(a, rcx, mem(r13, 1))
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, rdi, rax)
+        mov_rr(a, rsi, r12)
+        mov_rr(a, rcx, r13)
+        rep_movsb(a)
+    end
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_file_open_read, rt_file_open_write: rax a path from rt_file_path: rax a handle, or -1 with the
+    # system's code for what went wrong in rdx. A file opened to write is made, or emptied first.
+    if target is "windows"
+        for each way in list of (list of "rt_file_open_read", 0x80000000, 3), (list of "rt_file_open_write", 0x40000000, 2)
+            set opened to new_label(a)
+            mark(a, item 1 of way)
+            win_enter(a)
+            mov_rr(a, rcx, rax)
+            movi(a, rdx, item 2 of way)
+            movi(a, r8, 7) # others may read, write and delete it meanwhile, as Rust lets them
+            movi(a, r9, 0)
+            storei(a, mem(rsp, 32), item 3 of way)
+            storei(a, mem(rsp, 40), 0x80)
+            storei(a, mem(rsp, 48), 0)
+            call_import(a, "imp_CreateFileW")
+            alui(a, "cmp", rax, -1)
+            jcc(a, cc_ne, opened)
+            call_import(a, "imp_GetLastError")
+            mov32_rr(a, rdx, rax)
+            movi(a, rax, -1)
+            mark(a, opened)
+            win_leave(a)
+            ret(a)
+        end
+    else
+        for each way in list of (list of "rt_file_open_read", 0x80000), (list of "rt_file_open_write", 0x80241)
+            set again to new_label(a)
+            set opened to new_label(a)
+            mark(a, item 1 of way)
+            mov_rr(a, rdi, rax)
+            mark(a, again)
+            movi(a, rsi, item 2 of way)
+            movi(a, rdx, 438) # 0o666, less the umask
+            sys_call(a, 2)
+            alui(a, "cmp", rax, -4)
+            jcc(a, cc_e, again)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ns, opened)
+            unary(a, "neg", rax)
+            mov_rr(a, rdx, rax)
+            movi(a, rax, -1)
+            mark(a, opened)
+            ret(a)
+        end
+    end
+
+    # rt_file_read_some, rt_file_write_some: rax a handle, rsi where the bytes go or come from, rcx how many at
+    # most: rax how many did, 0 at the end, or -1 with the system's code in rdx
+    if target is "windows"
+        for each way in list of (list of "rt_file_read_some", "imp_ReadFile"), (list of "rt_file_write_some", "imp_WriteFile")
+            set capped to new_label(a)
+            set worked to new_label(a)
+            set finished to new_label(a)
+            mark(a, item 1 of way)
+            win_enter(a)
+            mov_rr(a, r8, rcx)
+            movi(a, rcx, 1073741824)
+            alu(a, "cmp", r8, rcx)
+            jcc(a, cc_be, capped)
+            mov_rr(a, r8, rcx)
+            mark(a, capped)
+            mov_rr(a, rcx, rax)
+            mov_rr(a, rdx, rsi)
+            lea(a, r9, mem(rsp, 48))
+            storei(a, mem(rsp, 48), 0)
+            storei(a, mem(rsp, 32), 0)
+            call_import(a, item 2 of way)
+            test32(a, rax)
+            jcc(a, cc_ne, worked)
+            call_import(a, "imp_GetLastError")
+            mov32_rr(a, rdx, rax)
+            movi(a, rax, -1)
+            alui(a, "cmp", rdx, 109) # a pipe whose other end has closed: the end
+            jcc(a, cc_ne, finished)
+            movi(a, rax, 0)
+            jmp_to(a, finished)
+            mark(a, worked)
+            load32(a, rax, mem(rsp, 48))
+            mark(a, finished)
+            win_leave(a)
+            ret(a)
+        end
+    else
+        for each way in list of (list of "rt_file_read_some", 0), (list of "rt_file_write_some", 1)
+            set again to new_label(a)
+            set worked to new_label(a)
+            mark(a, item 1 of way)
+            mov_rr(a, rdi, rax)
+            mov_rr(a, rdx, rcx)
+            mark(a, again)
+            sys_call(a, item 2 of way)
+            alui(a, "cmp", rax, -4)
+            jcc(a, cc_e, again)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ns, worked)
+            unary(a, "neg", rax)
+            mov_rr(a, rdx, rax)
+            movi(a, rax, -1)
+            mark(a, worked)
+            ret(a)
+        end
+    end
+
+    # rt_file_close: rax a handle
+    mark(a, "rt_file_close")
+    if target is "windows"
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+    else
+        mov_rr(a, rdi, rax)
+        sys_call(a, 3)
+    end
+    ret(a)
+
+    # rt_file_is_dir: rax a path: rax 1 if it is a folder, else 0
+    set not_dir to new_label(a)
+    mark(a, "rt_file_is_dir")
+    if target is "windows"
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_GetFileAttributesW")
+        win_leave(a)
+        mov32_rr(a, rax, rax)
+        movi(a, rcx, 4294967295)
+        alu(a, "cmp", rax, rcx)
+        jcc(a, cc_e, not_dir)
+        alui(a, "and", rax, 16)
+        shifti(a, "shr", rax, 4)
+        ret(a)
+    else
+        mov_rr(a, rdi, rax)
+        lea(a, rsi, rip("stat_buf"))
+        sys_call(a, 4)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, not_dir)
+        load32(a, rax, rip_plus("stat_buf", 24))
+        alui(a, "and", rax, 0xF000)
+        alui(a, "cmp", rax, 0x4000)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        ret(a)
+    end
+    mark(a, not_dir)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_os_text: rdx a code the system gave: what it means, as Rust's io::Error says it, into the builder
+    set os_number to new_label(a)
+    mark(a, "rt_os_text")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rdx)
+    if target is "windows"
+        set got_words to new_label(a)
+        set trim to new_label(a)
+        set trimmed to new_label(a)
+        set drop to new_label(a)
+        win_enter(a)
+        movi(a, rcx, 0x1200) # from the system, with no inserts
+        movi(a, rdx, 0)
+        mov_rr(a, r8, rbx)
+        movi(a, r9, 0)
+        lea(a, rax, rip("msg_wide"))
+        store(a, mem(rsp, 32), rax)
+        storei(a, mem(rsp, 40), 2048)
+        storei(a, mem(rsp, 48), 0)
+        call_import(a, "imp_FormatMessageW")
+        mov32_rr(a, r12, rax)
+        test_rr(a, r12, r12)
+        jcc(a, cc_ne, got_words)
+        call_import(a, "imp_GetLastError")
+        mov32_rr(a, r12, rax)
+        win_leave(a)
+        b_text(a, "OS Error ")
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_e_plain")
+        b_text(a, " (FormatMessageW() returned error ")
+        mov_rr(a, rax, r12)
+        call_to(a, "rt_e_plain")
+        b_text(a, ")")
+        jmp_to(a, os_number)
+        mark(a, got_words) # as UTF-8, without the line break at its end
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        lea(a, r8, rip("msg_wide"))
+        mov_rr(a, r9, r12)
+        lea(a, rax, rip("msg_utf8"))
+        store(a, mem(rsp, 32), rax)
+        storei(a, mem(rsp, 40), 6144)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        call_import(a, "imp_WideCharToMultiByte")
+        mov32_rr(a, rcx, rax)
+        win_leave(a)
+        mark(a, trim)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, trimmed)
+        lea(a, rax, rip("msg_utf8"))
+        alu(a, "add", rax, rcx)
+        load8(a, rax, mem(rax, -1))
+        ascii_space_jump(a, rax, drop)
+        jmp_to(a, trimmed)
+        mark(a, drop)
+        dec_r(a, rcx)
+        jmp_to(a, trim)
+        mark(a, trimmed)
+        lea(a, rsi, rip("msg_utf8"))
+        call_to(a, "rt_b_bytes")
+    else
+        set worded to new_label(a)
+        for each pair in errno_words
+            set other to new_label(a)
+            alui(a, "cmp", rbx, item 1 of pair)
+            jcc(a, cc_ne, other)
+            b_text(a, item 2 of pair)
+            jmp_to(a, worded)
+            mark(a, other)
+        end
+        b_text(a, "Unknown error ")
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_e_plain")
+        mark(a, worded)
+    end
+    mark(a, os_number)
+    b_text(a, " (os error ")
+    mov_rr(a, rax, rbx)
+    call_to(a, "rt_e_plain")
+    b_text(a, ")")
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_file_reason: rax the path of a file that went wrong, rdx the system's code for how, rcx 0 if it was
+    # being read or 1 written: as moth-native says it, in Node's words for a folder, a missing file and one the
+    # program may not have, as text in err_reason
+    set a_file to new_label(a)
+    set dir_open to new_label(a)
+    set missing to new_label(a)
+    set denied to new_label(a)
+    set reasoned to new_label(a)
+    mark(a, "rt_file_reason")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rdx)
+    mov_rr(a, r12, rcx)
+    call_to(a, "rt_file_is_dir")
+    push_r(a, rax)
+    call_to(a, "rt_b_reset")
+    pop_r(a, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, a_file)
+    b_text(a, "EISDIR: illegal operation on a directory, ")
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, dir_open)
+    b_text(a, "read")
+    jmp_to(a, reasoned)
+    mark(a, dir_open)
+    b_text(a, "open '")
+    file_name_text(a)
+    b_text(a, "'")
+    jmp_to(a, reasoned)
+    mark(a, a_file)
+    mov_rr(a, rdx, rbx)
+    missing_jump(a, target, missing)
+    denied_jump(a, target, denied)
+    call_to(a, "rt_os_text")
+    jmp_to(a, reasoned)
+    mark(a, missing)
+    b_text(a, "ENOENT: no such file or directory, open '")
+    file_name_text(a)
+    b_text(a, "'")
+    jmp_to(a, reasoned)
+    mark(a, denied)
+    b_text(a, "EACCES: permission denied, open '")
+    file_name_text(a)
+    b_text(a, "'")
+    mark(a, reasoned)
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_is_site: rax 1 if err_file is a site's address, starting http:// or https:// in either case
+    set site_no to new_label(a)
+    set site_yes to new_label(a)
+    set not_http to new_label(a)
+    mark(a, "rt_is_site")
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    alui(a, "cmp", rcx, 7)
+    jcc(a, cc_b, site_no)
+    ascii_prefix(a, "http://", not_http)
+    jmp_to(a, site_yes)
+    mark(a, not_http)
+    alui(a, "cmp", rcx, 8)
+    jcc(a, cc_b, site_no)
+    ascii_prefix(a, "https://", site_no)
+    mark(a, site_yes)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, site_no)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_name_nul: rax 1 if err_file has a 0 in it, which no file's name can
+    set nul_seek to new_label(a)
+    set nul_found to new_label(a)
+    set nul_none to new_label(a)
+    mark(a, "rt_name_nul")
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    mark(a, nul_seek)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, nul_none)
+    load8(a, rax, mem(rsi, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, nul_found)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, nul_seek)
+    mark(a, nul_found)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, nul_none)
+    movi(a, rax, 0)
+    ret(a)
+end
+
+to emit_named with a, target
+    # rt_named_allows: rcx what the program would do (0 read, 1 write, 2 go online): rax 1 if a name the --allow
+    # flags give for it covers err_file, as moth-native's Permits::allows has it: a file that is the file or
+    # folder named, or anywhere inside it, once each is where it really is; or a site whose host is the one
+    # named, with its port or without it
+    set files to new_label(a)
+    set each_site to new_label(a)
+    set try_name to new_label(a)
+    set next_site to new_label(a)
+    set each_file to new_label(a)
+    set named_yes to new_label(a)
+    set named_no to new_label(a)
+    set named_out to new_label(a)
+    mark(a, "rt_named_allows")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, rbx, rcx)
+    for each k from 0 to 2
+        set other to new_label(a)
+        alui(a, "cmp", rbx, k)
+        jcc(a, cc_ne, other)
+        lea(a, r12, rip("allow_names_" + k))
+        mark(a, other)
+    end
+    load(a, r13, mem(r12, 0))
+    alui(a, "add", r12, 8)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, named_no)
+    alui(a, "cmp", rbx, 2)
+    jcc(a, cc_ne, files)
+    load(a, rax, rip("err_file"))
+    call_to(a, "rt_host_of")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, named_no)
+    mark(a, each_site)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, named_no)
+    load(a, rax, mem(r12, 0))
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "cmp", rcx, rip("host_len"))
+    jcc(a, cc_ne, try_name)
+    load(a, rsi, mem(rax, 16))
+    lea(a, rdi, rip("host_buf"))
+    raw(a, list of 0xF3, 0xA6)
+    jcc(a, cc_e, named_yes)
+    mark(a, try_name)
+    load(a, rax, mem(r12, 0))
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "cmp", rcx, rip("host_name_len"))
+    jcc(a, cc_ne, next_site)
+    load(a, rsi, mem(rax, 16))
+    lea(a, rdi, rip("host_buf"))
+    raw(a, list of 0xF3, 0xA6)
+    jcc(a, cc_e, named_yes)
+    mark(a, next_site)
+    alui(a, "add", r12, 8)
+    dec_r(a, r13)
+    jmp_to(a, each_site)
+    mark(a, files)
+    mark(a, each_file)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, named_no)
+    load(a, rax, mem(r12, 0))
+    load(a, rdx, rip("err_file"))
+    call_to(a, "rt_within")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, named_yes)
+    alui(a, "add", r12, 8)
+    dec_r(a, r13)
+    jmp_to(a, each_file)
+    mark(a, named_yes)
+    movi(a, rax, 1)
+    jmp_to(a, named_out)
+    mark(a, named_no)
+    movi(a, rax, 0)
+    mark(a, named_out)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_within: rax a file or folder's name, rdx a file's: rax 1 if the file is that file or folder, or
+    # anywhere inside it, once each is where it really is (moth-native's within)
+    set within_no to new_label(a)
+    set within_yes to new_label(a)
+    set within_out to new_label(a)
+    mark(a, "rt_within")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rdx)
+    lea(a, rdi, rip("real_a"))
+    call_to(a, "rt_real_of")
+    mov_rr(a, r12, rax)
+    test_rr(a, r12, r12)
+    jcc(a, cc_s, within_no)
+    mov_rr(a, rax, rbx)
+    lea(a, rdi, rip("real_b"))
+    call_to(a, "rt_real_of")
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, within_no)
+    alu(a, "cmp", rax, r12)
+    jcc(a, cc_b, within_no)
+    lea(a, rsi, rip("real_a"))
+    lea(a, rdi, rip("real_b"))
+    mov_rr(a, rcx, r12)
+    if target is "windows"
+        raw(a, list of 0x66, 0xF3, 0xA7) # the same units
+    else
+        raw(a, list of 0xF3, 0xA6)
+    end
+    jcc(a, cc_ne, within_no)
+    alu(a, "cmp", rax, r12) # the same, or what follows starts with a separator, or it ends with one
+    jcc(a, cc_e, within_yes)
+    if target is "windows"
+        lea(a, rcx, rip("real_b"))
+        mov_rr(a, rdx, r12)
+        alu(a, "add", rdx, rdx)
+        alu(a, "add", rcx, rdx)
+        load16(a, rdx, mem(rcx, 0))
+        alui(a, "cmp", rdx, 92)
+        jcc(a, cc_e, within_yes)
+        lea(a, rcx, rip("real_a"))
+        mov_rr(a, rdx, r12)
+        alu(a, "add", rdx, rdx)
+        alu(a, "add", rcx, rdx)
+        load16(a, rdx, mem(rcx, -2))
+        alui(a, "cmp", rdx, 92)
+        jcc(a, cc_e, within_yes)
+    else
+        lea(a, rcx, rip("real_b"))
+        alu(a, "add", rcx, r12)
+        load8(a, rdx, mem(rcx, 0))
+        alui(a, "cmp", rdx, 47)
+        jcc(a, cc_e, within_yes)
+        lea(a, rcx, rip("real_a"))
+        alu(a, "add", rcx, r12)
+        load8(a, rdx, mem(rcx, -1))
+        alui(a, "cmp", rdx, 47)
+        jcc(a, cc_e, within_yes)
+    end
+    mark(a, within_no)
+    movi(a, rax, 0)
+    jmp_to(a, within_out)
+    mark(a, within_yes)
+    movi(a, rax, 1)
+    mark(a, within_out)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_real_of: rax a file's name, rdi where its real path goes: rax how long it is (in UTF-16 units on
+    # Windows, bytes on Linux), or -1 if it has none. One that's there is where its links lead; one that isn't
+    # is in the folder it would be in, which must be there (moth-native's real_of)
+    set real_out to new_label(a)
+    set missing to new_label(a)
+    set strip to new_label(a)
+    set sep_end to new_label(a)
+    set stripped to new_label(a)
+    set seek_sep to new_label(a)
+    set found_sep to new_label(a)
+    set no_sep to new_label(a)
+    set last_ok to new_label(a)
+    set has_folder to new_label(a)
+    set trim_folder to new_label(a)
+    set folder_ok to new_label(a)
+    set folder_made to new_label(a)
+    set joined to new_label(a)
+    set real_none to new_label(a)
+    mark(a, "rt_real_of")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, rbx, rax)
+    mov_rr(a, r12, rdi)
+    call_to(a, "rt_path_of")
+    mov_rr(a, r13, rax)
+    call_to(a, "rt_exists")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, missing)
+    mov_rr(a, rax, r13)
+    mov_rr(a, rdi, r12)
+    call_to(a, "rt_canonical")
+    jmp_to(a, real_out)
+    mark(a, missing) # its last part, without separators or a "." after it
+    mov_rr(a, rax, rbx)
+    untag(a, rax)
+    load(a, r13, mem(rax, 16))
+    load(a, r14, mem(rax, 0))
+    mark(a, strip)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, real_none)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, r14)
+    load8(a, rax, mem(rax, -1))
+    sep_byte_jump(a, target, rax, sep_end, stripped)
+    mark(a, sep_end) # a separator at the end, but for one that is all of it
+    alui(a, "cmp", r14, 1)
+    jcc(a, cc_e, stripped)
+    dec_r(a, r14)
+    jmp_to(a, strip)
+    mark(a, stripped)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, r14)
+    load8(a, rax, mem(rax, -1))
+    alui(a, "cmp", rax, 46)
+    set seek_last to new_label(a)
+    jcc(a, cc_ne, seek_last)
+    alui(a, "cmp", r14, 1) # "." alone has no name
+    jcc(a, cc_e, real_none)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, r14)
+    load8(a, rax, mem(rax, -2))
+    set dot_part to new_label(a)
+    sep_byte_jump(a, target, rax, dot_part, seek_last)
+    mark(a, dot_part) # a "." after a separator says nothing: without it, and on
+    dec_r(a, r14)
+    jmp_to(a, strip)
+    mark(a, seek_last)
+    mov_rr(a, rcx, r14)
+    mark(a, seek_sep)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, no_sep)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, -1))
+    set before to new_label(a)
+    sep_byte_jump(a, target, rax, found_sep, before)
+    mark(a, before)
+    dec_r(a, rcx)
+    jmp_to(a, seek_sep)
+    mark(a, no_sep)
+    mark(a, found_sep) # rcx where the last part starts
+    mov_rr(a, rdx, r14)
+    alu(a, "sub", rdx, rcx)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, real_none)
+    alui(a, "cmp", rdx, 2) # ".." has no name either
+    jcc(a, cc_ne, last_ok)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, rcx)
+    load8(a, rsi, mem(rax, 0))
+    load8(a, rax, mem(rax, 1))
+    alui(a, "cmp", rsi, 46)
+    jcc(a, cc_ne, last_ok)
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, real_none)
+    mark(a, last_ok)
+    push_r(a, rcx) # where the last part starts and how long it is
+    push_r(a, rdx)
+    lea(a, rax, rip(text_object(a, ".")))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, folder_made)
+    mark(a, has_folder) # the folder: up to the separator, without more separators before it
+    dec_r(a, rcx)
+    mark(a, trim_folder)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, folder_ok)
+    mov_rr(a, rax, r13)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, -1))
+    set more_sep to new_label(a)
+    sep_byte_jump(a, target, rax, more_sep, folder_ok)
+    mark(a, more_sep)
+    dec_r(a, rcx)
+    jmp_to(a, trim_folder)
+    mark(a, folder_ok)
+    set not_root to new_label(a)
+    test_rr(a, rcx, rcx) # the root, if that's all there was
+    jcc(a, cc_ne, not_root)
+    movi(a, rcx, 1)
+    mark(a, not_root)
+    if target is "windows" # C:\ for C:
+        set not_drive to new_label(a)
+        alui(a, "cmp", rcx, 2)
+        jcc(a, cc_ne, not_drive)
+        load8(a, rax, mem(r13, 1))
+        alui(a, "cmp", rax, 58)
+        jcc(a, cc_ne, not_drive)
+        movi(a, rcx, 3)
+        mark(a, not_drive)
+    end
+    mov_rr(a, rsi, r13)
+    call_to(a, "rt_text_from")
+    mark(a, folder_made) # its real path, then a separator, then the last part
+    push_r(a, rax)
+    call_to(a, "rt_path_of")
+    mov_rr(a, rdi, r12)
+    call_to(a, "rt_canonical")
+    pop_r(a, rcx)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, real_none)
+    mov_rr(a, r14, rax)
+    if target is "windows"
+        mov_rr(a, rax, r14)
+        alu(a, "add", rax, rax)
+        alu(a, "add", rax, r12)
+        load16(a, rax, mem(rax, -2))
+        alui(a, "cmp", rax, 92)
+        jcc(a, cc_e, joined)
+        mov_rr(a, rax, r14)
+        alu(a, "add", rax, rax)
+        alu(a, "add", rax, r12)
+        store16i(a, mem(rax, 0), 92)
+        inc_r(a, r14)
+        mark(a, joined)
+        push_r(a, rcx)
+        push_r(a, rdx)
+        win_enter(a)
+        mov_rr(a, r8, r13)
+        alu(a, "add", r8, rcx)
+        mov_rr(a, r9, rdx)
+        mov_rr(a, rax, r14)
+        alu(a, "add", rax, rax)
+        alu(a, "add", rax, r12)
+        store(a, mem(rsp, 32), rax)
+        movi(a, rax, 32767)
+        alu(a, "sub", rax, r14)
+        store(a, mem(rsp, 40), rax)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        call_import(a, "imp_MultiByteToWideChar")
+        win_leave(a)
+        pop_r(a, rdx)
+        pop_r(a, rcx)
+        mov32_rr(a, rax, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, real_none)
+        alu(a, "add", r14, rax)
+    else
+        mov_rr(a, rax, r12)
+        alu(a, "add", rax, r14)
+        load8(a, rax, mem(rax, -1))
+        alui(a, "cmp", rax, 47)
+        jcc(a, cc_e, joined)
+        mov_rr(a, rax, r12)
+        alu(a, "add", rax, r14)
+        store8i(a, mem(rax, 0), 47)
+        inc_r(a, r14)
+        mark(a, joined)
+        mov_rr(a, rax, r14)
+        alu(a, "add", rax, rdx)
+        alui(a, "cmp", rax, 4096)
+        jcc(a, cc_ae, real_none)
+        mov_rr(a, rdi, r12)
+        alu(a, "add", rdi, r14)
+        mov_rr(a, rsi, r13)
+        alu(a, "add", rsi, rcx)
+        alu(a, "add", r14, rdx)
+        mov_rr(a, rcx, rdx)
+        rep_movsb(a)
+    end
+    mov_rr(a, rax, r14)
+    jmp_to(a, real_out)
+    mark(a, real_none)
+    movi(a, rax, -1)
+    mark(a, real_out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_exists: rax a path from rt_path_of: rax 1 if there's something there, a link that leads nowhere too
+    mark(a, "rt_exists")
+    if target is "windows"
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_GetFileAttributesW")
+        win_leave(a)
+        mov32_rr(a, rax, rax)
+        movi(a, rcx, 4294967295)
+        alu(a, "cmp", rax, rcx)
+        setcc(a, cc_ne, rax)
+        movzx8(a, rax, rax)
+    else
+        mov_rr(a, rdi, rax)
+        lea(a, rsi, rip("stat_buf"))
+        sys_call(a, 6) # lstat
+        test_rr(a, rax, rax)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+    end
+    ret(a)
+
+    # rt_canonical: rax a path from rt_path_of, rdi where to put it: where it really is, its links followed, as
+    # Rust's canonicalize has it; rax how long that is, or -1 if it can't be found
+    set canon_none to new_label(a)
+    set canon_out to new_label(a)
+    mark(a, "rt_canonical")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, r12, rdi)
+    if target is "windows"
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        movi(a, rdx, 0)
+        movi(a, r8, 7)
+        movi(a, r9, 0)
+        storei(a, mem(rsp, 32), 3)
+        storei(a, mem(rsp, 40), 0x02000000) # a folder can be opened too
+        storei(a, mem(rsp, 48), 0)
+        call_import(a, "imp_CreateFileW")
+        win_leave(a)
+        alui(a, "cmp", rax, -1)
+        jcc(a, cc_e, canon_none)
+        mov_rr(a, rbx, rax)
+        win_enter(a)
+        mov_rr(a, rcx, rbx)
+        mov_rr(a, rdx, r12)
+        movi(a, r8, 32768)
+        movi(a, r9, 0)
+        call_import(a, "imp_GetFinalPathNameByHandleW")
+        mov32_rr(a, rdi, rax)
+        mov_rr(a, rcx, rbx)
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+        mov_rr(a, rax, rdi)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, canon_none)
+        alui(a, "cmp", rax, 32768)
+        jcc(a, cc_ae, canon_none)
+    else
+        mov_rr(a, rdi, rax)
+        movi(a, rsi, 0x280000) # O_PATH: only to find where it is
+        movi(a, rdx, 0)
+        sys_call(a, 2)
+        test_rr(a, rax, rax)
+        jcc(a, cc_s, canon_none)
+        mov_rr(a, rbx, rax)
+        point_at_text(a, "/proc/self/fd/") # then the link the system keeps for it, which says where it is
+        lea(a, rdi, rip("proc_buf"))
+        rep_movsb(a)
+        push_r(a, rdi)
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_digits")
+        pop_r(a, rdi)
+        lea(a, rsi, rip("dbuf"))
+        rep_movsb(a)
+        store8i(a, mem(rdi, 0), 0)
+        lea(a, rdi, rip("proc_buf"))
+        mov_rr(a, rsi, r12)
+        movi(a, rdx, 4096)
+        sys_call(a, 89) # readlink
+        push_r(a, rax)
+        mov_rr(a, rdi, rbx)
+        sys_call(a, 3)
+        pop_r(a, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_le, canon_none)
+        alui(a, "cmp", rax, 4096)
+        jcc(a, cc_ae, canon_none)
+    end
+    jmp_to(a, canon_out)
+    mark(a, canon_none)
+    movi(a, rax, -1)
+    mark(a, canon_out)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_host_of: rax a site's address: rax 1 with its host (example.com:8080) in host_buf, in lowercase, how
+    # long it is in host_len and how much of it is the name without the port in host_name_len; or rax 0 if
+    # the address is written in any odd way, so a name given to --allow-net can't match it by mistake
+    set host_none to new_label(a)
+    set not_http to new_label(a)
+    set schemed to new_label(a)
+    set copy_host to new_label(a)
+    set host_copied to new_label(a)
+    set as_is to new_label(a)
+    set bracket to new_label(a)
+    set name_loop to new_label(a)
+    set name_end to new_label(a)
+    set name_char to new_label(a)
+    set inner_loop to new_label(a)
+    set inner_char to new_label(a)
+    set inner_end to new_label(a)
+    set port to new_label(a)
+    set port_digits to new_label(a)
+    set host_good to new_label(a)
+    mark(a, "rt_host_of")
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    alui(a, "cmp", rcx, 7)
+    jcc(a, cc_b, host_none)
+    ascii_prefix(a, "http://", not_http)
+    alui(a, "add", rsi, 7)
+    alui(a, "sub", rcx, 7)
+    jmp_to(a, schemed)
+    mark(a, not_http)
+    alui(a, "cmp", rcx, 8)
+    jcc(a, cc_b, host_none)
+    ascii_prefix(a, "https://", host_none)
+    alui(a, "add", rsi, 8)
+    alui(a, "sub", rcx, 8)
+    mark(a, schemed) # the host, up to a /, ?, # or \, in lowercase
+    lea(a, r9, rip("host_buf"))
+    movi(a, rdx, 0)
+    mark(a, copy_host)
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_ae, host_copied)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, rdx)
+    load8(a, rax, mem(rax, 0))
+    for each stop_at in list of 47, 63, 35, 92
+        alui(a, "cmp", rax, stop_at)
+        jcc(a, cc_e, host_copied)
+    end
+    mov_rr(a, r8, rax)
+    alui(a, "sub", r8, 65)
+    alui(a, "cmp", r8, 25)
+    jcc(a, cc_a, as_is)
+    alui(a, "add", rax, 32)
+    mark(a, as_is)
+    alui(a, "cmp", rdx, 4096)
+    jcc(a, cc_ae, host_none)
+    mov_rr(a, r8, r9)
+    alu(a, "add", r8, rdx)
+    store8(a, mem(r8, 0), rax)
+    inc_r(a, rdx)
+    jmp_to(a, copy_host)
+    mark(a, host_copied)
+    store(a, rip("host_len"), rdx)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, host_none)
+    load8(a, rax, mem(r9, 0))
+    alui(a, "cmp", rax, 91)
+    jcc(a, cc_e, bracket)
+    movi(a, r8, 0) # a name of a to z, digits, dots and dashes, up to a :
+    mark(a, name_loop)
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_ae, name_end)
+    mov_rr(a, rax, r9)
+    alu(a, "add", rax, r8)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 58)
+    jcc(a, cc_e, name_end)
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, name_char)
+    alui(a, "cmp", rax, 45)
+    jcc(a, cc_e, name_char)
+    mov_rr(a, rcx, rax)
+    alui(a, "sub", rcx, 97)
+    alui(a, "cmp", rcx, 25)
+    jcc(a, cc_be, name_char)
+    alui(a, "sub", rax, 48)
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_a, host_none)
+    mark(a, name_char)
+    inc_r(a, r8)
+    jmp_to(a, name_loop)
+    mark(a, name_end)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, host_none)
+    jmp_to(a, port)
+    mark(a, bracket) # [ then hex digits, colons and dots, then ]
+    movi(a, r8, 1)
+    mark(a, inner_loop)
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_ae, host_none)
+    mov_rr(a, rax, r9)
+    alu(a, "add", rax, r8)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 93)
+    jcc(a, cc_e, inner_end)
+    alui(a, "cmp", rax, 58)
+    jcc(a, cc_e, inner_char)
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, inner_char)
+    mov_rr(a, rcx, rax)
+    alui(a, "sub", rcx, 97)
+    alui(a, "cmp", rcx, 5)
+    jcc(a, cc_be, inner_char)
+    alui(a, "sub", rax, 48)
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_a, host_none)
+    mark(a, inner_char)
+    inc_r(a, r8)
+    jmp_to(a, inner_loop)
+    mark(a, inner_end)
+    alui(a, "cmp", r8, 1)
+    jcc(a, cc_e, host_none)
+    inc_r(a, r8)
+    mark(a, port) # then nothing, or a : and digits
+    store(a, rip("host_name_len"), r8)
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_e, host_good)
+    mov_rr(a, rax, r9)
+    alu(a, "add", rax, r8)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 58)
+    jcc(a, cc_ne, host_none)
+    inc_r(a, r8)
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_e, host_none)
+    mark(a, port_digits)
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_ae, host_good)
+    mov_rr(a, rax, r9)
+    alu(a, "add", rax, r8)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "sub", rax, 48)
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_a, host_none)
+    inc_r(a, r8)
+    jmp_to(a, port_digits)
+    mark(a, host_good)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, host_none)
+    movi(a, rax, 0)
+    ret(a)
+end
+
+# jumps to `is_sep` if the byte in register r separates a path's parts (/, and \ on Windows), else to
+# `not_sep`
+to sep_byte_jump with a, target, r, is_sep, not_sep
+    alui(a, "cmp", r, 47)
+    jcc(a, cc_e, is_sep)
+    if target is "windows"
+        alui(a, "cmp", r, 92)
+        jcc(a, cc_e, is_sep)
+    end
+    jmp_to(a, not_sep)
+end
+
+to emit_reading with a, target
+    # rt_read: xmm0 a file's name (or a site's), rdx 1 for its bytes or 0 for its text: what it holds, into
+    # xmm0 with rax 0; or rax 2 with err_why 20 (the name isn't text), 21 (it can't be read), 22 (there is no
+    # such file) or 27 (it's too long a text)
+    set not_text to new_label(a)
+    set refused to new_label(a)
+    set offline to new_label(a)
+    set nul_name to new_label(a)
+    set open_failed to new_label(a)
+    set no_file to new_label(a)
+    set more to new_label(a)
+    set room_left to new_label(a)
+    set read_failed to new_label(a)
+    set all_read to new_label(a)
+    set as_text to new_label(a)
+    set too_long to new_label(a)
+    set failed to new_label(a)
+    set gave_up to new_label(a)
+    set read_out to new_label(a)
+    mark(a, "rt_read")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, r12, rdx)
+    movq_rx(a, rax, xmm0)
+    store(a, rip("err_file"), rax)
+    store(a, rip("err_a"), rax)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, not_text)
+    call_to(a, "rt_is_site")
+    mov_rr(a, r13, rax)
+    mov_rr(a, rcx, rax)
+    alu(a, "add", rcx, rcx)
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, refused)
+    test_rr(a, r13, r13)
+    jcc(a, cc_ne, offline)
+    call_to(a, "rt_name_nul")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, nul_name)
+    call_to(a, "rt_file_path")
+    mov_rr(a, rbx, rax)
+    call_to(a, "rt_file_open_read")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, open_failed)
+    mov_rr(a, r13, rax)
+    movi(a, rcx, 65536) # what it holds, in memory that doubles as it fills
+    store(a, rip("f_room"), rcx)
+    storei(a, rip("f_used"), 0)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, r14, rax)
+    mark(a, more)
+    load(a, rcx, rip("f_room"))
+    alu_load(a, "sub", rcx, rip("f_used"))
+    jcc(a, cc_ne, room_left)
+    load(a, rcx, rip("f_room"))
+    alu(a, "add", rcx, rcx)
+    store(a, rip("f_room"), rcx)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rsi, r14)
+    load(a, rcx, rip("f_used"))
+    rep_movsb(a)
+    mov_rr(a, r14, rax)
+    load(a, rcx, rip("f_room"))
+    alu_load(a, "sub", rcx, rip("f_used"))
+    mark(a, room_left)
+    mov_rr(a, rax, r13)
+    mov_rr(a, rsi, r14)
+    alu_load(a, "add", rsi, rip("f_used"))
+    call_to(a, "rt_file_read_some")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, read_failed)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, all_read)
+    alu_store(a, "add", rip("f_used"), rax)
+    jmp_to(a, more)
+    mark(a, all_read)
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_file_close")
+    test_rr(a, r12, r12)
+    jcc(a, cc_e, as_text)
+    load(a, rcx, rip("f_used")) # its bytes
+    call_to(a, "rt_bytes_new")
+    mov_rr(a, rbx, rax)
+    load(a, rdi, mem(rax, 8))
+    mov_rr(a, rsi, r14)
+    load(a, rcx, rip("f_used"))
+    rep_movsb(a)
+    mov_rr(a, rax, rbx)
+    movi64(a, rcx, tag_bytes)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    jmp_to(a, read_out)
+    mark(a, as_text) # its text, which keeps a byte order mark, as Rust's from_utf8_lossy and Node's toString do
+    mov_rr(a, rsi, r14)
+    load(a, rcx, rip("f_used"))
+    call_to(a, "rt_decode_bytes")
+    call_to(a, "rt_b_fits")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, too_long)
+    call_to(a, "rt_b_text")
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    jmp_to(a, read_out)
+    mark(a, read_failed)
+    push_r(a, rdx)
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_file_close")
+    pop_r(a, rdx)
+    jmp_to(a, failed)
+    mark(a, open_failed) # no such file is a mistake of its own
+    missing_jump(a, target, no_file)
+    mark(a, failed) # rdx the system's code, rbx the path
+    mov_rr(a, rax, rbx)
+    movi(a, rcx, 0)
+    call_to(a, "rt_file_reason")
+    storei(a, rip("err_why"), 21)
+    jmp_to(a, gave_up)
+    mark(a, no_file)
+    storei(a, rip("err_why"), 22)
+    jmp_to(a, gave_up)
+    mark(a, not_text)
+    storei(a, rip("err_why"), 20)
+    jmp_to(a, gave_up)
+    mark(a, refused) # err_reason says why
+    storei(a, rip("err_why"), 21)
+    jmp_to(a, gave_up)
+    mark(a, offline)
+    call_to(a, "rt_b_reset")
+    b_text(a, "couldn't reach it (a program in machine code can't go online yet)")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    storei(a, rip("err_why"), 21)
+    jmp_to(a, gave_up)
+    mark(a, nul_name)
+    nul_reason(a, target)
+    storei(a, rip("err_why"), 21)
+    jmp_to(a, gave_up)
+    mark(a, too_long)
+    storei(a, rip("err_why"), 27)
+    mark(a, gave_up)
+    movi(a, rax, 2)
+    mark(a, read_out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_writing with a, target
+    # rt_write_file: xmm0 a value, xmm1 a file's name: the file gets bytes as they are, anything else as `say`
+    # shows it; rax 0, or 2 with err_why 20 (the name isn't text), 23 (it can't be written) or 27 (too long a
+    # text). What it is is shown before the program is let write, as the engines show it, and again after.
+    set not_text to new_label(a)
+    set shown_fits to new_label(a)
+    set refused to new_label(a)
+    set nul_name to new_label(a)
+    set as_bytes to new_label(a)
+    set as_text to new_label(a)
+    set have_bytes to new_label(a)
+    set more to new_label(a)
+    set all_written to new_label(a)
+    set write_failed to new_label(a)
+    set failed to new_label(a)
+    set too_long to new_label(a)
+    set gave_up to new_label(a)
+    set write_out to new_label(a)
+    mark(a, "rt_write_file")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    movq_rx(a, r12, xmm0)
+    movq_rx(a, rax, xmm1)
+    store(a, rip("err_file"), rax)
+    store(a, rip("err_a"), rax)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, not_text)
+    mov_rr(a, rax, r12)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, shown_fits)
+    alui(a, "cmp", rax, kind_bytes)
+    jcc(a, cc_e, shown_fits)
+    call_to(a, "rt_b_reset") # anything else as `say` shows it, which mustn't be too long a text
+    mov_rr(a, rax, r12)
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    call_to(a, "rt_b_fits")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, too_long)
+    mark(a, shown_fits)
+    movi(a, rcx, 1)
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, refused)
+    call_to(a, "rt_name_nul")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, nul_name)
+    call_to(a, "rt_file_path")
+    mov_rr(a, rbx, rax)
+    call_to(a, "rt_file_open_write")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, failed)
+    mov_rr(a, r13, rax)
+    mov_rr(a, rax, r12) # where its bytes are, in r14, and how many
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_bytes)
+    jcc(a, cc_e, as_bytes)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, as_text)
+    call_to(a, "rt_b_reset")
+    mov_rr(a, rax, r12)
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    load(a, r14, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    jmp_to(a, have_bytes)
+    mark(a, as_bytes)
+    mov_rr(a, rax, r12)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, r14, mem(rax, 8))
+    jmp_to(a, have_bytes)
+    mark(a, as_text)
+    mov_rr(a, rax, r12)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, r14, mem(rax, 16))
+    mark(a, have_bytes)
+    store(a, rip("f_used"), rcx)
+    mark(a, more)
+    load(a, rcx, rip("f_used"))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, all_written)
+    mov_rr(a, rax, r13)
+    mov_rr(a, rsi, r14)
+    call_to(a, "rt_file_write_some")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, write_failed)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, all_written)
+    alu(a, "add", r14, rax)
+    alu_store(a, "sub", rip("f_used"), rax)
+    jmp_to(a, more)
+    mark(a, all_written)
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_file_close")
+    movi(a, rax, 0)
+    jmp_to(a, write_out)
+    mark(a, write_failed)
+    push_r(a, rdx)
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_file_close")
+    pop_r(a, rdx)
+    mark(a, failed) # rdx the system's code, rbx the path
+    mov_rr(a, rax, rbx)
+    movi(a, rcx, 1)
+    call_to(a, "rt_file_reason")
+    storei(a, rip("err_why"), 23)
+    jmp_to(a, gave_up)
+    mark(a, not_text)
+    storei(a, rip("err_why"), 20)
+    jmp_to(a, gave_up)
+    mark(a, refused) # err_reason says why
+    storei(a, rip("err_why"), 23)
+    jmp_to(a, gave_up)
+    mark(a, nul_name)
+    nul_reason(a, target)
+    storei(a, rip("err_why"), 23)
+    jmp_to(a, gave_up)
+    mark(a, too_long)
+    storei(a, rip("err_why"), 27)
+    mark(a, gave_up)
+    movi(a, rax, 2)
+    mark(a, write_out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_arguments with a, target
+    # rt_arguments: what the program was started with after its own name, as a new list of text, into xmm0,
+    # with rax 0. On Windows the command line is split as Rust's std::env::args splits it.
+    mark(a, "rt_arguments")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    movi(a, rsi, 0)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    mov_rr(a, rbx, rax)
+    set done to new_label(a)
+    if target is "windows"
+        set name_loop to new_label(a)
+        set name_other to new_label(a)
+        set name_char to new_label(a)
+        set skip_space to new_label(a)
+        set arg_start to new_label(a)
+        set arg_loop to new_label(a)
+        set plain to new_label(a)
+        set not_space to new_label(a)
+        set backslashes to new_label(a)
+        set counted to new_label(a)
+        set halved to new_label(a)
+        set literal to new_label(a)
+        set put_them to new_label(a)
+        set quote_mark to new_label(a)
+        set not_double to new_label(a)
+        set open_quote to new_label(a)
+        set line_end to new_label(a)
+        set push_last to new_label(a)
+        set between to new_label(a)
+        win_enter(a) # the command line, as UTF-8 in memory of its own
+        call_import(a, "imp_GetCommandLineW")
+        mov_rr(a, r12, rax)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        mov_rr(a, r8, r12)
+        movi(a, r9, -1)
+        storei(a, mem(rsp, 32), 0)
+        storei(a, mem(rsp, 40), 0)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        call_import(a, "imp_WideCharToMultiByte")
+        mov32_rr(a, r13, rax)
+        win_leave(a)
+        lea(a, rcx, mem(r13, 1))
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, r14, rax)
+        win_enter(a)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        mov_rr(a, r8, r12)
+        movi(a, r9, -1)
+        store(a, mem(rsp, 32), r14)
+        store(a, mem(rsp, 40), r13)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        call_import(a, "imp_WideCharToMultiByte")
+        win_leave(a)
+        mov_rr(a, r12, r14) # r12 goes through it
+        movi(a, r13, 0) # first the program's own name: to a space or tab outside quotes, which only toggle
+        mark(a, name_loop)
+        load8(a, rax, mem(r12, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, done)
+        alui(a, "cmp", rax, 34)
+        jcc(a, cc_ne, name_other)
+        alui(a, "xor", r13, 1)
+        inc_r(a, r12)
+        jmp_to(a, name_loop)
+        mark(a, name_other)
+        test_rr(a, r13, r13)
+        jcc(a, cc_ne, name_char)
+        alui(a, "cmp", rax, 32)
+        jcc(a, cc_e, skip_space)
+        alui(a, "cmp", rax, 9)
+        jcc(a, cc_e, skip_space)
+        mark(a, name_char)
+        inc_r(a, r12)
+        jmp_to(a, name_loop)
+        mark(a, skip_space) # then each argument after spaces and tabs
+        load8(a, rax, mem(r12, 0))
+        alui(a, "cmp", rax, 32)
+        jcc(a, cc_e, between)
+        alui(a, "cmp", rax, 9)
+        jcc(a, cc_ne, arg_start)
+        mark(a, between)
+        inc_r(a, r12)
+        jmp_to(a, skip_space)
+        mark(a, arg_start)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, done)
+        call_to(a, "rt_b_reset")
+        movi(a, r13, 0) # 1 inside quotes
+        mark(a, arg_loop)
+        load8(a, rax, mem(r12, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, line_end)
+        alui(a, "cmp", rax, 92)
+        jcc(a, cc_e, backslashes)
+        alui(a, "cmp", rax, 34)
+        jcc(a, cc_e, quote_mark)
+        alui(a, "cmp", rax, 32)
+        jcc(a, cc_e, not_space)
+        alui(a, "cmp", rax, 9)
+        jcc(a, cc_ne, plain)
+        mark(a, not_space) # a space or tab: inside quotes it's the argument's own, else it ends it
+        test_rr(a, r13, r13)
+        jcc(a, cc_ne, plain)
+        call_to(a, "rt_b_text")
+        mov_rr(a, rdx, rax)
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_list_push")
+        jmp_to(a, skip_space)
+        mark(a, plain)
+        call_to(a, "rt_b_byte")
+        inc_r(a, r12)
+        jmp_to(a, arg_loop)
+        mark(a, backslashes) # backslashes: halved before a quote, which an odd number of them makes a quote
+        movi(a, r14, 0)
+        mark(a, counted)
+        load8(a, rax, mem(r12, 0))
+        alui(a, "cmp", rax, 92)
+        jcc(a, cc_ne, halved)
+        inc_r(a, r14)
+        inc_r(a, r12)
+        jmp_to(a, counted)
+        mark(a, halved)
+        alui(a, "cmp", rax, 34)
+        jcc(a, cc_ne, literal)
+        mov_rr(a, rax, r14)
+        alui(a, "and", rax, 1)
+        push_r(a, rax)
+        shifti(a, "shr", r14, 1)
+        call_to(a, put_them)
+        pop_r(a, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, arg_loop)
+        movi(a, rax, 34)
+        call_to(a, "rt_b_byte")
+        inc_r(a, r12)
+        jmp_to(a, arg_loop)
+        mark(a, literal)
+        call_to(a, put_them)
+        jmp_to(a, arg_loop)
+        mark(a, quote_mark)
+        test_rr(a, r13, r13)
+        jcc(a, cc_e, open_quote)
+        load8(a, rax, mem(r12, 1)) # inside quotes: "" is a quote, the end of the line leaves it open
+        alui(a, "cmp", rax, 34)
+        jcc(a, cc_ne, not_double)
+        call_to(a, "rt_b_byte")
+        alui(a, "add", r12, 2)
+        jmp_to(a, arg_loop)
+        mark(a, not_double)
+        inc_r(a, r12)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, arg_loop)
+        movi(a, r13, 0)
+        jmp_to(a, arg_loop)
+        mark(a, open_quote)
+        movi(a, r13, 1)
+        inc_r(a, r12)
+        jmp_to(a, arg_loop)
+        mark(a, line_end) # the last argument, if anything was in it or quotes were open
+        load(a, rax, rip("b_len"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, push_last)
+        test_rr(a, r13, r13)
+        jcc(a, cc_e, done)
+        mark(a, push_last)
+        call_to(a, "rt_b_text")
+        mov_rr(a, rdx, rax)
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_list_push")
+        jmp_to(a, done)
+        set again to new_label(a) # put_them: r14 backslashes into the builder
+        set put_done to new_label(a)
+        mark(a, put_them)
+        mark(a, again)
+        test_rr(a, r14, r14)
+        jcc(a, cc_e, put_done)
+        movi(a, rax, 92)
+        call_to(a, "rt_b_byte")
+        dec_r(a, r14)
+        jmp_to(a, again)
+        mark(a, put_done)
+        ret(a)
+    else
+        set each_arg to new_label(a)
+        set measure to new_label(a)
+        set measured to new_label(a)
+        movi(a, r12, 1) # argv[1] on, from the stack the program started with
+        mark(a, each_arg)
+        alu_load(a, "cmp", r12, rip("arg_count"))
+        jcc(a, cc_ae, done)
+        load(a, rax, rip("arg_vector"))
+        mov_rr(a, rcx, r12)
+        shifti(a, "shl", rcx, 3)
+        alu(a, "add", rax, rcx)
+        load(a, rsi, mem(rax, 0))
+        movi(a, rcx, 0)
+        mark(a, measure)
+        mov_rr(a, rax, rsi)
+        alu(a, "add", rax, rcx)
+        load8(a, rax, mem(rax, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, measured)
+        inc_r(a, rcx)
+        jmp_to(a, measure)
+        mark(a, measured)
+        call_to(a, "rt_decode_bytes")
+        call_to(a, "rt_b_text")
+        mov_rr(a, rdx, rax)
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_list_push")
+        inc_r(a, r12)
+        jmp_to(a, each_arg)
+    end
+    mark(a, done)
+    movq_xr(a, xmm0, rbx)
+    movi(a, rax, 0)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_file_why with a
+    # rt_why_file: what went wrong with a file, a site or a question, from err_why, into the builder
+    set w21 to new_label(a)
+    set w22 to new_label(a)
+    set w23 to new_label(a)
+    set w26 to new_label(a)
+    set w27 to new_label(a)
+    mark(a, "rt_why_file")
+    load(a, rax, rip("err_why"))
+    for each pair in list of (list of 21, w21), (list of 22, w22), (list of 23, w23), (list of 26, w26), (list of 27, w27)
+        alui(a, "cmp", rax, item 1 of pair)
+        jcc(a, cc_e, item 2 of pair)
+    end
+    b_text(a, "a file name is text, not ") # 20
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w21)
+    b_text(a, "can't read '")
+    file_name_text(a)
+    b_text(a, "': ")
+    reason_text(a)
+    ret(a)
+    mark(a, w22)
+    b_text(a, "there is no file called '")
+    file_name_text(a)
+    b_text(a, "'")
+    ret(a)
+    mark(a, w23)
+    b_text(a, "can't write '")
+    file_name_text(a)
+    b_text(a, "': ")
+    reason_text(a)
+    ret(a)
+    mark(a, w26)
+    b_text(a, "there was no answer to this question: the input ended")
+    ret(a)
+    mark(a, w27)
+    b_text(a, too_big)
+    ret(a)
+end
+
+# `read`, `ask` and `arguments`, whose values come from outside the program: into xmm0
+to gen_outside with fc, e
+    set a to a of fc
+    if kind of e is "arguments"
+        call_to(a, "rt_arguments")
+        return nothing
+    end
+    if kind of e is "read"
+        gen_expr(fc, subject of e)
+        movi(a, rdx, 0)
+        if binary of e
+            movi(a, rdx, 1)
+        end
+        call_to(a, "rt_read")
+    else
+        gen_expr(fc, question of e)
+        call_to(a, "rt_ask")
+    end
+    why_stub(fc, at of e, "rt_why_file")
+end
+
+# `write value to name`
+to gen_write with fc, s
+    gen_pair(fc, value of s, target of s)
+    call_to(a of fc, "rt_write_file")
+    why_stub(fc, at of s, "rt_why_file")
+end
+
 # ---------- what can't become machine code yet ----------
 
 set node_words to dictionary where "list" is "a list", "record" is "a record", "dictionary" is "a dictionary",
-    "length" is "'length of'", "item" is "'item'", "field" is "a record's field", "ask" is "'ask'", "read" is "'read'",
-    "arguments" is "'arguments'", "random" is "'random number'", "builtin" is "this", "each" is "'for each ... in'",
+    "length" is "'length of'", "item" is "'item'", "field" is "a record's field",
+    "random" is "'random number'", "builtin" is "this", "each" is "'for each ... in'",
     "setItem" is "'set item'", "setField" is "setting a field", "when" is "'when'", "every" is "'every'",
-    "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'", "write" is "'write'", "expect" is "'expect'"
+    "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'", "expect" is "'expect'"
 
 to not_yet with at, what
-    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions (as values too, and made inside functions), try and most of the helpers can")
+    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions (as values too, and made inside functions), try, files, ask, arguments and most of the helpers can")
 end
 
 to not_yet_node with node
@@ -8836,7 +11408,7 @@ to new_state with a, program_name, files, source, target
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
-        line_entries empty dictionary, uses_case no
+        line_entries empty dictionary, uses_case no, allowed nothing
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -9111,6 +11683,12 @@ to function_at with fc, found
 end
 
 to compile_machine with source, file_names, file_texts, target, program_name
+    return compile_allowing(source, file_names, file_texts, target, program_name, empty list)
+end
+
+# compile_machine for a program built with --allow flags, which say what it may do without asking
+to compile_allowing with source, file_names, file_texts, target, program_name, flags
+    set allowing to allowed_of(flags)
     set files to empty list
     for each i from 1 to length of file_names
         add record with name item i of file_names, text item i of file_texts to files
@@ -9119,6 +11697,7 @@ to compile_machine with source, file_names, file_texts, target, program_name
     set body to front's parse(front's tokenize(source, ""), reading)
     set a to new_asm()
     set st to new_state(a, program_name, files, source, target)
+    set allowed of st to allowing
     gen_program(st, body)
     emit_runtime(st)
     if target is "windows"
@@ -9446,6 +12025,8 @@ to gen_statement with fc, s
             call_to(a, "rt_e_shown")
             jmp_to(a, "rt_e_end")
         end
+    else if what is "write"
+        gen_write(fc, s)
     else
         not_yet_node(s)
     end
@@ -9965,6 +12546,8 @@ to gen_expr with fc, e
         end
         call_to(a, item (name of e) of builtin_routines)
         why_stub(fc, at of e, "rt_why_builtin")
+    else if what is "read" or what is "ask" or what is "arguments"
+        gen_outside(fc, e)
     else
         not_yet_node(e)
     end
@@ -10354,6 +12937,9 @@ end
 to windows_file with a
     set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess",
         "VirtualAlloc"
+    for each fn_name in file_imports
+        add fn_name to names
+    end
     set text_size to length of hot of a + length of cold of a
     set text_rva to 4096
     set rdata_rva to align_up(text_rva + text_size, 4096)

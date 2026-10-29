@@ -144,6 +144,14 @@ export const MACHINE_CASES = [
   "set d to empty dictionary\nto f\n    return 1\nend\nset item \"a\" of d to f\nsay d\nsay item \"a\" of d\nset r to record with go f\nsay go of r\nset w to go of r\nsay w()",
   "to outer\n    to inner with a, b\n        return a * b\n    end\n    set results to empty list\n    for each i from 1 to 3\n        try\n            add inner(i) to results\n        if it fails with why\n            add why to results\n        end\n    end\n    return results\nend\nsay outer()",
   "to f with n\n    if n is 0\n        fail with \"bottom\"\n    end\n    return g(n - 1)\nend\nto g with n\n    set h to f\n    return h(n)\nend\nf(3)",
+  // what comes from outside, with nothing given and nothing allowed: no arguments, no answer, and files and
+  // sites refused
+  "say arguments\nsay length of arguments\nset a to arguments\nadd 1 to a\nsay length of arguments\nsay a",
+  "say \"before\"\nset name to ask \"What's your name?\"\nsay \"never\"",
+  "to greet\n    return ask list of \"name\", 1\nend\ntry\n    say greet()\nif it fails with why\n    say \"failed: \" why\nend\nsay greet()",
+  "for each name in list of \"in.txt\", \"https://example.com/x\", \"HTTP://a\", 5, nothing, list of 1\n    try\n        say read name\n    if it fails with why\n        say why\n    end\n    try\n        say read bytes name\n    if it fails with why\n        say why\n    end\nend\nfor each name in list of \"out.txt\", \"https://example.com/x\", yes\n    try\n        write \"x\" to name\n    if it fails with why\n        say why\n    end\nend\nwrite list of 1, 2 to \"out.txt\"",
+  "to save with v\n    write v to \"keep.txt\"\nend\nsave(\"x\")",
+  "say read bytes 3",
 ];
 
 export function machinePrograms(seed, count) {

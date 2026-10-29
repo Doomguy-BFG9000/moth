@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,11 +19,25 @@ const skip = target ? false : "machine.moth makes programs for Windows and Linux
 const machine = machineCompiler(here("machine.moth"), here("compiler.moth"));
 const executable = (dir, name) => join(dir, target === "windows" ? `${name}.exe` : name);
 
+// What `moth run` gives a program started away from a terminal, with no --allow flags and nothing to read:
+// every file and site refused, as run refuses them, and each question asked with no answer to it.
+const refused = (doing) => () => {
+  throw new Error(`this program isn't allowed to ${doing}`);
+};
+const NOTHING_ALLOWED = {
+  read: (name) => refused(/^https?:\/\//i.test(name) ? "go online (start it with --allow-net)" : "read files (start it with --allow-read)")(),
+  write: refused("write files (start it with --allow-write)"),
+};
+
 // What `moth run p.moth` prints, writes as a mistake, and exits with; null for a program too long to wait for.
 function onEngine(source, name) {
   let stdout = "";
+  const ask = (question) => {
+    stdout += `${question} \n`; // the question, then a line of its own, as the input has ended
+    return null;
+  };
   try {
-    run(source, (line) => (stdout += `${line}\n`), { maxSteps: 3_000_000, file: name });
+    run(source, (line) => (stdout += `${line}\n`), { maxSteps: 3_000_000, file: name, ask, disk: NOTHING_ALLOWED, args: [] });
     return { stdout, stderr: "", status: 0 };
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
@@ -183,5 +197,59 @@ test("moth build --exe writes a program of its own, which uses files as moth run
     assert.equal(ran.status, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A program that takes arguments, asks, reads and writes, built with and without --allow flags, against `moth
+// run` given the same flags, arguments and input, each in a folder of its own with the same files in it.
+test("moth build --exe builds --allow flags in, and its program reads, writes, asks and takes arguments as moth run does", { skip }, () => {
+  const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
+  const source = [
+    "for each a in arguments",
+    '    say "[" a "]"',
+    "end",
+    'set name to ask "Name?"',
+    'say "Hi " name',
+    'write "made by " + name to "out.txt"',
+    'say read "out.txt"',
+    'say read bytes "in.txt"',
+    'say length of read "data/big.txt"',
+    "try",
+    '    say read "data"',
+    "if it fails with why",
+    "    say why",
+    "end",
+    'set again to ask "Again?"',
+    'say read "missing.txt"',
+  ].join("\n");
+  const setUp = () => {
+    const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+    writeFileSync(join(dir, "tool.moth"), source);
+    writeFileSync(join(dir, "in.txt"), "hello\n");
+    mkdirSync(join(dir, "data"));
+    writeFileSync(join(dir, "data", "big.txt"), "é".repeat(100_000));
+    return dir;
+  };
+  const outFile = (dir) => (existsSync(join(dir, "out.txt")) ? readFileSync(join(dir, "out.txt"), "utf8") : null);
+  const dirs = [];
+  try {
+    for (const flags of [[], ["--allow-read"], ["--allow-read", "--allow-write"], ["--allow-all"], ["--allow-read=data,in.txt", "--allow-write=."],
+      ["--allow-read=data", "--allow-write=data", "--allow-net=example.com"]]) {
+      const [made, ran] = [setUp(), setUp()];
+      dirs.push(made, ran);
+      const built = spawnSync(process.execPath, [cli, "build", "--exe", "tool.moth", ...flags], { cwd: made, encoding: "utf8" });
+      assert.equal(built.status, 0, built.stderr);
+      const args = ["one", "two words", 'q"uote', ""];
+      const input = "Sam\r\nagain";
+      const got = spawnSync(executable(made, "tool"), args, { cwd: made, encoding: "utf8", input });
+      const want = spawnSync(process.execPath, [cli, "run", "tool.moth", ...flags, ...args], { cwd: ran, encoding: "utf8", input });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status, out: outFile(made) },
+        { stdout: want.stdout, stderr: want.stderr, status: want.status, out: outFile(ran) }, flags.join(" "));
+    }
+    const bad = spawnSync(process.execPath, [cli, "build", "--exe", "tool.moth", "--allow-everything"], { cwd: dirs[0], encoding: "utf8" });
+    assert.equal(bad.status, 2);
+    assert.equal(spawnSync(process.execPath, [cli, "build", "--exe", "tool.moth", "--allow-all=x"], { cwd: dirs[0], encoding: "utf8" }).status, 2);
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
 });

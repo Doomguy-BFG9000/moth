@@ -971,6 +971,29 @@ hold them to agreeing.
   ICU decides it. Tested on every character there is, both ways, against the
   JavaScript engine; only a program that changes case carries the tables. The
   Rust engine's tables are a Unicode version behind, so it differs on 56.
+- **Files, questions and arguments.** `read`, `write`, `ask` and `arguments`
+  do what they do in a program `moth-native build --exe` makes, which `moth
+  run` matches. A file is read or written, or a site read, only once the
+  program may: the `--allow` flags it was built with, kept in its data, say
+  what it may do without asking; otherwise a person at a terminal is asked,
+  once for each file or site (or for all of them, with `a`), and anywhere else
+  the answer is no. A flag that names files or folders allows them and what's
+  in them, once each is where it really is: on Windows from
+  `GetFinalPathNameByHandleW`, on Linux from the link `/proc/self/fd/N` the
+  system keeps for a file opened with `O_PATH`. On Windows a file's name
+  becomes the path Rust's own library opens (`GetFullPathNameW`, then `\\?\`),
+  so a name ending in `/` or `.` means the same as there. A file that can't be
+  read or written says what moth-native says: Node's words for a folder, a
+  missing file and one the program may not have, and the system's own for the
+  rest (`FormatMessageW`, or glibc's words on Linux). Input comes a line at a
+  time through a buffer that keeps what came after the line, for `ask` and
+  for a question alike, and from a Windows console as UTF-16, through
+  `ReadConsoleW`, as Rust reads it. Linux's arguments come from the stack the
+  program starts on, Windows' from `GetCommandLineW`, split as Rust's
+  `std::env::args` splits it. File bytes come from `rt_alloc_raw`, and the
+  values the runtime keeps (the file's name, why it failed, and what a person
+  answered) sit among the collector's roots. It can't go online yet, so a
+  site the program may read says it couldn't be reached.
 - **A trap, twice.** In Moth a `set` inside a function changes a top-level
   variable of the same name, and a file used `as` a name shares its functions'
   variables with the program's top level. A label called `here` in machine.moth
@@ -980,4 +1003,6 @@ hold them to agreeing.
 - **Checked.** 400 random programs made from what it takes, 120 written for what's
   easy to get wrong, and every test program and 300 broken ones it can take, on
   the system the tests run on, against the JavaScript engine's output, mistakes,
-  trails and exit codes.
+  trails and exit codes; and programs that read, write, ask and take arguments,
+  built with and without `--allow` flags, against `moth run` and `moth-native
+  run`, each in a folder of its own, down to the files they leave there.

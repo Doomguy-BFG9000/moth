@@ -176,10 +176,12 @@ program, writing every x86-64 instruction and the file around them byte by
 byte, with no assembler, linker or other compiler. So far it takes numbers,
 yes, no and nothing, text, lists, records, dictionaries, bytes, variables,
 `say`, `if`, the loops, functions (made inside functions and passed around as
-values too), `try`, and the helpers, which is enough for
-[`math.moth`](math.moth) and the handwriting network. What it makes does
-exactly what `moth run` does, down to how a number is shown, how two numbers
-compare to 15 digits, how text sorts, and the calls a mistake lists:
+values too), `try`, `read` and `write`, `ask`, `arguments`, and the helpers,
+which is enough for [`math.moth`](math.moth) and the handwriting network. What
+it makes does exactly what `moth run` does, down to how a number is shown, how
+two numbers compare to 15 digits, how text sorts, the calls a mistake lists,
+and asking before it reads or writes a file, unless `--allow` flags after the
+file in `moth build --exe` let it:
 
 ```text
 $ moth build --exe fib.moth
@@ -210,9 +212,10 @@ always works in decimals, even for a count that is only ever whole.
 nothing else installed, and machine.moth, made into machine code, already
 compiles itself into exactly the bytes it makes on Node.js, in 1.9 s against
 Node.js's 5.1 s, with a garbage collector keeping it to 535 MB. Making a
-program still starts from Node.js, though: the rest of the way is reading and
-writing files, so a `moth.exe` can read a program and write the one it makes.
-From then on Moth needs neither JavaScript nor Rust.
+program still starts from Node.js, though. A program in machine code can now
+read and write files and take its arguments, so the rest of the way is a
+`moth.exe`: machine.moth, with a few lines around it that read a program and
+write the one it makes. From then on Moth needs neither JavaScript nor Rust.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -811,7 +814,8 @@ calls that led there.
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
   what's easy to get wrong, and every test program and 300 broken ones it can
   take, each built for the system the tests run on, which must print, fail and
-  exit exactly alike
+  exit exactly alike; and a tool's files, arguments, answers and `--allow`
+  flags against `moth run`'s
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -845,9 +849,9 @@ unboxed numbers were all caught, some only by the fuzzer.
   Building one needs `rustc`, and a very big program takes minutes. It has no
   limit on its steps, so a loop that never ends runs until it's stopped.
 - `moth build --exe` takes only part of Moth so far: no units, tables,
-  files, `ask`, drawing, apps or `expect`; anything
-  else stops with a mistake that says it can't become
-  machine code yet.
+  `random number`, drawing, apps or `expect`; anything else stops with a
+  mistake that says it can't become machine code yet. What it makes can't go
+  online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
 - The engines change case with their own Unicode tables: JavaScript's are
   Unicode 17 and Rust's 16, so `uppercase of` and `lowercase of` differ on the
