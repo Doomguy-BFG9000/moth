@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { run, test as testMoth, format, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
+import { generatePrograms } from "./generate.js";
 
 const ENGINES = ["jit", "wasm", "vm"];
 
@@ -1096,4 +1097,49 @@ test("a file used inside a module is the module's own, and the program can use i
   for (const engine of ENGINES) assert.equal(output(program, { engine, ...reading }), "5 2 1 10", engine);
   const moth = mothCompiler(COMPILER);
   assert.deepEqual(compiled((s) => moth(s, files), program), compiled((s) => compileToJs(s, reading), program));
+});
+
+// ---------- generated programs ----------
+
+// The randomly broken programs above only break programs that exist. These are new ones, made from the
+// grammar with every feature mixed in (generate.js): the three engines must do exactly the same with each,
+// files and trails included; the compiler written in Moth must write the JIT's JavaScript; tidied code
+// must run the same; and the checker must never say a line that runs in a finished program will fail.
+test("generated programs: the engines, the compiler in Moth, the formatter and the checker all agree", () => {
+  const moth = mothCompiler(COMPILER);
+  const world = (engine, source) => {
+    const said = [];
+    const disk = memoryDisk({ "file.txt": "hello\nworld", "data.bin": new Uint8Array([1, 2, 3]) });
+    try {
+      run(source, (line) => said.push(line), { engine, maxSteps: 5_000, disk, args: ["one", "2"] });
+      return { said, files: [...disk.files] };
+    } catch (err) {
+      if (!(err instanceof MothError)) assert.fail(`the ${engine} crashed with ${err.stack}\non this program:\n${source}`);
+      return { said, files: [...disk.files], error: [err.message, err.col, err.trail] };
+    }
+  };
+  let finished = 0;
+  generatePrograms(2026, 1500).forEach((source, i) => {
+    const vm = world("vm", source);
+    assert.deepEqual(world("jit", source), vm, source);
+    assert.deepEqual(world("wasm", source), vm, `wasm: ${source}`);
+    if (i % 10 === 0) assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+    let tidy;
+    try {
+      tidy = format(source);
+    } catch (err) {
+      if (err instanceof MothError) return; // code that can't be read: the engines agreed on that above
+      throw err;
+    }
+    assert.equal(format(tidy), tidy, source);
+    assert.deepEqual(world("vm", tidy), vm, `tidied: ${source}`);
+    if (vm.error) return;
+    finished++;
+    const ran = new Set(timeline(source, { limit: 20_000 }).steps.map((step) => step.line));
+    for (const p of problems(source)) {
+      const [line] = p.split(":").map(Number);
+      if (p.includes(" fails: ") && !catches(source)) assert.ok(!ran.has(line), `said line ${line} fails, but it ran fine:\n${source}`);
+    }
+  });
+  assert.ok(finished > 20, `only ${finished} programs finished`);
 });

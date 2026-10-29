@@ -492,6 +492,11 @@ calls that led there.
   messages and positions, on all three engines
 - 5,000 randomly broken programs: each must fail with a proper Moth error, never
   a JavaScript crash, and the three engines must agree on all of them
+- 1,500 new programs made from the grammar ([`generate.js`](generate.js)), every
+  feature mixed in: the engines must agree, files and trails included, the
+  compiler written in Moth must match the JIT, tidying must change nothing they
+  do, and the checker must raise no false alarms. Run for longer, it found the
+  `else` / `if` bug
 - the checker against reality, on 3,000 more: no line it says will fail ever
   runs in a program that finishes, and it predicts 44% of runtime errors with
   no false alarms
@@ -555,7 +560,7 @@ unboxed numbers were all caught, some only by the fuzzer.
 ## Run it from the source
 
 ```bash
-npm test                     # everything above, in about 25 seconds
+npm test                     # everything above, in about 40 seconds
 npm run bench                # the three engines, timed
 node cli.js run hello.moth   # the moth command, without installing it
 python -m http.server        # then open http://localhost:8000 for the playground

@@ -577,3 +577,27 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   and the trail pointed straight at the second one. They also show a gap: Moth
   has no word for asking what kind a value is, which is why the JSON tool
   reads JSON but doesn't write it.
+
+## 20. Hunting bugs
+
+- **Programs from the grammar.** The fuzzer breaks programs that already
+  exist, so it rarely builds anything new. `generate.js` makes new ones from
+  the grammar, every feature mixed in, with a sensible value in each variable
+  to start and some lines wrapped in `try`, so they get further before a
+  mistake. Each must run the same on all three engines, compile to the same
+  JavaScript in the compiler written in Moth, run the same once tidied, and
+  get no false alarms from the checker. 12,000 of them found one bug, which
+  every engine shared, so only tidying caught it: an `if` on the line after
+  an `else` was read as `else if`, so ordinary nested code failed.
+- **Gaps found by looking.** A list that holds itself stopped the program
+  with "a value got too big" when shown (now `[1, [...]]`, and comparing two
+  of them doesn't go round for ever); a file used plainly inside a module was
+  read once for everyone, so the program's own use of it was skipped; and a
+  built program couldn't `ask`.
+- **Measure, then fix.** Typing in the playground's longest example felt
+  slow, and the checker, which runs on every key, looked to blame. Measuring
+  said otherwise: it took 8 ms of 120. The rest was rebuilding all 4,355
+  coloured spans and Chrome laying out all 1,592 lines again, because they
+  were one block of text. Now each line is its own block and only changed
+  lines are redrawn: 30 ms. Tidy's freeze was the same lesson: tidying took
+  50 ms, putting the result in with the browser's undoable insert took 17 s.
