@@ -1,2 +1,4 @@
 # what the programs in tools/ make when they run
 tools/*.bmp
+# pages made from the apps with moth build --web
+apps/*.html

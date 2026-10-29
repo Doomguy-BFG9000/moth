@@ -18,6 +18,9 @@ const USAGE = `usage:
                               (--check only says which aren't tidy, and fails if any aren't)
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
+  moth build --web <file.moth>
+                              make it into <file>.html: one web page, with nothing else needed, that
+                              runs it in any browser; an app there gets keys, clicks and its timers
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
   moth js <file.moth>         show the JavaScript the JIT makes
   moth wasm <file.moth>       show the WebAssembly module the third engine makes
@@ -134,10 +137,14 @@ function report(err, source, file) {
   if (err.trail.length) console.error(describeTrail(err.trail)); // the calls that led there
 }
 
+// The program compiled to bytecode, as JavaScript. A token is only kept for its position, so the compiled
+// program's errors can still point at the spot.
+const bytecode = (file, source) => JSON.stringify(compile(source, reading(file)), (key, v) => (key === "at" ? v.map((t) => t && { line: t.line, col: t.col, file: t.file }) : v));
+const usedSources = () => JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)));
+
 function build(file, source) {
   const out = file.replace(/\.moth$/i, "") + ".mjs";
-  // a token is only kept for its position, so the compiled program's errors can still point at the spot
-  const program = JSON.stringify(compile(source, reading(file)), (key, v) => (key === "at" ? v.map((t) => t && { line: t.line, col: t.col, file: t.file }) : v));
+  const program = bytecode(file, source);
   const vm = readFileSync(new URL("./vm.js", import.meta.url), "utf8");
   writeFileSync(out, `#!/usr/bin/env node
 // Compiled by Moth from ${basename(file)}: the program's bytecode plus the Moth virtual machine.
@@ -151,7 +158,7 @@ ${readLine}
 ${askAtTerminal}
 {
   const source = ${JSON.stringify(source)};
-  const used = ${JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)))}; // for a mistake in a file it uses
+  const used = ${usedSources()}; // for a mistake in a file it uses
   try {
     execute(${program}, console.log, Infinity, undefined, askAtTerminal, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2), Math.random);
   } catch (err) {
@@ -163,6 +170,173 @@ ${askAtTerminal}
 }
 `);
   console.log(`compiled ${file} -> ${out}`);
+}
+
+// The script of a page made by `moth build --web`, where it comes after vm.js. It runs the program, shows
+// what it says and draws, and if it's an app, gives it the keys pressed, clicks and drags on the picture,
+// and its timers. `ask` asks with the browser's own box, and `write` makes files that last while it's open.
+function webPage(program, source, used, name) {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("canvas");
+  const output = $("output");
+  let drawing = []; // what it has drawn since its last `clear`
+  let app = false; // set up, and waiting for keys, clicks or time
+  const reachOf = (d) => (d.shape === "box" ? Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.x + d.width), Math.abs(d.y + d.height))
+    : d.shape === "circle" ? Math.max(Math.abs(d.x), Math.abs(d.y)) + d.radius
+    : d.shape === "text" ? Math.max(Math.abs(d.x), Math.abs(d.y) + d.size)
+    : Math.max(Math.abs(d.x1), Math.abs(d.y1), Math.abs(d.x2), Math.abs(d.y2)));
+  // (0, 0) in the middle and y going up; a picture that reaches past the edge is zoomed out, but an app's
+  // never moves, since it's where its clicks land
+  function render() {
+    const pen = canvas.getContext("2d");
+    const half = canvas.width / 2;
+    const scale = app ? 1 : Math.min(1, (half - 10) / Math.max(0, ...drawing.map(reachOf)));
+    pen.setTransform(1, 0, 0, 1, 0, 0);
+    pen.clearRect(0, 0, canvas.width, canvas.height);
+    pen.setTransform(scale, 0, 0, -scale, half, half);
+    pen.lineCap = "round";
+    for (const d of drawing) {
+      pen.strokeStyle = pen.fillStyle = d.color;
+      if (d.shape === "box") pen.fillRect(d.x, d.y, d.width, d.height);
+      else if (d.shape === "circle") {
+        pen.beginPath();
+        pen.arc(d.x, d.y, d.radius, 0, 2 * Math.PI);
+        pen.fill();
+      } else if (d.shape === "text") { // the right way up, in a picture whose y goes up
+        pen.save();
+        pen.translate(d.x, d.y);
+        pen.scale(1, -1);
+        pen.font = `${d.size}px system-ui, sans-serif`;
+        pen.fillText(d.text, 0, 0);
+        pen.restore();
+      } else {
+        pen.beginPath();
+        pen.lineWidth = d.width;
+        pen.moveTo(d.x1, d.y1);
+        pen.lineTo(d.x2, d.y2);
+        pen.stroke();
+      }
+    }
+  }
+  let painting = false;
+  const paintSoon = () => { // at most once a frame, however fast it draws
+    if (painting) return;
+    painting = true;
+    requestAnimationFrame(() => {
+      painting = false;
+      render();
+    });
+  };
+  const draw = (d) => {
+    canvas.hidden = false;
+    if (d.clear) drawing = [];
+    else drawing.push(d);
+    paintSoon();
+  };
+  const say = (line) => {
+    output.hidden = false;
+    output.append(`${line}\n`);
+  };
+  const files = new Map();
+  const disk = {
+    read: (file, asBytes) => {
+      if (!files.has(file)) return null;
+      const data = files.get(file);
+      if (asBytes) return typeof data === "string" ? new TextEncoder().encode(data) : data.slice();
+      return typeof data === "string" ? data : new TextDecoder().decode(data);
+    },
+    write: (file, data) => void files.set(file, data),
+  };
+  const options = { ask: (question) => prompt(question), disk, random: Math.random, listeners: [], turtle: new Turtle(draw) };
+  const timers = [];
+  function failed(err) {
+    app = false;
+    timers.forEach(clearInterval);
+    $("hint").hidden = true;
+    const trail = err.trail?.length ? `\n${describeTrail(err.trail)}` : ""; // the calls that led there
+    $("error").textContent = err instanceof MothError
+      ? `${err.file ?? name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(err.file ? used[err.file] ?? "" : source, err)}${trail}`
+      : `Moth itself crashed: ${err.message}`;
+    $("error").hidden = false;
+  }
+  try {
+    new Machine(program, say, options).run();
+  } catch (err) {
+    return failed(err);
+  }
+  const waits = options.listeners;
+  if (!waits.length) return;
+  app = true;
+  canvas.hidden = false;
+  render();
+  const handle = (wait, inputs = []) => {
+    if (!app) return;
+    try {
+      callFunction(wait.closure, inputs, say, options);
+    } catch (err) {
+      failed(err);
+    }
+  };
+  const send = (event, inputs) => waits.forEach((wait) => wait.event === event && handle(wait, inputs));
+  for (const wait of waits) if (wait.event === "every") timers.push(setInterval(() => handle(wait), Math.max(10, wait.interval)));
+  const wants = [waits.some((w) => w.event === "key") && "press keys", waits.some((w) => w.event === "click" || w.event === "drag") && "click the picture"].filter(Boolean);
+  $("hint").textContent = wants.length ? `It's waiting for you: ${wants.join(" or ")}.` : "";
+  $("hint").hidden = !wants.length;
+  const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space", Enter: "enter", Escape: "escape", Backspace: "backspace" };
+  addEventListener("keydown", (e) => {
+    if (!app || e.ctrlKey || e.metaKey || e.altKey || e.key === "Tab") return;
+    e.preventDefault(); // arrows and space would scroll the page
+    send("key", [KEYS[e.key] ?? e.key.toLowerCase()]);
+  });
+  // where the pointer is, in the picture's own numbers
+  const spot = (e) => {
+    const box = canvas.getBoundingClientRect();
+    return [Math.round(((e.clientX - box.left) / box.width) * canvas.width - canvas.width / 2), Math.round(canvas.height / 2 - ((e.clientY - box.top) / box.height) * canvas.height)];
+  };
+  canvas.onpointerdown = (e) => {
+    if (!app) return;
+    canvas.setPointerCapture(e.pointerId); // a drag keeps going past the edge
+    send("click", spot(e));
+  };
+  canvas.onpointermove = (e) => e.buttons && send("drag", spot(e));
+}
+
+// `moth build --web`: one HTML file with everything in it, which runs the program in any browser
+function buildWeb(file, source) {
+  const out = file.replace(/\.moth$/i, "") + ".html";
+  const name = basename(file);
+  const vm = readFileSync(new URL("./vm.js", import.meta.url), "utf8");
+  // "</script" or "<!--" inside the script (in a string, say) would end it early; "<\/" is the same in JavaScript
+  const script = `${vm}\n${webPage}\nwebPage(${bytecode(file, source)}, ${JSON.stringify(source)}, ${usedSources()}, ${JSON.stringify(name)});`.replace(/<(\/script|!--)/gi, "<\\$1");
+  const title = name.replace(/\.moth$/i, "").replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+  writeFileSync(out, `<!doctype html>
+<!-- Made by Moth from ${title}.moth: the program's bytecode plus the Moth virtual machine. Open it in a browser. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 16px; display: grid; place-content: center; gap: 12px; background: #0f0f0f; color: #e6e6e6; font: 15px/1.5 system-ui, sans-serif; }
+  canvas { display: block; width: min(100vw - 32px, 500px); aspect-ratio: 1; background: #161616; border: 1px solid #333; border-radius: 6px; touch-action: none; }
+  pre { margin: 0; max-width: min(100vw - 32px, 500px); max-height: 40vh; overflow: auto; white-space: pre-wrap; font: 14px/1.5 ui-monospace, Consolas, monospace; }
+  p { margin: 0; color: #9a9a9a; font-size: 14px; }
+  #error { color: #ff7b72; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="500" height="500" hidden></canvas>
+<p id="hint" hidden></p>
+<pre id="output" hidden></pre>
+<pre id="error" hidden></pre>
+<script type="module">
+${script}
+</script>
+</body>
+</html>
+`);
+  console.log(`made ${file} into a web page -> ${out}`);
 }
 
 function shell() {
@@ -331,6 +505,8 @@ function main([command, file, ...extra]) {
     }
     return tests(rest, engine);
   }
+  const web = command === "build" && file === "--web";
+  if (web) file = extra.shift();
   let engine = "jit";
   if (command === "run" && extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
   const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own
@@ -356,11 +532,11 @@ function main([command, file, ...extra]) {
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
         writeFileSync(out, svg(drawn));
-        console.error(`drew ${drawn.length} lines -> ${out}`); // stderr, so the program's own output stays clean
+        console.error(`drew ${drawn.length} ${drawn.every((d) => d.x1 !== undefined) ? "lines" : "lines and shapes"} -> ${out}`); // stderr, so the program's own output stays clean
       }
     }
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
-    else if (command === "build") build(file, source);
+    else if (command === "build") (web ? buildWeb : build)(file, source);
     else if (command === "js") console.log(compileToJs(source, reading(file)).source);
     else if (command === "wasm") {
       const { bytes, listing } = compileToWasmBytes(source, reading(file));

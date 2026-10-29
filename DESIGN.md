@@ -601,3 +601,39 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   were one block of text. Now each line is its own block and only changed
   lines are redrawn: 30 ms. Tidy's freeze was the same lesson: tidying took
   50 ms, putting the result in with the browser's undoable insert took 17 s.
+
+## 21. Apps
+
+- **Handlers, set up once.** `when a key is pressed` and `every 100
+  milliseconds` only work at the top level, so an app's handlers are a fixed
+  list, made while the program sets up. Each is a function over the program's
+  own variables, which is how a timer and a key share a game's state. `run()`
+  hands back the app: what it waits for, and a way to send it an event. Each
+  event gets its own step limit, since a game left running for an hour would
+  run out of any shared one.
+- **The same app on every engine.** The JIT and WebAssembly hand a program
+  that goes too deep to the VM by running it again from the start. An app can
+  be deep in an event when that happens, so the VM runs the set-up again, then
+  every event sent so far, with the same answers, files and random numbers
+  (everything from outside is logged for exactly this), and only then the event
+  that went too deep.
+- **Randomness comes from outside.** `random number from 1 to 6` asks whoever
+  runs the program for a number: `moth run` and a built page give real ones,
+  tests give a fixed sequence, and the playground picks a new start for each
+  Run but keeps it while the program waits for an answer, so running it again
+  up to the question gives the same numbers.
+- **A picture that can be redrawn for ever.** `clear` wipes the picture, and
+  the playground only keeps what came after the last one, so a game that
+  redraws every frame never grows. An app's picture never zooms out the way a
+  drawing does, because a click has to land where the thing was drawn.
+- **The playground keeps an app running** in its worker, timers and all, no
+  more often than every 10 ms, and sends it keys only while the picture has
+  the focus, so typing in the editor never reaches the game. Trying it found a
+  bug the tests couldn't: the picture took the focus before it was shown, so
+  it never had it, and no key arrived.
+- **`moth build --web`** makes one HTML file, about 70 KB for Snake: the VM,
+  the bytecode, and a short script that draws and sends events. Only the VM,
+  because it's the smallest of the three and never too deep. `ask` uses the
+  browser's own box. Text in the program can hold `</script>`, which would end
+  the page's script early, so every one is written `<\/script>`, which reads
+  the same to JavaScript.

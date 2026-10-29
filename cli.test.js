@@ -213,3 +213,81 @@ test("a program built with moth build can ask, like moth run", (t) => {
   assert.equal(built.stdout, "Name? Sam\nHi Sam\n");
   assert.equal(built.status, 0);
 });
+
+// ---------- a web page ----------
+
+// A built page's script, run on node with a stand-in for the page: its picture, its boxes of text, and the
+// browser's frames, timers, keys and `ask` box, which the test works by hand.
+const STAND_IN = `
+const drawn = [];
+const pen = new Proxy({}, { get: (o, k) => (k in o ? o[k] : (...a) => drawn.push(k)), set: (o, k, v) => ((o[k] = v), true) });
+const element = () => ({ hidden: true, textContent: "", width: 500, height: 500, append(t) { this.textContent += t; },
+  getContext: () => pen, getBoundingClientRect: () => ({ left: 0, top: 0, width: 500, height: 500 }), setPointerCapture() {} });
+const page = Object.fromEntries(["canvas", "hint", "output", "error"].map((id) => [id, element()]));
+globalThis.document = { getElementById: (id) => page[id] };
+const frames = [], timers = [], keys = [];
+globalThis.requestAnimationFrame = (f) => frames.push(f);
+globalThis.setInterval = (f, ms) => timers.push([f, ms]);
+globalThis.addEventListener = (type, f) => keys.push(f);
+globalThis.prompt = () => "Ada";
+`;
+const DRIVE = `
+keys.forEach((f) => f({ key: "ArrowUp", preventDefault() {} }));
+timers.forEach(([f]) => f());
+timers.forEach(([f]) => f());
+page.canvas.onpointerdown({ clientX: 260, clientY: 240, pointerId: 1 });
+page.canvas.onpointermove({ buttons: 1, clientX: 300, clientY: 200 });
+frames.splice(0).forEach((f) => f());
+console.log(JSON.stringify({ output: page.output.textContent, hint: page.hint.textContent, error: page.error.textContent, every: timers.map(([, ms]) => ms), boxes: drawn.filter((k) => k === "fillRect").length }));
+`;
+
+test("moth build --web makes one page, with nothing outside it, that runs an app: keys, clicks, drags and timers", (t) => {
+  const file = tempFile(t, "app.moth", [
+    'say "</script> in a string can\'t end the page\'s script"',
+    'set name to ask "Who is playing?"',
+    'say "hello " name',
+    "set ticks to 0",
+    "when a key is pressed with key",
+    '    say "key " key',
+    "end",
+    "when the mouse is clicked with x and y",
+    '    say "click " x ", " y',
+    "end",
+    "when the mouse is dragged with x and y",
+    '    say "drag " x ", " y',
+    "end",
+    "every 5 milliseconds",
+    "    add 1 to ticks",
+    "    clear",
+    "    draw box at 0, 0 size ticks by ticks",
+    "end",
+  ].join("\n"));
+  const made = moth(["build", "--web", file]);
+  assert.equal(made.status, 0);
+  const html = readFileSync(file.replace(/\.moth$/, ".html"), "utf8");
+  assert.doesNotMatch(html, /\b(src|href)=/); // everything it needs is in it
+  assert.equal(html.match(/<\/script>/g).length, 1);
+  const script = html.slice(html.indexOf('<script type="module">') + 22, html.lastIndexOf("</script>"));
+  const page = tempFile(t, "page.mjs", STAND_IN + script + DRIVE);
+  const ran = node([page]);
+  assert.equal(ran.stderr, "");
+  assert.deepEqual(JSON.parse(ran.stdout), {
+    output: "</script> in a string can't end the page's script\nhello Ada\nkey up\nclick 10, 10\ndrag 50, 50\n",
+    hint: "It's waiting for you: press keys or click the picture.",
+    error: "",
+    every: [10], // 5 milliseconds is faster than a page runs timers well
+    boxes: 1, // the last one: what came before the last `clear` is gone
+  });
+});
+
+test("a page made with moth build --web shows a mistake, with the calls that led there, and the app stops", (t) => {
+  const file = tempFile(t, "oops.moth", "to boom with k\n    return 1 / k\nend\nwhen a key is pressed with key\n    say boom(0)\nend\nevery 1 second\n    say \"tick\"\nend");
+  assert.equal(moth(["build", "--web", file]).status, 0);
+  const html = readFileSync(file.replace(/\.moth$/, ".html"), "utf8");
+  const script = html.slice(html.indexOf('<script type="module">') + 22, html.lastIndexOf("</script>"));
+  const ran = node([tempFile(t, "page.mjs", STAND_IN + script + DRIVE)]);
+  const { output, error, hint } = JSON.parse(ran.stdout);
+  assert.equal(error, "oops.moth:2:14: can't divide by zero\n    return 1 / k\n             ^\n  in 'boom', called from line 5");
+  assert.equal(output, ""); // the timer stopped with it
+  assert.equal(hint, "It's waiting for you: press keys.");
+});

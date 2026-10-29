@@ -122,8 +122,9 @@ fixed point: the compiler written in Moth compiles itself to exactly what the JI
 tell apart two moons of dots, after Andrej Karpathy's
 [micrograd](https://github.com/karpathy/micrograd): every number it works out is
 a record that remembers how it was made, so backpropagation can trace each
-weight's share of the blame. Moth has no random numbers, sine or `exp`, so
-[`math.moth`](math.moth) writes them in Moth too. From 50% right to 100% in 60
+weight's share of the blame. Moth has no sine or `exp`, so
+[`math.moth`](math.moth) writes them in Moth too, with random numbers that come
+out the same every run. From 50% right to 100% in 60
 steps:
 
 <p align="center"><img src="docs/neural.svg" width="560" alt="Four pictures of what the network believes: before training it calls almost everything blue; at step 8 and step 20 the boundary bends between the moons; at the end it wraps around both moons exactly. Below, the loss falls from 1.17 to 0.006."></p>
@@ -300,6 +301,29 @@ to test_area                                # moth test runs every function name
 end
 ```
 
+Apps: pictures that answer keys, clicks and time.
+[`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines, and
+[`apps/paint.moth`](apps/paint.moth) a paint program in 54.
+
+```
+move to 50, -20                             # straight to a spot, drawing if the pen is down
+draw box at 0, 0 size 40 by 20              # filled with the pen's color
+draw circle at 0, 0 size 10
+draw "Score: 3" at -200, 220 size 16
+clear                                       # wipe the picture
+say random number from 1 to 6               # a whole number, different each run
+
+when a key is pressed with key              # "left", "space", "a", ...
+    say "you pressed " key
+end
+when the mouse is clicked with x and y      # also: when the mouse is dragged
+    draw circle at x, y size 5
+end
+every 100 milliseconds                      # or: every 2 seconds
+    move forward 1
+end
+```
+
 - **Values:** numbers, `"text"`, `yes`, `no`, `nothing`, lists, records,
   dictionaries and bytes. Only `no` and `nothing` count as false.
 - **Comparisons:** `is`, `is not`, `is less than`, `is greater than`,
@@ -353,6 +377,8 @@ nothing to install.
   JavaScript from the compiler written in Moth, or the WebAssembly module.
 - **Share** puts the code in the link, and **Tidy** lays it out the one way
   Moth writes it (Undo brings it back).
+- **Apps** keep running once they've set up: click the picture, and your keys,
+  clicks and drags go to the program. Try **Snake** and **Paint**.
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
   number-guessing game that asks for answers), **Neural network**, and **Moth's
   own compiler**, running in your browser.
@@ -372,6 +398,7 @@ moth test                          run every test_ function in every .test.moth 
 moth fmt hello.moth                tidy it (--check only says whether it's tidy)
 moth check hello.moth              find mistakes without running it
 moth build hello.moth              compile it to hello.mjs, which runs with plain node
+moth build --web snake.moth        make it into snake.html: one web page, apps and all
 moth bytecode hello.moth           show the bytecode the VM runs
 moth js hello.moth                 show the JavaScript the JIT makes
 moth wasm hello.moth               show the WebAssembly module, as text
@@ -526,7 +553,11 @@ unboxed numbers were all caught, some only by the fuzzer.
 ## Limits
 
 - No network and no clock: a program learns about the world through `ask`, its
-  files and its arguments. In the playground, files last for one run.
+  files, its arguments, and in an app, keys, clicks and timers. In the
+  playground, files last for one run.
+- An app runs in the playground or as a page made by `moth build --web`; `moth
+  run` only sets it up, since a terminal has no clicks. In the playground, an
+  app can't `ask` once it's running.
 - `use` without `as` puts a file's names in with the program's, where they can
   collide; `use ... as` keeps them apart.
 - The handwriting reader learned from shapes, not people, so unusual ways of
@@ -541,7 +572,7 @@ unboxed numbers were all caught, some only by the fuzzer.
   say if else end repeat while for to return and or not is yes no nothing list
   empty length item move turn pen record fail stop ask use try uppercase
   lowercase split join number position dictionary remove keys in byte bytes as
-  shift read write arguments expect`.
+  shift read write arguments expect clear draw when every`.
 - There's no word yet for asking what kind a value is (a number, text, a list...).
 - Bits work on whole numbers from 0 to 2^53 − 1, the most a Moth number holds
   exactly.
