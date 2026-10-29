@@ -111,6 +111,12 @@ export const MACHINE_CASES = [
   "say (list of 1, 300) as bytes",
   "say 5 as bytes",
   "set b to 2 bytes\nset byte 1 of b to \"a\"",
+  // upper and lower case, Σ at the end of a word and not, and mistakes
+  "say uppercase of \"hello, World! 123\"\nsay lowercase of \"HELLO, wORLD! 123\"\nsay uppercase of \"\"\nsay uppercase of \"straße ŉ ǰ ﬃ\"\nsay lowercase of \"İSTANBUL\"",
+  "for each t in list of \"ΑΣ\", \"ΑΣΑ\", \"Σ\", \"Α.Σ\", \"ΑΣ.\", \"ΣΑ\", \"ΑΣ Α\", \"ΟΔΥΣΣΕΥΣ\", \"ΆΣ\", \"ΑΣ1\", \"1Σ\"\n    say lowercase of t\nend",
+  "set t to \"abc\"\nset u to uppercase of t\nadd \"d\" to t\nsay t + \" \" + u\nsay lowercase of (uppercase of \"Ünïcödé 😀 ΣΊΣΥΦΟΣ\")",
+  "say uppercase of 5",
+  "say lowercase of (list of \"A\")",
   // functions as values, functions made inside functions, and calls through a variable
   "to make_counter\n    set count to 0\n    to step\n        add 1 to count\n        return count\n    end\n    return step\nend\nset c to make_counter()\nsay c()\nsay c()\nset d to make_counter()\nsay d()\nsay c()\nsay c",
   "to twice with f, x\n    return f(f(x))\nend\nto inc with n\n    return n + 1\nend\nsay twice(inc, 5)\nset g to inc\nsay g(10)\nsay list of inc, 1\nsay record with f inc",

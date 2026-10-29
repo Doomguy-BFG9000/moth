@@ -176,8 +176,8 @@ program, writing every x86-64 instruction and the file around them byte by
 byte, with no assembler, linker or other compiler. So far it takes numbers,
 yes, no and nothing, text, lists, records, dictionaries, bytes, variables,
 `say`, `if`, the loops, functions (made inside functions and passed around as
-values too), `try`, and the helpers but `uppercase` and
-`lowercase`, which is enough for [`math.moth`](math.moth). What it makes does
+values too), `try`, and the helpers, which is enough for
+[`math.moth`](math.moth) and the handwriting network. What it makes does
 exactly what `moth run` does, down to how a number is shown, how two numbers
 compare to 15 digits, how text sorts, and the calls a mistake lists:
 
@@ -844,11 +844,14 @@ unboxed numbers were all caught, some only by the fuzzer.
   JavaScript's engine, which has years of tuning behind it, is faster still.
   Building one needs `rustc`, and a very big program takes minutes. It has no
   limit on its steps, so a loop that never ends runs until it's stopped.
-- `moth build --exe` takes only part of Moth so far: no units, `uppercase`
-  or `lowercase`, tables, files, `ask`, drawing, apps or `expect`; anything
+- `moth build --exe` takes only part of Moth so far: no units, tables,
+  files, `ask`, drawing, apps or `expect`; anything
   else stops with a mistake that says it can't become
   machine code yet.
   It makes programs for x86-64 Windows and Linux, not for Macs.
+- The engines change case with their own Unicode tables: JavaScript's are
+  Unicode 17 and Rust's 16, so `uppercase of` and `lowercase of` differ on the
+  56 letters Unicode 17 added a case to. Machine code does what JavaScript does.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
   allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
   with a mistake, and Rust carries on. As WebAssembly, whose stack is smaller,

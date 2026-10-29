@@ -959,6 +959,18 @@ hold them to agreeing.
   4,000 negative numbers on a line went from 53 MB of program to 419 KB. The
   digit reader then runs as a program of its own, 3.5 times as fast as `moth
   run`, and training it 2.3 times.
+- **Upper and lower case.** JavaScript's toUpperCase and toLowerCase know all of
+  Unicode, and machine code has nothing of the kind, so tools/case-tables.mjs
+  asks Node.js what each character past ASCII becomes and writes the answers
+  into machine.moth as runs (a first character, a last, a step of 1 or 2 and
+  what to add): 197 for upper case and 184 for lower, the 102 that become more
+  than one character (ß becomes SS), and the ranges of cased and
+  case-ignorable characters. ASCII changes on the spot, anything else is found
+  by halving. A Σ in lower case is ς at the end of a word, when a cased
+  character comes before it and none after, skipping case-ignorable ones, as
+  ICU decides it. Tested on every character there is, both ways, against the
+  JavaScript engine; only a program that changes case carries the tables. The
+  Rust engine's tables are a Unicode version behind, so it differs on 56.
 - **A trap, twice.** In Moth a `set` inside a function changes a top-level
   variable of the same name, and a file used `as` a name shares its functions'
   variables with the program's top level. A label called `here` in machine.moth
