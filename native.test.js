@@ -206,11 +206,18 @@ const noWasm = existsSync(WASM) ? false : "the WebAssembly build isn't made (car
 const WASI_RUNNER = `
 import { readFileSync } from "node:fs";
 import { WASI } from "node:wasi";
-const wasi = new WASI({ version: "preview1", args: ["moth-native", ...process.argv.slice(1)], env: {}, preopens: { ".": "." }, returnOnExit: true });
+const wasi = new WASI({ version: "preview1", args: ["moth-native", ...process.argv.slice(2)], env: {}, preopens: { ".": "." }, returnOnExit: true });
 const module = await WebAssembly.compile(readFileSync(${JSON.stringify(WASM)}));
 process.exitCode = wasi.start(await WebAssembly.instantiate(module, wasi.getImportObject()));
 `;
-const onWasm = (args, options) => spawnSync(process.execPath, ["--no-warnings", "--input-type=module", "-e", WASI_RUNNER, "--", ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options });
+const runner = join(mkdtempSync(join(tmpdir(), "moth-wasi-")), "run.mjs");
+writeFileSync(runner, WASI_RUNNER);
+function onWasm(args, options) {
+  const ran = spawnSync(process.execPath, ["--no-warnings", runner, ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options });
+  // everything about a run that went wrong, so a failure says why
+  ran.why = `status ${ran.status}, signal ${ran.signal}, error ${ran.error?.message}\n${ran.stderr}`;
+  return ran;
+}
 
 test("moth-native as WebAssembly needs nothing but WASI, and agrees with the JavaScript VM on the test and broken programs", { skip: skip || noWasm }, () => {
   const imports = WebAssembly.Module.imports(new WebAssembly.Module(readFileSync(WASM)));
@@ -218,7 +225,7 @@ test("moth-native as WebAssembly needs nothing but WASI, and agrees with the Jav
   const sources = [...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s)];
   const jobs = [...sources.map((source) => ({ source, bytecode: true, answers: ["50", "25", "37"] })), ...brokenPrograms(42, 1000).map((source) => ({ source, maxSteps: 10_000 }))].filter(whole);
   const ran = onWasm(["conform"], { input: jobs.map((job) => JSON.stringify(job)).join("\n") + "\n" });
-  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.status, 0, ran.why);
   const lines = ran.stdout.trim().split("\n");
   assert.equal(lines.length, jobs.length);
   jobs.forEach((job, i) => assert.deepEqual(JSON.parse(lines[i]), onJs(job), job.source.slice(0, 2000)));
@@ -233,7 +240,7 @@ test("moth-native as WebAssembly runs a program's files, its answers and its mis
   assert.equal(ran.status, 1);
   writeFileSync(join(dir, "compiler.moth"), here("compiler.moth"));
   const built = onWasm(["bootstrap", "compiler.moth"], { cwd: dir });
-  assert.equal(built.status, 0, built.stdout + built.stderr);
+  assert.equal(built.status, 0, built.stdout + built.why);
   assert.equal(built.stdout.match(/the same bytecode/g).length, 3);
 });
 
