@@ -3,99 +3,285 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Moth playground</title>
+  <title>Moth · a programming language that reads like English</title>
+  <meta name="description" content="Moth is a small programming language with no symbols to learn. Write programs in plain words, draw pictures and make games, right in your browser.">
+  <link rel="icon" href="docs/moth.svg" type="image/svg+xml">
   <style>
     :root {
       color-scheme: dark;
-      --bg: #1e1e1e; --panel: #252526; --raised: #333337; --border: #3c3c3c;
-      --text: #d4d4d4; --dim: #8b8b8b; --accent: #4f8ff7;
+      --night: #070a13; --bg: #0b1020; --panel: #0e1427; --raised: #151d35; --border: #212a46; --line: #1a2240;
+      --text: #ece5d6; --soft: #c8c1b3; --dim: #8e96b0; --faint: #5b6482;
+      --amber: #f4b54a; --amber-hi: #ffc96b; --ember: #e8952e;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      --accent: var(--amber);
     }
-    html, body { height: 100%; margin: 0; }
-    body { display: grid; grid-template-rows: auto 1fr auto; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--night); color: var(--text); font: 15px/1.6 var(--sans); }
     [hidden] { display: none !important; }
+    a { color: inherit; }
+    ::selection { background: #f4b54a40; }
+    code, pre, textarea { font-feature-settings: "liga" 0, "calt" 0 !important; } /* show symbols as typed: a font shorthand would turn ligatures back on */
+    :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
-    /* toolbar */
-    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .logo { display: flex; align-items: baseline; gap: 10px; margin-right: 10px; }
-    .logo h1 { margin: 0; font-size: 19px; letter-spacing: 0.02em; }
-    .logo h1 span { color: var(--accent); }
-    .logo p { margin: 0; color: var(--dim); font-size: 12.5px; }
+    /* the moth, drawn once in the markup for each place it appears */
+    .moth .fore { fill: url(#wing-fore); } .moth .hind { fill: url(#wing-hind); }
+    .moth .spot { fill: #7a4512; } .moth .body { fill: #ffe7b5; }
+    .moth .feelers { fill: none; stroke: #ffe7b5; stroke-width: 1.6; stroke-linecap: round; }
+
+    /* ---------- the front page ---------- */
+    .intro { position: relative; overflow: hidden; isolation: isolate; background:
+      radial-gradient(56rem 34rem at 84% -8%, #f4b54a30, transparent 62%),
+      radial-gradient(44rem 32rem at -6% 104%, #6f5cff12, transparent 60%),
+      linear-gradient(#070a13, #0a0f1e 70%, #0b1020); }
+    .intro::after { content: ""; position: absolute; inset: auto 0 0; height: 1px; background: linear-gradient(90deg, transparent, #f4b54a55, transparent); }
+    .wrap { max-width: 1140px; margin: 0 auto; padding: 0 28px; }
+    .nav { display: flex; align-items: center; gap: 26px; padding-top: 22px; padding-bottom: 22px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; text-decoration: none; font: 600 23px/1 var(--serif); letter-spacing: 0.01em; }
+    .brand svg { width: 32px; height: 32px; filter: drop-shadow(0 0 10px #ffb84d70); }
+    .nav a:not(.brand) { color: var(--dim); text-decoration: none; font-size: 14.5px; }
+    .nav a:not(.brand):hover { color: var(--text); }
+
+    /* a lamp in the corner, and a moth that can't stay away from it */
+    .lamp { position: absolute; z-index: -1; top: 86px; right: 9%; width: 12px; height: 12px; border-radius: 50%; background: #fff4d6;
+      box-shadow: 0 0 24px 10px #ffd58a, 0 0 110px 54px #f4b54a3d, 0 0 320px 170px #f4b54a14; }
+    .flyer { position: absolute; z-index: -1; top: 64px; right: calc(9% + 54px); width: 46px; height: 46px; animation: drift 11s ease-in-out infinite; filter: drop-shadow(0 0 12px #ffb84d66); }
+    .flyer .wings { transform-box: view-box; transform-origin: 32px 30px; animation: flap 0.19s ease-in-out infinite alternate; }
+    @keyframes flap { to { transform: scaleX(0.42); } }
+    @keyframes drift {
+      0%, 100% { transform: translate(0, 0) rotate(-10deg); }
+      22% { transform: translate(-46px, 22px) rotate(8deg); }
+      48% { transform: translate(-12px, 58px) rotate(24deg); }
+      74% { transform: translate(34px, 26px) rotate(-4deg); }
+    }
+    @media (prefers-reduced-motion: reduce) { .flyer, .flyer .wings { animation: none; } html { scroll-behavior: auto; } }
+
+    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-top: 40px; padding-bottom: 76px; }
+    .hero h1 { margin: 0 0 22px; font: 500 clamp(42px, 6.2vw, 72px)/1.02 var(--serif); letter-spacing: -0.015em; }
+    .hero h1 em { color: var(--amber); text-shadow: 0 0 34px #ffb84d59; }
+    .lede { max-width: 33em; margin: 0 0 30px; color: var(--soft); font-size: 18.5px; line-height: 1.6; }
+    .lede code { color: var(--amber-hi); font: 0.9em var(--mono); }
+    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, background 0.15s; }
+    .btn.primary { color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); box-shadow: 0 10px 34px -10px #f4b54acc, inset 0 1px #fff1cc; }
+    .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 14px 40px -10px #f4b54aee, inset 0 1px #fff1cc; }
+    .btn.ghost { color: var(--text); border: 1px solid #333d60; }
+    .btn.ghost:hover { border-color: #f4b54a88; background: #f4b54a0d; }
+    .install { margin: 22px 0 0; color: var(--faint); font: 13.5px var(--mono); }
+    .install span { color: var(--dim); }
+    .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 26px 0 0; padding: 0; list-style: none; color: var(--dim); font-size: 13.5px; }
+    .facts li::before { content: "✦ "; color: var(--amber); }
+
+    .card { overflow: hidden; border: 1px solid #28315280; border-radius: 16px; background: linear-gradient(#111830, #0c1225);
+      box-shadow: 0 40px 90px -40px #000, inset 0 1px #ffffff0a, 0 0 70px -24px #f4b54a3a; }
+    .card-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--faint); font: 12.5px var(--mono); }
+    .card-head i { width: 9px; height: 9px; border-radius: 50%; background: #2a3354; }
+    .card-head i:first-child { background: #f4b54a99; }
+    .card-head button { margin-left: auto; padding: 4px 12px; border: 1px solid #f4b54a66; border-radius: 999px; color: var(--amber); background: none; font: 600 12px var(--sans); cursor: pointer; }
+    .card-head button:hover { background: #f4b54a1a; }
+    .card pre { margin: 0; padding: 18px 20px; overflow: auto; font: 14.5px/1.75 var(--mono); white-space: pre; }
+    .card .said { border-top: 1px dashed #2a3354; color: #f1e6cf; background: #090e1b; }
+    .card .said::before { content: "it says"; display: block; margin-bottom: 4px; color: var(--faint); font: 600 10.5px var(--sans); letter-spacing: 0.12em; text-transform: uppercase; }
+
+    .section { padding-top: 26px; padding-bottom: 64px; }
+    .section h2 { margin: 0 0 6px; font: 500 34px/1.2 var(--serif); }
+    .section > p { margin: 0 0 26px; color: var(--dim); }
+    .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .feature { padding: 22px 22px 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(#0f1529cc, #0b1122cc); }
+    .feature h3 { margin: 0 0 8px; font: 500 21px/1.25 var(--serif); color: var(--text); }
+    .feature h3::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 10px 3px 0; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px 2px #f4b54a88; }
+    .feature p { margin: 0; color: var(--dim); font-size: 14.5px; }
+    .feature code { color: var(--amber-hi); font: 0.92em var(--mono); white-space: nowrap; }
+    .feature pre { margin: 12px 0 0; padding: 10px 12px; overflow: auto; border-radius: 8px; background: #080c18; color: #ff9d8a; font: 12.5px/1.55 var(--mono); }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 16px; }
+    .shot { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; color: inherit; background: #0b1020; font: inherit; text-align: left; cursor: pointer; transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s; }
+    .shot:hover { transform: translateY(-3px); border-color: #f4b54a88; box-shadow: 0 0 34px -12px #f4b54a77; }
+    .shot img { display: block; width: 100%; aspect-ratio: 1; box-sizing: border-box; padding: 14px; object-fit: contain; background: radial-gradient(circle at 50% 40%, #151d38, #090d19 75%); }
+    .shot b { display: block; padding: 11px 14px 0; font: 500 17px/1.2 var(--serif); }
+    .shot small { display: block; padding: 2px 14px 13px; color: var(--dim); font-size: 12.5px; }
+    .down { display: block; width: max-content; margin: 0 auto; padding-bottom: 26px; color: var(--faint); font-size: 13px; text-decoration: none; }
+    .down:hover { color: var(--amber); }
+
+    /* ---------- the playground ---------- */
+    .playground { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; height: 100dvh; background: var(--bg); }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .logo { display: flex; align-items: center; gap: 10px; margin-right: 12px; }
+    .logo svg { width: 24px; height: 24px; filter: drop-shadow(0 0 6px #ffb84d66); }
+    .logo h1 { margin: 0; font: 600 19px/1 var(--serif); letter-spacing: 0.01em; }
+    .logo p { margin: 0; color: var(--faint); font-size: 12.5px; }
     .spacer { flex: 1; }
-    button, select { font: inherit; font-size: 13px; color: var(--text); background: var(--raised); border: 1px solid #4a4a4f; border-radius: 5px; padding: 4px 12px; cursor: pointer; }
-    button:hover:not(:disabled), select:hover { background: #3e3e43; }
+    #compiled { max-width: 160px; } #example { max-width: 190px; }
+    button, select { font: inherit; font-size: 13px; color: var(--text); background: var(--raised); border: 1px solid #2a3456; border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+    button:hover:not(:disabled), select:hover { background: #1c2543; border-color: #3a4670; }
     button:disabled { opacity: 0.4; cursor: default; }
-    button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    #run { background: #2ea043; border-color: #2ea043; color: #fff; font-weight: 600; }
-    #run:hover { background: #3fb950; }
-    #debug { background: #9e6a03; border-color: #9e6a03; color: #fff; font-weight: 600; }
-    #debug:hover { background: #bb8009; }
-    .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); cursor: pointer; }
+    select option { background: var(--panel); }
+    #run { color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); border-color: #f2ac3a; font-weight: 700; box-shadow: 0 4px 16px -6px #f4b54aaa; }
+    #run:hover { background: linear-gradient(#ffd383, #f6b54a); }
+    #debug { color: var(--amber); background: transparent; border-color: #f4b54a77; font-weight: 600; }
+    #debug:hover { background: #f4b54a17; }
+    .toggle { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 13px; cursor: pointer; }
     .toolbar a { color: var(--dim); font-size: 13px; text-decoration: none; }
-    .toolbar a:hover { color: var(--text); }
+    .toolbar a:hover { color: var(--amber); }
 
     /* the two panes */
     .workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-height: 0; }
     .pane { display: flex; flex-direction: column; min-height: 0; }
-    .pane + .pane { border-left: 1px solid var(--border); overflow: auto; }
-    .title { padding: 5px 12px; background: var(--panel); border-bottom: 1px solid var(--border); color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+    .pane + .pane { overflow: auto; border-left: 1px solid var(--border); background: #0a0f1d; }
+    .title { padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
 
     /* editor: line numbers, plus a coloured copy of the code under a see-through textarea */
     .editor { display: flex; flex: 1; min-height: 0; }
-    .gutter { margin: 0; padding: 12px 10px 12px 14px; min-width: 2ch; overflow: hidden; color: #5c5c5c; text-align: right; user-select: none; }
+    .gutter { margin: 0; padding: 12px 10px 12px 14px; min-width: 2ch; overflow: hidden; color: #39436a; text-align: right; user-select: none; }
     .code { position: relative; flex: 1; }
     .code textarea, .code pre { position: absolute; inset: 0; box-sizing: border-box; margin: 0; padding: 12px 12px 12px 4px; border: 0; overflow: auto; white-space: pre; tab-size: 4; }
-    .code textarea { color: transparent; background: transparent; caret-color: #fff; resize: none; outline: none; }
-    .code textarea::selection { background: #264f78; }
+    .code textarea { color: transparent; background: transparent; caret-color: var(--amber); resize: none; outline: none; }
+    .code textarea::selection { background: #f4b54a38; }
     .code pre { pointer-events: none; }
     .gutter, .code textarea, .code pre, #lines { font: 14px/1.6 var(--mono); }
-    .k { color: #569cd6; } .s { color: #ce9178; } .n { color: #b5cea8; } .c { color: #6a9955; font-style: italic; }
+    .k { color: #f4b54a; } .s { color: #a3d9a0; } .n { color: #8cc6ff; } .c { color: #646e90; font-style: italic; }
     .squiggle { text-decoration: underline wavy; text-decoration-skip-ink: none; text-underline-offset: 4px; }
-    .squiggle.bad { text-decoration-color: #f14c4c; } .squiggle.meh { text-decoration-color: #cca700; }
+    .squiggle.bad { text-decoration-color: #ff6b5e; } .squiggle.meh { text-decoration-color: #d9b44a; }
     #problems { margin: 0; padding: 6px 0; list-style: none; }
-    #problems button { display: block; width: 100%; padding: 3px 12px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
+    #problems button { display: block; width: 100%; padding: 3px 14px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
     #problems button:hover { background: var(--raised); }
-    #problems .bad { color: #f48771; } #problems .meh { color: #e2c08d; }
+    #problems .bad { color: #ff9d8a; } #problems .meh { color: #e8c98a; }
 
-    /* the code while debugging: numbered lines, the next one highlighted */
+    /* the code while debugging: numbered lines, the next one lit */
     #lines { position: relative; flex: 1; margin: 0; padding: 12px 12px 12px 48px; overflow: auto; }
     #lines li { min-height: 1.6em; padding-left: 6px; white-space: pre; border-left: 2px solid transparent; }
-    #lines li::marker { color: #5c5c5c; }
-    #lines li.current { background: #ffcc0021; border-left-color: #ffcc00; }
+    #lines li::marker { color: #39436a; }
+    #lines li.current { background: #f4b54a1c; border-left-color: var(--amber); }
 
     /* right pane */
-    .side pre { margin: 0; padding: 10px 12px; font: 13px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-    #output { min-height: 3em; }
-    .answer { display: flex; align-items: center; gap: 8px; margin: 6px 12px 10px; font: 13px/1.5 var(--mono); }
+    .side pre { margin: 0; padding: 10px 14px; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    #output { min-height: 3em; color: #f1e6cf; }
+    .answer { display: flex; align-items: center; gap: 8px; margin: 6px 14px 10px; font: 13px/1.5 var(--mono); }
     .answer.drawing { flex-direction: column; align-items: flex-start; }
-    .pad { width: 220px; height: 220px; background: #111; border: 1px solid #4a4a4f; border-radius: 6px; touch-action: none; cursor: crosshair; }
-    .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #4a4a4f; border-radius: 5px; padding: 3px 8px; }
-    #output.error { color: #f48771; }
-    #canvas { display: block; width: min(100% - 24px, 440px); aspect-ratio: 1; margin: 12px auto; background: #161616; border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
-    #canvas:focus-visible { outline: 2px solid #4f8ff7; outline-offset: 2px; }
-    #bytecode { color: #a9a9a9; }
+    .pad { width: 220px; height: 220px; background: #080c18; border: 1px solid #2a3456; border-radius: 8px; touch-action: none; cursor: crosshair; }
+    .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #2a3456; border-radius: 8px; padding: 4px 9px; }
+    #output.error { color: #ff9d8a; }
+    #canvas { display: block; width: min(100% - 28px, 440px); aspect-ratio: 1; margin: 14px auto; background: radial-gradient(circle at 50% 45%, #10172d, #080c18 75%); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 0 46px -20px #f4b54a55; touch-action: none; }
+    #canvas:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+    #bytecode { color: #9aa1ba; }
 
-    /* status bar: blue normally, amber while debugging */
-    .status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 26px; padding: 3px 12px; background: #007acc; color: #fff; font-size: 12.5px; }
-    .status.debugging { background: #9e6a03; }
-    .status button { padding: 1px 10px; font-size: 12px; color: #fff; background: #ffffff26; border-color: #ffffff40; }
-    .status button:hover:not(:disabled) { background: #ffffff40; }
-    #timeline { flex: 1; min-width: 120px; accent-color: #fff; }
-    .hint { margin-left: auto; opacity: 0.8; }
+    /* status bar: quiet normally, lamp-lit while debugging */
+    .status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 28px; padding: 3px 14px; background: var(--panel); border-top: 1px solid var(--border); color: var(--dim); font-size: 12.5px; }
+    .status.debugging { color: #ffe3a6; background: linear-gradient(90deg, #2b1f08, #1a1608); border-top-color: #f4b54a55; }
+    .status button { padding: 1px 10px; font-size: 12px; }
+    .status.debugging button { color: #ffe3a6; background: #f4b54a1f; border-color: #f4b54a55; }
+    #timeline { flex: 1; min-width: 120px; accent-color: var(--amber); }
+    .hint { margin-left: auto; color: var(--faint); }
 
+    @media (max-width: 880px) {
+      .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 16px; }
+      .features { grid-template-columns: 1fr; }
+      .card pre { font-size: 13px; }
+      .nav a:not(.brand):not(.go) { display: none; }
+      .lamp { right: 14%; } .flyer { right: calc(14% + 40px); }
+    }
     @media (max-width: 800px) {
-      body { height: auto; }
+      .playground { height: auto; }
       .workspace { grid-template-columns: 1fr; }
       .pane:first-child { height: 55vh; }
       .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
     }
+    @media (min-width: 881px) and (max-width: 1100px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   </style>
 </head>
 <body>
-  <header class="toolbar">
+  <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <header class="intro">
+    <div class="lamp" aria-hidden="true"></div>
+    <svg class="flyer moth" viewBox="0 0 64 64" aria-hidden="true">
+      <g class="wings">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+      </g>
+      <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+      <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+    </svg>
+
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="#"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="#playground">Playground</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth/blob/main/DESIGN.md">How it's built</a>
+      <a class="go" href="https://github.com/samyyy2423/moth">GitHub ↗</a>
+    </nav>
+
+    <div class="hero wrap">
+      <div>
+        <h1>Programs that read like <em>English</em>.</h1>
+        <p class="lede">Moth is a small programming language with no symbols to learn. You write <code>say</code>, <code>if</code> and
+          <code>repeat</code>, draw pictures, make games, and when something goes wrong, it tells you in plain words.</p>
+        <div class="cta">
+          <a class="btn primary" href="#playground">Try it now <span aria-hidden="true">↓</span></a>
+          <a class="btn ghost" href="https://github.com/samyyy2423/moth">See the code</a>
+        </div>
+        <p class="install"><span>$</span> npm install -g github:samyyy2423/moth</p>
+        <ul class="facts">
+          <li>runs in your browser</li>
+          <li>three engines that agree</li>
+          <li>a compiler written in Moth</li>
+          <li>no dependencies</li>
+        </ul>
+      </div>
+      <figure class="card" style="margin: 0">
+        <div class="card-head"><i></i><i></i><i></i> welcome.moth <button id="try-sample" type="button">Run it ▸</button></div>
+        <pre id="sample" aria-label="An example Moth program"></pre>
+        <pre id="sample-said" class="said" aria-label="What it says"></pre>
+      </figure>
+    </div>
+
+    <section class="section wrap" aria-labelledby="what">
+      <h2 id="what">What it can do</h2>
+      <p>Everything below runs in the playground underneath, with nothing to install.</p>
+      <div class="features">
+        <div class="feature"><h3>Words, not symbols</h3><p><code>if age is at least 18</code>, not <code>if (age &gt;= 18) {</code>. Lists, records and dictionaries are written the way you'd say them.</p></div>
+        <div class="feature"><h3>Mistakes in plain words</h3><p>It points at the exact spot, and guesses what you meant.</p><pre>line 2: 'totl' has no value yet.
+Did you mean 'total'?</pre></div>
+        <div class="feature"><h3>Games and apps</h3><p>Keys, clicks and timers. Snake is 110 lines, and <code>moth build --web</code> turns it into one web page.</p></div>
+        <div class="feature"><h3>Three engines that agree</h3><p>A bytecode VM, a JIT to JavaScript, and WebAssembly that Moth writes byte by byte. Thousands of random programs check they say the same.</p></div>
+        <div class="feature"><h3>A compiler written in Moth</h3><p>1,700 lines of Moth that compile any Moth program, itself included, to exactly what the JIT writes, byte for byte.</p></div>
+        <div class="feature"><h3>Debug backwards</h3><p>Step through a run in either direction: the line about to run, every variable, and the picture as it was.</p></div>
+      </div>
+    </section>
+
+    <section class="section wrap" aria-labelledby="made">
+      <h2 id="made">Made with Moth</h2>
+      <p>Click one to open it in the playground.</p>
+      <div class="gallery" id="gallery">
+        <button class="shot" type="button" data-example="Snake"><img src="docs/snake.svg" alt="" loading="lazy"><b>Snake</b><small>a game: arrow keys and a timer</small></button>
+        <button class="shot" type="button" data-example="Paint"><img src="docs/paint.svg" alt="" loading="lazy"><b>Paint</b><small>drag to draw, click a colour</small></button>
+        <button class="shot" type="button" data-example="Spiral"><img src="docs/spiral.svg" alt="" loading="lazy"><b>Spiral</b><small>the turtle, in colour</small></button>
+        <button class="shot" type="button" data-example="Tree"><img src="docs/tree.svg" alt="" loading="lazy"><b>Tree</b><small>a function that calls itself</small></button>
+        <button class="shot" type="button" data-example="Neural network"><img src="docs/neural.svg" alt="" loading="lazy"><b>Neural network</b><small>learns, in Moth</small></button>
+        <button class="shot" type="button" data-example="Handwriting"><img src="docs/handwriting.svg" alt="" loading="lazy"><b>Handwriting</b><small>reads the digit you draw</small></button>
+      </div>
+    </section>
+    <a class="down" href="#playground">The playground ↓</a>
+  </header>
+
+  <section class="playground" id="playground" aria-label="Playground">
+  <div class="toolbar">
     <div class="logo">
-      <h1><span>●</span> Moth</h1>
-      <p>a language that reads like English</p>
+      <svg class="moth" aria-hidden="true"><use href="#moth"/></svg>
+      <h1>Moth</h1>
     </div>
     <select id="example" aria-label="Example"></select>
     <button id="run" type="button" title="Ctrl+Enter">▶ Run</button>
@@ -120,8 +306,9 @@
       </select>
     </label>
     <span class="spacer"></span>
+    <a href="#">↑ Home</a>
     <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
-  </header>
+  </div>
 
   <main class="workspace">
     <section class="pane" aria-label="Code">
@@ -171,10 +358,11 @@
     <span id="status" role="status"></span>
     <span class="hint" id="hint">Ctrl+Enter runs · Debug goes backwards too</span>
   </footer>
+  </section>
 
   <script type="module">
     import examples from "./examples.js";
-    import { compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, MothError } from "./moth.js";
+    import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -754,6 +942,36 @@
         status.textContent = "Put back as it was before Tidy";
       }
     };
+    const SAMPLE = [
+      'set guests to list of "Ada", "Grace", "Alan"',
+      "for each guest in guests",
+      "    if length of guest is at least 4",
+      '        say "Welcome, " guest "!"',
+      "    else",
+      '        say "Hi, " guest',
+      "    end",
+      "end",
+    ].join("\n");
+    $("sample").innerHTML = highlight(SAMPLE);
+    const sampleSaid = [];
+    run(SAMPLE, (line) => sampleSaid.push(line));
+    $("sample-said").textContent = sampleSaid.join("\n");
+    const toPlayground = () => $("playground").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    $("try-sample").onclick = () => {
+      code.value = SAMPLE;
+      picker.selectedIndex = -1;
+      refreshEditor();
+      runCode();
+      toPlayground();
+    };
+    for (const shot of $("gallery").children) {
+      shot.onclick = () => {
+        picker.value = shot.dataset.example;
+        picker.onchange();
+        toPlayground();
+      };
+    }
+
     let shared = null;
     try {
       if (location.hash.startsWith("#code=")) shared = decodeURIComponent(location.hash.slice("#code=".length));
@@ -764,6 +982,7 @@
       picker.selectedIndex = -1;
       refreshEditor();
       runCode();
+      $("playground").scrollIntoView({ behavior: "instant" }); // someone shared code: show it, not the front page
     }
   </script>
 </body>

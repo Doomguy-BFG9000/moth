@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+    <linearGradient id="hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+  </defs>
+  <path fill="url(#hind)" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+  <path fill="url(#fore)" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+  <circle fill="#7a4512" cx="15" cy="21" r="2.6"/><circle fill="#7a4512" cx="49" cy="21" r="2.6"/>
+  <ellipse fill="#ffe7b5" cx="32" cy="35" rx="2.6" ry="11"/>
+  <circle fill="#ffe7b5" cx="32" cy="23" r="2.8"/>
+  <path fill="none" stroke="#ffe7b5" stroke-width="1.6" stroke-linecap="round" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+</svg>
