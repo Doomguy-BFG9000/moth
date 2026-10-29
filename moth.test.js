@@ -1033,3 +1033,44 @@ test("format() tidies code the one way, without changing a piece of it, and tidy
   }
   assert.ok(tidied > 500, `only ${tidied} could be tidied`);
 });
+
+// ---------- the tools written in Moth ----------
+
+const tool = (name) => readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+
+test("picture.moth writes the same BMP picture on all three engines", () => {
+  const pictures = ENGINES.map((engine) => {
+    const disk = memoryDisk();
+    assert.equal(output(tool("picture.moth"), { engine, disk, args: ["60", "40", "p.bmp"] }), "drew the Mandelbrot set, 60 by 40, in p.bmp", engine);
+    return disk.files.get("p.bmp");
+  });
+  const [bmp] = pictures;
+  assert.equal(String.fromCharCode(bmp[0], bmp[1]), "BM");
+  assert.equal(bmp.length, 54 + 60 * 3 * 40); // 180 bytes a row, which 4 divides already
+  assert.deepEqual([bmp[18], bmp[22], bmp[28]], [60, 40, 24]); // width, height, bits per pixel
+  assert.ok(bmp.subarray(54).some((b) => b > 0) && bmp.subarray(54).some((b) => b === 0)); // colours, and the black set
+  for (const other of pictures) assert.deepEqual(other, bmp);
+});
+
+test("wordcount.moth counts a file's words, on all three engines", () => {
+  for (const engine of ENGINES) {
+    const disk = memoryDisk({ "story.txt": tool("story.txt") });
+    assert.equal(output(tool("wordcount.moth"), { engine, disk, args: ["story.txt", "3"] }), [
+      "290 words, 107 different ones",
+      "the  ██████████████████████████████ 45",
+      "and  █████████████ 20",
+      "it   ███████ 11",
+    ].join("\n"), engine);
+  }
+  assert.equal(error(tool("wordcount.moth"), {}).reason, "which file? write: moth run wordcount.moth story.txt");
+});
+
+test("json.moth passes its own tests, json.test.moth, on all three engines", () => {
+  for (const engine of ENGINES) {
+    const results = testMoth(tool("json.test.moth"), { engine, files: (name) => tool(name) });
+    assert.deepEqual(results.map((r) => [r.name, r.error?.message]), [
+      ["test_values", undefined], ["test_lists_and_objects", undefined], ["test_spaces_and_lines", undefined],
+      ["test_escapes", undefined], ["test_mistakes", undefined],
+    ], engine);
+  }
+});

@@ -204,7 +204,8 @@ class Checker extends Scope {
       }
       case "define": {
         const key = this.source(s.name, () => "function");
-        if (!this.all.made.has(key)) this.all.made.set(key, { at: s.at, message: `'${s.name}' is made but never used` });
+        const isTest = !this.parent && s.name.startsWith("test_"); // `moth test` calls it
+        if (!this.all.made.has(key) && !isTest) this.all.made.set(key, { at: s.at, message: `'${s.name}' is made but never used` });
         this.all.defines.set(key, [...(this.all.defines.get(key) ?? []), s.params.length]);
         new Checker(this, s.name, s.params, s.body, this.all);
         return;

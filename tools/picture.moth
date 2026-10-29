@@ -1,0 +1,94 @@
+# Draws the Mandelbrot set and saves it as a picture any image viewer opens. A BMP file is a short
+# header, then the colour of every pixel, and Moth writes it byte by byte.
+#
+#   moth run picture.moth --engine wasm            makes picture.bmp, 480 by 320
+#   moth run picture.moth 1200 800 big.bmp         any size, any name
+
+set width to 480
+set height to 320
+set name to "picture.bmp"
+if length of arguments is at least 2
+    set width to number of item 1 of arguments
+    set height to number of item 2 of arguments
+end
+if length of arguments is at least 3
+    set name to item 3 of arguments
+end
+set most to 60 # rounds before a point counts as inside the set
+
+# a whole number into `size` bytes of the block, from byte `at`, lowest byte first, as BMP wants
+to put_number with block, at, value, size
+    set left to value
+    for each i from 0 to size - 1
+        set byte (at + i) of block to left bit and 255
+        set left to shift left right by 8
+    end
+end
+
+# the whole number at or below x, for x from 0 to 255
+to whole with x
+    set n to 0
+    for each step in list of 128, 64, 32, 16, 8, 4, 2, 1
+        if n + step is at most x
+            add step to n
+        end
+    end
+    return n
+end
+
+# how many rounds of z = z * z + c before z gets away, up to `most`
+to escape with cx, cy
+    set x to 0
+    set y to 0
+    set n to 0
+    repeat while n is less than most and x * x + y * y is at most 4
+        set next_x to x * x - y * y + cx
+        set y to 2 * x * y + cy
+        set x to next_x
+        add 1 to n
+    end
+    return n
+end
+
+# a colour for each count, worked out once: black inside the set, and outside it a glow from deep blue
+# to orange, by how quickly the point got away
+set colours to empty list
+for each n from 0 to most
+    set t to n / most
+    if n is most
+        add list of 0, 0, 0 to colours
+    else
+        add list of whole(9 * (1 - t) * t * t * t * 255), whole(15 * (1 - t) * (1 - t) * t * t * 255), whole(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255) to colours
+    end
+end
+
+# each row of pixels takes a whole number of 4 bytes
+set row_size to width * 3
+repeat while not (row_size is divisible by 4)
+    add 1 to row_size
+end
+set size to 54 + row_size * height
+set bmp to size bytes
+set byte 1 of bmp to 66 # "B"
+set byte 2 of bmp to 77 # "M"
+put_number(bmp, 3, size, 4)
+put_number(bmp, 11, 54, 4) # where the pixels start
+put_number(bmp, 15, 40, 4) # how long the rest of the header is
+put_number(bmp, 19, width, 4)
+put_number(bmp, 23, height, 4)
+put_number(bmp, 27, 1, 2)
+put_number(bmp, 29, 24, 2) # 24 bits for each pixel: blue, green, red
+
+for each row from 0 to height - 1 # BMP starts at the bottom row
+    set at to 55 + row * row_size
+    set cy to 1.2 - 2.4 * row / height
+    for each column from 0 to width - 1
+        set colour to item (escape(-2.25 + 3.3 * column / width, cy) + 1) of colours
+        set byte at of bmp to item 3 of colour
+        set byte (at + 1) of bmp to item 2 of colour
+        set byte (at + 2) of bmp to item 1 of colour
+        add 3 to at
+    end
+end
+write bmp to name
+say "drew the Mandelbrot set, " width " by " height ", in " name

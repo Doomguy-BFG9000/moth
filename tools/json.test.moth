@@ -1,0 +1,49 @@
+# The JSON reader's tests: moth test json.test.moth
+
+use "json.moth" as json
+
+to test_values
+    expect json's parse("42") is 42
+    expect json's parse("-1.5") is -1.5
+    expect json's parse("2e3") is 2000
+    expect json's parse("true") is yes
+    expect json's parse("false") is no
+    expect json's parse("null") is nothing
+    expect json's parse("\"hi\"") is "hi"
+end
+
+to test_lists_and_objects
+    expect json's parse("[1, 2, [3]]") is list of 1, 2, (list of 3)
+    expect json's parse("[]") is empty list
+    expect json's parse("{}") is empty dictionary
+    set person to json's parse("{\"name\": \"Sam\", \"age\": 20, \"pets\": [\"cat\"]}")
+    expect item "name" of person is "Sam"
+    expect item "age" of person + 1 is 21
+    expect "cat" is in item "pets" of person
+    expect keys of person is list of "name", "age", "pets"
+end
+
+to test_spaces_and_lines
+    expect json's parse("  {\n\t\"a\" : [ 1 ,\n 2 ] }  ") is dictionary where "a" is list of 1, 2
+end
+
+to test_escapes
+    expect json's parse("\"a\\nb\"") is "a\nb"
+    expect json's parse("\"say \\\"hi\\\"\"") is "say \"hi\""
+    expect json's parse("\"caf\\u00e9\"") is "café"
+    expect json's parse("\"\\u20ac5\"") is "€5"
+    expect json's parse("\"\\ud83d\\ude00\"") is "😀"
+end
+
+to test_mistakes
+    for each bad in list of "[1, 2", "{\"a\" 1}", "tru", "\"no end", "[1] 2", "{1: 2}", "1.2.3"
+        set caught to no
+        try
+            json's parse(bad)
+        if it fails with why
+            set caught to yes
+            expect position of "JSON, letter " in why is 1
+        end
+        expect caught
+    end
+end

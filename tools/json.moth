@@ -1,0 +1,222 @@
+# Reads JSON, the format most of the web speaks, into Moth's own values: an object becomes a dictionary,
+# an array a list, true and false yes and no, and null nothing.
+#
+#   use "json.moth" as json
+#   set data to json's parse(read "data.json")
+#   say item "name" of data
+#
+# A mistake in the JSON is a `fail with`, which says where: catch it with `try`.
+
+set letters to empty list # the text being read, a letter at a time, then "" to mark the end
+set at to 1 # the letter being read
+
+to parse with text
+    set letters to split text by ""
+    add "" to letters
+    set at to 1
+    set value to read_value()
+    skip_spaces()
+    if at is less than length of letters
+        problem("there is more after the end: " + item at of letters)
+    end
+    return value
+end
+
+to problem with why
+    fail with "JSON, letter " + at + ": " + why
+end
+
+to here
+    return item at of letters
+end
+
+to skip_spaces
+    repeat while here() is " " or here() is "\n" or here() is "\t" or here() is (list of 13) as bytes as text
+        set at to at + 1
+    end
+end
+
+to take with wanted
+    if here() is not wanted
+        problem("expected " + wanted + " but found " + shown(here()))
+    end
+    set at to at + 1
+end
+
+to shown with letter
+    if letter is ""
+        return "the end"
+    end
+    return letter
+end
+
+to read_value
+    skip_spaces()
+    set c to here()
+    if c is "{"
+        return read_object()
+    else if c is "["
+        return read_list()
+    else if c is "\""
+        return read_text()
+    else if c is "-" or (c is at least "0" and c is at most "9")
+        return read_number()
+    end
+    for each pair in list of (list of "true", yes), (list of "false", no), (list of "null", nothing)
+        if c is item 1 of item 1 of split item 1 of pair by ""
+            for each letter in item 1 of pair
+                take(letter)
+            end
+            return item 2 of pair
+        end
+    end
+    problem("expected a value but found " + shown(c))
+end
+
+to read_object
+    set made to empty dictionary
+    take("{")
+    skip_spaces()
+    if here() is "}"
+        take("}")
+        return made
+    end
+    repeat while yes
+        skip_spaces()
+        if here() is not "\""
+            problem("expected a key in quotes but found " + shown(here()))
+        end
+        set key to read_text()
+        skip_spaces()
+        take(":")
+        set item key of made to read_value()
+        skip_spaces()
+        if here() is "}"
+            take("}")
+            return made
+        end
+        take(",")
+    end
+end
+
+to read_list
+    set made to empty list
+    take("[")
+    skip_spaces()
+    if here() is "]"
+        take("]")
+        return made
+    end
+    repeat while yes
+        add read_value() to made
+        skip_spaces()
+        if here() is "]"
+            take("]")
+            return made
+        end
+        take(",")
+    end
+end
+
+to read_number
+    set digits to ""
+    repeat while here() is not "" and position of here() in "-0123456789." is not 0
+        add here() to digits
+        set at to at + 1
+    end
+    try
+        set value to number of digits
+    if it fails
+        problem("this isn't a number: " + digits)
+    end
+    if here() is "e" or here() is "E" # 1.5e3 is 1.5 times 10 three times
+        set at to at + 1
+        set sign to 1
+        if here() is "-" or here() is "+"
+            if here() is "-"
+                set sign to -1
+            end
+            set at to at + 1
+        end
+        set power to ""
+        repeat while here() is at least "0" and here() is at most "9" and here() is not ""
+            add here() to power
+            set at to at + 1
+        end
+        repeat number of power times
+            if sign is 1
+                set value to value * 10
+            else
+                set value to value / 10
+            end
+        end
+    end
+    return value
+end
+
+# text in quotes, with \n, \t, \" and the rest, and \u followed by four hex digits for any character
+to read_text
+    take("\"")
+    set made to ""
+    repeat while here() is not "\""
+        if here() is ""
+            problem("the text never ends")
+        end
+        set c to here()
+        set at to at + 1
+        if c is "\\"
+            set c to here()
+            set at to at + 1
+            if c is "n"
+                set c to "\n"
+            else if c is "t"
+                set c to "\t"
+            else if c is "u"
+                set c to read_code()
+            else if c is "b" or c is "f" or c is "r"
+                set c to (list of item (position of c in "bfr") of list of 8, 12, 13) as bytes as text
+            else if c is not "\"" and c is not "\\" and c is not "/"
+                problem("there is no \\" + c + " in JSON")
+            end
+        end
+        add c to made
+    end
+    take("\"")
+    return made
+end
+
+# \u then four hex digits: one character, as UTF-8 bytes, which `as text` reads. A pair of them makes one of
+# the characters past the first 65,536, like most emoji.
+to read_code
+    set code to hex_number()
+    if code is at least 0xD800 and code is at most 0xDBFF and here() is "\\"
+        set at to at + 1
+        take("u")
+        set low to hex_number()
+        set code to 0x10000 + (shift (code - 0xD800) left by 10) + (low - 0xDC00)
+    end
+    if code is less than 0x80
+        return (list of code) as bytes as text
+    else if code is less than 0x800
+        return (list of 0xC0 bit or shift code right by 6, 0x80 bit or (code bit and 0x3F)) as bytes as text
+    else if code is less than 0x10000
+        return (list of 0xE0 bit or shift code right by 12, 0x80 bit or (shift code right by 6 bit and 0x3F), 0x80 bit or (code bit and 0x3F)) as bytes as text
+    end
+    set four to list of 0xF0 bit or shift code right by 18, 0x80 bit or (shift code right by 12 bit and 0x3F)
+    add 0x80 bit or (shift code right by 6 bit and 0x3F) to four
+    add 0x80 bit or (code bit and 0x3F) to four
+    return four as bytes as text
+end
+
+to hex_number
+    set value to 0
+    repeat 4 times
+        set digit to position of lowercase of here() in "0123456789abcdef"
+        if digit is 0 or here() is ""
+            problem("expected 4 hex digits after \\u")
+        end
+        set value to value * 16 + digit - 1
+        set at to at + 1
+    end
+    return value
+end

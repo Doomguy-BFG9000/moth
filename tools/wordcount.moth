@@ -1,0 +1,66 @@
+# Counts the words in a file, and shows the ones used most, each with a bar.
+#
+#   moth run wordcount.moth story.txt              the top 10
+#   moth run wordcount.moth story.txt 5            the top 5
+
+if length of arguments is 0
+    fail with "which file? write: moth run wordcount.moth story.txt"
+end
+set top to 10
+if length of arguments is at least 2
+    set top to number of item 2 of arguments
+end
+
+# a word is letters, and the ' in words like don't; anything else ends one
+set counts to empty dictionary
+set total to 0
+set word to ""
+set text to lowercase of read item 1 of arguments
+for each c in text + " " # the space ends the last word
+    if (c is at least "a" and c is at most "z") or (c is "'" and word is not "")
+        add c to word
+    else if word is not ""
+        if word is in counts
+            set item word of counts to item word of counts + 1
+        else
+            set item word of counts to 1
+        end
+        add 1 to total
+        set word to ""
+    end
+end
+say total " words, " length of counts " different ones"
+
+# the words used most, most first: each time round, the most used one not picked yet
+set picked to empty list
+repeat top times
+    set best to nothing
+    for each w in counts
+        if not (w is in picked) and (best is nothing or item w of counts is greater than item best of counts)
+            set best to w
+        end
+    end
+    if best is nothing
+        stop
+    end
+    add best to picked
+end
+
+set longest to 0
+for each w in picked
+    if length of w is greater than longest
+        set longest to length of w
+    end
+end
+for each w in picked
+    set line to w
+    repeat longest - length of w + 2 times
+        add " " to line
+    end
+    for each k from 1 to 30 # a bar as long as the count, next to the top word's 30
+        if k * item (item 1 of picked) of counts is at most item w of counts * 30
+            add "█" to line
+        end
+    end
+    say line " " item w of counts
+end
