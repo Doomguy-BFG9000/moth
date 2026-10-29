@@ -837,3 +837,58 @@ hold them to agreeing.
   but behind V8, which inlines, guesses types and keeps objects in shapes. A big
   program is slow to build: compiler.moth is 1.3 MB of Rust, and rustc takes
   minutes over it.
+
+## 25. Machine code from Moth alone: machine.moth
+
+- **Why.** Every engine so far stands on JavaScript or on Rust, and the machine
+  code from §24 needs rustc. machine.moth is a compiler written in Moth that
+  writes the machine code itself, so once it takes the parts of Moth its own
+  code uses, it can compile itself and Moth needs neither.
+- **The same front.** It starts with `use "compiler.moth" as front`: the same
+  tokenizer, parser and scope rules, so a name means what it means in every
+  other engine, and a mistake in the program is reported as `moth run` would.
+- **Its own assembler.** An encoder for the x86-64 instructions it needs (one
+  function for the ModRM byte, one for each instruction), labels, and 32-bit
+  distances filled in once everything has its place. Code that only runs when
+  something goes wrong goes into a separate `cold` list, placed after the rest,
+  so the code that runs stays together.
+- **Values.** Every value is 8 bytes: a number is itself, and nothing, no and
+  yes are NaNs that arithmetic never makes. `a + b` is one `addsd`, then one
+  check of whether the answer is NaN; only then does it look closer, and either
+  stop with "can't use '+' on nothing and a number" or carry on with the NaN. A
+  variable with no value yet holds another NaN, so reading one is one compare.
+- **Frames and trails.** Main's variables live in the data, a function's in its
+  frame. Every call puts its number just under where the new frame's rbp points,
+  so a mistake walks the frames and turns each into "in 'f', called from line 3",
+  a run of the same call into one line. r15 counts the calls in progress, which
+  stop at 100,000 as every engine's do.
+- **Showing numbers** as JavaScript does after rounding to 15 digits, which took
+  four ways: a whole number below 2^53 as its digits; any other number from its
+  first 16 digits, worked out exactly with a 128-bit fraction and rounded half
+  up as `toPrecision` rounds; a whole number from 2^53 up with the fewest digits
+  that read back as it (Steele and White's method, as Burger and Dybvig put it),
+  with 1,280-bit whole numbers; and a number below 2^-1021, which has fewer
+  digits than 15, as the shortest digits of the double nearest its 15 digits.
+  That last one was found by testing against the engine: the first version gave
+  4.94065645841247e-324 where Moth says 5e-324.
+- **Comparing numbers** to 15 digits: two numbers far apart compare as they are;
+  two close ones as 17-digit decimals, which is exact, since different 15-digit
+  numbers are always different doubles; and two below 2^-1021 as their doubles.
+- **The files.** For Windows a PE32+ file whose imports are six kernel32
+  functions: `WriteFile`, or `WriteConsoleW` after `MultiByteToWideChar` for a
+  console, so every character shows. For Linux an ELF file with two segments, a
+  256 MB stack of its own, and the `write` and `exit_group` system calls. Output
+  waits in a buffer, and goes out after every line at a terminal.
+- **A trap.** A function in a file used `as front` that sets a name the program
+  also sets at the top level changes the program's: compiler.moth's `resolve`
+  has `set here to scope`, which replaced machine.moth's function `here`. It's
+  named `mark` now.
+- **Speed, and what's next.** Values wait on the stack and a comparison is a call
+  into the runtime, so there's room left, but fib(30) takes 0.08 s from start to
+  finish, against 0.21 s with `moth run` and 0.42 s with `moth-native run`, and
+  30 million rounds of a loop 0.16 s against 0.33 s and 1.05 s. Next it needs
+  text, lists and records, which need memory that grows.
+- **Checked.** 400 random programs made from what it takes, 27 written for what's
+  easy to get wrong, and every test program and 300 broken ones it can take, on
+  the system the tests run on, against the JavaScript engine's output, mistakes,
+  trails and exit codes.

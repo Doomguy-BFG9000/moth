@@ -170,6 +170,27 @@ stage 3, made by stage 2, compiles compiler.moth: the same JavaScript (207 ms)
 fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it
 ```
 
+**Machine code, from Moth alone.** [`machine.moth`](machine.moth) is a third
+back end, written in Moth: it turns a program into a Windows `.exe` or a Linux
+program, writing every x86-64 instruction and the file around them byte by
+byte, with no assembler, linker or other compiler. So far it takes the core of
+the language: numbers, yes, no and nothing, variables, `say`, `if`, the loops,
+and functions, which is enough for [`math.moth`](math.moth). What it makes does
+exactly what `moth run` does, down to how a number is shown, how two numbers
+compare to 15 digits, and the calls a mistake lists. fib(30) takes 0.08 s, start
+to finish, against 0.21 s with `moth run`:
+
+```text
+$ moth build --exe fib.moth
+compiled fib.moth to machine code for Windows -> fib.exe (11,776 bytes)
+$ ./fib.exe
+832040
+```
+
+It's the first step to a Moth that needs neither JavaScript nor Rust: once it
+takes the parts of Moth that its own code uses, it can make machine code of
+itself.
+
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
 [micrograd](https://github.com/karpathy/micrograd): every number it works out is
@@ -499,6 +520,7 @@ moth fmt hello.moth                tidy it (--check only says whether it's tidy)
 moth check hello.moth              find mistakes without running it
 moth build hello.moth              compile it to hello.mjs, which runs with plain node
 moth build --web snake.moth        make it into snake.html: one web page, apps and all
+moth build --exe fib.moth          compile it to machine code with Moth alone: fib.exe, or fib on Linux
 moth bytecode hello.moth           show the bytecode the VM runs
 moth js hello.moth                 show the JavaScript the JIT makes
 moth wasm hello.moth               show the WebAssembly module, as text
@@ -647,6 +669,8 @@ It needs Rust's compiler, `rustc` (from [rustup.rs](https://rustup.rs)), which
 turns the Rust that moth-native writes into machine code, together with the
 engine's own source, which moth-native carries inside it. A small program builds
 in about five seconds; Moth's 2,400-line compiler takes a few minutes.
+[`machine.moth`](machine.moth) needs no other tool at all, for
+the part of Moth it takes so far.
 
 **Moth builds itself, with no JavaScript.** [`compiler.moth`](compiler.moth),
 Moth's compiler written in Moth, now writes bytecode as well as JavaScript, and
@@ -666,10 +690,11 @@ fixed point: the compiler written in Moth builds itself to exactly what moth-nat
 ## How it's built
 
 ```text
-                                       ┌→ bytecode    → the VM        debugger, shell
-source → tokens → syntax tree → scope ─┼→ JavaScript  → V8            Run
-                                       ├→ WebAssembly → V8            the fastest
-                                       └→ checker     → problems      as you type
+                                       ┌→ bytecode     → the VM        debugger, shell
+                                       ├→ JavaScript   → V8            Run
+source → tokens → syntax tree → scope ─┼→ WebAssembly  → V8            the fastest
+                                       ├→ machine code → the CPU       moth build --exe
+                                       └→ checker      → problems      as you type
 ```
 
 A tokenizer and a recursive-descent parser make a syntax tree whose every node
@@ -677,7 +702,8 @@ remembers where it came from, so errors can point at it. The scope rules give
 each variable a slot, once, for every back end, so they can't disagree about
 what a name means. Every check and error message lives in one place, `vm.js`,
 which all three engines call. The compiler written in Moth repeats the first
-four steps and the JIT, in Moth.
+four steps and the JIT, in Moth, and machine.moth uses its first four steps to
+write machine code.
 
 How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.md)**.
 
@@ -694,6 +720,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`wasm.js`](wasm.js) | Moth to WebAssembly, with escape analysis and unboxed numbers |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
+| [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
@@ -755,6 +782,12 @@ calls that led there.
   generated and 150 broken ones compiled to machine code, which must say, draw,
   write and fail exactly alike; and a compiled tool's files, arguments, asking
   and mistakes against `moth-native run`'s
+- `moth build --exe` against the JavaScript engine: 400 random programs made
+  from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
+  with awkward numbers, every comparison and mistakes on purpose, 27 written for
+  what's easy to get wrong, and every test program and 300 broken ones it can
+  take, each built for the system the tests run on, which must print, fail and
+  exit exactly alike
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -787,6 +820,11 @@ unboxed numbers were all caught, some only by the fuzzer.
   JavaScript's engine, which has years of tuning behind it, is faster still.
   Building one needs `rustc`, and a very big program takes minutes. It has no
   limit on its steps, so a loop that never ends runs until it's stopped.
+- `moth build --exe` takes only the core of Moth so far: text only as the
+  words of a `say`, and no lists, records, dictionaries, files, `try`, drawing,
+  or functions made inside functions; anything else stops with a mistake that
+  says it can't become machine code yet. It makes programs for x86-64 Windows
+  and Linux, not for Macs.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
   allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
   with a mistake, and Rust carries on. As WebAssembly, whose stack is smaller,

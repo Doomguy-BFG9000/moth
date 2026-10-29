@@ -1319,6 +1319,23 @@ export function mothCompiler(compilerSource, using = compileToJs) {
   };
 }
 
+// Moth's machine-code back end (machine.moth, which reads programs with compiler.moth): give it both files'
+// text and get back a function that turns a program into the bytes of a program of its own, for `target`
+// "windows" (a PE .exe) or "linux" (an ELF executable). `files` are the files the program uses, by name, and
+// `name` is the program's own, for its mistakes.
+export function machineCompiler(machineSource, compilerSource) {
+  const { compile_machine: compileMachine } = loadProgram(compileToJs(machineSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "machine.moth" }));
+  return (source, { files = {}, target, name = "program.moth" } = {}) => {
+    try {
+      return Uint8Array.from(compileMachine(source, Object.keys(files), Object.values(files), target, name));
+    } catch (err) {
+      if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
+      if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");
+      throw err;
+    }
+  };
+}
+
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
 export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random } = {}) {

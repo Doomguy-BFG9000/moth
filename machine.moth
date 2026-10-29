@@ -1,0 +1,3670 @@
+# Machine code from Moth, written in Moth. compile_machine() turns a program into the bytes of a program of
+# its own, for Windows or Linux on x86-64, with no other tool: it reads the program with compiler.moth's
+# tokenizer, parser and scope rules, writes every instruction's bytes itself, and wraps them in the file
+# the system runs, PE for Windows and ELF for Linux.
+#
+# This is its first part: numbers, yes, no and nothing, variables, say, if, the loops, and functions made
+# at the top of the program. Anything else stops with a mistake that says it can't become machine code
+# yet. What it makes does just what `moth run` does: numbers are shown and compared to 15 digits, and a
+# mistake says the same thing, points at the same spot, and lists the same calls.
+
+use "compiler.moth" as front
+
+# ---------- registers, conditions and values ----------
+
+set rax to 0
+set rcx to 1
+set rdx to 2
+set rbx to 3
+set rsp to 4
+set rbp to 5
+set rsi to 6
+set rdi to 7
+set r8 to 8
+set r9 to 9
+set r10 to 10
+set r11 to 11
+set r12 to 12
+set r13 to 13
+set r14 to 14
+set r15 to 15 # how many calls are in progress, all through the program
+set xmm0 to 0
+set xmm1 to 1
+set xmm2 to 2
+set xmm3 to 3
+set xmm4 to 4
+# the conditions a jump can test, as x86 numbers them
+set cc_b to 2
+set cc_ae to 3
+set cc_e to 4
+set cc_ne to 5
+set cc_be to 6
+set cc_a to 7
+set cc_s to 8
+set cc_ns to 9
+set cc_p to 10
+set cc_l to 12
+set cc_ge to 13
+set cc_le to 14
+set cc_g to 15
+
+# A value is 8 bytes. A number is itself; nothing, no and yes are NaNs that arithmetic never makes, so a sum
+# is one instruction and only a result that is NaN needs a closer look. A variable with no value yet holds
+# another such NaN, and a function's name holds one more once its `to` has run.
+set bits_nothing to list of 1, 0, 0, 0, 0, 0, 248, 127
+set bits_no to list of 2, 0, 0, 0, 0, 0, 248, 127
+set bits_yes to list of 3, 0, 0, 0, 0, 0, 248, 127
+set bits_unset to list of 4, 0, 0, 0, 0, 0, 248, 127
+set bits_made to list of 5, 0, 0, 0, 0, 0, 248, 127
+
+set out_cap to 65536 # bytes of output kept before they are written
+set limbs to 20 # 64-bit pieces of a big whole number: room for 10^340 times 2^54
+set stack_size to 268435456 # 256 MB: 100,000 calls in progress, each with up to 2 KB
+set frame_limit to 2048
+set deepest to 100000 # calls in progress at once, as every engine allows
+set kind_names to list of "a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"
+
+# ---------- bytes ----------
+
+to put8 with out, v
+    set u to v
+    if u is less than 0
+        set u to u + 256
+    end
+    add u bit and 255 to out
+end
+
+to put16 with out, v
+    add v bit and 255 to out
+    add (shift v right by 8) bit and 255 to out
+end
+
+to put32 with out, v
+    set u to v
+    if u is less than 0
+        set u to u + 4294967296
+    end
+    repeat 4 times
+        add u bit and 255 to out
+        set u to shift u right by 8
+    end
+end
+
+# a whole number from 0 to 2^53
+to put64 with out, v
+    put32(out, v bit and 4294967295)
+    put32(out, shift v right by 32)
+end
+
+to put_all with out, more
+    for each b in more
+        add b to out
+    end
+end
+
+to patch32 with out, at, v
+    set four to empty list
+    put32(four, v)
+    for each k from 1 to 4
+        set item (at + k) of out to item k of four
+    end
+end
+
+to bytes_of with v
+    set out to empty list
+    put64(out, v)
+    return out
+end
+
+to align_up with value, alignment
+    set extra to value bit and (alignment - 1)
+    if extra is 0
+        return value
+    end
+    return value + alignment - extra
+end
+
+to pad_to with out, alignment
+    repeat while (length of out) bit and (alignment - 1) is not 0
+        add 0 to out
+    end
+end
+
+# The 8 bytes of the double a number is, worked out with exact steps: halving and doubling, and a
+# subtraction to compare, since Moth's own comparisons round to 15 digits.
+to double_bytes with v
+    set out to empty list
+    if v is 0
+        repeat 8 times
+            add 0 to out
+        end
+        return out
+    end
+    if v - v is not 0 # too big for a double: infinity
+        return list of 0, 0, 0, 0, 0, 0, 240, 127
+    end
+    set power to 1
+    set e to 0
+    repeat while v - power * 2 is at least 0
+        set power to power * 2
+        add 1 to e
+    end
+    repeat while v - power is less than 0
+        set power to power / 2
+        set e to e - 1
+    end
+    set field to e + 1023
+    set mant to v
+    if e is less than -1022 # subnormal: a whole number of 2^-1074
+        set field to 0
+        repeat 1074 times
+            set mant to mant * 2
+        end
+    else
+        set mant to v / power
+        repeat 52 times
+            set mant to mant * 2
+        end
+        set mant to mant - 4503599627370496
+    end
+    repeat 6 times
+        add mant bit and 255 to out
+        set mant to shift mant right by 8
+    end
+    add mant + (field bit and 15) * 16 to out
+    add shift field right by 4 to out
+    return out
+end
+
+# a number as the program wrote it: digits, maybe a point, or 0x and 0b whole numbers
+to literal_bytes with written, at
+    set chars to front's letters(written)
+    if length of chars is at least 2 and item 1 of chars is "0" and (item 2 of chars is "x" or item 2 of chars is "b")
+        set base to 16
+        if item 2 of chars is "b"
+            set base to 2
+        end
+        set v to 0
+        for each n from 3 to length of chars
+            set digit to (position of item n of chars in "0123456789abcdef") - 1
+            if digit is -1
+                set digit to (position of item n of chars in "ABCDEF") + 9
+            end
+            set v to v * base + digit
+            if v is at least 9007199254740992
+                not_yet(at, "a hex or binary number this big")
+            end
+        end
+        return double_bytes(v)
+    end
+    return double_bytes(number of written)
+end
+
+# ---------- the assembler ----------
+# Code goes into `hot`, and what only runs when something goes wrong into `cold`, which ends up after it,
+# out of the way. A label names a place in the code or the data, and a fixup is a 32-bit distance to one,
+# filled in once everything has its place.
+
+to new_asm
+    set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
+        bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary
+    set code of made to hot of made
+    return made
+end
+
+to use_hot with a
+    set code of a to hot of a
+    set buffer of a to "hot"
+end
+
+to use_cold with a
+    set code of a to cold of a
+    set buffer of a to "cold"
+end
+
+# into the cold code; gives where it was, for leave_cold
+to enter_cold with a
+    set was to buffer of a
+    use_cold(a)
+    return was
+end
+
+to leave_cold with a, was
+    if was is "hot"
+        use_hot(a)
+    end
+end
+
+to new_label with a
+    set count of a to count of a + 1
+    return "L" + count of a
+end
+
+to mark with a, name
+    set table to labels of a
+    set item name of table to record with section buffer of a, at length of code of a
+end
+
+to fixup with a, name, addend, extra
+    set code to code of a
+    set fixes to fixups of a
+    add record with buffer buffer of a, at length of code, label name, addend addend, finish length of code + 4 + extra to fixes
+    put32(code, 0)
+end
+
+to rodata_here with a, name
+    set table to labels of a
+    set item name of table to record with section "rodata", at length of rodata of a
+end
+
+to data_here with a, name
+    set table to labels of a
+    set item name of table to record with section "data", at length of data of a
+end
+
+# zeroed memory that takes no room in the file
+to reserve with a, name, size, alignment
+    set start to align_up(bss of a, alignment)
+    set table to labels of a
+    set item name of table to record with section "bss", at start
+    set bss of a to start + size
+end
+
+# a text's UTF-8 bytes in the read-only data, once each: its label and how many bytes
+to text_place with a, t
+    set known to texts of a
+    if t is in known
+        return item t of known
+    end
+    set ro to rodata of a
+    set start to length of ro
+    for each b in t as bytes
+        add b to ro
+    end
+    set name to "T" + start
+    set table to labels of a
+    set item name of table to record with section "rodata", at start
+    set made to record with label name, size length of ro - start
+    set item t of known to made
+    return made
+end
+
+# 8 bytes in the read-only data, once each: their label
+to number_place with a, eight
+    set key to ""
+    for each b in eight
+        set key to key + b + ","
+    end
+    set known to numbers of a
+    if key is in known
+        return item key of known
+    end
+    set ro to rodata of a
+    pad_to(ro, 8)
+    set name to "N" + length of ro
+    rodata_here(a, name)
+    put_all(ro, eight)
+    set item key of known to name
+    return name
+end
+
+# ---------- instructions ----------
+
+to reg_at with n
+    return record with mode "reg", r n
+end
+
+to mem with n, offset
+    return record with mode "base", r n, disp offset
+end
+
+to rip with name
+    return record with mode "rip", label name, addend 0
+end
+
+to rip_plus with name, addend
+    return record with mode "rip", label name, addend addend
+end
+
+to imm8 with v
+    set out to empty list
+    put8(out, v)
+    return out
+end
+
+to imm32 with v
+    set out to empty list
+    put32(out, v)
+    return out
+end
+
+to raw with a, codes
+    put_all(code of a, codes)
+end
+
+# An instruction with a ModRM byte: `pre` are the prefixes before REX (0x66, 0xF2, 0xF3), `wide` is REX.W,
+# `ops` the opcode, `reg` the ModRM reg field (a register, or the opcode's extension), `rm` the other operand
+# (reg_at, mem or rip), and `imm` the bytes after it.
+to enc with a, pre, wide, ops, reg, rm, imm
+    set code to code of a
+    put_all(code, pre)
+    set rex to 0
+    if wide
+        set rex to 8
+    end
+    if reg is at least 8
+        set rex to rex + 4
+    end
+    set low to 5
+    if mode of rm is not "rip"
+        set low to r of rm bit and 7
+        if r of rm is at least 8
+            set rex to rex + 1
+        end
+    end
+    if rex is not 0
+        add 64 + rex to code
+    end
+    put_all(code, ops)
+    set field to (reg bit and 7) * 8
+    if mode of rm is "reg"
+        add 192 + field + low to code
+    else if mode of rm is "rip"
+        add field + 5 to code
+        fixup(a, label of rm, addend of rm, length of imm)
+    else
+        set offset to disp of rm
+        set md to 128
+        if offset is 0 and low is not 5
+            set md to 0
+        else if offset is at least -128 and offset is at most 127
+            set md to 64
+        end
+        add md + field + low to code
+        if low is 4
+            add 36 to code # a SIB byte: rsp or r12, with no index
+        end
+        if md is 64
+            put8(code, offset)
+        else if md is 128
+            put32(code, offset)
+        end
+    end
+    put_all(code, imm)
+end
+
+to mov_rr with a, dst, src
+    enc(a, empty list, yes, (list of 0x89), src, reg_at(dst), empty list)
+end
+
+to mov32_rr with a, dst, src
+    enc(a, empty list, no, (list of 0x89), src, reg_at(dst), empty list)
+end
+
+to load with a, dst, at
+    enc(a, empty list, yes, (list of 0x8B), dst, at, empty list)
+end
+
+to store with a, at, src
+    enc(a, empty list, yes, (list of 0x89), src, at, empty list)
+end
+
+to load32 with a, dst, at
+    enc(a, empty list, no, (list of 0x8B), dst, at, empty list)
+end
+
+to store32 with a, at, src
+    enc(a, empty list, no, (list of 0x89), src, at, empty list)
+end
+
+to load8 with a, dst, at
+    enc(a, empty list, no, (list of 0x0F, 0xB6), dst, at, empty list)
+end
+
+to load16 with a, dst, at
+    enc(a, empty list, no, (list of 0x0F, 0xB7), dst, at, empty list)
+end
+
+# the low byte of al, cl, dl or bl
+to store8 with a, at, src
+    enc(a, empty list, no, (list of 0x88), src, at, empty list)
+end
+
+to store8i with a, at, v
+    enc(a, empty list, no, (list of 0xC6), 0, at, imm8(v))
+end
+
+to storei with a, at, v
+    enc(a, empty list, yes, (list of 0xC7), 0, at, imm32(v))
+end
+
+# a register gets v, from -2^31 to 2^32 - 1
+to movi with a, dst, v
+    if v is at least 0 and v is less than 4294967296
+        set code to code of a
+        if dst is at least 8
+            add 0x41 to code
+        end
+        add 0xB8 + (dst bit and 7) to code
+        put32(code, v)
+    else
+        enc(a, empty list, yes, (list of 0xC7), 0, reg_at(dst), imm32(v))
+    end
+end
+
+to movi64 with a, dst, eight
+    set code to code of a
+    add 0x48 + (shift dst right by 3) to code
+    add 0xB8 + (dst bit and 7) to code
+    put_all(code, eight)
+end
+
+to lea with a, dst, at
+    enc(a, empty list, yes, (list of 0x8D), dst, at, empty list)
+end
+
+set alu_codes to dictionary where "add" is 0, "or" is 1, "adc" is 2, "sbb" is 3, "and" is 4, "sub" is 5, "xor" is 6, "cmp" is 7
+
+to alu with a, op, dst, src
+    enc(a, empty list, yes, (list of (item op of alu_codes) * 8 + 1), src, reg_at(dst), empty list)
+end
+
+to alu_load with a, op, dst, at
+    enc(a, empty list, yes, (list of (item op of alu_codes) * 8 + 3), dst, at, empty list)
+end
+
+to alu_store with a, op, at, src
+    enc(a, empty list, yes, (list of (item op of alu_codes) * 8 + 1), src, at, empty list)
+end
+
+to alu_at with a, op, at, v
+    if v is at least -128 and v is at most 127
+        enc(a, empty list, yes, (list of 0x83), item op of alu_codes, at, imm8(v))
+    else
+        enc(a, empty list, yes, (list of 0x81), item op of alu_codes, at, imm32(v))
+    end
+end
+
+to alui with a, op, dst, v
+    alu_at(a, op, reg_at(dst), v)
+end
+
+to test_rr with a, x, y
+    enc(a, empty list, yes, (list of 0x85), y, reg_at(x), empty list)
+end
+
+to test32 with a, x
+    enc(a, empty list, no, (list of 0x85), x, reg_at(x), empty list)
+end
+
+set shift_codes to dictionary where "shl" is 4, "shr" is 5, "sar" is 7
+
+to shifti with a, op, dst, n
+    enc(a, empty list, yes, (list of 0xC1), item op of shift_codes, reg_at(dst), imm8(n))
+end
+
+to shift_cl with a, op, dst
+    enc(a, empty list, yes, (list of 0xD3), item op of shift_codes, reg_at(dst), empty list)
+end
+
+to shld_cl with a, dst, src
+    enc(a, empty list, yes, (list of 0x0F, 0xA5), src, reg_at(dst), empty list)
+end
+
+to imul_ri with a, dst, src, v
+    enc(a, empty list, yes, (list of 0x69), dst, reg_at(src), imm32(v))
+end
+
+set unary_codes to dictionary where "not" is 2, "neg" is 3, "mul" is 4, "div" is 6, "idiv" is 7
+
+to unary with a, op, dst
+    enc(a, empty list, yes, (list of 0xF7), item op of unary_codes, reg_at(dst), empty list)
+end
+
+to inc_r with a, dst
+    enc(a, empty list, yes, (list of 0xFF), 0, reg_at(dst), empty list)
+end
+
+to dec_r with a, dst
+    enc(a, empty list, yes, (list of 0xFF), 1, reg_at(dst), empty list)
+end
+
+set bit_codes to dictionary where "bts" is 5, "btr" is 6, "btc" is 7
+
+to bit_op with a, op, dst, n
+    enc(a, empty list, yes, (list of 0x0F, 0xBA), item op of bit_codes, reg_at(dst), imm8(n))
+end
+
+to push_r with a, n
+    if n is at least 8
+        raw(a, list of 0x41)
+    end
+    raw(a, list of 0x50 + (n bit and 7))
+end
+
+to pop_r with a, n
+    if n is at least 8
+        raw(a, list of 0x41)
+    end
+    raw(a, list of 0x58 + (n bit and 7))
+end
+
+to call_to with a, name
+    raw(a, list of 0xE8)
+    fixup(a, name, 0, 0)
+end
+
+to call_import with a, name
+    enc(a, empty list, no, (list of 0xFF), 2, rip(name), empty list)
+end
+
+to jmp_to with a, name
+    raw(a, list of 0xE9)
+    fixup(a, name, 0, 0)
+end
+
+to jcc with a, cc, name
+    raw(a, list of 0x0F, 0x80 + cc)
+    fixup(a, name, 0, 0)
+end
+
+to ret with a
+    raw(a, list of 0xC3)
+end
+
+# the low byte of al, cl, dl or bl gets 1 if the condition holds, else 0
+to setcc with a, cc, dst
+    enc(a, empty list, no, (list of 0x0F, 0x90 + cc), 0, reg_at(dst), empty list)
+end
+
+to movzx8 with a, dst, src
+    enc(a, empty list, no, (list of 0x0F, 0xB6), dst, reg_at(src), empty list)
+end
+
+to rep_movsb with a
+    raw(a, list of 0xF3, 0xA4)
+end
+
+to rep_stosb with a
+    raw(a, list of 0xF3, 0xAA)
+end
+
+to rep_movsq with a
+    raw(a, list of 0xF3, 0x48, 0xA5)
+end
+
+to rep_stosq with a
+    raw(a, list of 0xF3, 0x48, 0xAB)
+end
+
+# SSE2, on the xmm registers
+to sse with a, pre, op, x, at
+    enc(a, (list of pre), no, (list of 0x0F, op), x, at, empty list)
+end
+
+to movsd_load with a, x, at
+    sse(a, 0xF2, 0x10, x, at)
+end
+
+to movsd_store with a, at, x
+    sse(a, 0xF2, 0x11, x, at)
+end
+
+to movapd with a, x, y
+    sse(a, 0x66, 0x28, x, reg_at(y))
+end
+
+set sse_codes to dictionary where "+" is 0x58, "*" is 0x59, "-" is 0x5C, "/" is 0x5E, "max" is 0x5F
+
+to sse_math with a, op, x, at
+    sse(a, 0xF2, item op of sse_codes, x, at)
+end
+
+to ucomisd with a, x, at
+    sse(a, 0x66, 0x2E, x, at)
+end
+
+to movq_xr with a, x, src
+    enc(a, (list of 0x66), yes, (list of 0x0F, 0x6E), x, reg_at(src), empty list)
+end
+
+to movq_rx with a, dst, x
+    enc(a, (list of 0x66), yes, (list of 0x0F, 0x7E), x, reg_at(dst), empty list)
+end
+
+to cvtsi2sd with a, x, src
+    enc(a, (list of 0xF2), yes, (list of 0x0F, 0x2A), x, reg_at(src), empty list)
+end
+
+to cvttsd2si with a, dst, x
+    enc(a, (list of 0xF2), yes, (list of 0x0F, 0x2C), dst, reg_at(x), empty list)
+end
+
+# rsi and rcx: a text's bytes and how many
+to point_at_text with a, t
+    set placed to text_place(a, t)
+    lea(a, rsi, rip(label of placed))
+    movi(a, rcx, size of placed)
+end
+
+to load_bits with a, x, eight
+    movsd_load(a, x, rip(number_place(a, eight)))
+end
+
+# ---------- the runtime: output ----------
+# Every program carries these. Output collects in out_buf and is written when it fills, at the end, before a
+# mistake, and after every line when it goes to a terminal, so each line shows as it is said.
+
+to emit_output with a
+    # rt_out_text: rsi, rcx: these bytes go out
+    set fits to new_label(a)
+    mark(a, "rt_out_text")
+    load(a, rax, rip("out_len"))
+    mov_rr(a, rdx, rax)
+    alu(a, "add", rdx, rcx)
+    alui(a, "cmp", rdx, out_cap)
+    jcc(a, cc_be, fits)
+    push_r(a, rsi)
+    push_r(a, rcx)
+    call_to(a, "rt_flush_out")
+    pop_r(a, rcx)
+    pop_r(a, rsi)
+    alui(a, "cmp", rcx, out_cap)
+    jcc(a, cc_be, fits)
+    mov_rr(a, rdx, rcx) # more than the buffer holds: straight out
+    movi(a, rdi, 1)
+    jmp_to(a, "rt_write")
+    mark(a, fits)
+    load(a, rax, rip("out_len"))
+    lea(a, rdi, rip("out_buf"))
+    alu(a, "add", rdi, rax)
+    alu(a, "add", rax, rcx)
+    store(a, rip("out_len"), rax)
+    rep_movsb(a)
+    ret(a)
+
+    # rt_out_value: rax: a value goes out as `say` shows it
+    set room to new_label(a)
+    mark(a, "rt_out_value")
+    load(a, rdx, rip("out_len"))
+    alui(a, "add", rdx, 32)
+    alui(a, "cmp", rdx, out_cap)
+    jcc(a, cc_be, room)
+    push_r(a, rax)
+    call_to(a, "rt_flush_out")
+    pop_r(a, rax)
+    mark(a, room)
+    load(a, rdx, rip("out_len"))
+    lea(a, rdi, rip("out_buf"))
+    alu(a, "add", rdi, rdx)
+    call_to(a, "rt_show")
+    lea(a, rax, rip("out_buf"))
+    alu(a, "sub", rdi, rax)
+    store(a, rip("out_len"), rdi)
+    ret(a)
+
+    # rt_out_line: the end of a line
+    set spare to new_label(a)
+    set now to new_label(a)
+    mark(a, "rt_out_line")
+    load(a, rax, rip("out_len"))
+    alui(a, "cmp", rax, out_cap)
+    jcc(a, cc_b, spare)
+    call_to(a, "rt_flush_out")
+    movi(a, rax, 0)
+    mark(a, spare)
+    lea(a, rdx, rip("out_buf"))
+    alu(a, "add", rdx, rax)
+    store8i(a, mem(rdx, 0), 10)
+    inc_r(a, rax)
+    store(a, rip("out_len"), rax)
+    load(a, rcx, rip("out_tty"))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, now)
+    alui(a, "cmp", rax, out_cap / 2)
+    jcc(a, cc_ae, now)
+    ret(a)
+    mark(a, now)
+    jmp_to(a, "rt_flush_out")
+
+    # rt_flush_out: write what has collected
+    set idle to new_label(a)
+    mark(a, "rt_flush_out")
+    load(a, rdx, rip("out_len"))
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, idle)
+    lea(a, rsi, rip("out_buf"))
+    movi(a, rdi, 1)
+    call_to(a, "rt_write")
+    storei(a, rip("out_len"), 0)
+    mark(a, idle)
+    ret(a)
+
+    # rt_show: rax, rdi: a value as `say` shows it, written at rdi, which ends up after it
+    set shown_nothing to new_label(a)
+    set shown_no to new_label(a)
+    set shown_yes to new_label(a)
+    mark(a, "rt_show")
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, shown_nothing)
+    inc_r(a, rcx)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, shown_no)
+    inc_r(a, rcx)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, shown_yes)
+    jmp_to(a, "rt_fmt")
+    mark(a, shown_nothing)
+    point_at_text(a, "nothing")
+    rep_movsb(a)
+    ret(a)
+    mark(a, shown_no)
+    point_at_text(a, "no")
+    rep_movsb(a)
+    ret(a)
+    mark(a, shown_yes)
+    point_at_text(a, "yes")
+    rep_movsb(a)
+    ret(a)
+end
+
+# ---------- the runtime: numbers as text ----------
+# As JavaScript's Number::toString shows them, after rounding to 15 significant digits (vm.js's canon): a
+# whole number below 2^53 as its digits; another number from its first 16 digits, worked out exactly with
+# 128-bit sums, or for one below 2^-68 with big whole numbers; and a whole number from 2^53 up with the
+# fewest digits that read back as it (Steele and White's method, as Burger and Dybvig put it), also with
+# big whole numbers.
+
+to emit_numbers with a
+    # rt_digits: rax: a whole number's digits go in dbuf; rcx: how many
+    set again to new_label(a)
+    mark(a, "rt_digits")
+    push_r(a, rdi)
+    lea(a, rsi, rip_plus("dbuf", 40))
+    mov_rr(a, r8, rsi)
+    movi(a, r9, 10)
+    mark(a, again)
+    movi(a, rdx, 0)
+    unary(a, "div", r9)
+    alui(a, "add", rdx, 48)
+    dec_r(a, rsi)
+    store8(a, mem(rsi, 0), rdx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, again)
+    mov_rr(a, rcx, r8)
+    alu(a, "sub", rcx, rsi)
+    push_r(a, rcx)
+    lea(a, rdi, rip("dbuf"))
+    rep_movsb(a)
+    pop_r(a, rcx)
+    pop_r(a, rdi)
+    ret(a)
+
+    # rt_layout: the rcx digits in dbuf, with the point rdx digits in, as JavaScript lays them out, at rdi
+    set fewer to new_label(a)
+    set small to new_label(a)
+    set power to new_label(a)
+    set exponent to new_label(a)
+    set positive to new_label(a)
+    mark(a, "rt_layout")
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_l, fewer)
+    alui(a, "cmp", rdx, 21)
+    jcc(a, cc_g, power)
+    lea(a, rsi, rip("dbuf")) # 1200: the digits, then zeros
+    mov_rr(a, r8, rdx)
+    alu(a, "sub", r8, rcx)
+    rep_movsb(a)
+    mov_rr(a, rcx, r8)
+    movi(a, rax, 48)
+    rep_stosb(a)
+    ret(a)
+    mark(a, fewer)
+    alui(a, "cmp", rdx, 0)
+    jcc(a, cc_le, small)
+    lea(a, rsi, rip("dbuf")) # 12.5: some digits, a point, the rest
+    mov_rr(a, r8, rcx)
+    alu(a, "sub", r8, rdx)
+    mov_rr(a, rcx, rdx)
+    rep_movsb(a)
+    store8i(a, mem(rdi, 0), 46)
+    inc_r(a, rdi)
+    mov_rr(a, rcx, r8)
+    rep_movsb(a)
+    ret(a)
+    mark(a, small)
+    alui(a, "cmp", rdx, -6)
+    jcc(a, cc_le, power)
+    store8i(a, mem(rdi, 0), 48) # 0.005: a point, zeros, the digits
+    store8i(a, mem(rdi, 1), 46)
+    alui(a, "add", rdi, 2)
+    mov_rr(a, r8, rcx)
+    mov_rr(a, rcx, rdx)
+    unary(a, "neg", rcx)
+    movi(a, rax, 48)
+    rep_stosb(a)
+    lea(a, rsi, rip("dbuf"))
+    mov_rr(a, rcx, r8)
+    rep_movsb(a)
+    ret(a)
+    mark(a, power)
+    lea(a, rsi, rip("dbuf")) # 1.5e+21: a digit, maybe a point and the rest, e and the power of ten
+    load8(a, rax, mem(rsi, 0))
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rsi)
+    inc_r(a, rdi)
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_e, exponent)
+    store8i(a, mem(rdi, 0), 46)
+    inc_r(a, rdi)
+    dec_r(a, rcx)
+    rep_movsb(a)
+    mark(a, exponent)
+    store8i(a, mem(rdi, 0), 101)
+    store8i(a, mem(rdi, 1), 43)
+    mov_rr(a, rax, rdx)
+    dec_r(a, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ns, positive)
+    store8i(a, mem(rdi, 1), 45)
+    unary(a, "neg", rax)
+    mark(a, positive)
+    alui(a, "add", rdi, 2)
+    call_to(a, "rt_digits")
+    lea(a, rsi, rip("dbuf"))
+    rep_movsb(a)
+    ret(a)
+
+    # rt_fmt: rax, rdi: a number's bits, shown at rdi
+    set nan to new_label(a)
+    set infinite to new_label(a)
+    set zero to new_label(a)
+    set plus to new_label(a)
+    set fraction to new_label(a)
+    set big to new_label(a)
+    set strip to new_label(a)
+    set stripped to new_label(a)
+    set below to new_label(a)
+    set smallest to new_label(a)
+    mark(a, "rt_fmt")
+    mov_rr(a, rdx, rax)
+    shifti(a, "shl", rdx, 1)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0xE0, 0xFF)
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_a, nan)
+    jcc(a, cc_e, infinite)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, zero)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ns, plus)
+    store8i(a, mem(rdi, 0), 45)
+    inc_r(a, rdi)
+    bit_op(a, "btr", rax, 63)
+    mark(a, plus)
+    movq_xr(a, xmm0, rax)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0x40, 0x43) # 2^53
+    movq_xr(a, xmm1, rcx)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_ae, big)
+    cvttsd2si(a, rcx, xmm0)
+    cvtsi2sd(a, xmm1, rcx)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_ne, fraction)
+    mov_rr(a, rax, rcx)
+    call_to(a, "rt_digits")
+    lea(a, rsi, rip("dbuf"))
+    rep_movsb(a)
+    ret(a)
+    mark(a, fraction)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shr", rax, 52)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_be, smallest)
+    push_r(a, rdi)
+    call_to(a, "rt_dec15")
+    push_r(a, rdx)
+    call_to(a, "rt_digits")
+    pop_r(a, rdx)
+    pop_r(a, rdi)
+    lea(a, rsi, rip("dbuf"))
+    mark(a, strip) # 15 digits, less the zeros at the end
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_be, stripped)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, -1))
+    alui(a, "cmp", rax, 48)
+    jcc(a, cc_ne, stripped)
+    dec_r(a, rcx)
+    jmp_to(a, strip)
+    mark(a, stripped)
+    jmp_to(a, "rt_layout")
+    mark(a, smallest)
+    push_r(a, rdi)
+    call_to(a, "rt_canon_small")
+    call_to(a, "rt_shortest")
+    pop_r(a, rdi)
+    jmp_to(a, "rt_layout")
+    mark(a, big)
+    push_r(a, rdi)
+    movq_rx(a, rax, xmm0)
+    call_to(a, "rt_shortest")
+    pop_r(a, rdi)
+    jmp_to(a, "rt_layout")
+    mark(a, nan)
+    point_at_text(a, "NaN")
+    rep_movsb(a)
+    ret(a)
+    mark(a, infinite)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, below)
+    point_at_text(a, "Infinity")
+    rep_movsb(a)
+    ret(a)
+    mark(a, below)
+    point_at_text(a, "-Infinity")
+    rep_movsb(a)
+    ret(a)
+    mark(a, zero)
+    store8i(a, mem(rdi, 0), 48)
+    inc_r(a, rdi)
+    ret(a)
+
+    # rt_dec15: xmm0, a number above 0 that isn't whole: rax gets its first 15 significant digits, rounded
+    # (half up, as toPrecision rounds), and rdx where the point goes: x is 0.ddd... times 10^rdx
+    set tiny to new_label(a)
+    set high to new_label(a)
+    set ready to new_label(a)
+    set fraction_only to new_label(a)
+    set whole_count to new_label(a)
+    set some_whole to new_label(a)
+    set more to new_label(a)
+    set last to new_label(a)
+    set leading to new_label(a)
+    set first to new_label(a)
+    mark(a, "rt_dec15")
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 52)
+    alui(a, "cmp", rcx, 955) # below 2^-68
+    jcc(a, cc_b, tiny)
+    push_r(a, r12)
+    push_r(a, r13)
+    cvttsd2si(a, r8, xmm0) # the whole part, then the rest as a 128-bit number of 2^-120ths
+    cvtsi2sd(a, xmm1, r8)
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    movq_rx(a, rax, xmm2)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 52)
+    alui(a, "sub", rcx, 955)
+    movi64(a, rdx, list of 255, 255, 255, 255, 255, 255, 15, 0)
+    alu(a, "and", rax, rdx)
+    bit_op(a, "bts", rax, 52)
+    alui(a, "cmp", rcx, 64)
+    jcc(a, cc_ae, high)
+    movi(a, r12, 0)
+    mov_rr(a, r11, rax)
+    shld_cl(a, r12, r11)
+    shift_cl(a, "shl", r11)
+    jmp_to(a, ready)
+    mark(a, high)
+    alui(a, "sub", rcx, 64)
+    mov_rr(a, r12, rax)
+    shift_cl(a, "shl", r12)
+    movi(a, r11, 0)
+    mark(a, ready)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, fraction_only)
+    mov_rr(a, rax, r8) # how many digits the whole part has
+    movi(a, r10, 0)
+    movi(a, r9, 10)
+    mark(a, whole_count)
+    inc_r(a, r10)
+    movi(a, rdx, 0)
+    unary(a, "div", r9)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, whole_count)
+    alui(a, "cmp", r10, 16)
+    jcc(a, cc_b, some_whole)
+    mov_rr(a, rax, r8) # 16 whole digits: the 16th decides
+    movi(a, rdx, 0)
+    unary(a, "div", r9)
+    mov_rr(a, r9, rax)
+    mov_rr(a, rax, rdx)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    jmp_to(a, "rt_round15")
+    mark(a, some_whole)
+    mov_rr(a, r9, r8)
+    movi(a, r13, 15)
+    alu(a, "sub", r13, r10)
+    jmp_to(a, more)
+    mark(a, fraction_only)
+    movi(a, r10, 0)
+    mark(a, leading)
+    next_digit(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, first)
+    dec_r(a, r10)
+    jmp_to(a, leading)
+    mark(a, first)
+    mov_rr(a, r9, rax)
+    movi(a, r13, 14)
+    mark(a, more)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, last)
+    next_digit(a)
+    imul_ri(a, r9, r9, 10)
+    alu(a, "add", r9, rax)
+    dec_r(a, r13)
+    jmp_to(a, more)
+    mark(a, last)
+    next_digit(a)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    jmp_to(a, "rt_round15")
+    mark(a, tiny)
+    jmp_to(a, "rt_tiny15")
+
+    # rt_round15: r9 is 15 digits, r10 where the point goes, rax the 16th digit: rounded, into rax and rdx
+    set kept to new_label(a)
+    mark(a, "rt_round15")
+    alui(a, "cmp", rax, 5)
+    jcc(a, cc_b, kept)
+    inc_r(a, r9)
+    movi64(a, rax, bytes_of(1000000000000000))
+    alu(a, "cmp", r9, rax)
+    jcc(a, cc_ne, kept)
+    movi64(a, r9, bytes_of(100000000000000))
+    inc_r(a, r10)
+    mark(a, kept)
+    mov_rr(a, rax, r9)
+    mov_rr(a, rdx, r10)
+    ret(a)
+
+    # rt_tiny15: the same for a number below 2^-68, as big whole numbers: x is R / S, and each digit is how
+    # many times S goes into R
+    set subnormal to new_label(a)
+    set scaled to new_label(a)
+    set grow to new_label(a)
+    set digit to new_label(a)
+    set count_off to new_label(a)
+    set got to new_label(a)
+    mark(a, "rt_tiny15")
+    push_r(a, rbx)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 52)
+    movi64(a, rdx, list of 255, 255, 255, 255, 255, 255, 15, 0)
+    alu(a, "and", rax, rdx)
+    movi(a, rdx, 1074)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, subnormal)
+    bit_op(a, "bts", rax, 52)
+    movi(a, rdx, 1075)
+    alu(a, "sub", rdx, rcx)
+    mark(a, subnormal)
+    push_r(a, rdx)
+    lea(a, rdi, rip("big_r"))
+    call_to(a, "big_set")
+    pop_r(a, rcx)
+    lea(a, rdi, rip("big_s"))
+    call_to(a, "big_pow2")
+    movi(a, r10, 1)
+    mark(a, grow) # R times 10 until it's at least S: each time, the point moves one further out
+    lea(a, rdi, rip("big_r"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+    jcc(a, cc_ae, scaled)
+    lea(a, rdi, rip("big_r"))
+    call_to(a, "big_mul10")
+    dec_r(a, r10)
+    jmp_to(a, grow)
+    mark(a, scaled)
+    movi(a, r9, 0)
+    movi(a, r11, 16)
+    mark(a, digit)
+    movi(a, rbx, 0)
+    mark(a, count_off)
+    lea(a, rdi, rip("big_r"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+    jcc(a, cc_b, got)
+    lea(a, rdi, rip("big_r"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_sub")
+    inc_r(a, rbx)
+    jmp_to(a, count_off)
+    mark(a, got)
+    dec_r(a, r11)
+    set sixteenth to new_label(a)
+    jcc(a, cc_e, sixteenth)
+    imul_ri(a, r9, r9, 10)
+    alu(a, "add", r9, rbx)
+    lea(a, rdi, rip("big_r"))
+    call_to(a, "big_mul10")
+    jmp_to(a, digit)
+    mark(a, sixteenth)
+    mov_rr(a, rax, rbx)
+    pop_r(a, rbx)
+    jmp_to(a, "rt_round15")
+
+    # rt_canon_small: xmm0, a number above 0 below 2^-1021, which isn't whole: rax gets the double nearest
+    # its value to 15 digits, D * 10^(n - 15), which is f * 2^-1074 for the f closest to D * 2^1074 / 10^(15 - n)
+    set upward to new_label(a)
+    set raise_f to new_label(a)
+    set downward to new_label(a)
+    set lower_f to new_label(a)
+    set settled to new_label(a)
+    set tens to new_label(a)
+    mark(a, "rt_canon_small")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    movq_rx(a, r12, xmm0) # below 2^-1021, a double's bits are its f
+    call_to(a, "rt_dec15")
+    mov_rr(a, r14, rax)
+    mov_rr(a, rbx, rdx)
+    lea(a, rdi, rip("big_r")) # R: D * 2^1075
+    movi(a, rcx, 1075)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rsi, r14)
+    call_to(a, "big_mul")
+    lea(a, rdi, rip("big_s")) # S: 10^(15 - n)
+    movi(a, rax, 1)
+    call_to(a, "big_set")
+    movi(a, r13, 15)
+    alu(a, "sub", r13, rbx)
+    mark(a, tens)
+    lea(a, rdi, rip("big_s"))
+    call_to(a, "big_mul10")
+    dec_r(a, r13)
+    jcc(a, cc_ne, tens)
+    mark(a, upward) # up while the value is past f + 1/2: (2f + 1) * S below R
+    times_odd(a, 1)
+    jcc(a, cc_b, raise_f)
+    jcc(a, cc_ne, downward)
+    test_rr(a, r12, r12) # halfway: to the even one
+    mov_rr(a, rax, r12)
+    alui(a, "and", rax, 1)
+    jcc(a, cc_e, settled)
+    inc_r(a, r12)
+    jmp_to(a, settled)
+    mark(a, raise_f)
+    inc_r(a, r12)
+    jmp_to(a, upward)
+    mark(a, downward) # down while it's short of f - 1/2
+    test_rr(a, r12, r12)
+    jcc(a, cc_e, settled)
+    times_odd(a, -1)
+    jcc(a, cc_a, lower_f)
+    jcc(a, cc_ne, settled)
+    mov_rr(a, rax, r12)
+    alui(a, "and", rax, 1)
+    jcc(a, cc_e, settled)
+    mark(a, lower_f)
+    dec_r(a, r12)
+    jmp_to(a, downward)
+    mark(a, settled)
+    mov_rr(a, rax, r12)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    emit_shortest(a)
+end
+
+# compares (2f + side) * S, f being r12, with R
+to times_odd with a, side
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_copy")
+    mov_rr(a, rsi, r12)
+    alu(a, "add", rsi, rsi)
+    alui(a, "add", rsi, side)
+    lea(a, rdi, rip("big_t"))
+    call_to(a, "big_mul")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_r"))
+    call_to(a, "big_cmp")
+end
+
+# rax gets the next digit of the 128-bit fraction in r12 (high) and r11 (low), which keeps the rest
+to next_digit with a
+    mov_rr(a, rax, r11)
+    movi(a, rcx, 10)
+    unary(a, "mul", rcx)
+    mov_rr(a, r11, rax)
+    imul_ri(a, r12, r12, 10)
+    alu(a, "add", r12, rdx)
+    mov_rr(a, rax, r12)
+    shifti(a, "shr", rax, 56)
+    movi64(a, rcx, list of 255, 255, 255, 255, 255, 255, 255, 0)
+    alu(a, "and", r12, rcx)
+end
+
+# rt_shortest: rax, a number above 0: dbuf gets the fewest digits that read back as it, rcx how many, rdx
+# where the point goes. The number is R / S, and M+ and M- are how far each way a number can be
+# and still read back as it, all doubled so they're whole.
+to emit_shortest with a
+    set ordinary to new_label(a)
+    set scaled to new_label(a)
+    set fix to new_label(a)
+    set bump to new_label(a)
+    set fixed to new_label(a)
+    set gen to new_label(a)
+    set divide to new_label(a)
+    set divided to new_label(a)
+    set low_yes to new_label(a)
+    set low_done to new_label(a)
+    set high_yes to new_label(a)
+    set high_done to new_label(a)
+    set low to new_label(a)
+    set up to new_label(a)
+    set emit_last to new_label(a)
+    set subnormal to new_label(a)
+    set exponent to new_label(a)
+    set negative to new_label(a)
+    set set_up to new_label(a)
+    set shrink_test to new_label(a)
+    set shrink to new_label(a)
+    mark(a, "rt_shortest")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 52)
+    movi64(a, rdx, list of 255, 255, 255, 255, 255, 255, 15, 0)
+    alu(a, "and", rax, rdx)
+    mov_rr(a, r12, rax) # what's below the leading bit: 0 for a power of two
+    mov_rr(a, rbx, rax) # rbx: the whole number f, and x is f * 2^e
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, subnormal)
+    bit_op(a, "bts", rbx, 52)
+    jmp_to(a, exponent)
+    mark(a, subnormal)
+    movi(a, rcx, 1)
+    mark(a, exponent)
+    alui(a, "sub", rcx, 1075)
+    mov_rr(a, r13, rcx)
+    mov_rr(a, r14, rbx) # r14: 1 if f is even, so a number exactly halfway reads back as x
+    alui(a, "and", r14, 1)
+    alui(a, "xor", r14, 1)
+    test_rr(a, r13, r13)
+    jcc(a, cc_s, negative)
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, ordinary)
+    lea(a, rdi, rip("big_r")) # a power of two: the next number down is closer than the next one up
+    mov_rr(a, rcx, r13)
+    alui(a, "add", rcx, 2)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rsi, rbx)
+    call_to(a, "big_mul")
+    lea(a, rdi, rip("big_s"))
+    movi(a, rax, 4)
+    call_to(a, "big_set")
+    lea(a, rdi, rip("big_mp"))
+    mov_rr(a, rcx, r13)
+    inc_r(a, rcx)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_mm"))
+    mov_rr(a, rcx, r13)
+    call_to(a, "big_pow2")
+    jmp_to(a, scaled)
+    mark(a, ordinary)
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rcx, r13)
+    inc_r(a, rcx)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rsi, rbx)
+    call_to(a, "big_mul")
+    lea(a, rdi, rip("big_s"))
+    movi(a, rax, 2)
+    call_to(a, "big_set")
+    lea(a, rdi, rip("big_mp"))
+    mov_rr(a, rcx, r13)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_mm"))
+    mov_rr(a, rcx, r13)
+    call_to(a, "big_pow2")
+    jmp_to(a, scaled)
+    mark(a, negative) # below 2^53 and not whole: R = 2f and S = 2^(1 - e), or twice both for a power of two
+    movi(a, r9, 1)
+    movi(a, r10, 1)
+    alui(a, "cmp", r13, -1074)
+    jcc(a, cc_e, set_up)
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, set_up)
+    movi(a, r9, 2)
+    mark(a, set_up)
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rax, rbx)
+    call_to(a, "big_set")
+    lea(a, rdi, rip("big_r"))
+    mov_rr(a, rsi, r9)
+    alu(a, "add", rsi, rsi)
+    call_to(a, "big_mul")
+    lea(a, rdi, rip("big_s"))
+    mov_rr(a, rcx, r9)
+    alu(a, "sub", rcx, r13)
+    call_to(a, "big_pow2")
+    lea(a, rdi, rip("big_mp"))
+    mov_rr(a, rax, r9)
+    call_to(a, "big_set")
+    lea(a, rdi, rip("big_mm"))
+    mov_rr(a, rax, r10)
+    call_to(a, "big_set")
+    mark(a, scaled)
+    movi(a, r12, 0) # r12 counts the digits before the point
+    mark(a, shrink_test) # R, M+ and M- times 10 while ten times R + M+ is short of S
+    high_test_tenfold(a)
+    jcc(a, cc_b, shrink)
+    jcc(a, cc_ne, fix)
+    test_rr(a, r14, r14)
+    jcc(a, cc_ne, fix)
+    mark(a, shrink)
+    lea(a, rdi, rip("big_r"))
+    call_to(a, "big_mul10")
+    lea(a, rdi, rip("big_mp"))
+    call_to(a, "big_mul10")
+    lea(a, rdi, rip("big_mm"))
+    call_to(a, "big_mul10")
+    dec_r(a, r12)
+    jmp_to(a, shrink_test)
+    mark(a, fix) # S times 10 while R + M+ reaches it
+    high_test(a)
+    jcc(a, cc_a, bump)
+    jcc(a, cc_ne, fixed)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, fixed)
+    mark(a, bump)
+    lea(a, rdi, rip("big_s"))
+    call_to(a, "big_mul10")
+    inc_r(a, r12)
+    jmp_to(a, fix)
+    mark(a, fixed)
+    movi(a, r13, 0) # r13 counts the digits made
+    mark(a, gen)
+    lea(a, rdi, rip("big_r"))
+    call_to(a, "big_mul10")
+    lea(a, rdi, rip("big_mp"))
+    call_to(a, "big_mul10")
+    lea(a, rdi, rip("big_mm"))
+    call_to(a, "big_mul10")
+    movi(a, rbx, 0)
+    mark(a, divide)
+    lea(a, rdi, rip("big_r"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+    jcc(a, cc_b, divided)
+    lea(a, rdi, rip("big_r"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_sub")
+    inc_r(a, rbx)
+    jmp_to(a, divide)
+    mark(a, divided)
+    lea(a, rdi, rip("big_r")) # low: R is within M- of 0 (R <= M- when halfway counts)
+    lea(a, rsi, rip("big_mm"))
+    call_to(a, "big_cmp")
+    movi(a, r9, 0)
+    jcc(a, cc_b, low_yes)
+    jcc(a, cc_ne, low_done)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, low_done)
+    mark(a, low_yes)
+    movi(a, r9, 1)
+    mark(a, low_done)
+    high_test(a) # high: R + M+ reaches S
+    movi(a, r10, 0)
+    jcc(a, cc_a, high_yes)
+    jcc(a, cc_ne, high_done)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, high_done)
+    mark(a, high_yes)
+    movi(a, r10, 1)
+    mark(a, high_done)
+    test_rr(a, r9, r9)
+    jcc(a, cc_ne, low)
+    test_rr(a, r10, r10)
+    jcc(a, cc_ne, up)
+    put_digit(a)
+    jmp_to(a, gen)
+    mark(a, low)
+    test_rr(a, r10, r10)
+    jcc(a, cc_e, emit_last)
+    lea(a, rdi, rip("big_t")) # both: the digit nearer x, and the even one at a tie
+    lea(a, rsi, rip("big_r"))
+    call_to(a, "big_copy")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_r"))
+    call_to(a, "big_add")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+    jcc(a, cc_b, emit_last)
+    jcc(a, cc_a, up)
+    mov_rr(a, rax, rbx)
+    alui(a, "and", rax, 1)
+    jcc(a, cc_e, emit_last)
+    mark(a, up)
+    inc_r(a, rbx)
+    mark(a, emit_last)
+    put_digit(a)
+    mov_rr(a, rcx, r13)
+    mov_rr(a, rdx, r12)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# compares ten times R + M+ with S, for the jumps after
+to high_test_tenfold with a
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_r"))
+    call_to(a, "big_copy")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_mp"))
+    call_to(a, "big_add")
+    lea(a, rdi, rip("big_t"))
+    call_to(a, "big_mul10")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+end
+
+# compares R + M+ with S, for the jumps after
+to high_test with a
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_r"))
+    call_to(a, "big_copy")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_mp"))
+    call_to(a, "big_add")
+    lea(a, rdi, rip("big_t"))
+    lea(a, rsi, rip("big_s"))
+    call_to(a, "big_cmp")
+end
+
+# the digit in rbx goes at place r13 of dbuf
+to put_digit with a
+    lea(a, rax, rip("dbuf"))
+    alu(a, "add", rax, r13)
+    alui(a, "add", rbx, 48)
+    store8(a, mem(rax, 0), rbx)
+    inc_r(a, r13)
+end
+
+# Big whole numbers, `limbs` 64-bit pieces each, lowest first. They use rax, rcx, rdx, rsi, rdi and r8.
+to emit_bignums with a
+    mark(a, "big_set") # rdi = rax
+    mov_rr(a, rdx, rax)
+    mov_rr(a, rsi, rdi)
+    movi(a, rax, 0)
+    movi(a, rcx, limbs)
+    rep_stosq(a)
+    store(a, mem(rsi, 0), rdx)
+    ret(a)
+
+    mark(a, "big_pow2") # rdi = 2^rcx
+    mov_rr(a, rdx, rcx)
+    mov_rr(a, rsi, rdi)
+    movi(a, rax, 0)
+    movi(a, rcx, limbs)
+    rep_stosq(a)
+    mov_rr(a, rcx, rdx)
+    shifti(a, "shr", rdx, 6)
+    alui(a, "and", rcx, 63)
+    movi(a, rax, 1)
+    shift_cl(a, "shl", rax)
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rsi, rdx)
+    store(a, mem(rsi, 0), rax)
+    ret(a)
+
+    mark(a, "big_mul10") # rdi times 10
+    movi(a, rsi, 10)
+    set times to new_label(a)
+    mark(a, "big_mul") # rdi times rsi
+    movi(a, r8, 0)
+    movi(a, rcx, limbs)
+    mark(a, times)
+    load(a, rax, mem(rdi, 0))
+    unary(a, "mul", rsi)
+    alu(a, "add", rax, r8)
+    alui(a, "adc", rdx, 0)
+    store(a, mem(rdi, 0), rax)
+    mov_rr(a, r8, rdx)
+    alui(a, "add", rdi, 8)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, times)
+    ret(a)
+
+    set adding to new_label(a)
+    mark(a, "big_add") # rdi plus rsi
+    movi(a, rcx, limbs)
+    raw(a, list of 0xF8) # clc
+    mark(a, adding)
+    load(a, rax, mem(rsi, 0))
+    alu_store(a, "adc", mem(rdi, 0), rax)
+    lea(a, rsi, mem(rsi, 8))
+    lea(a, rdi, mem(rdi, 8))
+    dec_r(a, rcx)
+    jcc(a, cc_ne, adding)
+    ret(a)
+
+    set taking to new_label(a)
+    mark(a, "big_sub") # rdi less rsi, which is no bigger
+    movi(a, rcx, limbs)
+    raw(a, list of 0xF8)
+    mark(a, taking)
+    load(a, rax, mem(rsi, 0))
+    alu_store(a, "sbb", mem(rdi, 0), rax)
+    lea(a, rsi, mem(rsi, 8))
+    lea(a, rdi, mem(rdi, 8))
+    dec_r(a, rcx)
+    jcc(a, cc_ne, taking)
+    ret(a)
+
+    set looking to new_label(a)
+    set decided to new_label(a)
+    mark(a, "big_cmp") # rdi against rsi, for an unsigned jump after
+    alui(a, "add", rdi, 8 * (limbs - 1))
+    alui(a, "add", rsi, 8 * (limbs - 1))
+    movi(a, rcx, limbs)
+    mark(a, looking)
+    load(a, rax, mem(rdi, 0))
+    alu_load(a, "cmp", rax, mem(rsi, 0))
+    jcc(a, cc_ne, decided)
+    alui(a, "sub", rdi, 8)
+    alui(a, "sub", rsi, 8)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, looking)
+    alu(a, "cmp", rax, rax)
+    mark(a, decided)
+    ret(a)
+
+    mark(a, "big_copy") # rdi gets rsi
+    movi(a, rcx, limbs)
+    rep_movsq(a)
+    ret(a)
+end
+
+# ---------- the runtime: comparing, as vm.js's numberOrder does ----------
+# Two numbers compare as their values to 15 significant digits do, so 0.1 + 0.2 is 0.3. That takes work
+# only for two numbers that aren't both whole and are close enough that 15 digits might not tell them
+# apart; then each becomes 17 decimal digits and a power of ten, which compare exactly.
+
+to emit_compares with a
+    set unordered to new_label(a)
+    set equal to new_label(a)
+    set near to new_label(a)
+    set plain to new_label(a)
+    set less to new_label(a)
+    set a_whole to new_label(a)
+    set canon to new_label(a)
+    set nearer to new_label(a)
+    set further to new_label(a)
+    set greater to new_label(a)
+    set decimal to new_label(a)
+    mark(a, "rt_order") # xmm0 against xmm1, neither nothing, yes nor no: rax is 0 if equal, 1 if less, 2 if
+    # greater, 3 if either is NaN
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_p, unordered)
+    jcc(a, cc_e, equal)
+    movapd(a, xmm2, xmm0) # how far apart, against 1e-14 of the bigger
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    movq_rx(a, rax, xmm2)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm2, rax)
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm3, rax)
+    movq_rx(a, rax, xmm1)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm4, rax)
+    sse_math(a, "max", xmm3, reg_at(xmm4))
+    sse_math(a, "*", xmm3, rip(number_place(a, double_bytes(number of "0.00000000000001"))))
+    ucomisd(a, xmm2, reg_at(xmm3))
+    jcc(a, cc_be, near)
+    mark(a, plain)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_b, less)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, less)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, equal)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, unordered)
+    movi(a, rax, 3)
+    ret(a)
+    mark(a, near) # an infinity is itself to 15 digits, and so is a whole number
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0xE0, 0xFF)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shl", rax, 1)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, plain)
+    movq_rx(a, rax, xmm1)
+    shifti(a, "shl", rax, 1)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, plain)
+    is_whole(a, xmm0, a_whole)
+    jmp_to(a, canon)
+    mark(a, a_whole)
+    is_whole(a, xmm1, plain)
+    mark(a, canon) # the same sign, and neither is 0
+    movsd_store(a, rip("o_a"), xmm0)
+    movsd_store(a, rip("o_b"), xmm1)
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    shifti(a, "shr", rax, 52)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_a, decimal)
+    movq_rx(a, rax, xmm1)
+    bit_op(a, "btr", rax, 63)
+    shifti(a, "shr", rax, 52)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_a, decimal)
+    small_canon(a, xmm0, "o_ma")
+    small_canon(a, xmm1, "o_na")
+    load(a, rax, rip("o_ma"))
+    load(a, rdx, rip("o_na"))
+    movsd_load(a, xmm0, rip("o_a"))
+    movsd_load(a, xmm1, rip("o_b"))
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_b, nearer)
+    jcc(a, cc_a, further)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, decimal)
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    call_to(a, "rt_dec17")
+    store(a, rip("o_ma"), rax)
+    store(a, rip("o_na"), rdx)
+    movsd_load(a, xmm0, rip("o_b"))
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    call_to(a, "rt_dec17")
+    load(a, r8, rip("o_na"))
+    alu(a, "cmp", r8, rdx)
+    jcc(a, cc_l, nearer)
+    jcc(a, cc_g, further)
+    load(a, r8, rip("o_ma"))
+    alu(a, "cmp", r8, rax)
+    jcc(a, cc_b, nearer)
+    jcc(a, cc_a, further)
+    movsd_load(a, xmm0, rip("o_a"))
+    movsd_load(a, xmm1, rip("o_b"))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, nearer) # a is nearer 0 than b
+    movsd_load(a, xmm0, rip("o_a"))
+    movsd_load(a, xmm1, rip("o_b"))
+    movq_rx(a, rax, xmm0)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, greater)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, further)
+    movsd_load(a, xmm0, rip("o_a"))
+    movsd_load(a, xmm1, rip("o_b"))
+    movq_rx(a, rax, xmm0)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, less)
+    mark(a, greater)
+    movi(a, rax, 2)
+    ret(a)
+
+    # rt_dec17: xmm0, a number above 0 (below 2^53 if whole): rax gets 17 decimal digits of its value to 15
+    # digits, and rdx where the point goes
+    set counting to new_label(a)
+    set widen to new_label(a)
+    set widened to new_label(a)
+    mark(a, "rt_dec17")
+    is_whole(a, xmm0, counting)
+    call_to(a, "rt_dec15")
+    imul_ri(a, rax, rax, 100)
+    ret(a)
+    mark(a, counting)
+    cvttsd2si(a, r9, xmm0)
+    mov_rr(a, rax, r9)
+    movi(a, r10, 0)
+    movi(a, r11, 10)
+    set count_digits to new_label(a)
+    mark(a, count_digits)
+    inc_r(a, r10)
+    movi(a, rdx, 0)
+    unary(a, "div", r11)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, count_digits)
+    mov_rr(a, rax, r9)
+    mov_rr(a, rcx, r10)
+    mark(a, widen)
+    alui(a, "cmp", rcx, 17)
+    jcc(a, cc_ae, widened)
+    imul_ri(a, rax, rax, 10)
+    inc_r(a, rcx)
+    jmp_to(a, widen)
+    mark(a, widened)
+    mov_rr(a, rdx, r10)
+    ret(a)
+
+    # The comparisons, on any two values in xmm0 and xmm1: rax is 1 if it holds, 0 if not, or 2 for a
+    # mistake, with the two values in err_a and err_b, and err_why 1 for dividing by zero.
+    for each test in list of "lt", "gt", "ge", "le"
+        set wrong to new_label(a)
+        mark(a, "rt_cmp_" + test)
+        special_jump(a, xmm0, wrong)
+        special_jump(a, xmm1, wrong)
+        call_to(a, "rt_order")
+        if test is "lt"
+            alui(a, "cmp", rax, 1)
+            setcc(a, cc_e, rax)
+        else if test is "gt"
+            alui(a, "cmp", rax, 2)
+            setcc(a, cc_e, rax)
+        else if test is "ge" # equal or greater: 0 or 2
+            alui(a, "and", rax, 1)
+            setcc(a, cc_e, rax)
+        else
+            alui(a, "cmp", rax, 2)
+            setcc(a, cc_b, rax)
+        end
+        movzx8(a, rax, rax)
+        ret(a)
+        mark(a, wrong)
+        cmp_mistake(a, 0)
+    end
+
+    # `is`: numbers as rt_order has them; nothing, yes and no as themselves
+    set odd to new_label(a)
+    mark(a, "rt_cmp_is")
+    special_jump(a, xmm0, odd)
+    special_jump(a, xmm1, odd)
+    call_to(a, "rt_order")
+    test_rr(a, rax, rax)
+    setcc(a, cc_e, rax)
+    movzx8(a, rax, rax)
+    ret(a)
+    mark(a, odd)
+    movq_rx(a, rax, xmm0)
+    movq_rx(a, rdx, xmm1)
+    alu(a, "cmp", rax, rdx)
+    setcc(a, cc_e, rax)
+    movzx8(a, rax, rax)
+    ret(a)
+
+    # `is divisible by`: whole numbers by their remainder, anything else by whether a / b is whole to 15 digits
+    set wrong to new_label(a)
+    set by_zero to new_label(a)
+    set general to new_label(a)
+    set huge to new_label(a)
+    set holds to new_label(a)
+    set fails to new_label(a)
+    set rem_loop to new_label(a)
+    set b_whole to new_label(a)
+    set a_ok to new_label(a)
+    mark(a, "rt_cmp_div")
+    special_jump(a, xmm0, wrong)
+    special_jump(a, xmm1, wrong)
+    movq_rx(a, rax, xmm1)
+    shifti(a, "shl", rax, 1)
+    jcc(a, cc_e, by_zero)
+    finite_jump(a, xmm0, general)
+    finite_jump(a, xmm1, general)
+    is_whole(a, xmm0, a_ok)
+    jmp_to(a, general)
+    mark(a, a_ok)
+    is_whole(a, xmm1, b_whole)
+    jmp_to(a, general)
+    mark(a, b_whole)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0x40, 0x43) # both below 2^53: a 64-bit remainder
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, huge)
+    movq_rx(a, rax, xmm1)
+    bit_op(a, "btr", rax, 63)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, huge)
+    cvttsd2si(a, rax, xmm0)
+    cvttsd2si(a, rcx, xmm1)
+    raw(a, list of 0x48, 0x99) # cqo
+    unary(a, "idiv", rcx)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, holds)
+    jmp_to(a, fails)
+    mark(a, huge) # bigger: the x87's exact remainder
+    movsd_store(a, rip("o_a"), xmm0)
+    movsd_store(a, rip("o_b"), xmm1)
+    enc(a, empty list, no, (list of 0xDD), 0, rip("o_b"), empty list) # fld b
+    enc(a, empty list, no, (list of 0xDD), 0, rip("o_a"), empty list) # fld a
+    mark(a, rem_loop)
+    raw(a, list of 0xD9, 0xF8) # fprem
+    raw(a, list of 0xDF, 0xE0) # fnstsw ax
+    raw(a, list of 0xF6, 0xC4, 0x04) # test ah, 4: not finished yet
+    jcc(a, cc_ne, rem_loop)
+    enc(a, empty list, no, (list of 0xDD), 3, rip("o_ma"), empty list) # fstp the remainder
+    raw(a, list of 0xDD, 0xD8) # fstp st(0)
+    load(a, rax, rip("o_ma"))
+    shifti(a, "shl", rax, 1)
+    jcc(a, cc_e, holds)
+    jmp_to(a, fails)
+    mark(a, general)
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "/", xmm2, reg_at(xmm1))
+    finite_jump(a, xmm2, fails)
+    movapd(a, xmm0, xmm2)
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    is_whole(a, xmm0, holds)
+    call_to(a, "rt_canon_int")
+    ret(a)
+    mark(a, holds)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, fails)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, wrong)
+    cmp_mistake(a, 0)
+    mark(a, by_zero)
+    cmp_mistake(a, 1)
+
+    # rt_canon_int: xmm0, a number above 0 that isn't whole: rax is 1 if it is whole to 15 digits, with rcx
+    # that whole number, else 0
+    set big_enough to new_label(a)
+    set not_whole to new_label(a)
+    set tens to new_label(a)
+    set times_one to new_label(a)
+    mark(a, "rt_canon_int")
+    call_to(a, "rt_dec15")
+    alui(a, "cmp", rdx, 15)
+    jcc(a, cc_ge, big_enough)
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_l, not_whole)
+    movi(a, rcx, 15)
+    alu(a, "sub", rcx, rdx)
+    movi(a, r8, 1)
+    mark(a, tens)
+    imul_ri(a, r8, r8, 10)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, tens)
+    movi(a, rdx, 0)
+    unary(a, "div", r8)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_ne, not_whole)
+    mov_rr(a, rcx, rax)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, big_enough)
+    mov_rr(a, rcx, rax)
+    alui(a, "cmp", rdx, 15)
+    jcc(a, cc_e, times_one)
+    imul_ri(a, rcx, rcx, 10)
+    mark(a, times_one)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, not_whole)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_repeat: xmm0, how many times a `repeat` goes round, which must be whole to 15 digits and 0 or
+    # more: xmm0 gets it, and rax 0, or rax is 2 for a mistake
+    set bad to new_label(a)
+    set whole_count to new_label(a)
+    mark(a, "rt_repeat")
+    movsd_store(a, rip("err_a"), xmm0)
+    special_jump(a, xmm0, bad)
+    finite_jump(a, xmm0, bad)
+    movq_rx(a, rax, xmm0)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, whole_count)
+    is_whole(a, xmm0, whole_count)
+    call_to(a, "rt_canon_int")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, bad)
+    cvtsi2sd(a, xmm0, rcx)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, whole_count) # whole, or below 0
+    movsd_load(a, xmm0, rip("err_a"))
+    movi(a, rax, 0)
+    movq_xr(a, xmm1, rax)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_b, bad)
+    is_whole(a, xmm0, "rt_ok0")
+    jmp_to(a, bad)
+    mark(a, "rt_ok0")
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, bad)
+    movi(a, rax, 2)
+    ret(a)
+
+    # rt_any_special: rax is 1 if xmm2 or xmm1 is nothing, yes or no
+    set found to new_label(a)
+    mark(a, "rt_any_special")
+    special_jump(a, xmm2, found)
+    special_jump(a, xmm1, found)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, found)
+    movi(a, rax, 1)
+    ret(a)
+end
+
+# the bits of a tiny number's double to 15 digits (from o_a or o_b, as xmm x says), saved in `into`; a
+# whole number is itself
+to small_canon with a, x, into
+    set whole to new_label(a)
+    set saved to new_label(a)
+    if x is xmm0
+        movsd_load(a, xmm0, rip("o_a"))
+    else
+        movsd_load(a, xmm0, rip("o_b"))
+    end
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    is_whole(a, xmm0, whole)
+    call_to(a, "rt_canon_small")
+    jmp_to(a, saved)
+    mark(a, whole)
+    movq_rx(a, rax, xmm0)
+    mark(a, saved)
+    store(a, rip(into), rax)
+end
+
+# jumps if xmm x holds nothing, yes or no; uses rax and rcx
+to special_jump with a, x, name
+    movq_rx(a, rax, x)
+    movi64(a, rcx, bits_nothing)
+    alu(a, "sub", rax, rcx)
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_b, name)
+end
+
+# jumps if xmm x is an infinity or NaN; uses rax and rcx
+to finite_jump with a, x, name
+    movq_rx(a, rax, x)
+    shifti(a, "shl", rax, 1)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0xE0, 0xFF)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, name)
+end
+
+# jumps if xmm x, a finite number, is whole; uses rax, rcx and xmm4
+to is_whole with a, x, name
+    movq_rx(a, rax, x)
+    bit_op(a, "btr", rax, 63)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0x30, 0x43) # 2^52 and up are all whole
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ae, name)
+    cvttsd2si(a, rax, x)
+    cvtsi2sd(a, xmm4, rax)
+    ucomisd(a, x, reg_at(xmm4))
+    jcc(a, cc_e, name)
+end
+
+to cmp_mistake with a, why
+    movsd_store(a, rip("err_a"), xmm0)
+    movsd_store(a, rip("err_b"), xmm1)
+    storei(a, rip("err_why"), why)
+    movi(a, rax, 2)
+    ret(a)
+end
+
+# ---------- the runtime: mistakes ----------
+# A mistake is written as `moth run` writes it: where, what, the line with the spot marked, and the calls in
+# progress. The code that finds it calls rt_e_start with the record of where, adds what to say with
+# rt_e_text, rt_e_kind and rt_e_shown, and jumps to rt_e_end. Each frame keeps the number of the call that
+# made it just under where rbp points, so rt_e_end can walk them.
+
+to emit_mistakes with a
+    mark(a, "rt_e_start") # rsi: where it happened: "file:line:col: " then "\n" and the line
+    store(a, rip("err_site"), rsi)
+    storei(a, rip("ebuf_len"), 0)
+    load32(a, rcx, mem(rsi, 0))
+    alui(a, "add", rsi, 4)
+    mark(a, "rt_e_text") # rsi, rcx: these bytes
+    load(a, rax, rip("ebuf_len"))
+    lea(a, rdi, rip("ebuf"))
+    alu(a, "add", rdi, rax)
+    alu(a, "add", rax, rcx)
+    store(a, rip("ebuf_len"), rax)
+    rep_movsb(a)
+    ret(a)
+
+    set kind_nothing to new_label(a)
+    set kind_bool to new_label(a)
+    mark(a, "rt_e_kind") # rax: what kind of value it is
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, kind_nothing)
+    inc_r(a, rcx)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, kind_bool)
+    inc_r(a, rcx)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, kind_bool)
+    point_at_text(a, "a number")
+    jmp_to(a, "rt_e_text")
+    mark(a, kind_nothing)
+    point_at_text(a, "nothing")
+    jmp_to(a, "rt_e_text")
+    mark(a, kind_bool)
+    point_at_text(a, "yes/no")
+    jmp_to(a, "rt_e_text")
+
+    mark(a, "rt_e_shown") # rax: a value as `say` shows it
+    load(a, rdx, rip("ebuf_len"))
+    lea(a, rdi, rip("ebuf"))
+    alu(a, "add", rdi, rdx)
+    call_to(a, "rt_show")
+    lea(a, rax, rip("ebuf"))
+    alu(a, "sub", rdi, rax)
+    store(a, rip("ebuf_len"), rdi)
+    ret(a)
+
+    mark(a, "rt_e_plain") # rax: a whole number's digits
+    call_to(a, "rt_digits")
+    lea(a, rsi, rip("dbuf"))
+    jmp_to(a, "rt_e_text")
+
+    set first_group to new_label(a)
+    set groups to new_label(a)
+    set grouped to new_label(a)
+    mark(a, "rt_e_grouped") # rax: a whole number with commas, as toLocaleString writes it
+    call_to(a, "rt_digits")
+    load(a, rax, rip("ebuf_len"))
+    lea(a, rdi, rip("ebuf"))
+    alu(a, "add", rdi, rax)
+    lea(a, rsi, rip("dbuf"))
+    mov_rr(a, r9, rcx)
+    mov_rr(a, rax, rcx)
+    movi(a, rdx, 0)
+    movi(a, r8, 3)
+    unary(a, "div", r8)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_ne, first_group)
+    movi(a, rdx, 3)
+    mark(a, first_group)
+    mov_rr(a, rcx, rdx)
+    alu(a, "sub", r9, rdx)
+    rep_movsb(a)
+    mark(a, groups)
+    test_rr(a, r9, r9)
+    jcc(a, cc_e, grouped)
+    store8i(a, mem(rdi, 0), 44)
+    inc_r(a, rdi)
+    movi(a, rcx, 3)
+    alui(a, "sub", r9, 3)
+    rep_movsb(a)
+    jmp_to(a, groups)
+    mark(a, grouped)
+    lea(a, rax, rip("ebuf"))
+    alu(a, "sub", rdi, rax)
+    store(a, rip("ebuf_len"), rdi)
+    ret(a)
+
+    set walk to new_label(a)
+    set fresh to new_label(a)
+    set first to new_label(a)
+    set onward to new_label(a)
+    set walked to new_label(a)
+    set counted to new_label(a)
+    set close to new_label(a)
+    set one_line to new_label(a)
+    set skip to new_label(a)
+    mark(a, "rt_e_end")
+    load(a, rsi, rip("err_site")) # the line, with its spot marked
+    load32(a, rax, mem(rsi, 0))
+    alu(a, "add", rsi, rax)
+    alui(a, "add", rsi, 4)
+    load32(a, rcx, mem(rsi, 0))
+    alui(a, "add", rsi, 4)
+    call_to(a, "rt_e_text")
+    mov_rr(a, rbx, rbp) # the calls in progress, innermost first, one line for a run of the same call
+    movi(a, r12, -1)
+    movi(a, r13, 0)
+    movi(a, r14, 0)
+    mark(a, walk)
+    load(a, rax, mem(rbx, -8))
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, walked)
+    lea(a, rdx, rip("site_table"))
+    mov_rr(a, rcx, rax)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rdx, rcx)
+    load32(a, rcx, mem(rdx, 0))
+    alu(a, "cmp", rcx, r12)
+    jcc(a, cc_ne, fresh)
+    inc_r(a, r13)
+    jmp_to(a, onward)
+    mark(a, fresh)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, first)
+    push_r(a, rax)
+    push_r(a, rcx)
+    call_to(a, one_line)
+    pop_r(a, rcx)
+    pop_r(a, rax)
+    mark(a, first)
+    mov_rr(a, r12, rcx)
+    store(a, rip("t_prev"), rax)
+    movi(a, r13, 1)
+    mark(a, onward)
+    load(a, rbx, mem(rbx, 0))
+    jmp_to(a, walk)
+    mark(a, walked)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, counted)
+    call_to(a, one_line)
+    mark(a, counted)
+    alui(a, "cmp", r14, 10)
+    jcc(a, cc_be, close)
+    point_at_text(a, "\n  ... and ")
+    call_to(a, "rt_e_text")
+    mov_rr(a, rax, r14)
+    alui(a, "sub", rax, 10)
+    call_to(a, "rt_e_plain")
+    point_at_text(a, " more")
+    call_to(a, "rt_e_text")
+    mark(a, close)
+    point_at_text(a, "\n")
+    call_to(a, "rt_e_text")
+    call_to(a, "rt_flush_out")
+    movi(a, rdi, 2)
+    lea(a, rsi, rip("ebuf"))
+    load(a, rdx, rip("ebuf_len"))
+    call_to(a, "rt_write")
+    movi(a, rcx, 1)
+    jmp_to(a, "rt_exit")
+    mark(a, one_line) # the call in t_prev, r13 times in a row; the first 10 are shown
+    alui(a, "cmp", r14, 10)
+    jcc(a, cc_ae, skip)
+    point_at_text(a, "\n")
+    call_to(a, "rt_e_text")
+    load(a, rax, rip("t_prev"))
+    lea(a, rdx, rip("site_table"))
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rdx, rax)
+    load32(a, rax, mem(rdx, 4))
+    lea(a, rsi, rip("site_table"))
+    alu(a, "add", rsi, rax)
+    load32(a, rcx, mem(rsi, 0))
+    alui(a, "add", rsi, 4)
+    call_to(a, "rt_e_text")
+    alui(a, "cmp", r13, 1)
+    jcc(a, cc_be, skip)
+    point_at_text(a, " (")
+    call_to(a, "rt_e_text")
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_e_grouped")
+    point_at_text(a, " times)")
+    call_to(a, "rt_e_text")
+    mark(a, skip)
+    inc_r(a, r14)
+    ret(a)
+end
+
+# ---------- the runtime: the system ----------
+# rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
+# code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
+
+to emit_windows with a, wide_cap
+    mark(a, "start")
+    alui(a, "sub", rsp, 40)
+    movi(a, rcx, -11)
+    call_import(a, "imp_GetStdHandle")
+    store(a, rip("out_handle"), rax)
+    mov_rr(a, rcx, rax)
+    lea(a, rdx, rip("scratch"))
+    call_import(a, "imp_GetConsoleMode")
+    store32(a, rip("out_tty"), rax)
+    movi(a, rcx, -12)
+    call_import(a, "imp_GetStdHandle")
+    store(a, rip("err_handle"), rax)
+    mov_rr(a, rcx, rax)
+    lea(a, rdx, rip("scratch"))
+    call_import(a, "imp_GetConsoleMode")
+    store32(a, rip("err_tty"), rax)
+    alui(a, "add", rsp, 40)
+    jmp_to(a, "rt_begin")
+
+    mark(a, "rt_exit")
+    alui(a, "and", rsp, -16)
+    alui(a, "sub", rsp, 32)
+    call_import(a, "imp_ExitProcess")
+
+    set chosen to new_label(a)
+    set files to new_label(a)
+    set console to new_label(a)
+    set chunk to new_label(a)
+    set pieces to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_write")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    alui(a, "and", rsp, -16)
+    alui(a, "sub", rsp, 64)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rdx)
+    load(a, rbx, rip("out_handle"))
+    load32(a, r14, rip("out_tty"))
+    alui(a, "cmp", rdi, 1)
+    jcc(a, cc_e, chosen)
+    load(a, rbx, rip("err_handle"))
+    load32(a, r14, rip("err_tty"))
+    mark(a, chosen)
+    test_rr(a, r14, r14)
+    jcc(a, cc_ne, console)
+    mark(a, files) # a file or a pipe: the bytes as they are
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, done)
+    mov_rr(a, rcx, rbx)
+    mov_rr(a, rdx, r12)
+    mov_rr(a, r8, r13)
+    lea(a, r9, mem(rsp, 48))
+    storei(a, mem(rsp, 32), 0)
+    call_import(a, "imp_WriteFile")
+    test32(a, rax)
+    jcc(a, cc_e, done)
+    load32(a, rax, mem(rsp, 48))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, done)
+    alu(a, "add", r12, rax)
+    alu(a, "sub", r13, rax)
+    jmp_to(a, files)
+    mark(a, console) # a console: as UTF-16, so every character shows
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    mov_rr(a, r8, r12)
+    mov_rr(a, r9, r13)
+    lea(a, rax, rip("wbuf"))
+    store(a, mem(rsp, 32), rax)
+    storei(a, mem(rsp, 40), wide_cap)
+    call_import(a, "imp_MultiByteToWideChar")
+    mov32_rr(a, r13, rax)
+    lea(a, r12, rip("wbuf"))
+    mark(a, pieces)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, done)
+    mov_rr(a, r14, r13)
+    alui(a, "cmp", r14, 8192)
+    jcc(a, cc_be, chunk)
+    movi(a, r14, 8192)
+    mov_rr(a, rax, r14) # not between the two halves of a character past 65,535
+    alu(a, "add", rax, rax)
+    alu(a, "add", rax, r12)
+    load16(a, rax, mem(rax, -2))
+    alui(a, "cmp", rax, 0xD800)
+    jcc(a, cc_b, chunk)
+    alui(a, "cmp", rax, 0xDBFF)
+    jcc(a, cc_a, chunk)
+    dec_r(a, r14)
+    mark(a, chunk)
+    mov_rr(a, rcx, rbx)
+    mov_rr(a, rdx, r12)
+    mov_rr(a, r8, r14)
+    lea(a, r9, mem(rsp, 48))
+    storei(a, mem(rsp, 32), 0)
+    call_import(a, "imp_WriteConsoleW")
+    test32(a, rax)
+    jcc(a, cc_e, done)
+    mov_rr(a, rax, r14)
+    alu(a, "add", rax, rax)
+    alu(a, "add", r12, rax)
+    alu(a, "sub", r13, r14)
+    jmp_to(a, pieces)
+    mark(a, done)
+    mov_rr(a, rsp, rbp)
+    pop_r(a, rbp)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_linux with a
+    mark(a, "start")
+    lea(a, rsp, rip_plus("stack", stack_size))
+    for each stream in list of 1, 2 # a terminal answers TCGETS
+        movi(a, rdi, stream)
+        movi(a, rsi, 0x5401)
+        lea(a, rdx, rip("scratch"))
+        movi(a, rax, 16)
+        raw(a, list of 0x0F, 0x05)
+        test_rr(a, rax, rax)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        if stream is 1
+            store(a, rip("out_tty"), rax)
+        else
+            store(a, rip("err_tty"), rax)
+        end
+    end
+    jmp_to(a, "rt_begin")
+
+    mark(a, "rt_exit")
+    mov_rr(a, rdi, rcx)
+    movi(a, rax, 231)
+    raw(a, list of 0x0F, 0x05)
+
+    set again to new_label(a)
+    set failed to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_write")
+    mark(a, again)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, done)
+    movi(a, rax, 1)
+    raw(a, list of 0x0F, 0x05)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, failed)
+    alu(a, "add", rsi, rax)
+    alu(a, "sub", rdx, rax)
+    jmp_to(a, again)
+    mark(a, failed)
+    alui(a, "cmp", rax, -4) # interrupted, or an output that can't take more just now: again
+    jcc(a, cc_e, again)
+    alui(a, "cmp", rax, -11)
+    jcc(a, cc_e, again)
+    mark(a, done)
+    ret(a)
+end
+
+to emit_runtime with st
+    set a to a of st
+    mark(a, "rt_begin")
+    movi(a, r15, 0)
+    call_to(a, "moth_main")
+    call_to(a, "rt_flush_out")
+    movi(a, rcx, 0)
+    jmp_to(a, "rt_exit")
+    emit_output(a)
+    emit_numbers(a)
+    emit_bignums(a)
+    emit_compares(a)
+    emit_mistakes(a)
+    set biggest to out_cap
+    if ebuf_size of st is greater than biggest
+        set biggest to ebuf_size of st
+    end
+    if longest_text of st is greater than biggest
+        set biggest to longest_text of st
+    end
+    if target of st is "windows"
+        emit_windows(a, biggest)
+        reserve(a, "wbuf", 2 * biggest, 16)
+    else
+        emit_linux(a)
+        reserve(a, "stack", stack_size, 16)
+    end
+    reserve(a, "out_buf", out_cap, 16)
+    reserve(a, "ebuf", ebuf_size of st, 16)
+    for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "ebuf_len", "err_site", "err_a",
+        "err_b", "err_why", "o_a", "o_b", "o_ma", "o_na", "t_prev"
+        reserve(a, name, 8, 8)
+    end
+    reserve(a, "scratch", 64, 16)
+    reserve(a, "dbuf", 64, 16)
+    for each name in list of "big_r", "big_s", "big_mp", "big_mm", "big_t"
+        reserve(a, name, 8 * limbs, 16)
+    end
+    # the calls: for each, which run of calls it belongs to, and the line a mistake shows for it
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "site_table")
+    set calls to calls of st
+    set text_at to 8 * length of calls
+    set records to empty list
+    for each c in calls
+        put32(ro, trail_key of c)
+        put32(ro, text_at + length of records)
+        set line_bytes to trail_text of c as bytes
+        put32(records, length of line_bytes)
+        put_all(records, line_bytes)
+    end
+    put_all(ro, records)
+end
+
+# ---------- what can't become machine code yet ----------
+
+set node_words to dictionary where "list" is "a list", "record" is "a record", "dictionary" is "a dictionary",
+    "length" is "'length of'", "item" is "'item'", "field" is "a record's field", "ask" is "'ask'", "read" is "'read'",
+    "arguments" is "'arguments'", "random" is "'random number'", "builtin" is "this", "each" is "'for each ... in'",
+    "setItem" is "'set item'", "setField" is "setting a field", "when" is "'when'", "every" is "'every'",
+    "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'", "write" is "'write'", "expect" is "'expect'",
+    "try" is "'try'"
+
+to not_yet with at, what
+    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, variables, say, if, loops and functions can")
+end
+
+to not_yet_node with node
+    set what to "'" + kind of node + "'"
+    if kind of node is in node_words
+        set what to item (kind of node) of node_words
+    end
+    if kind of node is "builtin"
+        set what to "'" + name of node + "'"
+    end
+    not_yet(at of node, what)
+end
+
+# ---------- the program's code ----------
+# Main's variables live in `globals`, a function's in its frame: its inputs above where rbp points, where
+# the call put them, and its own below, under the number of the call. A value being worked out waits on
+# the stack. `fc` is the function being written.
+
+to new_state with a, program_name, files, source, target
+    set sources to empty dictionary
+    set item "" of sources to source
+    set biggest to length of (source as bytes)
+    for each f in files
+        set item (name of f) of sources to text of f
+        if length of (text of f as bytes) is greater than biggest
+            set biggest to length of (text of f as bytes)
+        end
+    end
+    return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
+        calls empty list, trail_keys empty dictionary, functions empty dictionary, fn_slots empty dictionary, main_scope nothing,
+        target target, ebuf_size 65536 + 3 * biggest, longest_text 0
+end
+
+to new_fc with st, scope, main, name, inputs, own
+    return record with st st, a a of st, scope scope, main main, name name, inputs inputs, own own, hidden 0,
+        most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing
+end
+
+# where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
+# ^ under the spot
+to site_of with fc, at
+    set st to st of fc
+    set a to a of st
+    set key to "" + line of at + ":" + col of at + ":" + file of at
+    set table to sites of st
+    if key is in table
+        return item key of table
+    end
+    set where_name to file of at
+    if where_name is ""
+        set where_name to name of st
+    end
+    set head to (where_name + ":" + line of at + ":" + col of at + ": ") as bytes
+    set tail to ("\n" + excerpt_of(st, file of at, line of at, col of at)) as bytes
+    set ro to rodata of a
+    set label to "S" + length of ro
+    rodata_here(a, label)
+    put32(ro, length of head)
+    put_all(ro, head)
+    put32(ro, length of tail)
+    put_all(ro, tail)
+    set item key of table to label
+    return label
+end
+
+# vm.js's excerpt: the line, and under it a ^ at the column, with the line's own tabs kept so it lines up
+to excerpt_of with st, file, line_no, col
+    set table to lines of st
+    if not (file is in table)
+        set all to empty list
+        for each piece in split item file of sources of st by "\n"
+            add without_return(piece) to all
+        end
+        set item file of table to all
+    end
+    set all to item file of table
+    set line_text to ""
+    if line_no is at most length of all
+        set line_text to item line_no of all
+    end
+    set marker to ""
+    set units to 0
+    for each c in line_text
+        if units is at least col - 1
+            stop
+        end
+        set w to front's width(c)
+        if js_space(c)
+            add c to marker
+        else if w is 2
+            add "  " to marker
+        else
+            add " " to marker
+        end
+        add w to units
+    end
+    return line_text + "\n" + marker + "^"
+end
+
+to code_point with c
+    set got to c as bytes
+    set lead to byte 1 of got
+    if lead is less than 128
+        return lead
+    end
+    set cp to lead bit and 31
+    set extra to 1
+    if lead is at least 240
+        set cp to lead bit and 7
+        set extra to 3
+    else if lead is at least 224
+        set cp to lead bit and 15
+        set extra to 2
+    end
+    for each k from 2 to extra + 1
+        set cp to cp * 64 + (byte k of got bit and 63)
+    end
+    return cp
+end
+
+# JavaScript's \s
+to js_space with c
+    set cp to code_point(c)
+    if cp is at least 9 and cp is at most 13
+        return yes
+    end
+    if cp is at least 0x2000 and cp is at most 0x200A
+        return yes
+    end
+    return cp is 32 or cp is 0xA0 or cp is 0x1680 or cp is 0x2028 or cp is 0x2029 or cp is 0x202F or cp is 0x205F or
+        cp is 0x3000 or cp is 0xFEFF
+end
+
+to without_return with line_text
+    set made to ""
+    set n to 0
+    set total to length of line_text
+    for each c in line_text
+        add 1 to n
+        if n is not total or code_point(c) is not 13
+            add c to made
+        end
+    end
+    return made
+end
+
+# code that stops with this mistake, in the cold code; gives its label
+to fail_stub with fc, at, message
+    set a to a of fc
+    set site to site_of(fc, at)
+    set was to enter_cold(a)
+    set label to new_label(a)
+    mark(a, label)
+    lea(a, rsi, rip(site))
+    call_to(a, "rt_e_start")
+    point_at_text(a, message)
+    call_to(a, "rt_e_text")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+    return label
+end
+
+# the start of a mistake whose message is put together as it happens: after it, the pieces, then rt_e_end
+to stub_start with fc, at
+    set a to a of fc
+    lea(a, rsi, rip(site_of(fc, at)))
+    call_to(a, "rt_e_start")
+end
+
+to stub_text with a, t
+    point_at_text(a, t)
+    call_to(a, "rt_e_text")
+end
+
+to stub_kind with a, from
+    load(a, rax, rip(from))
+    call_to(a, "rt_e_kind")
+end
+
+# "before" + what err_a is + "middle" + what err_b is
+to two_kinds with fc, at, before, middle
+    set a to a of fc
+    stub_start(fc, at)
+    stub_text(a, before)
+    stub_kind(a, "err_a")
+    stub_text(a, middle)
+    stub_kind(a, "err_b")
+    jmp_to(a, "rt_e_end")
+end
+
+to push_value with fc
+    set a to a of fc
+    movq_rx(a, rax, xmm0)
+    push_r(a, rax)
+    set pushed of fc to pushed of fc + 1
+    if pushed of fc is greater than most_pushed of fc
+        set most_pushed of fc to pushed of fc
+    end
+end
+
+to pop_value with fc, x
+    set a to a of fc
+    pop_r(a, rax)
+    movq_xr(a, x, rax)
+    set pushed of fc to pushed of fc - 1
+end
+
+# a place in the frame for a loop's count or limit
+to hidden_place with fc
+    set h to hidden of fc
+    set hidden of fc to h + 1
+    if hidden of fc is greater than most_hidden of fc
+        set most_hidden of fc to hidden of fc
+    end
+    return mem(rbp, -16 - 8 * (own of fc + h))
+end
+
+# where a variable resolve() found lives
+to place_of with fc, found
+    if main of fc or depth of found is at least 1
+        return rip_plus("globals", 8 * (slot of found - 1))
+    end
+    set k to slot of found
+    if k is at most inputs of fc
+        return mem(rbp, 16 + 8 * (inputs of fc - k))
+    end
+    return mem(rbp, -16 - 8 * (k - inputs of fc - 1))
+end
+
+# the program's function whose name is in that place, if it is one
+to function_at with fc, found
+    if found is nothing
+        return nothing
+    end
+    if not (main of fc or depth of found is at least 1)
+        return nothing
+    end
+    set table to fn_slots of st of fc
+    if slot of found is in table
+        return item (slot of found) of table
+    end
+    return nothing
+end
+
+to compile_machine with source, file_names, file_texts, target, program_name
+    set files to empty list
+    for each i from 1 to length of file_names
+        add record with name item i of file_names, text item i of file_texts to files
+    end
+    set reading to record with files files, loaded empty list, open empty list, within ""
+    set body to front's parse(front's tokenize(source, ""), reading)
+    set a to new_asm()
+    set st to new_state(a, program_name, files, source, target)
+    gen_program(st, body)
+    emit_runtime(st)
+    if target is "windows"
+        return windows_file(a)
+    end
+    return linux_file(a)
+end
+
+to collect_functions with st, body
+    for each s in body
+        set what to kind of s
+        if what is "define"
+            set table to functions of st
+            if name of s is in table
+                not_yet(at of s, "a function made twice ('" + name of s + "')")
+            end
+            set found to front's resolve(main_scope of st, name of s)
+            set made to record with name name of s, label "F" + slot of found, params params of s, kinds kinds of s, body body of s,
+                slot slot of found, at at of s
+            set item (name of s) of table to made
+            set slots to fn_slots of st
+            set item (slot of found) of slots to made
+        else if what is "if"
+            collect_functions(st, then of s)
+            collect_functions(st, otherwise of s)
+        else if what is "while" or what is "repeat" or what is "count"
+            collect_functions(st, body of s)
+        end
+    end
+end
+
+to frame_size with a, at
+    set code to code of a
+    raw(a, list of 0x48, 0x81, 0xEC) # sub rsp, the size of the frame
+    set where_at to length of code
+    put32(code, 0)
+    return where_at
+end
+
+to gen_program with st, body
+    set a to a of st
+    set scope to front's new_scope(nothing, empty list, body)
+    set main_scope of st to scope
+    collect_functions(st, body)
+    data_here(a, "globals")
+    for each n in names of scope
+        put_all(data of a, bits_unset)
+    end
+    mark(a, "moth_main")
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    raw(a, list of 0x6A, 0xFF) # push -1: main, where the calls stop
+    set sized to frame_size(a, nothing)
+    set fc to new_fc(st, scope, yes, "main", 0, 0)
+    gen_block(fc, body)
+    mov_rr(a, rsp, rbp)
+    pop_r(a, rbp)
+    ret(a)
+    patch32(hot of a, sized, 8 * most_hidden of fc)
+    set table to functions of st
+    for each fn_name in keys of table
+        gen_function(st, item fn_name of table)
+    end
+end
+
+to gen_function with st, f
+    set a to a of st
+    set scope to front's new_scope(main_scope of st, params of f, body of f)
+    set n to length of params of f
+    set own to length of names of scope - n
+    mark(a, label of f)
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    push_r(a, rax) # the number of the call
+    set sized to frame_size(a, nothing)
+    if own is greater than 0
+        movi64(a, rax, bits_unset)
+        for each j from 0 to own - 1
+            store(a, mem(rbp, -16 - 8 * j), rax)
+        end
+    end
+    set fc to new_fc(st, scope, no, name of f, n, own)
+    set done of fc to new_label(a)
+    gen_block(fc, body of f)
+    load_bits(a, xmm0, bits_nothing)
+    mark(a, done of fc)
+    mov_rr(a, rsp, rbp)
+    pop_r(a, rbp)
+    ret(a)
+    patch32(hot of a, sized, 8 * (own + most_hidden of fc))
+    if 8 * (3 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
+        not_yet(at of f, "a function this big")
+    end
+end
+
+to gen_block with fc, body
+    for each s in body
+        gen_statement(fc, s)
+    end
+end
+
+to gen_statement with fc, s
+    set a to a of fc
+    set what to kind of s
+    if what is "say"
+        gen_say(fc, s)
+    else if what is "set"
+        gen_expr(fc, value of s)
+        store_var(fc, name of s, at of s)
+    else if what is "add"
+        gen_add(fc, s)
+    else if what is "if"
+        set otherwise_at to new_label(a)
+        set end_at to new_label(a)
+        gen_cond(fc, cond of s, otherwise_at, no)
+        gen_block(fc, then of s)
+        jmp_to(a, end_at)
+        mark(a, otherwise_at)
+        gen_block(fc, otherwise of s)
+        mark(a, end_at)
+    else if what is "while"
+        set top to new_label(a)
+        set exit to new_label(a)
+        mark(a, top)
+        gen_cond(fc, cond of s, exit, no)
+        gen_loop_body(fc, body of s, exit)
+        jmp_to(a, top)
+        mark(a, exit)
+    else if what is "repeat"
+        gen_repeat(fc, s)
+    else if what is "count"
+        gen_count(fc, s)
+    else if what is "define"
+        if not main of fc
+            not_yet(at of s, "a function made inside a function")
+        end
+        movi64(a, rax, bits_made)
+        store(a, place_of(fc, front's resolve(scope of fc, name of s)), rax)
+    else if what is "return"
+        if value of s is nothing
+            load_bits(a, xmm0, bits_nothing)
+        else
+            gen_expr(fc, value of s)
+        end
+        jmp_to(a, done of fc)
+    else if what is "stop"
+        jmp_to(a, exit of loops of fc)
+    else if what is "call"
+        gen_call(fc, s, yes)
+    else if what is "fail" # the mistake says the value, as `say` shows it
+        if is_text(value of s)
+            jmp_to(a, fail_stub(fc, at of s, value of value of s))
+        else
+            gen_expr(fc, value of s)
+            movsd_store(a, rip("err_a"), xmm0)
+            stub_start(fc, at of s)
+            load(a, rax, rip("err_a"))
+            call_to(a, "rt_e_shown")
+            jmp_to(a, "rt_e_end")
+        end
+    else
+        not_yet_node(s)
+    end
+end
+
+to gen_loop_body with fc, body, exit
+    set loops of fc to record with exit exit, outer loops of fc
+    gen_block(fc, body)
+    set loops of fc to outer of loops of fc
+end
+
+to store_var with fc, wanted, at
+    set found to front's resolve(scope of fc, wanted)
+    if function_at(fc, found) is not nothing
+        not_yet(at, "changing what a function's name ('" + wanted + "') holds")
+    end
+    movsd_store(a of fc, place_of(fc, found), xmm0)
+end
+
+to gen_say with fc, s
+    set a to a of fc
+    set waiting to 0
+    for each part in parts of s
+        if not is_text(part)
+            gen_expr(fc, part)
+            push_value(fc)
+            add 1 to waiting
+        end
+    end
+    set j to 0
+    set line_size to 0
+    for each part in parts of s
+        if is_text(part)
+            if value of part is not ""
+                point_at_text(a, value of part)
+                call_to(a, "rt_out_text")
+                set line_size to line_size + length of (value of part as bytes)
+            end
+        else
+            load(a, rax, mem(rsp, 8 * (waiting - 1 - j)))
+            call_to(a, "rt_out_value")
+            add 1 to j
+        end
+    end
+    call_to(a, "rt_out_line")
+    if waiting is greater than 0
+        alui(a, "add", rsp, 8 * waiting)
+        set pushed of fc to pushed of fc - waiting
+    end
+    set st to st of fc
+    if line_size is greater than longest_text of st
+        set longest_text of st to line_size
+    end
+end
+
+to is_text with e
+    return kind of e is "value" and type of e is "string"
+end
+
+to gen_add with fc, s
+    set a to a of fc
+    gen_expr(fc, value of s)
+    set found to front's resolve(scope of fc, name of s)
+    if found is nothing
+        jmp_to(a, fail_stub(fc, at of s, front's undefined_message(scope of fc, name of s, no, no)))
+        return nothing
+    end
+    if function_at(fc, found) is not nothing
+        not_yet(at of s, "changing what a function's name ('" + name of s + "') holds")
+    end
+    set place to place_of(fc, found)
+    set unset to fail_stub(fc, at of s, front's no_value(name of s))
+    set wrong to new_label(a)
+    set first_back to new_label(a)
+    set second_back to new_label(a)
+    set odd_before to new_label(a)
+    set odd_after to new_label(a)
+    movapd(a, xmm1, xmm0)
+    movsd_load(a, xmm0, place)
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, odd_before)
+    mark(a, first_back)
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, odd_after)
+    mark(a, second_back)
+    movsd_store(a, place, xmm0)
+    set was to enter_cold(a)
+    mark(a, odd_before) # the variable is NaN: no value yet, or nothing, yes or no, or the number NaN
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, unset)
+    special_jump(a, xmm0, wrong)
+    jmp_to(a, first_back)
+    mark(a, odd_after) # the sum is NaN: is what's added nothing, yes or no?
+    set wrong_after to new_label(a)
+    special_jump(a, xmm1, wrong_after)
+    jmp_to(a, second_back)
+    mark(a, wrong_after)
+    movapd(a, xmm0, xmm2)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm1)
+    movsd_store(a, rip("err_b"), xmm0)
+    two_kinds(fc, at of s, "can't add ", " to ")
+    leave_cold(a, was)
+end
+
+to gen_repeat with fc, s
+    set a to a of fc
+    gen_expr(fc, count of s)
+    set bad to new_label(a)
+    call_to(a, "rt_repeat")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad)
+    set left to hidden_place(fc)
+    movsd_store(a, left, xmm0)
+    set top to new_label(a)
+    set exit to new_label(a)
+    mark(a, top)
+    movsd_load(a, xmm0, left)
+    ucomisd(a, xmm0, rip(number_place(a, double_bytes(0))))
+    jcc(a, cc_be, exit)
+    sse_math(a, "-", xmm0, rip(number_place(a, double_bytes(1))))
+    movsd_store(a, left, xmm0)
+    gen_loop_body(fc, body of s, exit)
+    jmp_to(a, top)
+    mark(a, exit)
+    set hidden of fc to hidden of fc - 1
+    set was to enter_cold(a)
+    mark(a, bad)
+    stub_start(fc, at of s)
+    stub_text(a, "repeat needs a whole number of times, not ")
+    load(a, rax, rip("err_a"))
+    call_to(a, "rt_e_shown")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+end
+
+to gen_count with fc, s
+    set a to a of fc
+    gen_expr(fc, start of s)
+    push_value(fc)
+    gen_expr(fc, limit of s)
+    movapd(a, xmm1, xmm0)
+    pop_value(fc, xmm0)
+    set odd to new_label(a)
+    set back to new_label(a)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_p, odd)
+    mark(a, back)
+    set from_place to hidden_place(fc)
+    set to_place to hidden_place(fc)
+    movsd_store(a, from_place, xmm0)
+    movsd_store(a, to_place, xmm1)
+    set top to new_label(a)
+    set close to new_label(a)
+    set go to new_label(a)
+    set exit to new_label(a)
+    mark(a, top)
+    movsd_load(a, xmm0, from_place)
+    movsd_load(a, xmm1, to_place)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_p, close)
+    jcc(a, cc_be, go)
+    mark(a, close) # past the limit, unless the two are the same to 15 digits
+    call_to(a, "rt_order")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, exit)
+    movsd_load(a, xmm0, from_place)
+    mark(a, go)
+    store_var(fc, name of s, at of s)
+    sse_math(a, "+", xmm0, rip(number_place(a, double_bytes(1))))
+    movsd_store(a, from_place, xmm0)
+    gen_loop_body(fc, body of s, exit)
+    jmp_to(a, top)
+    mark(a, exit)
+    set hidden of fc to hidden of fc - 2
+    set was to enter_cold(a)
+    mark(a, odd)
+    movapd(a, xmm2, xmm0)
+    call_to(a, "rt_any_special")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, back)
+    movsd_store(a, rip("err_a"), xmm2)
+    movsd_store(a, rip("err_b"), xmm1)
+    two_kinds(fc, at of s, "'from' and 'to' need numbers, not ", " and ")
+    leave_cold(a, was)
+end
+
+# ---------- conditions ----------
+
+set compare_names to dictionary where "is" is "is", "less than" is "lt", "greater than" is "gt", "at least" is "ge",
+    "at most" is "le", "divisible by" is "div"
+
+# jumps to `label` when what `e` is counts as `goal` (only no and nothing count as false)
+to gen_cond with fc, e, label, goal
+    set a to a of fc
+    set what to kind of e
+    if what is "compare"
+        gen_compare(fc, e)
+        set jump_true to goal
+        if negate of e
+            set jump_true to not goal
+        end
+        test_rr(a, rax, rax)
+        if jump_true
+            jcc(a, cc_ne, label)
+        else
+            jcc(a, cc_e, label)
+        end
+    else if what is "and"
+        if goal
+            set skip to new_label(a)
+            gen_cond(fc, left of e, skip, no)
+            gen_cond(fc, right of e, label, yes)
+            mark(a, skip)
+        else
+            gen_cond(fc, left of e, label, no)
+            gen_cond(fc, right of e, label, no)
+        end
+    else if what is "or"
+        if goal
+            gen_cond(fc, left of e, label, yes)
+            gen_cond(fc, right of e, label, yes)
+        else
+            set skip to new_label(a)
+            gen_cond(fc, left of e, skip, yes)
+            gen_cond(fc, right of e, label, no)
+            mark(a, skip)
+        end
+    else if what is "not"
+        gen_cond(fc, operand of e, label, not goal)
+    else if what is "value" and type of e is not "string"
+        set truth to not (type of e is "nothing" or type of e is "no")
+        if truth is goal
+            jmp_to(a, label)
+        end
+    else
+        gen_expr(fc, e)
+        truth_test(a)
+        if goal
+            jcc(a, cc_ae, label)
+        else
+            jcc(a, cc_b, label)
+        end
+    end
+end
+
+# flags for xmm0: below means it counts as false
+to truth_test with a
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_nothing)
+    alu(a, "sub", rax, rcx)
+    alui(a, "cmp", rax, 2)
+end
+
+# both sides of a comparison, then rt_cmp_...: rax is 1 if it holds, else 0
+to gen_compare with fc, e
+    set a to a of fc
+    if not (op of e is in compare_names)
+        not_yet(at of e, "'is in'")
+    end
+    set test to item (op of e) of compare_names
+    gen_pair(fc, left of e, right of e)
+    call_to(a, "rt_cmp_" + test)
+    alui(a, "cmp", rax, 1)
+    set wrong to new_label(a)
+    jcc(a, cc_a, wrong)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    if test is "div"
+        set kinds_wrong to new_label(a)
+        load(a, rax, rip("err_why"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, kinds_wrong)
+        jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
+        mark(a, kinds_wrong)
+    end
+    two_kinds(fc, at of e, "can't check if ", " is " + op of e + " ")
+    leave_cold(a, was)
+end
+
+# xmm0 gets the left value and xmm1 the right
+to gen_pair with fc, left, right
+    set a to a of fc
+    gen_expr(fc, left)
+    if kind of right is "value" and type of right is not "string"
+        gen_value(fc, right, xmm1)
+    else
+        push_value(fc)
+        gen_expr(fc, right)
+        movapd(a, xmm1, xmm0)
+        pop_value(fc, xmm0)
+    end
+end
+
+# ---------- values ----------
+# Each leaves what it works out in xmm0.
+
+to gen_expr with fc, e
+    set a to a of fc
+    set what to kind of e
+    if what is "value"
+        gen_value(fc, e, xmm0)
+    else if what is "name"
+        gen_name(fc, e)
+    else if what is "call"
+        gen_call(fc, e, no)
+    else if what is "math"
+        gen_math(fc, e)
+    else if what is "compare"
+        gen_compare(fc, e)
+        if negate of e
+            alui(a, "xor", rax, 1)
+        end
+        movi64(a, rcx, bits_no)
+        alu(a, "add", rcx, rax)
+        movq_xr(a, xmm0, rcx)
+    else if what is "and" or what is "or"
+        set end_at to new_label(a)
+        gen_expr(fc, left of e)
+        truth_test(a)
+        if what is "and"
+            jcc(a, cc_b, end_at)
+        else
+            jcc(a, cc_ae, end_at)
+        end
+        gen_expr(fc, right of e)
+        mark(a, end_at)
+    else if what is "not"
+        gen_expr(fc, operand of e)
+        truth_test(a)
+        setcc(a, cc_b, rax)
+        movzx8(a, rax, rax)
+        movi64(a, rcx, bits_no)
+        alu(a, "add", rcx, rax)
+        movq_xr(a, xmm0, rcx)
+    else if what is "negate"
+        gen_negate(fc, e)
+    else
+        not_yet_node(e)
+    end
+end
+
+to gen_value with fc, e, x
+    set a to a of fc
+    set type to type of e
+    if type is "number"
+        load_bits(a, x, literal_bytes(value of e, at of e))
+    else if type is "yes"
+        load_bits(a, x, bits_yes)
+    else if type is "no"
+        load_bits(a, x, bits_no)
+    else if type is "nothing"
+        load_bits(a, x, bits_nothing)
+    else
+        not_yet(at of e, "text")
+    end
+end
+
+to gen_name with fc, e
+    set a to a of fc
+    set found to front's resolve(scope of fc, name of e)
+    if found is nothing
+        jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, name of e, no, no)))
+        return nothing
+    end
+    if function_at(fc, found) is not nothing
+        not_yet(at of e, "a function used as a value ('" + name of e + "')")
+    end
+    set unset to fail_stub(fc, at of e, front's no_value(name of e))
+    set odd to new_label(a)
+    set back to new_label(a)
+    movsd_load(a, xmm0, place_of(fc, found))
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, odd)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, odd)
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, unset)
+    jmp_to(a, back)
+    leave_cold(a, was)
+end
+
+to gen_math with fc, e
+    set a to a of fc
+    set op to op of e
+    gen_pair(fc, left of e, right of e)
+    set odd to new_label(a)
+    set back to new_label(a)
+    set wrong to new_label(a)
+    set by_zero to new_label(a)
+    if op is "/"
+        movq_rx(a, rax, xmm1)
+        shifti(a, "shl", rax, 1)
+        jcc(a, cc_e, by_zero)
+    end
+    movapd(a, xmm2, xmm0)
+    sse_math(a, op, xmm0, reg_at(xmm1))
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, odd)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, odd) # NaN: from nothing, yes or no, or just NaN
+    call_to(a, "rt_any_special")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, back)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm2)
+    movsd_store(a, rip("err_b"), xmm1)
+    two_kinds(fc, at of e, "can't use '" + op + "' on ", " and ")
+    if op is "/"
+        mark(a, by_zero)
+        movapd(a, xmm2, xmm0)
+        call_to(a, "rt_any_special")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, wrong)
+        jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
+    end
+    leave_cold(a, was)
+end
+
+to gen_negate with fc, e
+    set a to a of fc
+    gen_expr(fc, operand of e)
+    set odd to new_label(a)
+    set back to new_label(a)
+    set wrong to new_label(a)
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, odd)
+    mark(a, back)
+    movq_rx(a, rax, xmm0)
+    bit_op(a, "btc", rax, 63)
+    movq_xr(a, xmm0, rax)
+    set was to enter_cold(a)
+    mark(a, odd)
+    special_jump(a, xmm0, wrong)
+    jmp_to(a, back)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm0)
+    stub_start(fc, at of e)
+    stub_text(a, "'-' needs a number, not ")
+    stub_kind(a, "err_a")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+end
+
+to plural_of with n, word
+    if n is 1
+        return "1 " + word
+    end
+    return "" + n + " " + word + "s"
+end
+
+# A call: the function must have been made by now, then its inputs are worked out and pushed in order,
+# their number and kinds checked, and the calls in progress counted. rax carries the call's number, which
+# the function keeps in its frame for the trail a mistake shows.
+to gen_call with fc, e, statement
+    set a to a of fc
+    set callee to name of e
+    set found to front's resolve(scope of fc, callee)
+    if found is nothing
+        jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, callee, yes, statement)))
+        return nothing
+    end
+    set f to function_at(fc, found)
+    if f is nothing
+        not_yet(at of e, "calling '" + callee + "', which isn't a function made with 'to'")
+    end
+    set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
+    movi64(a, rcx, bits_unset)
+    alu_load(a, "cmp", rcx, place_of(fc, found))
+    jcc(a, cc_e, made_yet)
+    for each arg in args of e
+        gen_expr(fc, arg)
+        push_value(fc)
+    end
+    set n to length of args of e
+    set wanted to length of params of f
+    if n is not wanted
+        jmp_to(a, fail_stub(fc, at of e, "'" + callee + "' needs " + plural_of(wanted, "input") + " but got " + n))
+    else
+        for each i from 1 to n
+            set k to item i of kinds of f
+            if k is not -1
+                check_kind(fc, e, f, i, k, n)
+            end
+        end
+    end
+    set deep to fail_stub(fc, at of e, "too much recursion: a function kept calling itself")
+    alui(a, "cmp", r15, deepest)
+    jcc(a, cc_ae, deep)
+    inc_r(a, r15)
+    movi(a, rax, call_site(fc, f, at of e))
+    call_to(a, label of f)
+    dec_r(a, r15)
+    if n is greater than 0
+        alui(a, "add", rsp, 8 * n)
+        set pushed of fc to pushed of fc - n
+    end
+end
+
+to check_kind with fc, e, f, i, k, n
+    set a to a of fc
+    set wrong to new_label(a)
+    set fine to new_label(a)
+    load(a, rax, mem(rsp, 8 * (n - i)))
+    if k is 0
+        mov_rr(a, rdx, rax)
+        movi64(a, rcx, bits_nothing)
+        alu(a, "sub", rdx, rcx)
+        alui(a, "cmp", rdx, 3)
+        jcc(a, cc_b, wrong)
+    else if k is 2
+        movi64(a, rcx, bits_no)
+        alu(a, "cmp", rax, rcx)
+        jcc(a, cc_e, fine)
+        inc_r(a, rcx)
+        alu(a, "cmp", rax, rcx)
+        jcc(a, cc_ne, wrong)
+    else
+        jmp_to(a, wrong)
+    end
+    mark(a, fine)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    store(a, rip("err_a"), rax)
+    stub_start(fc, at of e)
+    stub_text(a, "'" + name of e + "' needs " + item i of params of f + " to be " + item (k + 1) of kind_names + ", not ")
+    stub_kind(a, "err_a")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+end
+
+# a number for this call, which a mistake's trail turns into "in 'f', called from line 3"; calls from the same
+# place to the same function share a key, so a run of them shows as one line
+to call_site with fc, f, at
+    set st to st of fc
+    set key_text to name of f + "|" + line of at + ":" + col of at + ":" + file of at
+    set known to trail_keys of st
+    if not (key_text is in known)
+        set item key_text of known to length of keys of known
+    end
+    set from to ""
+    if file of at is not ""
+        set from to file of at + ", "
+    end
+    set calls to calls of st
+    add record with trail_key item key_text of known, trail_text "  in '" + name of f + "', called from " + from + "line " + line of at to calls
+    return length of calls - 1
+end
+
+# ---------- the files the system runs ----------
+
+# every label's place, now that each part of the file has its address: `bases` gives each part's
+to place_labels with a, bases
+    set hot_size to length of hot of a
+    set text to empty list
+    put_all(text, hot of a)
+    put_all(text, cold of a)
+    set table to labels of a
+    for each fix in fixups of a
+        if not (label of fix is in table)
+            fail with "machine.moth has no label called " + label of fix
+        end
+        set target to item (label of fix) of table
+        if section of target is "cold"
+            set address to item "hot" of bases + hot_size + at of target
+        else
+            set address to item (section of target) of bases + at of target
+        end
+        set from to at of fix
+        set finish to finish of fix
+        if buffer of fix is "cold"
+            set from to from + hot_size
+            set finish to finish + hot_size
+        end
+        patch32(text, from, address + addend of fix - (item "hot" of bases + finish))
+    end
+    return text
+end
+
+to label_offset with a, name
+    set target to item name of labels of a
+    if section of target is "cold"
+        return length of hot of a + at of target
+    end
+    return at of target
+end
+
+to windows_file with a
+    set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess"
+    set text_size to length of hot of a + length of cold of a
+    set text_rva to 4096
+    set rdata_rva to align_up(text_rva + text_size, 4096)
+    set data_rva to align_up(rdata_rva + length of rodata of a, 4096)
+    # kernel32.dll's functions, at the end of the data: what to look up, and where the loader puts each one
+    set dat to data of a
+    pad_to(dat, 8)
+    set descriptors to length of dat
+    set lookups to descriptors + 40
+    set slots to lookups + 8 * (length of names + 1)
+    set hints to slots + 8 * (length of names + 1)
+    set hint_at to empty list
+    set spot to hints
+    for each fn_name in names
+        add spot to hint_at
+        set spot to align_up(spot + 2 + length of fn_name + 1, 2)
+    end
+    set dll_at to spot
+    put32(dat, data_rva + lookups)
+    put32(dat, 0)
+    put32(dat, 0)
+    put32(dat, data_rva + dll_at)
+    put32(dat, data_rva + slots)
+    repeat 20 times
+        add 0 to dat
+    end
+    repeat 2 times
+        for each spot_at in hint_at
+            put64(dat, data_rva + spot_at)
+        end
+        put64(dat, 0)
+    end
+    set table to labels of a
+    set k to 0
+    for each fn_name in names
+        set item ("imp_" + fn_name) of table to record with section "data", at slots + 8 * k
+        add 1 to k
+        put16(dat, 0)
+        put_all(dat, fn_name as bytes)
+        add 0 to dat
+        pad_to(dat, 2)
+    end
+    put_all(dat, "KERNEL32.dll" as bytes)
+    add 0 to dat
+    pad_to(dat, 16)
+    set bss_rva to data_rva + length of dat
+    set data_virtual to length of dat + bss of a
+    set image_size to align_up(data_rva + data_virtual, 4096)
+    set bases to dictionary where "hot" is text_rva, "rodata" is rdata_rva, "data" is data_rva, "bss" is bss_rva
+    set text to place_labels(a, bases)
+    set text_raw to align_up(text_size, 512)
+    set rdata_raw to align_up(length of rodata of a, 512)
+    set data_raw to align_up(length of dat, 512)
+    set out to empty list
+    # the MS-DOS header: just "MZ" and where the PE header is
+    put16(out, 0x5A4D)
+    repeat 58 times
+        add 0 to out
+    end
+    put32(out, 64)
+    put32(out, 0x4550) # "PE\0\0"
+    put16(out, 0x8664) # x86-64
+    put16(out, 3) # sections
+    put32(out, 0)
+    put32(out, 0)
+    put32(out, 0)
+    put16(out, 240) # the optional header's size
+    put16(out, 0x23) # an executable, with no relocations, that can use addresses past 2 GB
+    put16(out, 0x20B) # PE32+
+    put16(out, 14)
+    put32(out, text_raw)
+    put32(out, rdata_raw + data_raw)
+    put32(out, 0)
+    put32(out, text_rva + label_offset(a, "start"))
+    put32(out, text_rva)
+    put64(out, 0x140000000) # where it is loaded
+    put32(out, 4096)
+    put32(out, 512)
+    put16(out, 6) # Windows Vista or later
+    put16(out, 0)
+    put32(out, 0)
+    put16(out, 6)
+    put16(out, 0)
+    put32(out, 0)
+    put32(out, image_size)
+    put32(out, 1024) # the headers
+    put32(out, 0)
+    put16(out, 3) # a console program
+    put16(out, 0x8100) # NX and terminal-server aware
+    put64(out, stack_size)
+    put64(out, 65536)
+    put64(out, 1048576)
+    put64(out, 4096)
+    put32(out, 0)
+    put32(out, 16)
+    for each n from 0 to 15
+        if n is 1 # the imports
+            put32(out, data_rva + descriptors)
+            put32(out, 40)
+        else if n is 12 # the import address table
+            put32(out, data_rva + slots)
+            put32(out, 8 * (length of names + 1))
+        else
+            put32(out, 0)
+            put32(out, 0)
+        end
+    end
+    section_header(out, ".text", text_size, text_rva, text_raw, 1024, 0x60000020)
+    section_header(out, ".rdata", length of rodata of a, rdata_rva, rdata_raw, 1024 + text_raw, 0x40000040)
+    section_header(out, ".data", data_virtual, data_rva, data_raw, 1024 + text_raw + rdata_raw, 0xC0000040)
+    pad_to_size(out, 1024)
+    put_all(out, text)
+    pad_to_size(out, 1024 + text_raw)
+    put_all(out, rodata of a)
+    pad_to_size(out, 1024 + text_raw + rdata_raw)
+    put_all(out, dat)
+    pad_to_size(out, 1024 + text_raw + rdata_raw + data_raw)
+    return out
+end
+
+to section_header with out, title, virtual, rva, raw_size, raw_at, flags
+    set name_bytes to title as bytes
+    put_all(out, name_bytes)
+    repeat 8 - length of name_bytes times
+        add 0 to out
+    end
+    put32(out, virtual)
+    put32(out, rva)
+    put32(out, raw_size)
+    put32(out, raw_at)
+    put32(out, 0)
+    put32(out, 0)
+    put16(out, 0)
+    put16(out, 0)
+    put32(out, flags)
+end
+
+to pad_to_size with out, size
+    repeat while length of out is less than size
+        add 0 to out
+    end
+end
+
+to linux_file with a
+    set base to 4194304 # 0x400000
+    set text_size to length of hot of a + length of cold of a
+    set text_at to 256
+    set rodata_at to align_up(text_at + text_size, 16)
+    set first_end to rodata_at + length of rodata of a
+    set data_at to align_up(first_end, 4096)
+    set dat to data of a
+    pad_to(dat, 16)
+    set bss_at to data_at + length of dat
+    set bases to dictionary where "hot" is base + text_at, "rodata" is base + rodata_at, "data" is base + data_at, "bss" is base + bss_at
+    set text to place_labels(a, bases)
+    set out to empty list
+    put_all(out, list of 0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0) # ELF, 64-bit, little-endian
+    repeat 8 times
+        add 0 to out
+    end
+    put16(out, 2) # an executable
+    put16(out, 62) # x86-64
+    put32(out, 1)
+    put64(out, base + text_at + label_offset(a, "start"))
+    put64(out, 64) # the program headers
+    put64(out, 0)
+    put32(out, 0)
+    put16(out, 64)
+    put16(out, 56)
+    put16(out, 3)
+    put16(out, 64)
+    put16(out, 0)
+    put16(out, 0)
+    program_header(out, 1, 5, 0, base, first_end, first_end) # the code and read-only data: read and run
+    program_header(out, 1, 6, data_at, base + data_at, length of dat, length of dat + bss of a) # the data: read and write
+    program_header(out, 0x6474E551, 6, 0, 0, 0, 0) # a stack no code runs from
+    pad_to_size(out, text_at)
+    put_all(out, text)
+    pad_to_size(out, rodata_at)
+    put_all(out, rodata of a)
+    pad_to_size(out, data_at)
+    put_all(out, dat)
+    return out
+end
+
+to program_header with out, type, flags, offset, address, file_size, memory_size
+    put32(out, type)
+    put32(out, flags)
+    put64(out, offset)
+    put64(out, address)
+    put64(out, address)
+    put64(out, file_size)
+    put64(out, memory_size)
+    put64(out, 4096)
+end

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
-import { readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { addAllow, permissions, guardedDisk, within } from "./disk.js";
-import { run, test, format, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, test, format, compile, compileToJs, compileToWasmBytes, mothCompiler, machineCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -28,6 +28,10 @@ const USAGE = `usage:
   moth build --web <file.moth>
                               make it into <file>.html: one web page, with nothing else needed, that
                               runs it in any browser; an app there gets keys, clicks and its timers
+  moth build --exe <file.moth> [--target windows|linux]
+                              compile it to machine code with machine.moth, Moth's own compiler, and
+                              nothing else: <file>.exe for Windows, or <file> for Linux; so far it
+                              takes numbers, yes, no and nothing, variables, say, if, loops and functions
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
   moth js <file.moth>         show the JavaScript the JIT makes
   moth wasm <file.moth>       show the WebAssembly module the third engine makes
@@ -133,6 +137,19 @@ function report(err, source, file) {
   const where = err.file ?? file; // a mistake in a file the program uses is shown in that file
   console.error(`${where ? `${where}:${err.line}:${err.col}: ${err.reason}` : err.message}\n${excerpt(err.file ? sources.get(err.file) ?? "" : source, err)}`);
   if (err.trail.length) console.error(describeTrail(err.trail)); // the calls that led there
+}
+
+// The program as machine code, made by machine.moth, Moth's machine-code back end written in Moth: a file of
+// its own, which runs with nothing else installed.
+function buildExe(file, source, target) {
+  compile(source, reading(file)); // reads the files it uses, and stops at a mistake in them as run would
+  const files = Object.fromEntries([...sources].filter(([, text]) => text !== undefined));
+  const here = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
+  const bytes = machineCompiler(here("machine.moth"), here("compiler.moth"))(source, { files, target, name: basename(file) });
+  const out = file.replace(/\.moth$/i, "") + (target === "windows" ? ".exe" : "");
+  writeFileSync(out, bytes);
+  if (target === "linux") chmodSync(out, 0o755);
+  console.log(`compiled ${file} to machine code for ${target === "windows" ? "Windows" : "Linux"} -> ${out} (${bytes.length.toLocaleString("en")} bytes)`);
 }
 
 // The program compiled to bytecode, as JavaScript. A token is only kept for its position, so the compiled
@@ -509,14 +526,17 @@ function main([command, file, ...extra]) {
     return tests(rest, engine);
   }
   const web = command === "build" && file === "--web";
-  if (web) file = extra.shift();
+  const exe = command === "build" && file === "--exe";
+  if (web || exe) file = extra.shift();
+  let target = process.platform === "win32" ? "windows" : "linux";
+  if (exe && extra[0] === "--target" && ["windows", "linux"].includes(extra[1])) [target, extra] = [extra[1], extra.slice(2)];
   let engine = "jit";
   while (command === "run" && extra.length) {
     if (extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
     else if (addAllow(allowed, extra[0])) extra = extra.slice(1);
     else break;
   }
-  if (command === "build" && !web) extra = extra.filter((a) => !addAllow(allowed, a));
+  if (command === "build" && !web && !exe) extra = extra.filter((a) => !addAllow(allowed, a));
   const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
@@ -544,6 +564,7 @@ function main([command, file, ...extra]) {
       }
     }
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
+    else if (exe) buildExe(file, source, target);
     else if (command === "build") (web ? buildWeb : build)(file, source, allowed);
     else if (command === "js") console.log(compileToJs(source, reading(file)).source);
     else if (command === "wasm") {
