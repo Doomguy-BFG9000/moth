@@ -646,7 +646,10 @@ to parse with tokens, reading
         set then to block(t)
         set otherwise to empty list
         if word("else")
-            set else_if to word("if")
+            set else_if to no
+            if not nl of peek() # an `if` on the next line starts a new if inside the else
+                set else_if to word("if")
+            end
             if else_if
                 set nested to list of if_rest(else_if)
                 return record with kind "if", cond cond, then then, otherwise nested, at t

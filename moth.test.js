@@ -135,6 +135,10 @@ const PROGRAMS = [
   // expect: nothing happens when it is so; otherwise it says what each side was
   ["expect 1 + 1 is 2\nexpect \"a\" is not \"b\"\nexpect 3 is in list of 1, 2, 3\nexpect 2 is at most 2\nexpect yes\nexpect 1\nsay \"ok\"", "ok"],
   ["try\n    expect 1 is 2\nif it fails with why\n    say why\nend\nto check with n\n    expect n is greater than 0\n    return n\nend\nsay check(5)", "expected 1 to be 2\n5"],
+  // an if on the line after an else is a new if inside the else, not an else if
+  ["if no\n    say 1\nelse\n    if yes\n        say 2\n    end\nend\nsay 3", "2\n3"],
+  ["if no\n    say 1\nelse if yes\n    say 2\nelse\n    if no\n        say 3\n    else\n        say 4\n    end\nend", "2"],
+  ["set x to 5\nif x is 1\n    say \"one\"\nelse\n    if x is 5\n        say \"five\"\n    else if x is 6\n        say \"six\"\n    end\n    say \"done\"\nend", "five\ndone"],
 ];
 
 test("programs print what they should, on all three engines", () => {

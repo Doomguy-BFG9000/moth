@@ -306,7 +306,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     const then = block(t);
     let otherwise = [];
     if (word("else")) {
-      const elseIf = word("if");
+      const elseIf = !peek().nl && word("if"); // an `if` on the next line starts a new if inside the else
       if (elseIf) return { kind: "if", cond, then, otherwise: [ifRest(elseIf)], at: t };
       otherwise = block(t);
     }
