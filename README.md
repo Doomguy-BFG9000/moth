@@ -492,6 +492,7 @@ moth run hello.moth                run it, saving any drawing as hello.svg
 moth run hello.moth --engine wasm  the same, on WebAssembly (or vm)
 moth run tool.moth a b c           run it with arguments; it asks before it reads or writes a file here, or goes online
 moth run tool.moth --allow-read    let it read files without asking (also --allow-write, --allow-net, --allow-all)
+moth run tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
 moth test                          run every test_ function in every .test.moth file here
 moth fmt hello.moth                tidy it (--check only says whether it's tidy)
 moth check hello.moth              find mistakes without running it
@@ -503,11 +504,17 @@ moth wasm hello.moth               show the WebAssembly module, as text
 moth bootstrap                     compile Moth's compiler with itself, three times over
 ```
 
-A program run with `moth run` asks before it reads a file, writes one, or goes
-online, the way Deno does: at a terminal you're asked, once for each file or
-site (or `a` for all of them); anywhere else, such as in a script, the answer is
-no unless moth was started with `--allow-read`, `--allow-write`, `--allow-net`
-or `--allow-all`. A refusal is a mistake the program can catch with `try`:
+A program run with `moth run` or `moth test`, or made by `moth build`, asks
+before it reads a file, writes one, or goes online, the way Deno does: at a
+terminal you're asked, once for each file or site (or `a` for all of them);
+anywhere else, such as in a script, the answer is no unless moth was started
+with `--allow-read`, `--allow-write`, `--allow-net` or `--allow-all` (for `moth
+build`, after the file: they're built into the program). The first three can
+name what they allow: `--allow-read=data,notes.txt` lets it read those files and
+everything in those folders, wherever their links lead; `--allow-net=example.com`
+that site. A site that sends the program on to another address is asked about
+again, there. `use` only reads files in the program's own folder, or folders
+inside it. A refusal is a mistake the program can catch with `try`:
 
 ```text
 $ moth run copy.moth
@@ -666,6 +673,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
 | [`cli.js`](cli.js) | The `moth` command and its shell |
+| [`disk.js`](disk.js) | The files and sites a program on the command line can reach, and asking before it does |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
 </details>
@@ -739,7 +747,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   run` only sets it up, since a terminal has no clicks. In the playground, an
   app can't `ask` once it's running.
 - `use` without `as` puts a file's names in with the program's, where they can
-  collide; `use ... as` keeps them apart.
+  collide; `use ... as` keeps them apart. It only reads files in the program's
+  folder, or folders inside it: not `../lib.moth`, and not through a link out.
 - The handwriting reader learned from shapes, not people, so unusual ways of
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,

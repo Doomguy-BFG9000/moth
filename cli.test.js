@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -145,7 +145,7 @@ test("moth run passes on arguments, and the program reads and writes files where
     assert.equal(result.stdout, `wrote ${out}\n`, engine);
     assert.equal(readFileSync(join(dir, out), "utf8"), "HELLO", engine);
   }
-  assert.equal(moth(["build", file]).status, 0);
+  assert.equal(moth(["build", file, "--allow-read", "--allow-write"]).status, 0);
   const built = inDir([file.replace(/\.moth$/, ".mjs"), "in.txt", "d.txt"]);
   assert.equal(built.stdout, "wrote d.txt\n");
   assert.equal(readFileSync(join(dir, "d.txt"), "utf8"), "HELLO");
@@ -154,10 +154,13 @@ test("moth run passes on arguments, and the program reads and writes files where
   assert.match(missing.stderr, /shout\.moth:1:13: there is no file called 'nowhere\.txt'/);
 });
 
-// a site on this computer, for going online: it serves /sales.csv, and nothing else
+// a site on this computer, for going online: it serves /sales.csv, sends /old on to it, and sends /away on
+// to it at another name for this computer (localhost)
 async function site(t) {
   const script = [
     "const server = require('node:http').createServer((request, reply) => {",
+    "  if (request.url === '/old') return reply.writeHead(302, { location: '/sales.csv' }).end();",
+    "  if (request.url === '/away') return reply.writeHead(302, { location: `http://localhost:${server.address().port}/sales.csv` }).end();",
     "  if (request.url !== '/sales.csv') return reply.writeHead(404).end('no');",
     "  reply.writeHead(200, { 'content-type': 'text/csv' }).end('Name,Price\\nTea,2.5\\nCake,4\\n');",
     "});",
@@ -195,6 +198,93 @@ test("moth run asks before a program reads or writes a file or goes online, and 
     assert.equal(all.stdout, `copied\n6.5\ncan't read '${url}/missing': the site answered 404\n`, all.stderr);
   }
   assert.equal(readFileSync(join(dir, "out.txt"), "utf8"), "HELLO");
+});
+
+test("--allow-read, --allow-write and --allow-net can name the files, folders and sites they allow", async (t) => {
+  const url = await site(t);
+  const file = tempFile(t, "lists.moth", [
+    'say read "data/in.txt"',
+    'write "x" to "out/a.txt"',
+    `say length of read table "${url}/sales.csv"`,
+    `say length of read table "${url}/old"`, // sent on to /sales.csv, at the same site
+    'for each name in list of "notes.txt", "data/../notes.txt", "out/../b.txt", "' + url + '/away"',
+    "    try",
+    '        if name is "out/../b.txt"',
+    '            write "y" to name',
+    "        else",
+    "            say read name",
+    "        end",
+    "    if it fails with why",
+    "        say why",
+    "    end",
+    "end",
+  ].join("\n"));
+  const dir = dirname(file);
+  mkdirSync(join(dir, "data"));
+  mkdirSync(join(dir, "out"));
+  writeFileSync(join(dir, "data", "in.txt"), "hello");
+  writeFileSync(join(dir, "notes.txt"), "secret");
+  const ran = spawnSync(process.execPath, [CLI, "run", file, "--allow-read=data", "--allow-write=out", "--allow-net=127.0.0.1"], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(ran.stdout, [
+    "hello",
+    "2",
+    "2",
+    "can't read 'notes.txt': this program isn't allowed to read files (start it with --allow-read)",
+    "can't read 'data/../notes.txt': this program isn't allowed to read files (start it with --allow-read)",
+    "can't write 'out/../b.txt': this program isn't allowed to write files (start it with --allow-write)",
+    `can't read '${url}/away': it moved to '${url.replace("127.0.0.1", "localhost")}/sales.csv', and this program isn't allowed to go online (start it with --allow-net)`,
+    "",
+  ].join("\n"), ran.stderr);
+  assert.equal(readFileSync(join(dir, "out", "a.txt"), "utf8"), "x");
+});
+
+test("use only reads files in the program's folder, or folders inside it, and not through a link out of it", (t) => {
+  const top = dirname(tempFile(t, "secret.moth", "password = hunter2"));
+  const dir = join(top, "app");
+  mkdirSync(dir);
+  const file = join(dir, "main.moth");
+  writeFileSync(file, 'use "../secret.moth"\nsay "never"');
+  const outside = moth(["run", file]);
+  assert.equal(outside.status, 1);
+  assert.ok(outside.stderr.includes("main.moth:1:5: '../secret.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"), outside.stderr);
+  assert.doesNotMatch(outside.stderr, /hunter2/);
+  mkdirSync(join(dir, "lib"));
+  try {
+    symlinkSync("..", join(dir, "lib", "up"), "dir");
+  } catch {
+    return; // this computer won't make links (Windows, without developer mode)
+  }
+  writeFileSync(file, 'use "lib/up/secret.moth"\nsay "never"');
+  const linked = moth(["run", file]);
+  assert.match(linked.stderr, /there is no file called 'lib\/up\/secret\.moth'/);
+  assert.doesNotMatch(linked.stderr, /hunter2/);
+});
+
+test("moth test asks before the tests read, write or go online, as moth run does", (t) => {
+  const file = tempFile(t, "files.test.moth", 'to test_reading\n    expect read "in.txt" is "hello"\nend');
+  const dir = dirname(file);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  const denied = spawnSync(process.execPath, [CLI, "test", file], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(denied.status, 1);
+  assert.match(denied.stdout, /can't read 'in\.txt': this program isn't allowed to read files \(start it with --allow-read\)/);
+  const allowed = spawnSync(process.execPath, [CLI, "test", "--allow-read", file], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(allowed.status, 0, allowed.stdout);
+  assert.match(allowed.stdout, /1 passed/);
+});
+
+test("a program made by moth build asks too, allowing only what it was built with", (t) => {
+  const file = tempFile(t, "peek.moth", 'say read "in.txt"\nwrite "x" to "out.txt"');
+  const dir = dirname(file);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  const built = file.replace(/\.moth$/, ".mjs");
+  assert.equal(moth(["build", file]).status, 0);
+  const none = spawnSync(process.execPath, [built], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /can't read 'in\.txt': this program isn't allowed to read files \(start it with --allow-read\)/);
+  assert.equal(moth(["build", file, "--allow-read"]).status, 0);
+  const some = spawnSync(process.execPath, [built], { cwd: dir, encoding: "utf8", input: "" });
+  assert.equal(some.stdout, "hello\n");
+  assert.match(some.stderr, /can't write 'out\.txt': this program isn't allowed to write files/);
 });
 
 // ---------- moth test ----------

@@ -244,6 +244,38 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest"
+# whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
+# going up out of a folder ("../x")
+to outside_folder with wanted
+    set name_start to ""
+    set name_second to ""
+    set name_part to ""
+    set goes_up to no
+    set name_count to 0
+    for each c in wanted
+        add 1 to name_count
+        if name_count is 1
+            set name_start to c
+        else if name_count is 2
+            set name_second to c
+        end
+        if c is "/" or c is "\\"
+            if name_part is ".."
+                set goes_up to yes
+            end
+            set name_part to ""
+        else
+            add c to name_part
+        end
+    end
+    if name_part is ".."
+        set goes_up to yes
+    end
+    set from_top to name_start is "/" or name_start is "\\"
+    set drive to name_second is ":" and name_start is not "" and position of name_start in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" is greater than 0
+    return goes_up or from_top or drive
+end
+
 # `total of prices`: these words and `of` work out something from a list
 set aggregates to list of "total", "average", "largest", "smallest"
 # the words of the units an amount can have (`5 km`), each way vm.js's UNITS writes them
@@ -390,6 +422,9 @@ to parse with tokens, reading
     # set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's ").
     to use_file with name_token, alias
         set wanted to value of name_token
+        if outside_folder(wanted)
+            fail with problem(name_token, "'" + wanted + "' isn't in the program's folder: 'use' only reads files there, or in folders inside it")
+        end
         set within to within of reading
         set key to within + wanted
         if alias is not nothing

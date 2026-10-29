@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
 import { readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { addAllow, permissions, guardedDisk, within } from "./disk.js";
 import { run, test, format, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
 
 const USAGE = `usage:
@@ -13,14 +13,18 @@ const USAGE = `usage:
                               the file is the program's arguments (put --engine wasm or --engine vm
                               first to pick the engine; the JIT is the default). It asks before the
                               program reads or writes a file or goes online; --allow-read,
-                              --allow-write, --allow-net or --allow-all, first, let it without asking
+                              --allow-write, --allow-net or --allow-all, first, let it without asking,
+                              and --allow-read=data,notes.txt, --allow-write=out or
+                              --allow-net=example.com only those files, folders or sites
   moth test [files...]        run the tests: each function named test_..., on its own; with no file,
                               every file ending in .test.moth here and in the folders inside
-                              (--engine wasm or --engine vm picks the engine)
+                              (--engine wasm or --engine vm picks the engine); it asks as run does,
+                              and takes the same --allow flags
   moth fmt <files...>         tidy them: indents, spaces and blank lines, the one way Moth writes them
                               (--check only says which aren't tidy, and fails if any aren't)
   moth check <file.moth>      find mistakes without running it
-  moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
+  moth build <file.moth>      compile it to <file>.mjs, which runs with plain node and asks as run
+                              does; --allow flags after the file are built into it
   moth build --web <file.moth>
                               make it into <file>.html: one web page, with nothing else needed, that
                               runs it in any browser; an app there gets keys, clicks and its timers
@@ -73,7 +77,9 @@ const sources = new Map();
 const besides = (program) => (name) => {
   if (!sources.has(name)) {
     try {
-      sources.set(name, readFileSync(join(dirname(program), name), "utf8").replace(/^\uFEFF/, ""));
+      const file = join(dirname(program), name);
+      if (!within(dirname(program), file)) throw new Error("outside the program's folder"); // a link out of it
+      sources.set(name, readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
     } catch {
       sources.set(name, undefined);
     }
@@ -82,67 +88,6 @@ const besides = (program) => (name) => {
 };
 const reading = (file) => ({ files: besides(file), file: basename(file) });
 
-// What `read` and `write` use: the files in the folder moth runs in. A built program has this function too.
-function readDisk(name, asBytes) {
-  try {
-    const data = readFileSync(name);
-    return asBytes ? new Uint8Array(data) : data.toString("utf8"); // a copy: a Buffer's slice() wouldn't copy
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  }
-}
-// ---------- permissions: what a program may do, as Deno has them ----------
-// `moth run` asks before a program reads a file, writes one, or goes online (`read "https://..."`). At a
-// terminal the person running it is asked, once for each file or site, or for all of them with 'a'; anywhere
-// else the answer is no, unless moth was started with --allow-read, --allow-write, --allow-net or --allow-all.
-const PERMISSIONS = { read: ["read", "read files", "--allow-read"], write: ["write", "write files", "--allow-write"], net: ["go online to", "go online", "--allow-net"] };
-const ALLOW_FLAGS = { "--allow-read": ["read"], "--allow-write": ["write"], "--allow-net": ["net"], "--allow-all": ["read", "write", "net"] };
-function permissions(allowed) {
-  const asked = new Map();
-  const person = process.stdin.isTTY && process.stderr.isTTY;
-  return (kind, what) => {
-    const key = `${kind} ${what}`;
-    if (!allowed.has(kind) && !asked.has(key) && person) {
-      process.stderr.write(`moth: let this program ${PERMISSIONS[kind][0]} '${what}'? (y = yes, a = yes to all, n = no) `);
-      const answer = (readLine() ?? "").trim().toLowerCase();
-      if (answer === "a" || answer === "all") allowed.add(kind);
-      asked.set(key, ["y", "yes", "a", "all"].includes(answer));
-    }
-    if (!allowed.has(kind) && !asked.get(key)) throw new Error(`this program isn't allowed to ${PERMISSIONS[kind][1]} (start it with ${PERMISSIONS[kind][2]})`);
-  };
-}
-
-// a site's page, as `read` gets a file: fetched by another Node, so this one can wait for it
-function fetchSync(url, asBytes) {
-  const script = [
-    "try {",
-    "  const reply = await fetch(process.argv[1]);",
-    "  if (!reply.ok) throw new Error(`the site answered ${reply.status}`);",
-    "  process.stdout.write(Buffer.from(await reply.arrayBuffer()));",
-    "} catch (err) {",
-    "  process.stderr.write(err.message === 'fetch failed' ? `couldn't reach it (${err.cause?.message ?? 'no answer'})` : err.message);",
-    "  process.exitCode = 3;",
-    "}",
-  ].join("\n");
-  const ran = spawnSync(process.execPath, ["--input-type=module", "-e", script, url], { maxBuffer: 1 << 30 });
-  if (ran.status !== 0) throw new Error(ran.stderr.toString("utf8").trim() || "couldn't reach it");
-  return asBytes ? new Uint8Array(ran.stdout) : ran.stdout.toString("utf8");
-}
-
-// The files where moth runs, and sites, each read or written only once `permit` lets it
-const isSite = (name) => /^https?:\/\//i.test(name);
-const guardedDisk = (permit) => ({
-  read: (name, asBytes) => {
-    permit(isSite(name) ? "net" : "read", name);
-    return isSite(name) ? fetchSync(name, asBytes) : readDisk(name, asBytes);
-  },
-  write: (name, data) => {
-    permit("write", name);
-    writeFileSync(name, data);
-  },
-});
-const disk = guardedDisk(() => {}); // for `moth test`, which runs the tests of one's own code
 
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
@@ -195,25 +140,27 @@ function report(err, source, file) {
 const bytecode = (file, source) => JSON.stringify(compile(source, reading(file)), (key, v) => (key === "at" ? v.map((t) => t && { line: t.line, col: t.col, file: t.file }) : v));
 const usedSources = () => JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)));
 
-function build(file, source) {
+function build(file, source, allowed) {
   const out = file.replace(/\.moth$/i, "") + ".mjs";
   const program = bytecode(file, source);
   const vm = readFileSync(new URL("./vm.js", import.meta.url), "utf8");
+  const files = readFileSync(new URL("./disk.js", import.meta.url), "utf8");
   writeFileSync(out, `#!/usr/bin/env node
 // Compiled by Moth from ${basename(file)}: the program's bytecode plus the Moth virtual machine.
 // Run it with: node ${basename(out)} [arguments...]
 import { readFileSync, readSync, writeFileSync } from "node:fs";
 
 ${vm}
-${readDisk}
+${files}
 let pending = Buffer.alloc(0);
 ${readLine}
 ${askAtTerminal}
 {
   const source = ${JSON.stringify(source)};
   const used = ${usedSources()}; // for a mistake in a file it uses
+  const allowed = new Map(${JSON.stringify([...allowed])}); // what it may do without asking, as it was built
   try {
-    execute(${program}, console.log, Infinity, undefined, askAtTerminal, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2), Math.random);
+    execute(${program}, console.log, Infinity, undefined, askAtTerminal, guardedDisk(permissions(allowed, readLine)), process.argv.slice(2), Math.random);
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
     console.error((err.file ?? ${JSON.stringify(basename(file))}) + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(err.file ? used[err.file] ?? "" : source, err));
@@ -393,7 +340,7 @@ ${script}
 }
 
 function shell() {
-  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")), disk: guardedDisk(permissions(new Set())) }); // `use` reads from the folder it runs in
+  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")), disk: guardedDisk(permissions(new Map(), readLine)) }); // `use` reads from the folder it runs in
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "moth> " });
   const rawMode = (on) => process.stdin.isTTY && process.stdin.setRawMode(on);
   let pending = ""; // the lines of a block that hasn't reached its `end` yet
@@ -449,7 +396,7 @@ function bootstrap() {
 // there, and what it said before. Returns how many passed and failed.
 function testFile(file, source, engine) {
   let failed = 0;
-  const results = test(source, { engine, disk, ...reading(file) });
+  const results = test(source, { engine, disk, ...reading(file) }); // one disk for every test, so each file or site is asked about once
   for (const { name, said, error } of results) {
     const label = name ?? basename(file);
     if (!error) {
@@ -480,6 +427,7 @@ function findTests(dir) {
 }
 
 // `moth test`: the files' tests, then how many passed. Fails if any test, or any file, did.
+let disk; // what `moth test` gives the tests: see main()
 function tests(files, engine) {
   if (!files.length) files = findTests(".");
   if (!files.length) {
@@ -548,8 +496,10 @@ function main([command, file, ...extra]) {
     }
     return tidy(files, [file, ...extra].includes("--check"));
   }
+  const allowed = new Map(); // what `run`, `test` and a built program may do without asking
   if (command === "test") {
-    const rest = [file, ...extra].filter((a) => a !== undefined);
+    const rest = [file, ...extra].filter((a) => a !== undefined && !addAllow(allowed, a));
+    disk = guardedDisk(permissions(allowed, readLine));
     const at = rest.indexOf("--engine");
     const engine = at >= 0 ? rest.splice(at, 2)[1] : "jit";
     if (!["jit", "wasm", "vm"].includes(engine)) {
@@ -561,12 +511,12 @@ function main([command, file, ...extra]) {
   const web = command === "build" && file === "--web";
   if (web) file = extra.shift();
   let engine = "jit";
-  const allowed = new Set(); // what `run` lets the program do without asking
-  while (command === "run") {
+  while (command === "run" && extra.length) {
     if (extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
-    else if (Object.hasOwn(ALLOW_FLAGS, extra[0] ?? "")) for (const kind of ALLOW_FLAGS[extra.shift()]) allowed.add(kind);
+    else if (addAllow(allowed, extra[0])) extra = extra.slice(1);
     else break;
   }
+  if (command === "build" && !web) extra = extra.filter((a) => !addAllow(allowed, a));
   const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
@@ -585,7 +535,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      const app = run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk: guardedDisk(permissions(allowed)), args, random: Math.random, ...reading(file) });
+      const app = run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk: guardedDisk(permissions(allowed, readLine)), args, random: Math.random, ...reading(file) });
       if (app) console.error(`${basename(file)} is an app: it waits for keys, clicks or time, which a terminal can't give it. Open it in the playground, or make a web page of it with: moth build --web ${file}`);
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
@@ -594,7 +544,7 @@ function main([command, file, ...extra]) {
       }
     }
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
-    else if (command === "build") (web ? buildWeb : build)(file, source);
+    else if (command === "build") (web ? buildWeb : build)(file, source, allowed);
     else if (command === "js") console.log(compileToJs(source, reading(file)).source);
     else if (command === "wasm") {
       const { bytes, listing } = compileToWasmBytes(source, reading(file));

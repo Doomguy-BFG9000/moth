@@ -82,6 +82,9 @@ const RESERVED = new Set([
   "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
+// whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
+// going up out of a folder ("../x")
+const outsideFolder = (name) => /^[/\\]|^[A-Za-z]:/.test(name) || name.split(/[/\\]/).includes("..");
 const AGGREGATES = ["total", "average", "largest", "smallest"]; // `total of prices`: these words and `of` work out something from a list
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
   ["join", [null, "with"]], ["position", ["of", "in"]], ["keys", ["of"]]]);
@@ -161,6 +164,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // program can still use the same file for itself.
   function useFile(nameToken, alias) {
     const name = nameToken.value;
+    if (outsideFolder(name)) fail(nameToken, `'${name}' isn't in the program's folder: 'use' only reads files there, or in folders inside it`);
     const within = reading.within ?? "";
     const key = `${within}${name}${alias ? ` as ${alias}` : ""}`;
     if (reading.open.includes(name)) fail(nameToken, `'${name}' is already being read, so it can't be used here: files can't use each other in a circle`);

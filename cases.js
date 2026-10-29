@@ -130,6 +130,12 @@ export const ERRORS = [
   ["to f with l as a list\n    say l\nend\nto g\n    f(\"a\")\nend\ng()", "line 5: 'f' needs l to be a list, not text"],
   ["to f with x as a thing\n    say x\nend", "line 1: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'a'"],
   ["to f with x as\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'say'"],
+  // `use` only reads files in the program's folder, or folders inside it
+  ['use "../secret.moth"', "line 1: '../secret.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
+  ['say 1\nuse "lib/../../x.moth" as x', "line 2: 'lib/../../x.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
+  ['use "/etc/passwd"', "line 1: '/etc/passwd' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
+  ['use "C:/secret.moth"', "line 1: 'C:/secret.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
+  ['use "lib\\\\..\\\\x.moth"', "line 1: 'lib\\..\\x.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
   ["say 5 km + 2 hours", "line 1: can't use '+' on a distance and a time"],
   ["say 5 km + 3", "line 1: can't use '+' on a distance and a number"],
   ["say 5 km * 2 km", "line 1: can't use '*' on a distance and a distance"],

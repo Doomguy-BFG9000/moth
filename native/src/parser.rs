@@ -145,6 +145,14 @@ fn builtin_syntax(w: &str) -> Option<(Option<&'static str>, Option<&'static str>
     })
 }
 const BIT_WORDS: [&str; 3] = ["and", "or", "xor"];
+// whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
+// going up out of a folder ("../x")
+fn outside_folder(name: &str) -> bool {
+    let b = name.as_bytes();
+    name.starts_with(['/', '\\'])
+        || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
+        || name.split(['/', '\\']).any(|p| p == "..")
+}
 // `total of prices`: these words and `of` work out something from a list
 const AGGREGATES: [&str; 4] = ["total", "average", "largest", "smallest"];
 // what an input can say it is, in the order of KINDS in vm.js
@@ -327,6 +335,12 @@ impl<'a, 'f> Parser<'a, 'f> {
     // The statements of a file the program uses, or none if it was read already (see moth.js's useFile)
     fn use_file(&mut self, name_token: &Token, alias: Option<String>) -> R<Vec<Stmt>> {
         let name = name_token.text.clone();
+        if outside_folder(&name) {
+            return self.fail(
+                name_token,
+                format!("'{name}' isn't in the program's folder: 'use' only reads files there, or in folders inside it"),
+            );
+        }
         let within = self.reading.within.clone();
         let key = match &alias {
             Some(a) => format!("{within}{name} as {a}"),

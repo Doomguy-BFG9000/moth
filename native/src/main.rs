@@ -25,9 +25,11 @@ const USAGE: &str = "usage:
                               run a program; if it draws, the drawing goes to <file>.svg; what follows
                               the file is the program's arguments. It asks before the program reads or
                               writes a file or goes online; --allow-read, --allow-write, --allow-net or
-                              --allow-all, first, let it without asking
+                              --allow-all, first, let it without asking, and --allow-read=data,notes.txt,
+                              --allow-write=out or --allow-net=example.com only those files, folders or sites
   moth-native test [files...] run the tests: each function named test_..., on its own; with no file,
-                              every file ending in .test.moth here and in the folders inside
+                              every file ending in .test.moth here and in the folders inside; it asks as
+                              run does, and takes the same --allow flags
   moth-native build <file.moth>
                               compile it to <file>.mothc, bytecode moth-native runs without compiling again
   moth-native bytecode <file.moth>
@@ -77,16 +79,17 @@ struct Terminal {
     drawn: Vec<Drawn>,
     args: Vec<String>,
     random: Box<dyn FnMut() -> f64>,
-    pending: Vec<u8>,          // what's been read of the input but not yet asked for
-    said: Option<Vec<String>>, // for `test`: what it said, kept instead of printed
-    permits: Option<Permits>,  // what the program may do; None for `test`, which may do anything
+    pending: Vec<u8>,                      // what's been read of the input but not yet asked for
+    said: Option<Vec<String>>,             // for `test`: what it said, kept instead of printed
+    permits: Option<Rc<RefCell<Permits>>>, // what the program may do; None lets it do anything
 }
 
-// ---------- permissions: what a program may do, as Deno has them (cli.js's permissions) ----------
-// `moth-native run` asks before a program reads a file, writes one, or goes online (`read "https://..."`).
-// At a terminal the person running it is asked, once for each file or site, or for all of them with 'a';
-// anywhere else the answer is no, unless it was started with --allow-read, --allow-write, --allow-net or
-// --allow-all.
+// ---------- permissions: what a program may do, as Deno has them (disk.js) ----------
+// `moth-native run` and `moth-native test` ask before a program reads a file, writes one, or goes online
+// (`read "https://..."`). At a terminal the person running it is asked, once for each file or site, or for
+// all of them with 'a'; anywhere else the answer is no, unless it was started with --allow-read,
+// --allow-write, --allow-net or --allow-all. The first three can say what they allow: --allow-read=data,notes.txt
+// (those files, and everything in those folders), --allow-net=example.com (that site).
 const PERMISSIONS: [(&str, &str, &str); 3] =
     [("read", "read files", "--allow-read"), ("write", "write files", "--allow-write"), ("go online to", "go online", "--allow-net")];
 const READ: usize = 0;
@@ -96,17 +99,71 @@ const NET: usize = 2;
 #[derive(Default)]
 struct Permits {
     all: [bool; 3],                        // read, write and go online: allowed for everything
+    named: [Vec<String>; 3],               // or only for these files, folders and sites
     asked: HashMap<(usize, String), bool>, // what the person was asked, and said
 }
 
-// `--allow-read` and the rest, before a program's own arguments: what they allow
-fn allow_flag(flag: &str) -> Option<&'static [usize]> {
-    match flag {
-        "--allow-read" => Some(&[READ]),
-        "--allow-write" => Some(&[WRITE]),
-        "--allow-net" => Some(&[NET]),
-        "--allow-all" => Some(&[READ, WRITE, NET]),
-        _ => None,
+impl Permits {
+    // whether this is allowed (READ, WRITE or NET, for this file or site) without asking
+    fn allows(&self, kind: usize, what: &str) -> bool {
+        if self.all[kind] {
+            return true;
+        }
+        let named = &self.named[kind];
+        if kind == NET {
+            return match host_of(what) {
+                Some((host, name)) => named.iter().any(|n| {
+                    let n = n.to_ascii_lowercase();
+                    n == host || n == name
+                }),
+                None => false,
+            };
+        }
+        named.iter().any(|n| within(Path::new(n), Path::new(what)))
+    }
+}
+
+// `--allow-read`, `--allow-write=out`, `--allow-all`...: added to what's allowed; whether it was one of them
+fn add_allow(permits: &mut Permits, flag: &str) -> bool {
+    let Some(rest) = flag.strip_prefix("--allow-") else { return false };
+    let (kind, list) = match rest.split_once('=') {
+        Some((k, l)) => (k, Some(l)),
+        None => (rest, None),
+    };
+    let kinds: &[usize] = match kind {
+        "read" => &[READ],
+        "write" => &[WRITE],
+        "net" => &[NET],
+        "all" if list.is_none() => &[READ, WRITE, NET],
+        _ => return false,
+    };
+    for &k in kinds {
+        match list {
+            None => permits.all[k] = true,
+            Some(l) => permits.named[k].extend(l.split(',').filter(|n| !n.is_empty()).map(str::to_string)),
+        }
+    }
+    true
+}
+
+// Where a file really is, its links followed, so a link can't lead outside what's allowed; for a file that
+// isn't there yet, where its folder really is. None for a link that leads nowhere, or a missing folder.
+fn real_of(path: &Path) -> Option<PathBuf> {
+    if std::fs::symlink_metadata(path).is_ok() {
+        return std::fs::canonicalize(path).ok();
+    }
+    let folder = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    Some(std::fs::canonicalize(folder).ok()?.join(path.file_name()?))
+}
+
+// whether `name` is the file `folder`, or anywhere inside the folder `folder`
+fn within(folder: &Path, name: &Path) -> bool {
+    match (real_of(folder), real_of(name)) {
+        (Some(base), Some(real)) => real.starts_with(base),
+        _ => false,
     }
 }
 
@@ -115,16 +172,59 @@ fn is_site(name: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-// a site's page, as `read` gets a file, by curl
+// A site's host (example.com:8080) and its name without the port, from its address; None if the address is
+// written in any odd way, so a name given to --allow-net can't match it by mistake
+fn host_of(url: &str) -> Option<(String, String)> {
+    let lower = url.to_ascii_lowercase();
+    let rest = lower.strip_prefix("http://").or_else(|| lower.strip_prefix("https://"))?;
+    let host = &rest[..rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len())];
+    let (name, port) = if host.starts_with('[') {
+        let end = host.find(']')?;
+        (&host[..=end], &host[end + 1..])
+    } else {
+        match host.find(':') {
+            Some(i) => (&host[..i], &host[i..]),
+            None => (host, ""),
+        }
+    };
+    let good_name = if let Some(inner) = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
+        !inner.is_empty() && inner.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+    } else {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
+    };
+    let good_port = port.is_empty() || (port.len() > 1 && port[1..].chars().all(|c| c.is_ascii_digit()));
+    if !good_name || !good_port || port.starts_with(|c: char| c != ':') {
+        return None;
+    }
+    Some((host.to_string(), name.to_string()))
+}
+
+// a file or site's name as a question shows it: nothing in it can move the cursor or turn the text around
+// (control characters, zero-width ones, and those that change the text's direction)
+fn shown_name(name: &str) -> String {
+    const HIDDEN: [(u32, u32); 5] = [(0x00, 0x1f), (0x7f, 0x9f), (0x200b, 0x200f), (0x2028, 0x202e), (0x2066, 0x2069)];
+    name.chars().map(|c| if HIDDEN.iter().any(|&(low, high)| (low..=high).contains(&(c as u32))) { '?' } else { c }).collect()
+}
+
+// what a site answered: its page, or another address it sends the program on to
+enum Fetched {
+    Page(Vec<u8>),
+    Moved(String),
+}
+
+// a site's page, as `read` gets a file, by curl, which doesn't follow the site to another address by itself
 #[cfg(not(target_family = "wasm"))]
-fn fetch(url: &str) -> Result<Vec<u8>, String> {
+fn fetch_once(url: &str) -> Result<Fetched, String> {
     let ran = std::process::Command::new("curl")
-        .args(["-sSL", "--max-time", "60", "-w", "\n%{http_code}", url])
+        .args(["-sS", "--max-time", "60", "--proto", "=http,https", "-w", "\n%{http_code} %{redirect_url}", url])
         .output()
         .map_err(|e| format!("couldn't reach it (curl, which goes online for moth-native, didn't run: {e})"))?;
     let mut body = ran.stdout;
     let end = body.iter().rposition(|&b| b == b'\n').unwrap_or(0);
-    let status: u32 = String::from_utf8_lossy(&body[end..]).trim().parse().unwrap_or(0);
+    let tail = String::from_utf8_lossy(&body[end..]).trim().to_string();
+    let (status, moved) = tail.split_once(' ').unwrap_or((tail.as_str(), ""));
+    let status: u32 = status.parse().unwrap_or(0);
+    let moved = moved.to_string();
     body.truncate(end);
     if !ran.status.success() || status == 0 {
         let why = String::from_utf8_lossy(&ran.stderr).trim().trim_start_matches("curl: ").to_string();
@@ -134,13 +234,16 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
         };
         return Err(format!("couldn't reach it ({})", if why.is_empty() { "no answer".into() } else { why }));
     }
-    if status >= 400 {
+    if (300..400).contains(&status) && !moved.is_empty() {
+        return Ok(Fetched::Moved(moved));
+    }
+    if status >= 300 {
         return Err(format!("the site answered {status}"));
     }
-    Ok(body)
+    Ok(Fetched::Page(body))
 }
 #[cfg(target_family = "wasm")]
-fn fetch(_: &str) -> Result<Vec<u8>, String> {
+fn fetch_once(_: &str) -> Result<Fetched, String> {
     Err("couldn't reach it (WebAssembly can't go online)".into())
 }
 
@@ -159,24 +262,52 @@ impl Terminal {
 
     // whether the program may do this (READ, WRITE or NET) to this file or site, asking if there's a person to ask
     fn permit(&mut self, kind: usize, what: &str) -> Result<(), String> {
-        let Some(permits) = &self.permits else { return Ok(()) };
-        let key = (kind, what.to_string());
-        if !permits.all[kind] && !permits.asked.contains_key(&key) && std::io::stdin().is_terminal() && std::io::stderr().is_terminal() {
-            let _ = self.out.flush();
-            eprint!("moth-native: let this program {} '{what}'? (y = yes, a = yes to all, n = no) ", PERMISSIONS[kind].0);
-            let answer = self.read_line().unwrap_or_default().trim().to_lowercase();
-            let permits = self.permits.as_mut().unwrap();
-            if answer == "a" || answer == "all" {
-                permits.all[kind] = true;
-            }
-            permits.asked.insert(key.clone(), ["y", "yes", "a", "all"].contains(&answer.as_str()));
+        let Some(permits) = self.permits.clone() else { return Ok(()) };
+        if permits.borrow().allows(kind, what) {
+            return Ok(());
         }
-        let permits = self.permits.as_ref().unwrap();
-        if permits.all[kind] || permits.asked.get(&key) == Some(&true) {
+        let key = (kind, what.to_string());
+        let asked = permits.borrow().asked.contains_key(&key);
+        if !asked && std::io::stdin().is_terminal() && std::io::stderr().is_terminal() {
+            let _ = self.out.flush();
+            eprint!("moth-native: let this program {} '{}'? (y = yes, a = yes to all, n = no) ", PERMISSIONS[kind].0, shown_name(what));
+            let answer = self.read_line().unwrap_or_default().trim().to_lowercase();
+            let mut p = permits.borrow_mut();
+            if answer == "a" || answer == "all" {
+                p.all[kind] = true;
+            }
+            p.asked.insert(key.clone(), ["y", "yes", "a", "all"].contains(&answer.as_str()));
+        }
+        let p = permits.borrow();
+        if p.allows(kind, what) || p.asked.get(&key) == Some(&true) {
             return Ok(());
         }
         let (_, doing, flag) = PERMISSIONS[kind];
         Err(format!("this program isn't allowed to {doing} (start it with {flag})"))
+    }
+
+    // A site's page: a site that sends the program on to another address is asked about again, there
+    fn fetch(&mut self, url: &str) -> Result<Vec<u8>, String> {
+        let mut url = url.to_string();
+        let mut moves = 0;
+        loop {
+            match fetch_once(&url)? {
+                Fetched::Page(body) => return Ok(body),
+                Fetched::Moved(next) => {
+                    if moves == 10 {
+                        return Err("it moved too many times".into());
+                    }
+                    if !is_site(&next) {
+                        return Err(format!("it moved to '{}', which isn't a site", shown_name(&next)));
+                    }
+                    if let Err(why) = self.permit(NET, &next) {
+                        return Err(format!("it moved to '{}', and {why}", shown_name(&next)));
+                    }
+                    url = next;
+                    moves += 1;
+                }
+            }
+        }
     }
 
     // A line of standard input: from a terminal it waits for Enter, from a pipe it takes the next line. None at the end.
@@ -251,7 +382,7 @@ impl Host for Terminal {
             return Some(Err(why));
         }
         if is_site(name) {
-            return Some(fetch(name).map(|data| Some(as_data(data))));
+            return Some(self.fetch(name).map(|data| Some(as_data(data))));
         }
         Some(match std::fs::read(name) {
             Ok(data) => Ok(Some(if bytes { FileData::Bytes(data) } else { FileData::Text(String::from_utf8_lossy(&data).into_owned()) })),
@@ -284,13 +415,20 @@ struct Sources {
 }
 impl Sources {
     fn beside(program: &str) -> Sources {
-        Sources { dir: Path::new(program).parent().map(Path::to_path_buf).unwrap_or_default(), read: RefCell::new(HashMap::new()) }
+        let dir = Path::new(program).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        Sources { dir: dir.to_path_buf(), read: RefCell::new(HashMap::new()) }
     }
     fn get(&self, name: &str) -> Option<String> {
         self.read
             .borrow_mut()
             .entry(name.to_string())
-            .or_insert_with(|| std::fs::read(self.dir.join(name)).ok().map(|d| without_bom(String::from_utf8_lossy(&d).into_owned())))
+            .or_insert_with(|| {
+                let path = self.dir.join(name);
+                if !within(&self.dir, &path) {
+                    return None; // a link out of the program's folder
+                }
+                std::fs::read(path).ok().map(|d| without_bom(String::from_utf8_lossy(&d).into_owned()))
+            })
             .clone()
     }
 }
@@ -432,14 +570,11 @@ fn run_command(file: &str, args: Vec<String>) -> i32 {
     let mut real = Real::new();
     let mut args = args;
     let mut permits = Permits::default();
-    while let Some(kinds) = args.first().and_then(|a| allow_flag(a)) {
-        for &k in kinds {
-            permits.all[k] = true;
-        }
+    while args.first().is_some_and(|a| add_allow(&mut permits, a)) {
         args.remove(0);
     }
     let mut terminal = Terminal::new(args, Box::new(move || real.number()));
-    terminal.permits = Some(permits);
+    terminal.permits = Some(Rc::new(RefCell::new(permits)));
     let result = if bytecode::is_bytecode(&source) {
         // compiled already: the program's own source, if it's beside it, is only for showing mistakes
         let program = match bytecode::read(&source) {
@@ -641,7 +776,7 @@ fn find_tests(dir: &str, found: &mut Vec<String>) {
 }
 
 // One file's tests, each function at its top level named test_something, in a fresh run of the file
-fn test_file(file: &str, source: &str) -> Result<(usize, usize), MothError> {
+fn test_file(file: &str, source: &str, permits: &Rc<RefCell<Permits>>) -> Result<(usize, usize), MothError> {
     let sources = Sources::beside(file);
     let program = parse_program(source, &|name| sources.get(name), Some(&basename(file)))?;
     let names: Vec<String> = program
@@ -661,6 +796,7 @@ fn test_file(file: &str, source: &str) -> Result<(usize, usize), MothError> {
         let mut seeded = Seeded(1);
         let mut terminal = Terminal::new(vec![], Box::new(move || seeded.number()));
         terminal.said = Some(vec![]);
+        terminal.permits = Some(permits.clone()); // one for every test, so each file or site is asked about once
         let result = run_source(&code, &sources, file, &mut terminal, f64::INFINITY);
         let label = name.clone().unwrap_or_else(|| basename(file));
         match result {
@@ -686,7 +822,9 @@ fn test_file(file: &str, source: &str) -> Result<(usize, usize), MothError> {
 }
 
 fn test_command(files: Vec<String>) -> i32 {
-    let mut files = files;
+    let mut permits = Permits::default();
+    let mut files: Vec<String> = files.into_iter().filter(|a| !add_allow(&mut permits, a)).collect();
+    let permits = Rc::new(RefCell::new(permits));
     if files.is_empty() {
         find_tests(".", &mut files);
     }
@@ -704,7 +842,7 @@ fn test_command(files: Vec<String>) -> i32 {
                 eprintln!("{message}");
                 failed += 1;
             }
-            Ok(source) => match test_file(file, &source) {
+            Ok(source) => match test_file(file, &source, &permits) {
                 Ok((p, f)) => {
                     passed += p;
                     failed += f;

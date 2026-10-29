@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -342,10 +342,13 @@ test("moth-native run prints, fails, asks, reads, writes and draws as moth run d
   assert.equal(rustMissing.stderr.replace("moth-native:", "moth:"), jsMissing.stderr);
 });
 
-// a site on this computer, for going online: it serves /sales.csv, and nothing else
+// a site on this computer, for going online: it serves /sales.csv, sends /old on to it, and sends /away on
+// to it at another name for this computer (localhost)
 async function site(t) {
   const script = [
     "const server = require('node:http').createServer((request, reply) => {",
+    "  if (request.url === '/old') return reply.writeHead(302, { location: '/sales.csv' }).end();",
+    "  if (request.url === '/away') return reply.writeHead(302, { location: `http://localhost:${server.address().port}/sales.csv` }).end();",
     "  if (request.url !== '/sales.csv') return reply.writeHead(404).end('no');",
     "  reply.writeHead(200, { 'content-type': 'text/csv' }).end('Name,Price\\nTea,2.5\\nCake,4\\n');",
     "});",
@@ -376,6 +379,37 @@ test("moth-native run asks before a program reads, writes or goes online, as mot
   const [, rust] = both(["run", "copy.moth", "--allow-all"], { cwd: dir, input: "" });
   assert.match(rust.stdout, /\(record with name "Tea", price 2\.5\)/);
   assert.match(rust.stderr, /the site answered 404/);
+  // what the flags name, sites that send the program on, `use` outside the folder, and `test`
+  mkdirSync(join(dir, "data"));
+  writeFileSync(join(dir, "data", "in.txt"), "inside");
+  writeFileSync(join(dir, "lists.moth"), [
+    `for each name in list of "data/in.txt", "in.txt", "data/../in.txt", "${url}/old", "${url}/away", "${url}/sales.csv"`,
+    "    try",
+    "        say read name",
+    "    if it fails with why",
+    "        say why",
+    "    end",
+    "end",
+    "try",
+    '    write "x" to "data/out.txt"',
+    "if it fails with why",
+    "    say why",
+    "end",
+  ].join("\n"));
+  writeFileSync(join(dir, "evil.moth"), 'use "../in.txt"');
+  writeFileSync(join(dir, "files.test.moth"), 'to test_reading\n    expect read "in.txt" is "hello"\nend');
+  for (const args of [
+    ["run", "lists.moth", "--allow-read=data", "--allow-net=127.0.0.1"],
+    ["run", "lists.moth", "--allow-read=data,in.txt", "--allow-write=data", "--allow-net=localhost"],
+    ["run", "evil.moth"],
+    ["test", "files.test.moth"],
+    ["test", "--allow-read", "files.test.moth"],
+  ]) {
+    const [js, native] = both(args, { cwd: dir, input: "" });
+    assert.equal(native.status, js.status, args.join(" "));
+    assert.equal(native.stdout, js.stdout, args.join(" "));
+    assert.equal(native.stderr.replace("moth-native:", "moth:"), js.stderr, args.join(" "));
+  }
 });
 
 test("moth-native test and moth-native bytecode say what moth test and moth bytecode say", { skip }, (t) => {

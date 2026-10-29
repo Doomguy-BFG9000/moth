@@ -775,3 +775,18 @@ hold them to agreeing.
   wait for it, since `read` gives its answer at once: Node fetches it in a
   second Node and waits for that to finish, the Rust engine runs `curl`, and the
   playground's worker uses a request that waits, which only workers may do.
+- **Closing the gaps.** A look at the first version found five ways round it.
+  `use` read any file without asking, and a mistake in it printed its lines, a
+  secret's included: now every parser refuses a name that starts at the top of
+  a disk or goes up out of a folder, and the command lines refuse a link that
+  leads out of the program's folder. `moth test`, and programs made by `moth
+  build`, didn't ask at all: now they do, sharing one set of answers for every
+  test, and `moth build` builds in the flags it's given (`disk.js`, which holds
+  all of this, is copied into the program it makes). `--allow-write` was
+  everywhere or nowhere: now it can name folders, checked where each file
+  really is, links followed, so `data/../notes.txt` or a link inside `data` that
+  leads out isn't in `data`; `--allow-net` names sites, and an address written in
+  any odd way (`a.com@b.com`, a backslash) matches nothing. And a site could send
+  the program on to any other: neither Node nor `curl` follows a site now; each
+  new address is asked about again, ten at most. The question shows a file's
+  name with anything that moves the cursor or turns text around made `?`.
