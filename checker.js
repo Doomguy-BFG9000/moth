@@ -3,12 +3,19 @@
 // values of the types it worked out, so its message is the exact error that line would stop with.
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
-  callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure } from "./vm.js";
+  callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
 const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0),
-  function: new Closure({ name: "f", params: [] }, null) };
+  function: new Closure({ name: "f", params: [] }, null),
+  // an amount of each measure: 1 m, 1 second, 1 g, 1 litre
+  ...Object.fromEntries(MEASURE_TYPES.map((type, measure) => [type, new Quantity(1, UNITS.findIndex((u) => u[2] === measure && u[3] === 1))])) };
+// the type of what an operation on samples gave: a number, text, or an amount of some measure
+const resultType = (v) => (typeof v === "number" ? "number" : typeof v === "string" ? "text" : isQuantity(v) ? MEASURE_TYPES[measureOf(v)] : null);
+// what an amount of the unit `word` (written out, as `5 km` and `in miles` have it) measures
+const unitType = (word) => MEASURE_TYPES[UNITS[unitNamed(word)][2]];
 // what an input that says what it is (`as a number`) holds, by its number in vm.js's KINDS
 const KIND_TYPES = ["number", "text", "yes/no", "list", "record", "dictionary", "bytes", "function"];
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
@@ -88,17 +95,27 @@ class Checker extends Scope {
           const [a, b] = [left(), right()];
           if (a === undefined || b === undefined) return undefined;
           if (e.op === "+" && (a === "text" || b === "text")) return "text";
-          return a === "number" && b === "number" ? "number" : null;
+          if (!this.known(a, b)) return null;
+          try { // what the same operation on samples gives: 2 km * 3 is a distance, 2 km / 1 km a number
+            return resultType(e.op === "+" ? plus(SAMPLES[a], SAMPLES[b], found) : arithmetic(e.op, SAMPLES[a], SAMPLES[b], found));
+          } catch (error) {
+            if (error instanceof Found) return null; // it fails, which the check says
+            throw error;
+          }
         };
       }
       case "compare":
       case "not":
         return () => "yes/no";
-      case "negate":
+      case "negate": { // a number, or an amount (which keeps its unit); fails on anything else
+        const operand = this.type(e.operand);
+        return () => (MEASURE_TYPES.includes(operand()) ? operand() : operand() === null ? null : operand() === undefined ? undefined : "number");
+      }
       case "length":
       case "random":
         return () => "number";
       case "builtin": {
+        if (e.name === "unit" || e.name === "in") return () => unitType(e.args[1].value); // `5 km`, `trip in miles`
         const { gives } = BUILTINS.find((b) => b.name === e.name);
         return () => gives;
       }
@@ -167,6 +184,7 @@ class Checker extends Scope {
           const [current, v] = [this.slotType(key), value()];
           if (current === "list" || current === "text") return current;
           if (current === "number" && v === "number") return "number";
+          if (MEASURE_TYPES.includes(current) && v === current) return current; // `add 300 m to trip`
           // an add that will fail doesn't change the type: the program stops there
           return current === undefined || v === undefined || this.known(current, v) ? undefined : null;
         });

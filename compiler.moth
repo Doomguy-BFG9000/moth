@@ -242,7 +242,18 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
     "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
-    "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
+    "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in"
+# the words of the units an amount can have (`5 km`), each way vm.js's UNITS writes them
+set unit_words to list of "mm", "cm", "m", "km", "millimetre", "millimetres", "centimetre", "centimetres", "metre", "metres",
+    "kilometre", "kilometres", "millimeter", "millimeters", "centimeter", "centimeters", "meter", "meters", "kilometer",
+    "kilometers", "inch", "inches", "foot", "feet", "yard", "yards", "mile", "miles", "millisecond", "milliseconds", "second",
+    "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks", "mg", "g", "kg", "milligram", "milligrams",
+    "gram", "grams", "kilogram", "kilograms", "ounce", "ounces", "pound", "pounds", "tonne", "tonnes", "ml", "millilitre",
+    "millilitres", "litre", "litres", "milliliter", "milliliters", "liter", "liters"
+# how many milliseconds each unit of time is, for `every 2 seconds`
+set time_units to dictionary where "millisecond" is 1, "milliseconds" is 1, "second" is 1000, "seconds" is 1000,
+    "minute" is 60000, "minutes" is 60000, "hour" is 3600000, "hours" is 3600000, "day" is 86400000, "days" is 86400000,
+    "week" is 604800000, "weeks" is 604800000
 set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is still a name
 # what an input can say it is, `with width as a number`, in the order of KINDS in vm.js
 set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
@@ -259,6 +270,13 @@ to parse with tokens, reading
     set fn_depth to 0
     set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
+    set converting to yes # `trip in miles`; not in `position of ... in`, whose `in` is its own
+
+    # whether token i is a unit's word (`km`, `hours`), on the same line as what's before it
+    to unit_at with i
+        set unit_token to item i of tokens
+        return type of unit_token is "word" and not nl of unit_token and contains(unit_words, value of unit_token)
+    end
 
     to peek
         return item pos of tokens
@@ -594,17 +612,24 @@ to parse with tokens, reading
             end
             return record with kind "when", event event, fn func("when " + phrase, params, t), at t
         end
-        if word("every") # `every 100 milliseconds`, `every 2 seconds`
+        if word("every") # `every 100 milliseconds`, `every 2 seconds`, `every 1 minute`: in milliseconds
             set interval to additive()
             set unit to 0
-            if is_word("milliseconds") or is_word("millisecond")
-                set unit to 1
-            else if is_word("seconds") or is_word("second")
-                set unit to 1000
-            else
-                expected("'milliseconds' or 'seconds'")
+            if kind of interval is "builtin" and name of interval is "unit"
+                set unit_word to value of item 2 of args of interval
+                if unit_word is in time_units # `every 2 seconds`: the number, and its unit
+                    set unit to item unit_word of time_units
+                    set interval to item 1 of args of interval
+                end
             end
-            set pos to pos + 1
+            if unit is 0
+                if unit_at(pos) and value of peek() is in time_units # `every n seconds`
+                    set unit to item (value of peek()) of time_units
+                    set pos to pos + 1
+                else
+                    expected("'milliseconds' or 'seconds'")
+                end
+            end
             if not at_top
                 fail with problem(t, "'every' only works at the top level of a program")
             end
@@ -881,6 +906,15 @@ to parse with tokens, reading
             set left to record with kind "math", op type of t, left left, right multiplicative(), at t
             set t to match("+") or match("-")
         end
+        # `trip in miles`: an amount in another unit that measures the same
+        repeat while converting and is_word("in") and unit_at(pos + 1)
+            set in_token to peek()
+            set unit_token to item (pos + 1) of tokens
+            set pos to pos + 2
+            set unit_args to list of left
+            add (record with kind "value", type "string", value value of unit_token, at unit_token) to unit_args
+            set left to record with kind "builtin", name "in", args unit_args, at in_token
+        end
         return left
     end
 
@@ -932,7 +966,18 @@ to parse with tokens, reading
 
     to primary
         set t to peek()
-        if match("number") or match("string")
+        if match("number")
+            set number_node to record with kind "value", type "number", value value of t, at t
+            if not unit_at(pos)
+                return number_node
+            end
+            set unit_token to peek() # `5 km`: an amount of a unit
+            set pos to pos + 1
+            set unit_args to list of number_node
+            add (record with kind "value", type "string", value value of unit_token, at unit_token) to unit_args
+            return record with kind "builtin", name "unit", args unit_args, at t
+        end
+        if match("string")
             return record with kind "value", type type of t, value value of t, at t
         end
         if word("yes") or word("no")
@@ -1021,7 +1066,10 @@ to parse with tokens, reading
                 add unary() to inputs
                 return record with kind "builtin", name value of t, args inputs, at t
             end
+            set was_converting to converting
+            set converting to item 2 of syntax is not "in"
             add additive() to inputs
+            set converting to was_converting
             expect_word(item 2 of syntax)
             add additive() to inputs
             return record with kind "builtin", name value of t, args inputs, at t
@@ -1047,9 +1095,12 @@ to parse with tokens, reading
         end
         if match("(")
             set outside to indexing
+            set was_converting to converting
             set indexing to no
+            set converting to yes
             set inner to expression()
             set indexing to outside
+            set converting to was_converting
             if not match(")")
                 expected("')'")
             end

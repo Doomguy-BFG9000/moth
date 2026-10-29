@@ -15,6 +15,14 @@ export const PROGRAMS = [
   ["set d to dictionary where 0.3 is \"found\"\nsay item (0.1 + 0.2) of d\nsay (0.1 + 0.2) is in d\nset item (0.1 + 0.2) of d to \"again\"\nsay length of d \" \" item 0.3 of d", "found\nyes\n1 again"],
   ["for each i from 0.1 * 10 to 0.1 * 30\n    say i\nend\nsay 123456789012344.5 \" \" 0 - 123456789012344.5 \" \" 3.141592653589793", "1\n2\n3\n123456789012345 -123456789012345 3.14159265358979"],
   ["say (0.1 * 30) as hex\nsay (0.1 * 30) bytes\nsay (list of 1, 2, 3) is (list of 0.1 * 10, 0.2 * 10, 0.1 * 30)\nsay 9007199254740993 is 9007199254740992", "3\n(3 bytes: 0, 0, 0)\nyes\nyes"],
+  // amounts with units: added, converted, compared, scaled
+  ["set trip to 5 km + 300 m\nsay trip\nsay trip in m\nsay 1 mile in km\nsay number of (trip in m)", "5.3 km\n5300 m\n1.609344 km\n5300"],
+  ["say 2 hours + 30 minutes\nsay (2 hours + 30 minutes) in minutes\nsay 3 * 2 hours\nsay 10 km / 4\nsay 10 km / 2 km\nsay -5 km", "2.5 hours\n150 minutes\n6 hours\n2.5 km\n5\n-5 km"],
+  ["say 1 km is 1000 m\nsay 1 km is 1000\nsay 1 km is greater than 999 m\nsay 1 foot \" \" 2 feet \" \" 1 kg \" \" 500 ml in litres", "yes\nno\nyes\n1 foot 2 feet 1 kg 0.5 litres"],
+  ["set trip to 5 km\nadd 700 m to trip\nsay \"Trip: \" trip\nsay list of 1 km, 2 kg, 3 litres\nsay (1 km) is in (list of 1000 m)\nsay 2 km as text", "Trip: 5.7 km\n[1 km, 2 kg, 3 litres]\nyes\n2 km"],
+  ["set n to 2\nevery n minutes\n    say \"tick\"\nend\nevery 1 hour\n    say \"tock\"\nend\nsay \"ready\"", "ready"],
+  // a unit's word is only a unit after a number, so it can still be a name
+  ["set m to \"am\"\nsay position of \"m\" in m\nset day to 3\nsay \"Day \" day\nsay 2 * day", "2\nDay 3\n6"],
   // a `set` inside a function changes a variable the top level also sets
   ["set total to 0\nto bump\n    add 5 to total\nend\nbump\nbump\nsay total", "10"],
   // this is decided when the program is read, so it holds even before the top level's own `set` runs
@@ -122,6 +130,17 @@ export const ERRORS = [
   ["to f with l as a list\n    say l\nend\nto g\n    f(\"a\")\nend\ng()", "line 5: 'f' needs l to be a list, not text"],
   ["to f with x as a thing\n    say x\nend", "line 1: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'a'"],
   ["to f with x as\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'say'"],
+  ["say 5 km + 2 hours", "line 1: can't use '+' on a distance and a time"],
+  ["say 5 km + 3", "line 1: can't use '+' on a distance and a number"],
+  ["say 5 km * 2 km", "line 1: can't use '*' on a distance and a distance"],
+  ["say 3 hours in km", "line 1: 'in km' needs a distance, not a time"],
+  ["set x to 3\nsay x in km", "line 2: 'in km' needs a distance, not a number"],
+  ["say 5 km is less than 2 hours", "line 1: can't check if a distance is less than a time"],
+  ["set trip to 5 km\nadd 1 hour to trip", "line 2: can't add a time to a distance"],
+  ["say 5 km / 0", "line 1: can't divide by zero"],
+  ["say 5 km / 0 m", "line 1: can't divide by zero"],
+  ["every 2 km\n    say 1\nend", "line 2: expected 'milliseconds' or 'seconds' but found 'say'"],
+  ["say item 1 km of (list of 1)", "line 1: item numbers must be whole numbers, not 1 km"],
   ["\n\nsay totl", "line 3: 'totl' has no value yet (give it one with 'set totl to ...')"],
   ["to f\n    set secret to 1\nend\nf\nsay secret", "line 5: 'secret' has no value yet (give it one with 'set secret to ...')"],
   ["say x\nset x to 1", "line 1: 'x' has no value yet (give it one with 'set x to ...')"],

@@ -235,9 +235,13 @@ fn compare(op: usize, a: &Value, b: &Value) -> Res<bool> {
         matches!((a, b), (Value::Num(_), Value::Num(_)))
     } else {
         matches!((a, b), (Value::Num(_), Value::Num(_)) | (Value::Text(_), Value::Text(_)))
+            || matches!((a, b), (Value::Qty(_, u), Value::Qty(_, v)) if measure_of(*u) == measure_of(*v))
     };
     if !ok {
         return oops(format!("can't check if {} is {name} {}", kind_of(a), kind_of(b)));
+    }
+    if let (Value::Qty(x, u), Value::Qty(y, v)) = (a, b) {
+        return Ok(compare_numbers(op, *x, amount_in(*y, *v, *u))); // in a's unit
     }
     if let (Value::Num(x), Value::Num(y)) = (a, b) {
         if name == "divisible by" && *y == 0.0 {
@@ -273,21 +277,48 @@ fn plus(a: &Value, b: &Value) -> Res<Value> {
         let joined = shown(a, false)? + &shown(b, false)?;
         return Ok(Value::Text(Rc::from(fits(joined)?.as_str())));
     }
+    if let (Value::Qty(x, u), Value::Qty(y, v)) = (a, b) {
+        if measure_of(*u) == measure_of(*v) {
+            return Ok(Value::Qty(x + amount_in(*y, *v, *u), *u)); // 5 km + 300 m is 5.3 km
+        }
+    }
     oops(format!("can't use '+' on {} and {}", kind_of(a), kind_of(b)))
 }
 
+// `-`, `*` and `/`: on numbers, and on amounts: less an amount of the same measure, times a number, or over a
+// number (or an amount of the same measure, which gives how many times it goes in)
 fn arithmetic(op: &str, a: &Value, b: &Value) -> Res<Value> {
-    let (Value::Num(x), Value::Num(y)) = (a, b) else {
-        return oops(format!("can't use '{op}' on {} and {}", kind_of(a), kind_of(b)));
-    };
-    if op == "/" && *y == 0.0 {
-        return oops("can't divide by zero".into());
-    }
-    Ok(Value::Num(match op {
-        "-" => x - y,
-        "*" => x * y,
-        _ => x / y,
-    }))
+    let zero = || oops("can't divide by zero".into());
+    Ok(match (a, b) {
+        (Value::Num(x), Value::Num(y)) => {
+            if op == "/" && *y == 0.0 {
+                return zero();
+            }
+            Value::Num(match op {
+                "-" => x - y,
+                "*" => x * y,
+                _ => x / y,
+            })
+        }
+        (Value::Qty(x, u), Value::Qty(y, v)) if op != "*" && measure_of(*u) == measure_of(*v) => {
+            let y = amount_in(*y, *v, *u);
+            if op == "-" {
+                Value::Qty(x - y, *u)
+            } else if y == 0.0 {
+                return zero();
+            } else {
+                Value::Num(x / y)
+            }
+        }
+        (Value::Qty(x, u), Value::Num(y)) if op != "-" => {
+            if op == "/" && *y == 0.0 {
+                return zero();
+            }
+            Value::Qty(if op == "*" { x * y } else { x / y }, *u)
+        }
+        (Value::Num(x), Value::Qty(y, v)) if op == "*" => Value::Qty(x * y, *v),
+        _ => return oops(format!("can't use '{op}' on {} and {}", kind_of(a), kind_of(b))),
+    })
 }
 
 fn length_of(v: &Value) -> Res<f64> {
@@ -313,6 +344,10 @@ fn add_into(current: &Value, value: &Value, name: &str) -> Res<Value> {
         }
         Value::Num(x) => match value {
             Value::Num(y) => Ok(Value::Num(x + y)),
+            _ => oops(format!("can't add {} to {}", kind_of(value), kind_of(current))),
+        },
+        Value::Qty(x, u) => match value {
+            Value::Qty(y, v) if measure_of(*u) == measure_of(*v) => Ok(Value::Qty(x + amount_in(*y, *v, *u), *u)),
             _ => oops(format!("can't add {} to {}", kind_of(value), kind_of(current))),
         },
         _ => oops(format!("can't add {} to {}", kind_of(value), kind_of(current))),
@@ -397,8 +432,10 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
             t(parts.join(by))
         }
         "number" => {
-            if let Value::Num(_) = args[0] {
-                return Ok(args[0].clone());
+            match args[0] {
+                Value::Num(_) => return Ok(args[0].clone()),
+                Value::Qty(n, _) => return Ok(Value::Num(n)), // the number alone: `number of (trip in miles)`
+                _ => {}
             }
             let text = need_text("'number of'", &args[0])?;
             match number_of(text) {
@@ -480,6 +517,22 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
             other => t(shown(other, false)?),
         },
         "as hex" => Ok(text(&num::radix(bits("'as hex'", &args[0])?, 16))),
+        // `5 km` (the parser makes these) and `trip in miles`
+        "unit" => {
+            let word = need_text("a unit", &args[1])?;
+            match args[0] {
+                Value::Num(n) => Ok(Value::Qty(n, unit_named(word).unwrap())),
+                _ => oops(format!("'{word}' needs a number in front of it, not {}", kind_of(&args[0]))),
+            }
+        }
+        "in" => {
+            let word = need_text("a unit", &args[1])?;
+            let unit = unit_named(word).unwrap();
+            match args[0] {
+                Value::Qty(n, u) if measure_of(u) == measure_of(unit) => Ok(Value::Qty(amount_in(n, u, unit), unit)),
+                _ => oops(format!("'in {word}' needs {}, not {}", MEASURES[measure_of(unit) as usize], kind_of(&args[0]))),
+            }
+        }
         _ => Ok(text(&num::radix(bits("'as binary'", &args[0])?, 2))),
     }
 }
@@ -876,6 +929,7 @@ impl<'h> Machine<'h> {
                     }
                     NEG => match pop!() {
                         Value::Num(x) => stack.push(Value::Num(-x)),
+                        Value::Qty(x, u) => stack.push(Value::Qty(-x, u)),
                         other => fail!(format!("'-' needs a number, not {}", kind_of(&other))),
                     },
                     NOT => {

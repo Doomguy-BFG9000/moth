@@ -17,6 +17,7 @@ pub enum Value {
     Dict(Rc<RefCell<Dict>>),
     Bytes(Rc<RefCell<Vec<u8>>>),
     Func(Rc<Closure>),
+    Qty(f64, u8),            // an amount of a unit, by its place in UNITS: 5 km
     Unset,                   // a variable that is declared but hasn't been given a value yet
     Iter(Rc<RefCell<Iter>>), // what `for each` goes through, on the stack while it runs
 }
@@ -41,6 +42,66 @@ pub struct Env {
 pub struct Iter {
     pub items: Vec<Value>,
     pub i: usize,
+}
+
+// ---------- amounts with units: 5 km, 2 hours, 300 g (vm.js's UNITS, in the same order) ----------
+
+pub const MEASURES: [&str; 4] = ["a distance", "a time", "a weight", "a volume"];
+// each unit: how it is written for one and for many, what it measures, and how many of that measure's base
+// unit (a metre, a second, a gram, a litre) it is
+pub const UNITS: [(&str, &str, u8, f64); 36] = [
+    ("mm", "mm", 0, 0.001),
+    ("cm", "cm", 0, 0.01),
+    ("m", "m", 0, 1.0),
+    ("km", "km", 0, 1000.0),
+    ("millimetre", "millimetres", 0, 0.001),
+    ("centimetre", "centimetres", 0, 0.01),
+    ("metre", "metres", 0, 1.0),
+    ("kilometre", "kilometres", 0, 1000.0),
+    ("millimeter", "millimeters", 0, 0.001),
+    ("centimeter", "centimeters", 0, 0.01),
+    ("meter", "meters", 0, 1.0),
+    ("kilometer", "kilometers", 0, 1000.0),
+    ("inch", "inches", 0, 0.0254),
+    ("foot", "feet", 0, 0.3048),
+    ("yard", "yards", 0, 0.9144),
+    ("mile", "miles", 0, 1609.344),
+    ("millisecond", "milliseconds", 1, 0.001),
+    ("second", "seconds", 1, 1.0),
+    ("minute", "minutes", 1, 60.0),
+    ("hour", "hours", 1, 3600.0),
+    ("day", "days", 1, 86400.0),
+    ("week", "weeks", 1, 604800.0),
+    ("mg", "mg", 2, 0.001),
+    ("g", "g", 2, 1.0),
+    ("kg", "kg", 2, 1000.0),
+    ("milligram", "milligrams", 2, 0.001),
+    ("gram", "grams", 2, 1.0),
+    ("kilogram", "kilograms", 2, 1000.0),
+    ("ounce", "ounces", 2, 28.349523125),
+    ("pound", "pounds", 2, 453.59237),
+    ("tonne", "tonnes", 2, 1000000.0),
+    ("ml", "ml", 3, 0.001),
+    ("millilitre", "millilitres", 3, 0.001),
+    ("litre", "litres", 3, 1.0),
+    ("milliliter", "milliliters", 3, 0.001),
+    ("liter", "liters", 3, 1.0),
+];
+
+// a unit's place in UNITS, by either way it is written
+pub fn unit_named(w: &str) -> Option<u8> {
+    UNITS.iter().position(|u| u.0 == w || u.1 == w).map(|i| i as u8)
+}
+pub fn measure_of(unit: u8) -> u8 {
+    UNITS[unit as usize].2
+}
+// an amount of one unit in another that measures the same: 5 (km) is 5000 (m)
+pub fn amount_in(amount: f64, from: u8, to: u8) -> f64 {
+    if from == to {
+        amount
+    } else {
+        amount * UNITS[from as usize].3 / UNITS[to as usize].3
+    }
 }
 
 pub fn text(s: &str) -> Value {
@@ -155,6 +216,7 @@ pub fn kind_of(v: &Value) -> &'static str {
         Value::Record(_) => "a record",
         Value::Dict(_) => "a dictionary",
         Value::Bytes(_) => "bytes",
+        Value::Qty(_, u) => MEASURES[measure_of(*u) as usize],
         _ => "a number",
     }
 }
@@ -232,6 +294,10 @@ fn show_into(v: &Value, nested: bool, showing: &mut HashSet<usize>, out: &mut St
             }
         }
         Value::Num(n) => out.push_str(&num::display(*n)), // to 15 digits
+        Value::Qty(n, u) => {
+            let (one, many, _, _) = UNITS[*u as usize];
+            out.push_str(&format!("{} {}", num::display(*n), if num::canon(*n).abs() == 1.0 { one } else { many })); // 1 mile, 2 miles
+        }
         Value::Func(c) => out.push_str(&format!("<function {}>", c.func.name)),
         Value::Bytes(b) => {
             let b = b.borrow();
@@ -338,6 +404,11 @@ fn equal_in(a: &Value, b: &Value, comparing: &mut HashSet<(usize, usize)>, depth
         (Value::Bool(x), Value::Bool(y)) => return Ok(x == y),
         (Value::Num(x), Value::Num(y)) => return Ok(num::order(*x, *y) == Some(std::cmp::Ordering::Equal)), // to 15 digits
         (Value::Text(x), Value::Text(y)) => return Ok(x == y),
+        (Value::Qty(x, u), Value::Qty(y, v)) => {
+            // 1 km is 1000 m
+            return Ok(measure_of(*u) == measure_of(*v) && num::order(*x, amount_in(*y, *v, *u)) == Some(std::cmp::Ordering::Equal));
+        }
+        (Value::Qty(..), _) | (_, Value::Qty(..)) => return Ok(false),
         _ => {}
     }
     if same_object(a, b) {

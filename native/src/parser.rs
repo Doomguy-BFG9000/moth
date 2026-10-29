@@ -190,11 +190,12 @@ struct Parser<'a, 'f> {
     fn_depth: u32,
     loop_depth: u32,
     indexing: bool,
+    converting: bool, // `trip in miles`; not in `position of ... in`, whose `in` is its own
     reading: &'a mut Reading<'f>,
 }
 
 pub fn parse(tokens: Vec<Token>, reading: &mut Reading) -> R<Vec<Stmt>> {
-    let mut p = Parser { tokens, pos: 0, at_top: false, fn_depth: 0, loop_depth: 0, indexing: false, reading };
+    let mut p = Parser { tokens, pos: 0, at_top: false, fn_depth: 0, loop_depth: 0, indexing: false, converting: true, reading };
     p.statements(None, false)
 }
 
@@ -219,6 +220,15 @@ impl<'a, 'f> Parser<'a, 'f> {
     fn sym(&mut self, s: &'static str) -> Option<Token> {
         self.matches(Kind::Sym(s))
     }
+    // a unit's word (`km`, `hours`) at token i, on the same line as what's before it
+    fn unit_at(&self, i: usize) -> Option<u8> {
+        let t = self.tokens.get(i)?;
+        if t.kind != Kind::Word || t.nl {
+            return None;
+        }
+        crate::value::unit_named(&t.text)
+    }
+
     fn is_word(&self, w: &str) -> bool {
         self.peek().is_word(w)
     }
@@ -501,15 +511,36 @@ impl<'a, 'f> Parser<'a, 'f> {
             return one(Stmt::When { event, func, at });
         }
         if self.word("every").is_some() {
-            let interval = self.additive()?;
-            let unit = ["milliseconds", "millisecond", "seconds", "second"].into_iter().find(|w| self.is_word(w));
-            let Some(unit) = unit else { return self.expected("'milliseconds' or 'seconds'") };
-            self.pos += 1;
+            let mut interval = self.additive()?;
+            let is_time = |u: u8| crate::value::measure_of(u) == 1;
+            let unit = match &interval {
+                // `every 2 seconds`: the number, and its unit
+                Expr::Builtin(name, args, _) if name == "unit" => match &args[1] {
+                    Expr::Value(Lit::Text(w), _) => crate::value::unit_named(w).filter(|&u| is_time(u)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let unit = match unit {
+                Some(u) => {
+                    let Expr::Builtin(_, mut args, _) = interval else { unreachable!() };
+                    interval = args.swap_remove(0);
+                    u
+                }
+                None => match self.unit_at(self.pos).filter(|&u| is_time(u)) {
+                    Some(u) => {
+                        self.pos += 1; // `every n seconds`
+                        u
+                    }
+                    None => return self.expected("'milliseconds' or 'seconds'"),
+                },
+            };
             if !self.at_top {
                 return self.fail(&t, "'every' only works at the top level of a program".into());
             }
             let func = self.func("every".into(), vec![], &t)?;
-            return one(Stmt::Every { interval, unit: if unit.starts_with("milli") { 1 } else { 1000 }, func, at });
+            let unit = (crate::value::UNITS[unit as usize].3 * 1000.0) as i32; // in milliseconds
+            return one(Stmt::Every { interval, unit, func, at });
         }
         if self.word("return").is_some() {
             if self.fn_depth == 0 {
@@ -749,6 +780,13 @@ impl<'a, 'f> Parser<'a, 'f> {
             let op = if t.text == "+" { "+" } else { "-" };
             left = Expr::Math(op, Box::new(left), Box::new(right), t.pos());
         }
+        // `trip in miles`: an amount in another unit that measures the same
+        while self.converting && self.is_word("in") && self.unit_at(self.pos + 1).is_some() {
+            let at = self.peek().pos();
+            let unit = self.tokens[self.pos + 1].clone();
+            self.pos += 2;
+            left = Expr::Builtin("in".into(), vec![left, Expr::Value(Lit::Text(Rc::from(unit.text.as_str())), unit.pos())], at);
+        }
         Ok(left)
     }
 
@@ -799,7 +837,13 @@ impl<'a, 'f> Parser<'a, 'f> {
         let t = self.peek().clone();
         let at = t.pos();
         if let Some(n) = self.matches(Kind::Number) {
-            return Ok(Expr::Value(Lit::Num(n.num, Rc::from(n.text.as_str())), at));
+            let value = Expr::Value(Lit::Num(n.num, Rc::from(n.text.as_str())), at.clone());
+            if self.unit_at(self.pos).is_none() {
+                return Ok(value);
+            }
+            let unit = self.tokens[self.pos].clone(); // `5 km`: an amount of a unit
+            self.pos += 1;
+            return Ok(Expr::Builtin("unit".into(), vec![value, Expr::Value(Lit::Text(Rc::from(unit.text.as_str())), unit.pos())], at));
         }
         if let Some(s) = self.matches(Kind::Str) {
             return Ok(Expr::Value(Lit::Text(Rc::from(s.text.as_str())), at));
@@ -893,7 +937,11 @@ impl<'a, 'f> Parser<'a, 'f> {
                     let arg = self.unary()?;
                     return Ok(Expr::Builtin(t.text.clone(), vec![arg], at));
                 };
-                let a = self.additive()?;
+                let outside = self.converting;
+                self.converting = between != "in";
+                let a = self.additive();
+                self.converting = outside;
+                let a = a?;
                 self.expect_word(between)?;
                 let b = self.additive()?;
                 return Ok(Expr::Builtin(t.text.clone(), vec![a, b], at));
@@ -919,10 +967,11 @@ impl<'a, 'f> Parser<'a, 'f> {
             return Ok(Expr::Item { index: Box::new(index), of: Box::new(of), at });
         }
         if self.sym("(").is_some() {
-            let outside = self.indexing;
-            self.indexing = false;
-            let inner = self.expression()?;
-            self.indexing = outside;
+            let (outside, converting) = (self.indexing, self.converting);
+            (self.indexing, self.converting) = (false, true);
+            let inner = self.expression();
+            (self.indexing, self.converting) = (outside, converting);
+            let inner = inner?;
             if self.sym(")").is_none() {
                 return self.expected("')'");
             }

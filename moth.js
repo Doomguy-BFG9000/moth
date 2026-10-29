@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord } from "./vm.js";
+import { MothError, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -103,6 +103,8 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   let fnDepth = 0;
   let loopDepth = 0; // loops around this spot, in this function: `stop` needs one
   let indexing = false; // inside `item ... of`, where a name followed by `of` is the item number, not a field
+  let converting = true; // `trip in miles`; not in `position of ... in`, whose `in` is its own
+  const unitAt = (i) => tokens[i].type === "word" && !tokens[i].nl && unitNamed(tokens[i].value) !== undefined;
   const peek = () => tokens[pos];
   const check = (type) => tokens[pos].type === type;
   const match = (type) => check(type) && tokens[pos++];
@@ -270,11 +272,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "when", event: known.event, fn: func(`when ${phrase}`, params, t), at: t };
     }
     if (word("every")) { // `every 100 milliseconds`, `every 2 seconds`
-      const interval = additive();
-      const unit = ["milliseconds", "millisecond", "seconds", "second"].find(isWord) ?? expected("'milliseconds' or 'seconds'");
-      pos++;
+      let interval = additive();
+      let unit = interval.kind === "builtin" && interval.name === "unit" ? unitNamed(interval.args[1].value) : undefined;
+      if (unit !== undefined && UNITS[unit][2] === 1) interval = interval.args[0]; // `every 2 seconds`: the number, and its unit
+      else if (unitAt(pos) && UNITS[unitNamed(peek().value)][2] === 1) unit = unitNamed(tokens[pos++].value); // `every n seconds`
+      else expected("'milliseconds' or 'seconds'");
       if (!atTop) fail(t, "'every' only works at the top level of a program");
-      return { kind: "every", interval, unit: unit.startsWith("milli") ? 1 : 1000, fn: func("every", [], t), at: t };
+      return { kind: "every", interval, unit: UNITS[unit][3] * 1000, fn: func("every", [], t), at: t };
     }
     if (word("return")) {
       if (!fnDepth) fail(t, "'return' only works inside a function (one made with 'to')");
@@ -425,6 +429,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   function additive() {
     let left = multiplicative();
     for (let t; (t = match("+") || match("-")); ) left = { kind: "math", op: t.type, left, right: multiplicative(), at: t };
+    // `trip in miles`: an amount in another unit that measures the same
+    while (converting && isWord("in") && unitAt(pos + 1)) {
+      const t = tokens[pos++];
+      const unit = tokens[pos++];
+      left = { kind: "builtin", name: "in", args: [left, { kind: "value", value: unit.value, at: unit }], at: t };
+    }
     return left;
   }
 
@@ -454,7 +464,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
   function primary() {
     const t = peek();
-    if (match("number") || match("string")) return { kind: "value", value: t.value, at: t };
+    if (match("number")) {
+      const n = { kind: "value", value: t.value, at: t };
+      if (!unitAt(pos)) return n;
+      const unit = tokens[pos++]; // `5 km`: an amount of a unit
+      return { kind: "builtin", name: "unit", args: [n, { kind: "value", value: unit.value, at: unit }], at: t };
+    }
+    if (match("string")) return { kind: "value", value: t.value, at: t };
     if (word("yes") || word("no")) return { kind: "value", value: t.value === "yes", at: t };
     if (word("nothing")) return { kind: "value", value: null, at: t };
     if (word("list")) {
@@ -510,7 +526,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos++;
       if (syntax[0]) expectWord(syntax[0]);
       if (syntax.length === 1) return { kind: "builtin", name: t.value, args: [unary()], at: t };
+      const outside = converting;
+      converting = syntax[1] !== "in";
       const first = additive();
+      converting = outside;
       expectWord(syntax[1]);
       return { kind: "builtin", name: t.value, args: [first, additive()], at: t };
     }
@@ -530,10 +549,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "item", index, of: unary(), at: t };
     }
     if (match("(")) {
-      const outside = indexing;
-      indexing = false;
+      const [outside, wasConverting] = [indexing, converting];
+      [indexing, converting] = [false, true];
       const inner = expression();
-      indexing = outside;
+      [indexing, converting] = [outside, wasConverting];
       if (!match(")")) expected("')'");
       return inner;
     }

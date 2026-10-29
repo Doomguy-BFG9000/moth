@@ -12,7 +12,8 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
+  Quantity, isQuantity } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -20,7 +21,7 @@ const F64 = "f64";
 const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has its own stack
 const MATH = ["+", "-", "*", "/"];
 const BIT_BUILTINS = ["bit and", "bit or", "bit xor", "shift left", "shift right"]; // in the order R.bits numbers them
-const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8 };
+const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8, quantity: 9 };
 // ncmp's answer (-1, 0, 1, or 2 for NaN) made yes or no, for each comparison of two numbers
 const ORDER_TESTS = {
   "is": (c) => c.emit("i32.eqz"),
@@ -39,8 +40,8 @@ const IMPORTS = {
   fail: [[I32, I32], []], // a message the compiler worked out (a name nothing sets), and a position
   unset: [[I32, I32], []],
   plus: [[EQ, EQ, I32], [EQ]],
-  arithmetic: [[I32, EQ, EQ, I32], []],
-  negate: [[EQ, I32], []],
+  arithmetic: [[I32, EQ, EQ, I32], [EQ]],
+  negate: [[EQ, I32], [EQ]],
   compare: [[I32, EQ, EQ, I32], [I32]],
   remainder: [[F64, F64], [F64]],
   numberOrder: [[F64, F64], [I32]],
@@ -109,12 +110,13 @@ function declareTypes(m) {
   // Bytes live here, as an array of 8-bit numbers, so reading and changing one never leaves WebAssembly.
   T.u8 = m.type({ kind: "array", element: { type: "i8", mutable: true } });
   T.bytes = m.type({ kind: "struct", fields: [{ type: ref(T.u8) }] });
+  T.qty = m.type({ kind: "struct", fields: [{ type: F64 }, { type: I32 }] }); // an amount of a unit (its place in vm.js's UNITS)
   T.fn = (n) => { // a Moth function with n inputs
     const index = m.funcType([refNull(T.env), ...Array(n).fill(EQ)], [EQ]);
     m.typeNames[index] = `fn${n}`;
     return index;
   };
-  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "host", "u8", "bytes"]) m.typeNames[T[name]] = name;
+  for (const name of ["num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "host", "u8", "bytes", "qty"]) m.typeNames[T[name]] = name;
   return T;
 }
 
@@ -155,7 +157,7 @@ function declareRuntime(m, T, im) {
       c.emit(["f64.add", "f64.sub", "f64.mul", "f64.div"][op]).emit("struct.new", T.num);
       const slow = () => {
         if (sign === "+") c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.plus);
-        else c.emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic).emit("unreachable");
+        else c.emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic); // an amount, or a mistake
       };
       if (sign === "/") c.emit("else").emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic).emit("unreachable").emit("end");
       c.emit("else");
@@ -167,7 +169,7 @@ function declareRuntime(m, T, im) {
   fn("neg", [EQ, I32], [EQ], (c) => {
     isNum(c, T, 0).emit("if", EQ);
     numOf(c, T, 0).emit("f64.neg").emit("struct.new", T.num);
-    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("unreachable").emit("end");
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("end"); // an amount, or a mistake
   });
 
   // How two numbers compare, to 15 digits (numberOrder in vm.js): -1, 0, 1, or 2 if either is NaN. Two that are
@@ -205,6 +207,8 @@ function declareRuntime(m, T, im) {
     both(T.host);
     c.emit("i32.or");
     both(T.bytes);
+    c.emit("i32.or");
+    c.emit("local.get", 0).emit("ref.test", T.qty).emit("local.get", 1).emit("ref.test", T.qty).emit("i32.or"); // 1 km is 1000 m, and not 1000
     c.emit("i32.or").emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", im.equal).emit("return").emit("end");
     c.emit("i32.const", 0);
   });
@@ -482,6 +486,7 @@ function declareExports(m, T, R) {
       c.emit("local.get", 0).emit("ref.test", type).emit("if").emit("i32.const", tag).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.host).emit("if").emit("local.get", 0).emit("ref.cast", T.host).emit("struct.get", T.host, 1).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.bytes).emit("if").emit("i32.const", TAGS.bytes).emit("return").emit("end");
+    c.emit("local.get", 0).emit("ref.test", T.qty).emit("if").emit("i32.const", TAGS.quantity).emit("return").emit("end");
     c.emit("i32.const", TAGS.unset);
   });
   fn("num", [EQ], [F64], (c) => numOf(c, T, 0));
@@ -502,6 +507,9 @@ function declareExports(m, T, R) {
   fn("bytesLength", [EQ], [I32], (c) => bytesOf(c, T, 0).emit("array.len"));
   fn("byteAt", [EQ, I32], [I32], (c) => bytesOf(c, T, 0).emit("local.get", 1).emit("array.get_u", T.u8));
   fn("makeBytes", [I32], [EQ], (c) => c.emit("local.get", 0).emit("array.new_default", T.u8).emit("struct.new", T.bytes));
+  fn("makeQty", [F64, I32], [EQ], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("struct.new", T.qty));
+  fn("qtyAmount", [EQ], [F64], (c) => c.emit("local.get", 0).emit("ref.cast", T.qty).emit("struct.get", T.qty, 0));
+  fn("qtyUnit", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.qty).emit("struct.get", T.qty, 1));
   fn("setByte", [EQ, I32, I32], [], (c) => bytesOf(c, T, 0).emit("local.get", 1).emit("local.get", 2).emit("array.set", T.u8));
 }
 
@@ -636,9 +644,10 @@ class WasmCompiler extends Scope {
         const found = this.resolve(e.name);
         return Boolean(found) && found[0] === 0 && slots.has(found[1]);
       }
-      case "math":
-        return e.op !== "+" || (this.isNumber(e.left, slots) && this.isNumber(e.right, slots));
+      case "math": // a number less, or over, anything gives a number or fails; times or plus an amount, an amount
+        return this.isNumber(e.left, slots) && (e.op === "-" || e.op === "/" || this.isNumber(e.right, slots));
       case "negate":
+        return this.isNumber(e.operand, slots);
       case "length":
         return true;
       default:
@@ -1318,6 +1327,8 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
         for (const [key, value] of x.hostValue(v)) dictionary.set(key, toJs(value, seen));
         return dictionary;
       }
+      case TAGS.quantity:
+        return new Quantity(x.qtyAmount(v), x.qtyUnit(v));
       case TAGS.bytes: { // a copy, made byte by byte
         const bytes = new Uint8Array(x.bytesLength(v));
         for (let i = 0; i < bytes.length; i++) bytes[i] = x.byteAt(v, i);
@@ -1338,6 +1349,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     if (typeof v === "boolean") return v ? 1 : 0;
     if (typeof v === "number") return x.makeNum(v);
     if (typeof v === "string") return x.makeText(v);
+    if (isQuantity(v)) return x.makeQty(v.amount, v.unit);
     if (v instanceof Map) return x.makeHost(new Map([...v].map(([key, value]) => [key, toWasm(value)])), TAGS.dictionary);
     if (v instanceof Uint8Array) {
       const bytes = x.makeBytes(v.length); // all 0 to start with
@@ -1354,8 +1366,8 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     fail: (message, k) => errors[k](messages[message]),
     unset: (name, k) => errors[k](noValue(names[name])),
     plus: (a, b, k) => toWasm(plus(toJs(a), toJs(b), errors[k])),
-    arithmetic: (op, a, b, k) => arithmetic(MATH[op], toJs(a), toJs(b), errors[k]),
-    negate: (v, k) => negate(toJs(v), errors[k]),
+    arithmetic: (op, a, b, k) => toWasm(arithmetic(MATH[op], toJs(a), toJs(b), errors[k])),
+    negate: (v, k) => toWasm(negate(toJs(v), errors[k])),
     compare: (op, a, b, k) => (compare(COMPARE_OPS[op], toJs(a), COMPARE_OPS[op] === "in" ? rawOf(b) : toJs(b), errors[k]) ? 1 : 0),
     remainder: (a, b) => a % b,
     numberOrder: (a, b) => {

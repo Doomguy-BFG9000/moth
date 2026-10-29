@@ -125,7 +125,7 @@ pub mod op {
 use op::*;
 
 // Moth's built-in operations, in vm.js's BUILTINS order, with how many inputs each takes
-pub const BUILTINS: [(&str, usize); 17] = [
+pub const BUILTINS: [(&str, usize); 19] = [
     ("uppercase", 1),
     ("lowercase", 1),
     ("split", 2),
@@ -143,6 +143,8 @@ pub const BUILTINS: [(&str, usize); 17] = [
     ("as text", 1),
     ("as hex", 1),
     ("as binary", 1),
+    ("unit", 2), // `5 km`
+    ("in", 2),   // `trip in miles`
 ];
 pub const TURTLE_ACTIONS: [&str; 13] =
     ["forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text"];

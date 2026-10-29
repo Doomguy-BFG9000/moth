@@ -154,6 +154,8 @@ export function generatePrograms(seed, count) {
         const [name, inputs] = pick(ctx.functions);
         return `${name}(${Array.from({ length: inputs }, () => expr(depth - 1, ctx)).join(", ")})`;
       }
+      case 22: return `${pick(["1", "2.5", "0x10", "3", "0"])} ${pick(["km", "m", "miles", "feet", "hours", "minutes", "seconds", "kg", "g", "litres", "ml"])}`;
+      case 23: return `${e()} in ${pick(["km", "m", "miles", "hours", "seconds", "g", "ml"])}`;
       default: return atom(ctx.params);
     }
   }

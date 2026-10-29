@@ -160,6 +160,38 @@ export class Closure {
   }
 }
 
+// ---------- amounts with units: 5 km, 2 hours, 300 g ----------
+// What each unit measures, and each unit: how it is written for one and for many, what it measures, and
+// how many of that measure's base unit (a metre, a second, a gram, a litre) it is. The Rust engine has
+// the same table in the same order (native/src/value.rs).
+export const MEASURES = ["a distance", "a time", "a weight", "a volume"];
+export const UNITS = [
+  ["mm", "mm", 0, 0.001], ["cm", "cm", 0, 0.01], ["m", "m", 0, 1], ["km", "km", 0, 1000],
+  ["millimetre", "millimetres", 0, 0.001], ["centimetre", "centimetres", 0, 0.01], ["metre", "metres", 0, 1], ["kilometre", "kilometres", 0, 1000],
+  ["millimeter", "millimeters", 0, 0.001], ["centimeter", "centimeters", 0, 0.01], ["meter", "meters", 0, 1], ["kilometer", "kilometers", 0, 1000],
+  ["inch", "inches", 0, 0.0254], ["foot", "feet", 0, 0.3048], ["yard", "yards", 0, 0.9144], ["mile", "miles", 0, 1609.344],
+  ["millisecond", "milliseconds", 1, 0.001], ["second", "seconds", 1, 1], ["minute", "minutes", 1, 60], ["hour", "hours", 1, 3600],
+  ["day", "days", 1, 86400], ["week", "weeks", 1, 604800],
+  ["mg", "mg", 2, 0.001], ["g", "g", 2, 1], ["kg", "kg", 2, 1000], ["milligram", "milligrams", 2, 0.001], ["gram", "grams", 2, 1],
+  ["kilogram", "kilograms", 2, 1000], ["ounce", "ounces", 2, 28.349523125], ["pound", "pounds", 2, 453.59237], ["tonne", "tonnes", 2, 1000000],
+  ["ml", "ml", 3, 0.001], ["millilitre", "millilitres", 3, 0.001], ["litre", "litres", 3, 1], ["milliliter", "milliliters", 3, 0.001], ["liter", "liters", 3, 1],
+];
+const UNIT_WORDS = new Map(UNITS.flatMap(([one, many], i) => [[one, i], [many, i]]));
+export const unitNamed = (word) => UNIT_WORDS.get(word); // a unit's place in UNITS, by either way it is written
+
+// An amount of a unit. It never changes: arithmetic makes a new one.
+export class Quantity {
+  constructor(amount, unit) {
+    this.amount = amount;
+    this.unit = unit;
+  }
+}
+export const isQuantity = (v) => v instanceof Quantity;
+export const measureOf = (q) => UNITS[q.unit][2];
+// q's amount in another unit of the same measure: 5 km is 5000 in m
+const amountIn = (q, unit) => (q.unit === unit ? q.amount : (q.amount * UNITS[q.unit][3]) / UNITS[unit][3]);
+const sameMeasure = (a, b) => isQuantity(a) && isQuantity(b) && measureOf(a) === measureOf(b);
+
 export const UNSET = Symbol("unset"); // a variable that is declared but hasn't been given a value yet
 const isList = Array.isArray;
 // A record is made by `new Record()`, whose prototype has no properties and no prototype of its own, so a
@@ -178,6 +210,7 @@ export const truthy = (v) => v !== null && v !== false;
 export function equal(a, b, comparing = new Map()) {
   if (a === b) return true;
   if (typeof a === "number" && typeof b === "number") return numberOrder(a, b) === 0;
+  if (isQuantity(a) || isQuantity(b)) return sameMeasure(a, b) && numberOrder(a.amount, amountIn(b, a.unit)) === 0; // 1 km is 1000 m
   if (isBytes(a) && isBytes(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
   const both = (test) => test(a) && test(b);
   if (!both(isList) && !both(isDictionary) && !both(isRecord)) return false;
@@ -207,6 +240,7 @@ export function kindOf(v) {
   if (isRecord(v)) return "a record";
   if (isDictionary(v)) return "a dictionary";
   if (isBytes(v)) return "bytes";
+  if (isQuantity(v)) return MEASURES[measureOf(v)];
   return "a number";
 }
 
@@ -218,6 +252,7 @@ export function show(v, nested = false, showing = new Set()) {
   if (typeof v === "string") return nested ? JSON.stringify(v) : v;
   if (v instanceof Closure) return `<function ${v.fn.name}>`;
   if (isBytes(v)) return `(${plural(v.length, "byte")}${v.length ? `: ${v.join(", ")}` : ""})`;
+  if (isQuantity(v)) return `${show(v.amount)} ${UNITS[v.unit][Math.abs(canon(v.amount)) === 1 ? 0 : 1]}`; // 1 mile, 2 miles
   if (!isList(v) && !isRecord(v) && !isDictionary(v)) return String(canon(v)); // a number, to 15 digits
   if (showing.has(v)) return isList(v) ? "[...]" : "(...)";
   showing.add(v);
@@ -316,26 +351,41 @@ export function compare(op, a, b, error = oops) {
   if (op === "in") return isIn(a, b, error);
   const ok = op === "divisible by"
     ? typeof a === "number" && typeof b === "number"
-    : typeof a === typeof b && (typeof a === "number" || typeof a === "string");
+    : (typeof a === typeof b && (typeof a === "number" || typeof a === "string")) || sameMeasure(a, b);
   if (!ok) error(`can't check if ${kindOf(a)} is ${op} ${kindOf(b)}`);
   if (op === "divisible by" && b === 0) error("can't divide by zero");
+  if (isQuantity(a)) return COMPARISONS[op](a.amount, amountIn(b, a.unit)); // in a's unit
   return COMPARISONS[op](a, b);
 }
 
 // `+` when a and b aren't both numbers
 export function plus(a, b, error) {
   if (typeof a === "string" || typeof b === "string") return show(a) + show(b);
+  if (sameMeasure(a, b)) return new Quantity(a.amount + amountIn(b, a.unit), a.unit); // 5 km + 300 m is 5.3 km
   error(`can't use '+' on ${kindOf(a)} and ${kindOf(b)}`);
 }
 
 // `-`, `*` and `/`
 export function arithmetic(op, a, b, error) {
-  if (typeof a !== "number" || typeof b !== "number") error(`can't use '${op}' on ${kindOf(a)} and ${kindOf(b)}`);
-  if (op === "/" && b === 0) error("can't divide by zero");
-  return op === "-" ? a - b : op === "*" ? a * b : a / b;
+  if (typeof a === "number" && typeof b === "number") {
+    if (op === "/" && b === 0) error("can't divide by zero");
+    return op === "-" ? a - b : op === "*" ? a * b : a / b;
+  }
+  // amounts: less an amount of the same measure, times a number, or over a number (or an amount of the same
+  // measure, which gives how many times it goes in)
+  if (op === "-" && sameMeasure(a, b)) return new Quantity(a.amount - amountIn(b, a.unit), a.unit);
+  if (op === "*" && isQuantity(a) && typeof b === "number") return new Quantity(a.amount * b, a.unit);
+  if (op === "*" && typeof a === "number" && isQuantity(b)) return new Quantity(a * b.amount, b.unit);
+  if (op === "/" && isQuantity(a) && (typeof b === "number" || sameMeasure(a, b))) {
+    const by = typeof b === "number" ? b : amountIn(b, a.unit);
+    if (by === 0) error("can't divide by zero");
+    return typeof b === "number" ? new Quantity(a.amount / by, a.unit) : a.amount / by;
+  }
+  error(`can't use '${op}' on ${kindOf(a)} and ${kindOf(b)}`);
 }
 
 export function negate(v, error) {
+  if (isQuantity(v)) return new Quantity(-v.amount, v.unit);
   if (typeof v !== "number") error(`'-' needs a number, not ${kindOf(v)}`);
   return -v;
 }
@@ -355,6 +405,7 @@ export function addInto(current, value, name, error) {
     return current;
   }
   if (typeof current === "string") return current + show(value);
+  if (sameMeasure(current, value)) return new Quantity(current.amount + amountIn(value, current.unit), current.unit);
   if (typeof current !== "number" || typeof value !== "number") error(`can't add ${kindOf(value)} to ${kindOf(current)}`);
   return current + value;
 }
@@ -445,6 +496,9 @@ const bits = (what, v, error) => {
 };
 // JavaScript's own bit operators take 32 bits, so the high bits and the low 32 go through them apart
 const bitwise = (op, a, b) => (op(Math.floor(a / 2 ** 32), Math.floor(b / 2 ** 32)) >>> 0) * 2 ** 32 + (op(a >>> 0, b >>> 0) >>> 0);
+// what the checker calls each measure, as a type
+export const MEASURE_TYPES = ["distance", "time", "weight", "volume"];
+
 export const BUILTINS = [
   { name: "uppercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'uppercase of'", t, error).toUpperCase() },
   { name: "lowercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'lowercase of'", t, error).toLowerCase() },
@@ -465,9 +519,10 @@ export const BUILTINS = [
     },
   },
   {
-    name: "number", needs: [["text", "number"]], gives: "number",
+    name: "number", needs: [["text", "number", ...MEASURE_TYPES]], gives: "number",
     run: ([text], error) => {
       if (typeof text === "number") return text;
+      if (isQuantity(text)) return text.amount; // the number alone: `number of (trip in miles)`
       needText("'number of'", text, error);
       if (!/^\s*-?\d+(\.\d+)?\s*$/.test(text)) error(`${show(text, true)} isn't a number`); // a number as Moth writes them
       return Number(text);
@@ -527,11 +582,28 @@ export const BUILTINS = [
     },
   },
   {
-    name: "as text", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes"]], gives: "text",
+    name: "as text", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", ...MEASURE_TYPES]], gives: "text",
     run: ([v]) => (isBytes(v) ? new TextDecoder().decode(v) : show(v)), // bytes are read as UTF-8; anything else as `say` shows it
   },
   { name: "as hex", needs: [["number"]], gives: "text", run: ([n], error) => bits("'as hex'", n, error).toString(16) },
   { name: "as binary", needs: [["number"]], gives: "text", run: ([n], error) => bits("'as binary'", n, error).toString(2) },
+  // `5 km`: a number written out with a unit after it (the parser makes these), and `trip in miles`. What they
+  // give depends on the unit, so the checker works it out itself.
+  {
+    name: "unit", needs: [["number"], ["text"]], gives: null,
+    run: ([n, word], error) => {
+      if (typeof n !== "number") error(`'${word}' needs a number in front of it, not ${kindOf(n)}`);
+      return new Quantity(n, unitNamed(word));
+    },
+  },
+  {
+    name: "in", needs: [MEASURE_TYPES, ["text"]], gives: null,
+    run: ([q, word], error) => {
+      const unit = unitNamed(word);
+      if (!isQuantity(q) || measureOf(q) !== UNITS[unit][2]) error(`'in ${word}' needs ${MEASURES[UNITS[unit][2]]}, not ${kindOf(q)}`);
+      return new Quantity(amountIn(q, unit), unit);
+    },
+  },
 ];
 
 // `ask question`: the answer, as text. `answer` is whoever can answer (a person at a terminal, a page): it gets
