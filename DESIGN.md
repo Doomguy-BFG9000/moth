@@ -921,13 +921,23 @@ hold them to agreeing.
   precision, then moved a step at a time with big whole numbers until it's the
   nearest double. Bytes read as text the way TextDecoder reads UTF-8, each
   broken part a U+FFFD.
+- **Functions as values.** A function is a value like any other: where its
+  code is, the variables it was made among, and a description of its inputs.
+  A function that makes functions keeps its variables in memory, not in its
+  frame, with a link to the variables further out, so the functions it makes
+  can still use them after it returns; one that makes none keeps them in its
+  frame as before. A function made once at the top level, whose name nothing
+  else sets, is still called straight; any other call checks the value is a
+  function, then its description checks the inputs, with the engines'
+  mistakes. Every frame now holds the function's number as well as the call's,
+  so a trail names the function that ran, not the name it was called by.
 - **A trap, twice.** In Moth a `set` inside a function changes a top-level
   variable of the same name, and a file used `as` a name shares its functions'
   variables with the program's top level. A label called `here` in machine.moth
   was overwritten by compiler.moth's `resolve`, and a label called `bits_made`
   overwrote machine.moth's own marker, which showed only when one compiler made
   two programs. A test now checks that no function sets such a name.
-- **Checked.** 400 random programs made from what it takes, 27 written for what's
+- **Checked.** 400 random programs made from what it takes, 120 written for what's
   easy to get wrong, and every test program and 300 broken ones it can take, on
   the system the tests run on, against the JavaScript engine's output, mistakes,
   trails and exit codes.

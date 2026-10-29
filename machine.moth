@@ -55,7 +55,6 @@ set bits_nothing to list of 1, 0, 0, 0, 0, 0, 248, 127
 set bits_no to list of 2, 0, 0, 0, 0, 0, 248, 127
 set bits_yes to list of 3, 0, 0, 0, 0, 0, 248, 127
 set bits_unset to list of 4, 0, 0, 0, 0, 0, 248, 127
-set bits_made to list of 5, 0, 0, 0, 0, 0, 248, 127
 # A value in memory is a pointer with its kind in the top 16 bits, which make it a NaN no arithmetic makes
 # either: text, a list, a record, a dictionary, bytes or a function.
 set kind_text to 65529
@@ -70,6 +69,7 @@ set tag_list to list of 0, 0, 0, 0, 0, 0, 0xFA, 0xFF
 set tag_record to list of 0, 0, 0, 0, 0, 0, 0xFB, 0xFF
 set tag_dict to list of 0, 0, 0, 0, 0, 0, 0xFC, 0xFF
 set tag_bytes to list of 0, 0, 0, 0, 0, 0, 0xFD, 0xFF
+set tag_function to list of 0, 0, 0, 0, 0, 0, 0xFE, 0xFF
 
 set out_cap to 65536 # bytes of output kept before they are written
 set limbs to 20 # 64-bit pieces of a big whole number: room for 10^340 times 2^54
@@ -608,6 +608,15 @@ end
 
 to call_import with a, name
     enc(a, empty list, no, (list of 0xFF), 2, rip(name), empty list)
+end
+
+to call_r with a, r
+    enc(a, empty list, no, (list of 0xFF), 2, reg_at(r), empty list)
+end
+
+to push_i32 with a, v
+    raw(a, list of 0x68)
+    put32(code of a, v)
 end
 
 to jmp_r with a, r
@@ -2277,16 +2286,19 @@ to emit_mistakes with a
     movi(a, r12, -1)
     movi(a, r13, 0)
     movi(a, r14, 0)
+    storei(a, rip("t_prev_fn"), 0)
     mark(a, walk)
-    load(a, rax, mem(rbx, -8))
+    load(a, rax, mem(rbx, -8)) # where it was called from
     alui(a, "cmp", rax, -1)
     jcc(a, cc_e, walked)
-    lea(a, rdx, rip("site_table"))
-    mov_rr(a, rcx, rax)
+    load(a, rcx, mem(rbx, -16)) # and the function's name
     shifti(a, "shl", rcx, 3)
+    lea(a, rdx, rip("fn_names"))
     alu(a, "add", rdx, rcx)
-    load32(a, rcx, mem(rdx, 0))
-    alu(a, "cmp", rcx, r12)
+    load(a, rcx, mem(rdx, 0))
+    alu(a, "cmp", rax, r12)
+    jcc(a, cc_ne, fresh)
+    alu_load(a, "cmp", rcx, rip("t_prev_fn"))
     jcc(a, cc_ne, fresh)
     inc_r(a, r13)
     jmp_to(a, onward)
@@ -2299,8 +2311,8 @@ to emit_mistakes with a
     pop_r(a, rcx)
     pop_r(a, rax)
     mark(a, first)
-    mov_rr(a, r12, rcx)
-    store(a, rip("t_prev"), rax)
+    mov_rr(a, r12, rax)
+    store(a, rip("t_prev_fn"), rcx)
     movi(a, r13, 1)
     mark(a, onward)
     load(a, rbx, mem(rbx, 0))
@@ -2329,20 +2341,24 @@ to emit_mistakes with a
     call_to(a, "rt_write")
     movi(a, rcx, 1)
     jmp_to(a, "rt_exit")
-    mark(a, one_line) # the call in t_prev, r13 times in a row; the first 10 are shown
+    mark(a, one_line) # the call r12 to the function named t_prev_fn, r13 times in a row; the first 10 are shown
     alui(a, "cmp", r14, 10)
     jcc(a, cc_ae, skip)
-    point_at_text(a, "\n")
+    point_at_text(a, "\n  in '")
     call_to(a, "rt_e_text")
-    load(a, rax, rip("t_prev"))
+    load(a, rax, rip("t_prev_fn"))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_e_text")
+    point_at_text(a, "', ")
+    call_to(a, "rt_e_text")
     lea(a, rdx, rip("site_table"))
+    mov_rr(a, rax, r12)
     shifti(a, "shl", rax, 3)
     alu(a, "add", rdx, rax)
-    load32(a, rax, mem(rdx, 4))
-    lea(a, rsi, rip("site_table"))
-    alu(a, "add", rsi, rax)
-    load32(a, rcx, mem(rsi, 0))
-    alui(a, "add", rsi, 4)
+    load(a, rax, mem(rdx, 0))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
     call_to(a, "rt_e_text")
     alui(a, "cmp", r13, 1)
     jcc(a, cc_be, skip)
@@ -2851,7 +2867,20 @@ to emit_show with a
     alui(a, "cmp", rax, kind_bytes)
     set said_bytes to new_label(a)
     jcc(a, cc_e, said_bytes)
+    alui(a, "cmp", rax, kind_function)
+    set said_function to new_label(a)
+    jcc(a, cc_e, said_function)
     b_text(a, "<internal>")
+    jmp_to(a, done)
+    mark(a, said_function)
+    b_text(a, "<function ")
+    load(a, rax, mem(r13, 16))
+    load(a, rax, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    movi(a, rax, 62)
+    call_to(a, "rt_b_byte")
     jmp_to(a, done)
     mark(a, said_bytes)
     movi(a, rax, 40)
@@ -6654,6 +6683,197 @@ to against with a, side
     call_to(a, "big_cmp")
 end
 
+# ---------- the runtime: functions as values ----------
+# A function value is 24 bytes: where its code is, the variables it was made among (the environment of the
+# function it was made in, or 0 at the top level), and a description of it: how many inputs, its name, and
+# for each input what it must be (-1 for anything) and its name. An environment is the variables of a
+# function that makes functions, kept in memory so the functions it makes can still reach them after it
+# returns: the environment it was made in, then a slot for each variable.
+
+to emit_functions with a
+    # rt_closure: rcx code, rdx environment, r8 description: a new function value, in rax
+    mark(a, "rt_closure")
+    push_r(a, rcx)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    pop_r(a, rcx)
+    store(a, mem(rax, 0), rcx)
+    store(a, mem(rax, 8), rdx)
+    store(a, mem(rax, 16), r8)
+    movi64(a, rcx, tag_function)
+    alu(a, "or", rax, rcx)
+    ret(a)
+
+    # rt_env_new: rcx variables, none with a value yet, and rdx the environment further out: a new
+    # environment, in rax
+    mark(a, "rt_env_new")
+    push_r(a, rdi)
+    push_r(a, rcx)
+    push_r(a, rdx)
+    inc_r(a, rcx)
+    shifti(a, "shl", rcx, 3)
+    call_to(a, "rt_alloc")
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    store(a, mem(rax, 0), rdx)
+    push_r(a, rax)
+    lea(a, rdi, mem(rax, 8))
+    movi64(a, rax, bits_unset)
+    rep_stosq(a)
+    pop_r(a, rax)
+    pop_r(a, rdi)
+    ret(a)
+
+    # rt_fits_kind: rax a value, rdx what an input says it is (0 a number, 1 text, 2 yes or no, 3 a list, 4 a
+    # record, 5 a dictionary, 6 bytes, 7 a function): rax is 1 if it is that
+    set number_kind to new_label(a)
+    set yes_no_kind to new_label(a)
+    set fits to new_label(a)
+    set fits_not to new_label(a)
+    mark(a, "rt_fits_kind")
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, number_kind)
+    alui(a, "cmp", rdx, 2)
+    jcc(a, cc_e, yes_no_kind)
+    lea(a, rcx, rip("kind_tag_table")) # in memory: its tag
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rcx, rdx)
+    shifti(a, "shr", rax, 48)
+    alu_load(a, "cmp", rax, mem(rcx, 0))
+    jcc(a, cc_e, fits)
+    jmp_to(a, fits_not)
+    mark(a, number_kind)
+    movq_xr(a, xmm0, rax)
+    odd_jump(a, xmm0, fits_not)
+    jmp_to(a, fits)
+    mark(a, yes_no_kind)
+    movi64(a, rcx, bits_no)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, fits)
+    inc_r(a, rcx)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, fits)
+    mark(a, fits_not)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, fits)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_check_call: rax a function value, rsi its inputs (the last first, rcx of them): rax 0 if they're as
+    # many as it has and each what it says it is; else 2, with err_why 1 (how many, wanted in err_len and
+    # given in err_got) or 2 (what one is: its value in err_a, its name in err_field, its kind in err_kind)
+    set counted to new_label(a)
+    set each_input to new_label(a)
+    set next_input to new_label(a)
+    set inputs_fine to new_label(a)
+    mark(a, "rt_check_call")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    untag(a, rax)
+    load(a, rbx, mem(rax, 16)) # its description
+    store(a, rip("err_got"), rcx)
+    load(a, rax, mem(rbx, 0))
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, counted)
+    store(a, rip("err_len"), rax)
+    storei(a, rip("err_why"), 1)
+    movi(a, rax, 2)
+    jmp_to(a, inputs_fine)
+    mark(a, counted)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rcx)
+    movi(a, r14, 0)
+    mark(a, each_input)
+    alu(a, "cmp", r14, r13)
+    jcc(a, cc_ae, "rt_check_ok")
+    mov_rr(a, rax, r14)
+    shifti(a, "shl", rax, 4)
+    alu(a, "add", rax, rbx)
+    load(a, rdx, mem(rax, 16))
+    alui(a, "cmp", rdx, -1)
+    jcc(a, cc_e, next_input)
+    mov_rr(a, rcx, r13) # input r14 (from 0) is at rsi + 8 * (n - 1 - r14)
+    alu(a, "sub", rcx, r14)
+    dec_r(a, rcx)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rcx, r12)
+    load(a, rax, mem(rcx, 0))
+    push_r(a, rax)
+    push_r(a, rdx)
+    call_to(a, "rt_fits_kind")
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, next_input)
+    store(a, rip("err_a"), rcx)
+    store(a, rip("err_kind"), rdx)
+    mov_rr(a, rax, r14)
+    shifti(a, "shl", rax, 4)
+    alu(a, "add", rax, rbx)
+    load(a, rax, mem(rax, 24))
+    store(a, rip("err_field"), rax)
+    storei(a, rip("err_why"), 2)
+    movi(a, rax, 2)
+    jmp_to(a, inputs_fine)
+    mark(a, next_input)
+    inc_r(a, r14)
+    jmp_to(a, each_input)
+    mark(a, "rt_check_ok")
+    movi(a, rax, 0)
+    mark(a, inputs_fine)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_why_call: what was wrong with a call to the function named err_what, into the builder
+    set kind_wrong to new_label(a)
+    set one_input to new_label(a)
+    mark(a, "rt_why_call")
+    load(a, rax, rip("err_why"))
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, kind_wrong)
+    b_text(a, "'")
+    what_name(a)
+    b_text(a, "' needs ")
+    load(a, rax, rip("err_len"))
+    call_to(a, "rt_e_plain")
+    b_text(a, " input")
+    load(a, rax, rip("err_len"))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_e, one_input)
+    movi(a, rax, 115)
+    call_to(a, "rt_b_byte")
+    mark(a, one_input)
+    b_text(a, " but got ")
+    load(a, rax, rip("err_got"))
+    jmp_to(a, "rt_e_plain")
+    mark(a, kind_wrong)
+    b_text(a, "'")
+    what_name(a)
+    b_text(a, "' needs ")
+    load(a, rax, rip("err_field"))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    b_text(a, " to be ")
+    lea(a, rax, rip("kind_phrase_table"))
+    load(a, rcx, rip("err_kind"))
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    b_text(a, ", not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+end
+
 # ---------- the runtime: the system ----------
 # rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
 # code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
@@ -6859,6 +7079,7 @@ to emit_runtime with st
     emit_sequences(a)
     emit_records(a)
     emit_builtins(a)
+    emit_functions(a)
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
     pad_to(ro, 8)
     rodata_here(a, "pow10")
@@ -6879,7 +7100,7 @@ to emit_runtime with st
         "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev", "heap_top", "heap_end", "bytes_top", "bytes_end",
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
-        "x87_tmp", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d"
+        "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d"
         reserve(a, name, 8, 8)
     end
     reserve(a, "scratch", 64, 16)
@@ -6887,21 +7108,71 @@ to emit_runtime with st
     for each name in list of "big_r", "big_s", "big_mp", "big_mm", "big_t", "big_n"
         reserve(a, name, 8 * limbs, 16)
     end
-    # the calls: for each, which run of calls it belongs to, and the line a mistake shows for it
+    # where each call is, each function's name and its description, and what an input can say it is: texts
+    # first, then tables of where they are
+    set call_texts to empty list
+    for each c in calls of st
+        add text_object(a, c) to call_texts
+    end
+    set fn_texts to empty list
+    set param_texts to empty list
+    for each f in all_fns of st
+        add text_object(a, name of f) to fn_texts
+        set names to empty list
+        for each p in params of f
+            add text_object(a, p) to names
+        end
+        add names to param_texts
+    end
+    set phrases to empty list
+    for each phrase in kind_names
+        add text_object(a, phrase) to phrases
+    end
     set ro to rodata of a
     pad_to(ro, 8)
-    rodata_here(a, "site_table")
-    set calls to calls of st
-    set text_at to 8 * length of calls
-    set records to empty list
-    for each c in calls
-        put32(ro, trail_key of c)
-        put32(ro, text_at + length of records)
-        set line_bytes to trail_text of c as bytes
-        put32(records, length of line_bytes)
-        put_all(records, line_bytes)
+    table_of_texts(a, "site_table", call_texts)
+    table_of_texts(a, "fn_names", fn_texts)
+    table_of_texts(a, "kind_phrase_table", phrases)
+    rodata_here(a, "kind_tag_table")
+    for each tag in kind_tags
+        put64(ro, tag)
     end
-    put_all(ro, records)
+    set k to 0
+    for each f in all_fns of st # how many inputs, the name, then for each input what it is and its name
+        add 1 to k
+        rodata_here(a, info of f)
+        put64(ro, length of params of f)
+        absolute(a, "rodata", length of ro, item k of fn_texts, 0)
+        put64(ro, 0)
+        set i to 0
+        for each p in params of f
+            add 1 to i
+            set kind to -1
+            if i is at most length of kinds of f
+                set kind to item i of kinds of f
+            end
+            set eight to empty list
+            put32(eight, kind)
+            set high to 0
+            if kind is less than 0
+                set high to -1
+            end
+            put32(eight, high)
+            put_all(ro, eight)
+            absolute(a, "rodata", length of ro, item i of item k of param_texts, 0)
+            put64(ro, 0)
+        end
+    end
+end
+
+# a table, called `name`, of where these texts are
+to table_of_texts with a, name, labels
+    set ro to rodata of a
+    rodata_here(a, name)
+    for each label in labels
+        absolute(a, "rodata", length of ro, label, 0)
+        put64(ro, 0)
+    end
 end
 
 # ---------- what can't become machine code yet ----------
@@ -6913,7 +7184,7 @@ set node_words to dictionary where "list" is "a list", "record" is "a record", "
     "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'", "write" is "'write'", "expect" is "'expect'"
 
 to not_yet with at, what
-    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions, try and most of the helpers can")
+    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions (as values too, and made inside functions), try and most of the helpers can")
 end
 
 to not_yet_node with node
@@ -6939,13 +7210,14 @@ to new_state with a, program_name, files, source, target
         set item (name of f) of sources to text of f
     end
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
-        calls empty list, trail_keys empty dictionary, functions empty dictionary, fn_slots empty dictionary, main_scope nothing,
-        target target
+        calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
+        main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary
 end
 
 to new_fc with st, scope, main, name, inputs, own
     return record with st st, a a of st, scope scope, main main, name name, inputs inputs, own own, hidden 0,
-        most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing, tries 0, saved_try nothing
+        most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing, tries 0, saved_try nothing, level 0,
+        env_slot nothing, outer_slot nothing
 end
 
 # where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
@@ -7129,27 +7401,46 @@ to hidden_place with fc
     if hidden of fc is greater than most_hidden of fc
         set most_hidden of fc to hidden of fc
     end
-    return mem(rbp, -16 - 8 * (own of fc + h))
+    return mem(rbp, -24 - 8 * (own of fc + h))
 end
 
 # where a variable resolve() found lives
+# where a variable resolve() found lives: main's in `globals`; a function's own in its frame, its inputs above
+# where rbp points and the rest below, or in its environment if it makes functions; and a variable of a
+# function further out in that function's environment, reached through the environments in between (r11
+# holds its address then)
 to place_of with fc, found
-    if main of fc or depth of found is at least 1
+    set target to level of fc - depth of found
+    if target is 0
         return rip_plus("globals", 8 * (slot of found - 1))
     end
+    set a to a of fc
     set k to slot of found
-    if k is at most inputs of fc
-        return mem(rbp, 16 + 8 * (inputs of fc - k))
+    if depth of found is 0
+        if env_slot of fc is nothing
+            if k is at most inputs of fc
+                return mem(rbp, 16 + 8 * (inputs of fc - k))
+            end
+            return mem(rbp, -24 - 8 * (k - inputs of fc - 1))
+        end
+        load(a, r11, env_slot of fc)
+        return mem(r11, 8 * k)
     end
-    return mem(rbp, -16 - 8 * (k - inputs of fc - 1))
+    load(a, r11, outer_slot of fc)
+    repeat depth of found - 1 times
+        load(a, r11, mem(r11, 0))
+    end
+    return mem(r11, 8 * k)
 end
 
 # the program's function whose name is in that place, if it is one
+# the program's function whose name is in that place, if it is one that is only ever that function: made
+# once, at the top level, and its name never set otherwise, so a call to it can go straight to its code
 to function_at with fc, found
     if found is nothing
         return nothing
     end
-    if not (main of fc or depth of found is at least 1)
+    if level of fc - depth of found is not 0
         return nothing
     end
     set table to fn_slots of st of fc
@@ -7176,27 +7467,88 @@ to compile_machine with source, file_names, file_texts, target, program_name
     return linux_file(a)
 end
 
-to collect_functions with st, body
+# a function the program makes, at `level` (1 at the top), whose variables' scope sits in `parent`
+to new_function with st, s, parent, level
+    set all_made to all_fns of st
+    set id to length of all_made
+    set made to record with name name of s, label "F" + id, id id, info "I" + id, params params of s, kinds kinds of s,
+        body body of s, at at of s, parent parent, level level
+    add made to all_made
+    return made
+end
+
+to define_key with s
+    return "" + line of at of s + ":" + col of at of s + ":" + file of at of s
+end
+
+# the functions made at the top level, and which of them are only ever that function
+to collect_functions with st, body, made_count
     for each s in body
         set what to kind of s
         if what is "define"
-            set table to functions of st
-            if name of s is in table
-                not_yet(at of s, "a function made twice ('" + name of s + "')")
+            set made to new_function(st, s, main_scope of st, 1)
+            set records to fn_records of st
+            set item define_key(s) of records to made
+            set n to 0
+            if name of s is in made_count
+                set n to item (name of s) of made_count
             end
-            set found to front's resolve(main_scope of st, name of s)
-            set made to record with name name of s, label "F" + slot of found, params params of s, kinds kinds of s, body body of s,
-                slot slot of found, at at of s
+            set item (name of s) of made_count to n + 1
+            set table to functions of st
             set item (name of s) of table to made
-            set slots to fn_slots of st
-            set item (slot of found) of slots to made
         else if what is "if"
-            collect_functions(st, then of s)
-            collect_functions(st, otherwise of s)
-        else if what is "while" or what is "repeat" or what is "count"
-            collect_functions(st, body of s)
+            collect_functions(st, then of s, made_count)
+            collect_functions(st, otherwise of s, made_count)
+        else if what is "while" or what is "repeat" or what is "count" or what is "each"
+            collect_functions(st, body of s, made_count)
+        else if what is "try"
+            collect_functions(st, body of s, made_count)
+            collect_functions(st, handler of s, made_count)
         end
     end
+end
+
+# every name a statement sets, anywhere in the program
+to set_names with body, table
+    for each s in body
+        set what to kind of s
+        if what is "set" or what is "add" or what is "count" or what is "each" or (what is "try" and name of s is not nothing)
+            set item (name of s) of table to yes
+        end
+        if what is "if"
+            set_names(then of s, table)
+            set_names(otherwise of s, table)
+        else if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "define"
+            set_names(body of s, table)
+        else if what is "try"
+            set_names(body of s, table)
+            set_names(handler of s, table)
+        end
+    end
+end
+
+# whether a function's code makes a function, not counting the code of the functions it makes
+to makes_functions with body
+    for each s in body
+        set what to kind of s
+        if what is "define"
+            return yes
+        end
+        if what is "if"
+            if makes_functions(then of s) or makes_functions(otherwise of s)
+                return yes
+            end
+        else if what is "while" or what is "repeat" or what is "count" or what is "each"
+            if makes_functions(body of s)
+                return yes
+            end
+        else if what is "try"
+            if makes_functions(body of s) or makes_functions(handler of s)
+                return yes
+            end
+        end
+    end
+    return no
 end
 
 to frame_size with a, at
@@ -7211,7 +7563,18 @@ to gen_program with st, body
     set a to a of st
     set scope to front's new_scope(nothing, empty list, body)
     set main_scope of st to scope
-    collect_functions(st, body)
+    set made_count to empty dictionary
+    collect_functions(st, body, made_count)
+    set assigned to empty dictionary
+    set_names(body, assigned)
+    set table to functions of st
+    for each fn_name in keys of table # a call to one made once, whose name nothing else sets, goes straight to it
+        if item fn_name of made_count is 1 and not (fn_name is in assigned)
+            set f to item fn_name of table
+            set slots to fn_slots of st
+            set item (slot of front's resolve(scope, fn_name)) of slots to f
+        end
+    end
     data_here(a, "globals")
     for each n in names of scope
         put_all(data of a, bits_unset)
@@ -7220,6 +7583,7 @@ to gen_program with st, body
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
     raw(a, list of 0x6A, 0xFF) # push -1: main, where the calls stop
+    raw(a, list of 0x6A, 0x00)
     set sized to frame_size(a, nothing)
     set fc to new_fc(st, scope, yes, "main", 0, 0)
     gen_block(fc, body)
@@ -7227,30 +7591,60 @@ to gen_program with st, body
     pop_r(a, rbp)
     ret(a)
     patch32(hot of a, sized, 8 * most_hidden of fc)
-    set table to functions of st
-    for each fn_name in keys of table
-        gen_function(st, item fn_name of table)
+    set waiting to pending of st
+    set k to 1
+    repeat while k is at most length of waiting
+        gen_function(st, item k of waiting)
+        add 1 to k
     end
 end
 
+# A function's code: its frame has the number of the call that made it and its own number under where rbp
+# points, for a mistake's trail, then its variables, unless it makes functions, when they live in an
+# environment of its own. A function made inside another gets the environment it was made in in rdx.
 to gen_function with st, f
     set a to a of st
-    set scope to front's new_scope(main_scope of st, params of f, body of f)
+    set scope to front's new_scope(parent of f, params of f, body of f)
     set n to length of params of f
-    set own to length of names of scope - n
+    set total to length of names of scope
+    set with_env to makes_functions(body of f)
+    set own to total - n
+    if with_env
+        set own to 0
+    end
     mark(a, label of f)
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
     push_r(a, rax) # the number of the call
+    push_i32(a, id of f)
     set sized to frame_size(a, nothing)
     if own is greater than 0
         movi64(a, rax, bits_unset)
         for each j from 0 to own - 1
-            store(a, mem(rbp, -16 - 8 * j), rax)
+            store(a, mem(rbp, -24 - 8 * j), rax)
         end
     end
     set fc to new_fc(st, scope, no, name of f, n, own)
+    set level of fc to level of f
     set done of fc to new_label(a)
+    if level of f is at least 2
+        set outer_slot of fc to hidden_place(fc)
+        store(a, outer_slot of fc, rdx)
+    end
+    if with_env # its variables in memory, its inputs copied there
+        set env_slot of fc to hidden_place(fc)
+        movi(a, rcx, total)
+        movi(a, rdx, 0)
+        if outer_slot of fc is not nothing
+            load(a, rdx, outer_slot of fc)
+        end
+        call_to(a, "rt_env_new")
+        store(a, env_slot of fc, rax)
+        for each i from 1 to n
+            load(a, rcx, mem(rbp, 16 + 8 * (n - i)))
+            store(a, mem(rax, 8 * i), rcx)
+        end
+    end
     if has_try(body of f)
         set saved_try of fc to hidden_place(fc)
         load(a, rax, rip("try_top"))
@@ -7267,7 +7661,7 @@ to gen_function with st, f
     pop_r(a, rbp)
     ret(a)
     patch32(hot of a, sized, 8 * (own + most_hidden of fc))
-    if 8 * (3 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
+    if 8 * (4 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
         not_yet(at of f, "a function this big")
     end
 end
@@ -7309,12 +7703,24 @@ to gen_statement with fc, s
         gen_repeat(fc, s)
     else if what is "count"
         gen_count(fc, s)
-    else if what is "define"
-        if not main of fc
-            not_yet(at of s, "a function made inside a function")
+    else if what is "define" # a function value, in its name's variable; its code comes later
+        set f to nothing
+        if main of fc
+            set f to item define_key(s) of fn_records of st of fc
+        else
+            set f to new_function(st of fc, s, scope of fc, level of fc + 1)
         end
-        movi64(a, rax, bits_made)
-        store(a, place_of(fc, front's resolve(scope of fc, name of s)), rax)
+        set waiting to pending of st of fc
+        add f to waiting
+        lea(a, rcx, rip(label of f))
+        movi(a, rdx, 0)
+        if env_slot of fc is not nothing
+            load(a, rdx, env_slot of fc)
+        end
+        lea(a, r8, rip(info of f))
+        call_to(a, "rt_closure")
+        movq_xr(a, xmm0, rax)
+        movsd_store(a, place_of(fc, front's resolve(scope of fc, name of s)), xmm0)
     else if what is "return"
         if value of s is nothing
             load_bits(a, xmm0, bits_nothing)
@@ -7392,9 +7798,6 @@ end
 
 to store_var with fc, wanted, at
     set found to front's resolve(scope of fc, wanted)
-    if function_at(fc, found) is not nothing
-        not_yet(at, "changing what a function's name ('" + wanted + "') holds")
-    end
     movsd_store(a of fc, place_of(fc, found), xmm0)
 end
 
@@ -7443,10 +7846,6 @@ to gen_add with fc, s
         jmp_to(a, fail_stub(fc, at of s, front's undefined_message(scope of fc, name of s, no, no)))
         return nothing
     end
-    if function_at(fc, found) is not nothing
-        not_yet(at of s, "changing what a function's name ('" + name of s + "') holds")
-    end
-    set place to place_of(fc, found)
     set unset to fail_stub(fc, at of s, front's no_value(name of s))
     set wrong to new_label(a)
     set first_back to new_label(a)
@@ -7454,7 +7853,7 @@ to gen_add with fc, s
     set odd_before to new_label(a)
     set odd_after to new_label(a)
     movapd(a, xmm1, xmm0)
-    movsd_load(a, xmm0, place)
+    movsd_load(a, xmm0, place_of(fc, found))
     ucomisd(a, xmm0, reg_at(xmm0))
     jcc(a, cc_p, odd_before)
     mark(a, first_back)
@@ -7463,7 +7862,7 @@ to gen_add with fc, s
     ucomisd(a, xmm0, reg_at(xmm0))
     jcc(a, cc_p, odd_after)
     mark(a, second_back)
-    movsd_store(a, place, xmm0)
+    movsd_store(a, place_of(fc, found), xmm0)
     set added to new_label(a)
     mark(a, added)
     set was to enter_cold(a)
@@ -7482,7 +7881,7 @@ to gen_add with fc, s
     alui(a, "cmp", rax, 2)
     jcc(a, cc_e, kinds)
     jcc(a, cc_a, fail_stub(fc, at of s, too_big))
-    movsd_store(a, place, xmm0)
+    movsd_store(a, place_of(fc, found), xmm0)
     jmp_to(a, added)
     mark(a, odd_after) # the sum is NaN: isn't what's added a number?
     set wrong_after to new_label(a)
@@ -7958,9 +8357,6 @@ to gen_name with fc, e
         jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, name of e, no, no)))
         return nothing
     end
-    if function_at(fc, found) is not nothing
-        not_yet(at of e, "a function used as a value ('" + name of e + "')")
-    end
     set unset to fail_stub(fc, at of e, front's no_value(name of e))
     set odd to new_label(a)
     set back to new_label(a)
@@ -8067,7 +8463,8 @@ to gen_call with fc, e, statement
     end
     set f to function_at(fc, found)
     if f is nothing
-        not_yet(at of e, "calling '" + callee + "', which isn't a function made with 'to'")
+        gen_value_call(fc, e, found)
+        return nothing
     end
     set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
     movi64(a, rcx, bits_unset)
@@ -8093,7 +8490,7 @@ to gen_call with fc, e, statement
     alui(a, "cmp", r15, deepest)
     jcc(a, cc_ae, deep)
     inc_r(a, r15)
-    movi(a, rax, call_site(fc, f, at of e))
+    movi(a, rax, call_site(fc, at of e))
     call_to(a, label of f)
     dec_r(a, r15)
     if n is greater than 0
@@ -8143,20 +8540,84 @@ end
 
 # a number for this call, which a mistake's trail turns into "in 'f', called from line 3"; calls from the same
 # place to the same function share a key, so a run of them shows as one line
-to call_site with fc, f, at
+# the number of the place a call is, which a mistake's trail turns into "called from line 3"
+to call_site with fc, at
     set st to st of fc
-    set key_text to name of f + "|" + line of at + ":" + col of at + ":" + file of at
-    set known to trail_keys of st
-    if not (key_text is in known)
-        set item key_text of known to length of keys of known
+    set key to "" + line of at + ":" + col of at + ":" + file of at
+    set known to call_places of st
+    if key is in known
+        return item key of known
     end
     set from to ""
     if file of at is not ""
         set from to file of at + ", "
     end
     set calls to calls of st
-    add record with trail_key item key_text of known, trail_text "  in '" + name of f + "', called from " + from + "line " + line of at to calls
+    add "called from " + from + "line " + line of at to calls
+    set item key of known to length of calls - 1
     return length of calls - 1
+end
+
+# A call through a function value: the name's value must be a function, then the inputs are worked out
+# and pushed in order, and the function's description checks them as it runs.
+to gen_value_call with fc, e, found
+    set a to a of fc
+    set callee to name of e
+    set none to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
+    set wrong to new_label(a)
+    set back to new_label(a)
+    movsd_load(a, xmm0, place_of(fc, found))
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, none)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_function)
+    jcc(a, cc_ne, wrong)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm0)
+    stub_start(fc, at of e)
+    stub_text(a, "'" + callee + "' is ")
+    stub_kind(a, "err_a")
+    stub_text(a, ", not a function")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+    push_value(fc)
+    for each arg in args of e
+        gen_expr(fc, arg)
+        push_value(fc)
+    end
+    set n to length of args of e
+    load(a, rax, mem(rsp, 8 * n))
+    movi(a, rcx, n)
+    mov_rr(a, rsi, rsp)
+    call_to(a, "rt_check_call")
+    set call_wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, call_wrong)
+    set was_too to enter_cold(a)
+    mark(a, call_wrong)
+    stub_start(fc, at of e)
+    lea(a, rax, rip(text_object(a, callee)))
+    store(a, rip("err_what"), rax)
+    call_to(a, "rt_why_call")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was_too)
+    set deep to fail_stub(fc, at of e, "too much recursion: a function kept calling itself")
+    alui(a, "cmp", r15, deepest)
+    jcc(a, cc_ae, deep)
+    inc_r(a, r15)
+    load(a, rax, mem(rsp, 8 * n))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    movi(a, rax, call_site(fc, at of e))
+    call_r(a, rcx)
+    dec_r(a, r15)
+    alui(a, "add", rsp, 8 * (n + 1))
+    set pushed of fc to pushed of fc - n - 1
 end
 
 # ---------- the files the system runs ----------

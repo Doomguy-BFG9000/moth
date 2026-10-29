@@ -111,6 +111,33 @@ export const MACHINE_CASES = [
   "say (list of 1, 300) as bytes",
   "say 5 as bytes",
   "set b to 2 bytes\nset byte 1 of b to \"a\"",
+  // functions as values, functions made inside functions, and calls through a variable
+  "to make_counter\n    set count to 0\n    to step\n        add 1 to count\n        return count\n    end\n    return step\nend\nset c to make_counter()\nsay c()\nsay c()\nset d to make_counter()\nsay d()\nsay c()\nsay c",
+  "to twice with f, x\n    return f(f(x))\nend\nto inc with n\n    return n + 1\nend\nsay twice(inc, 5)\nset g to inc\nsay g(10)\nsay list of inc, 1\nsay record with f inc",
+  "to adder with n\n    to add_it with x\n        return x + n\n    end\n    return add_it\nend\nset add5 to adder(5)\nset add10 to adder(10)\nsay add5(1)\nsay add10(1)\nsay add5(add10(100))",
+  "to f with a, b\n    return a + b\nend\nset g to f\nsay g(1)",
+  "to f with a as a number\n    return a * 2\nend\nset g to f\nsay g(3)\nsay g(\"x\")",
+  "set x to 5\nsay x(1)",
+  "say nope(1)",
+  "to outer\n    set total to 0\n    to add_some with k\n        set total to total + k\n    end\n    for each i from 1 to 5\n        add_some(i)\n    end\n    return total\nend\nsay outer()",
+  "to fact with n\n    to go with k\n        if k is at most 1\n            return 1\n        end\n        return k * go(k - 1)\n    end\n    return go(n)\nend\nsay fact(10)",
+  "to a\n    to b\n        to c\n            fail with \"deep\"\n        end\n        c()\n    end\n    b()\nend\na()",
+  "to f\n    return 1\nend\nset f to 3\nsay f\nto g\n    return 2\nend\nsay g()\nset h to g\nset g to 7\nsay h()",
+  "set fs to empty list\nfor each i from 1 to 3\n    to show with x\n        return x * 10\n    end\n    add show to fs\nend\nfor each f in fs\n    say f(2)\nend",
+  "to make with name\n    set greeting to \"hi \" + name\n    to say_it\n        return greeting\n    end\n    return say_it\nend\nset ps to list of make(\"a\"), make(\"b\")\nfor each p in ps\n    say p()\nend",
+  "to loop_forever with n\n    return loop_forever(n + 1)\nend\nset f to loop_forever\nsay f(0)",
+  "to apply with f, xs\n    set out to empty list\n    for each x in xs\n        add f(x) to out\n    end\n    return out\nend\nto sq with x\n    return x * x\nend\nsay apply(sq, (list of 1, 2, 3))\ntry\n    say apply(sq, (list of \"a\"))\nif it fails with why\n    say \"failed: \" + why\nend",
+  "to outer with a\n    to mid with b\n        to inner with c\n            return a + b + c\n        end\n        return inner\n    end\n    return mid\nend\nset m to outer(1)\nset i to m(10)\nsay i(100)\nsay outer(2)(20)(200)",
+  "to f\n    return 1\nend\nto g\n    return 1\nend\nset h to f\nsay f is f\nsay f is g\nsay h is f\nsay f is not g\nsay \"x\" + f\nsay length of f",
+  "set base to 100\nto make\n    to get with k\n        return base + k\n    end\n    return get\nend\nset q to make()\nsay q(1)\nset base to 200\nsay q(1)",
+  "to make\n    to bad\n        return missing_thing\n    end\n    return bad\nend\nset b to make()\ntry\n    say b()\nif it fails with why\n    say \"caught: \" + why\nend\nsay b()",
+  "to make\n    to later\n        return v\n    end\n    set r to later()\n    set v to 3\n    return r\nend\nsay make()",
+  "to make\n    set v to 1\n    to later\n        return v\n    end\n    set v to 2\n    return later\nend\nset m to make()\nsay m()",
+  "to make with n\n    to go\n        if n is 0\n            return \"done\"\n        end\n        set n to n - 1\n        return go()\n    end\n    return go\nend\nset g to make(5)\nsay g()\nsay g()",
+  "to k with x as a function\n    return x(2)\nend\nto dbl with y\n    return y * 2\nend\nsay k(dbl)\nsay k(5)",
+  "set d to empty dictionary\nto f\n    return 1\nend\nset item \"a\" of d to f\nsay d\nsay item \"a\" of d\nset r to record with go f\nsay go of r\nset w to go of r\nsay w()",
+  "to outer\n    to inner with a, b\n        return a * b\n    end\n    set results to empty list\n    for each i from 1 to 3\n        try\n            add inner(i) to results\n        if it fails with why\n            add why to results\n        end\n    end\n    return results\nend\nsay outer()",
+  "to f with n\n    if n is 0\n        fail with \"bottom\"\n    end\n    return g(n - 1)\nend\nto g with n\n    set h to f\n    return h(n)\nend\nf(3)",
 ];
 
 export function machinePrograms(seed, count) {
@@ -126,6 +153,7 @@ export function machinePrograms(seed, count) {
     const data = chance(0.5); // text and lists as well as numbers
     const vars = data ? ["a", "b", "c", "t", "l"] : ["a", "b", "c"];
     const fns = [];
+    const makers = [];
     const lines = [];
     const number = () => (chance(0.01) ? pick(ODD) : pick(NUMBERS));
     const leaf = (names) => (data && chance(0.25) ? pick(TEXTS) : chance(0.5) && names.length ? pick(names) : number());
@@ -194,7 +222,26 @@ export function machinePrograms(seed, count) {
       fns.push([name, params.length]);
       // a function may call itself, but only so deep: its first input counts down
       if (params.length && chance(0.3)) lines.push(`    if ${params[0]} is greater than 3`, `        return ${name}(${[`${params[0]} - 1`, ...params.slice(1)].join(", ")})`, "    end");
-      lines.push(...block(1, [...params, ...vars.slice(0, random(2))], 0, false, true), "end");
+      const names = [...params, ...vars.slice(0, random(2))];
+      // sometimes a function made inside it, which uses its variables, and which it hands back
+      const inner = chance(0.3) ? `${name}_in` : null;
+      if (inner) lines.push(`    to ${inner} with r`, ...block(2, [...names, "r"], 1, false, true), "    end");
+      lines.push(...block(1, names, 0, false, true));
+      if (inner) {
+        lines.push(`    return ${inner}`);
+        makers.push([name, params.length]);
+      }
+      lines.push("end");
+    }
+    // what those hand back, and a function in a variable, called like any
+    makers.forEach(([f, n], i) => {
+      lines.push(`set m${i} to ${f}(${Array.from({ length: n }, () => value(1, vars)).join(", ")})`);
+      fns.push([`m${i}`, 1]);
+    });
+    if (fns.length && chance(0.3)) {
+      const [f, n] = pick(fns);
+      lines.push(`set v to ${f}`);
+      fns.push(["v", n]);
     }
     lines.push(...block(0, vars, 0, false, false));
     return lines.join("\n");

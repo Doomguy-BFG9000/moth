@@ -175,7 +175,8 @@ back end, written in Moth: it turns a program into a Windows `.exe` or a Linux
 program, writing every x86-64 instruction and the file around them byte by
 byte, with no assembler, linker or other compiler. So far it takes numbers,
 yes, no and nothing, text, lists, records, dictionaries, bytes, variables,
-`say`, `if`, the loops, functions, `try`, and the helpers but `uppercase` and
+`say`, `if`, the loops, functions (made inside functions and passed around as
+values too), `try`, and the helpers but `uppercase` and
 `lowercase`, which is enough for [`math.moth`](math.moth). What it makes does
 exactly what `moth run` does, down to how a number is shown, how two numbers
 compare to 15 digits, how text sorts, and the calls a mistake lists:
@@ -207,9 +208,7 @@ always works in decimals, even for a count that is only ever whole.
 
 **Is Moth standalone yet?** Halfway. What `moth build --exe` makes runs with
 nothing else installed, but making it still takes Node.js, which runs
-machine.moth. The rest of the way: functions made inside functions in machine
-code; reading and
-writing files; and then machine.moth compiling itself into a `moth.exe` that
+machine.moth. The rest of the way: reading and writing files; and then machine.moth compiling itself into a `moth.exe` that
 builds every program, itself included, into exactly the same bytes. From
 then on Moth needs neither JavaScript nor Rust.
 
@@ -807,7 +806,7 @@ calls that led there.
   and mistakes against `moth-native run`'s
 - `moth build --exe` against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
-  with awkward numbers, every comparison and mistakes on purpose, 27 written for
+  with awkward numbers, every comparison and mistakes on purpose, 120 written for
   what's easy to get wrong, and every test program and 300 broken ones it can
   take, each built for the system the tests run on, which must print, fail and
   exit exactly alike
@@ -844,8 +843,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   Building one needs `rustc`, and a very big program takes minutes. It has no
   limit on its steps, so a loop that never ends runs until it's stopped.
 - `moth build --exe` takes only part of Moth so far: no units, `uppercase`
-  or `lowercase`, tables, files, `ask`, drawing, apps, `expect`, or functions
-  made inside functions; anything else stops with a mistake that says it can't become
+  or `lowercase`, tables, files, `ask`, drawing, apps or `expect`; anything
+  else stops with a mistake that says it can't become
   machine code yet. Memory a program takes isn't given back until it ends.
   It makes programs for x86-64 Windows and Linux, not for Macs.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
