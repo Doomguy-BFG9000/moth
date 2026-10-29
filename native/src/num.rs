@@ -1,5 +1,5 @@
 // fdlibm's constants are written as fdlibm writes them, and its `x - x` makes NaN on purpose
-#![allow(clippy::excessive_precision, clippy::eq_op, clippy::needless_range_loop)]
+#![allow(clippy::excessive_precision, clippy::eq_op, clippy::needless_range_loop, clippy::explicit_counter_loop, clippy::approx_constant)]
 // Numbers exactly as JavaScript has them: Moth's numbers are 64-bit floats, and every engine must show,
 // round and draw them alike, so this engine does what V8 does, bit for bit.
 

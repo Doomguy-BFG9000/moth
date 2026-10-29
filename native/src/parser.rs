@@ -723,8 +723,7 @@ impl<'a, 'f> Parser<'a, 'f> {
 
     fn additive(&mut self) -> R<Expr> {
         let mut left = self.multiplicative()?;
-        loop {
-            let Some(t) = self.sym("+").or_else(|| self.sym("-")) else { break };
+        while let Some(t) = self.sym("+").or_else(|| self.sym("-")) {
             let right = self.multiplicative()?;
             let op = if t.text == "+" { "+" } else { "-" };
             left = Expr::Math(op, Box::new(left), Box::new(right), t.pos());
@@ -735,8 +734,7 @@ impl<'a, 'f> Parser<'a, 'f> {
     fn multiplicative(&mut self) -> R<Expr> {
         let first = self.unary()?;
         let mut left = self.postfix(first)?;
-        loop {
-            let Some(t) = self.sym("*").or_else(|| self.sym("/")) else { break };
+        while let Some(t) = self.sym("*").or_else(|| self.sym("/")) {
             let operand = self.unary()?;
             let right = self.postfix(operand)?;
             let op = if t.text == "*" { "*" } else { "/" };

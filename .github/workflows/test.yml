@@ -11,7 +11,7 @@ jobs:
         with:
           node-version: 22
       - run: cargo build --release --manifest-path native/Cargo.toml # the Rust engine, which native.test.js holds up against the others
-      - run: cargo clippy --release --manifest-path native/Cargo.toml -- -D warnings
+      - run: cargo clippy --release --manifest-path native/Cargo.toml -- -D clippy::correctness -D clippy::suspicious -D clippy::perf # style lints change with each Rust, so they only warn
       - run: cargo fmt --check --manifest-path native/Cargo.toml
       - run: npm test
       - run: node cli.js test # every .test.moth file, with Moth's own test runner

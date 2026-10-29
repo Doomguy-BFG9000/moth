@@ -806,7 +806,8 @@ impl<'h> Machine<'h> {
                             handlers.pop(); // its tries end with it
                         }
                         let Some(frame) = frames.pop() else {
-                            break 'run Failure { message: String::new(), value: None, last: true }; // the function this machine ran is done
+                            break 'run Failure { message: String::new(), value: None, last: true };
+                            // the function this machine ran is done
                         };
                         let value = pop!();
                         stack.truncate(base);
@@ -1113,7 +1114,9 @@ impl<'h> Machine<'h> {
                         ip += 1;
                         stack.pop(); // the handler
                         match pop!() {
-                            Value::Num(x) if x > 0.0 && x != f64::INFINITY => self.listeners.push(Listener { event: "every", interval: Some(x * unit) }),
+                            Value::Num(x) if x > 0.0 && x != f64::INFINITY => {
+                                self.listeners.push(Listener { event: "every", interval: Some(x * unit) })
+                            }
                             other => fail!(format!("'every' needs a number above 0, not {}", described(&other))),
                         }
                     }
