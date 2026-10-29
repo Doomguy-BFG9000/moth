@@ -203,3 +203,13 @@ test("moth fmt tidies files, and with --check only says which aren't tidy", (t) 
   assert.match(bad.stderr, /missing its 'end'/);
   assert.equal(readFileSync(broken, "utf8"), "if yes\n");
 });
+
+// ---------- a built program asks ----------
+
+test("a program built with moth build can ask, like moth run", (t) => {
+  const file = tempFile(t, "hi.moth", 'set name to ask "Name?"\nsay "Hi " name');
+  assert.equal(moth(["build", file]).status, 0);
+  const built = node([file.replace(/\.moth$/, ".mjs")], "Sam\n");
+  assert.equal(built.stdout, "Name? Sam\nHi Sam\n");
+  assert.equal(built.status, 0);
+});

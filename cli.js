@@ -131,15 +131,18 @@ function build(file, source) {
   writeFileSync(out, `#!/usr/bin/env node
 // Compiled by Moth from ${basename(file)}: the program's bytecode plus the Moth virtual machine.
 // Run it with: node ${basename(out)} [arguments...]
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readSync, writeFileSync } from "node:fs";
 
 ${vm}
 ${readDisk}
+let pending = Buffer.alloc(0);
+${readLine}
+${askAtTerminal}
 {
   const source = ${JSON.stringify(source)};
   const used = ${JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)))}; // for a mistake in a file it uses
   try {
-    execute(${program}, console.log, Infinity, undefined, undefined, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2));
+    execute(${program}, console.log, Infinity, undefined, askAtTerminal, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2));
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
     console.error((err.file ?? ${JSON.stringify(basename(file))}) + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(err.file ? used[err.file] ?? "" : source, err));

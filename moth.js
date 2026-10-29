@@ -150,17 +150,22 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   // The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
-  // names are kept apart (see prefixed), and it can be used again as another.
+  // names are kept apart (see prefixed), and it can be used again as another. Files are read once for each
+  // set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's "), and the
+  // program can still use the same file for itself.
   function useFile(nameToken, alias) {
     const name = nameToken.value;
-    const key = alias ? `${name} as ${alias}` : name;
+    const within = reading.within ?? "";
+    const key = `${within}${name}${alias ? ` as ${alias}` : ""}`;
     if (reading.open.includes(name)) fail(nameToken, `'${name}' is already being read, so it can't be used here: files can't use each other in a circle`);
     if (reading.loaded.has(key)) return [];
     const text = reading.files?.(name);
     if (typeof text !== "string") fail(nameToken, `there is no file called '${name}'`);
     reading.loaded.add(key);
     reading.open.push(name);
+    if (alias) reading.within = `${within}${alias}'s `;
     const body = parse(tokenize(text, name), reading);
+    reading.within = within;
     reading.open.pop();
     return alias ? prefixed(body, alias) : body;
   }

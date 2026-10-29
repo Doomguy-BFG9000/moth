@@ -146,16 +146,25 @@ export const isDictionary = (v) => v instanceof Map;
 // Bytes are a block of memory: a fixed number of whole numbers from 0 to 255.
 export const isBytes = (v) => v instanceof Uint8Array;
 export const truthy = (v) => v !== null && v !== false;
-export function equal(a, b) {
+// `comparing` holds the pairs being compared further up: a list that holds itself comes round to the same
+// pair again, which counts as equal so far, instead of going round for ever.
+export function equal(a, b, comparing = new Map()) {
   if (a === b) return true;
-  if (isList(a) && isList(b)) return a.length === b.length && a.every((x, i) => equal(x, b[i]));
   if (isBytes(a) && isBytes(b)) return a.length === b.length && a.every((x, i) => x === b[i]);
-  if (isDictionary(a) && isDictionary(b)) return a.size === b.size && [...a].every(([key, value]) => b.has(key) && equal(value, b.get(key)));
-  if (isRecord(a) && isRecord(b)) {
+  const both = (test) => test(a) && test(b);
+  if (!both(isList) && !both(isDictionary) && !both(isRecord)) return false;
+  if (comparing.get(a)?.has(b)) return true;
+  if (!comparing.has(a)) comparing.set(a, new Set());
+  comparing.get(a).add(b);
+  let same;
+  if (isList(a)) same = a.length === b.length && a.every((x, i) => equal(x, b[i], comparing));
+  else if (isDictionary(a)) same = a.size === b.size && [...a].every(([key, value]) => b.has(key) && equal(value, b.get(key), comparing));
+  else {
     const fields = Object.keys(a);
-    return fields.length === Object.keys(b).length && fields.every((f) => Object.hasOwn(b, f) && equal(a[f], b[f]));
+    same = fields.length === Object.keys(b).length && fields.every((f) => Object.hasOwn(b, f) && equal(a[f], b[f], comparing));
   }
-  return a === b;
+  comparing.get(a).delete(b);
+  return same;
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const noValue = (name) => `'${name}' has no value yet (give it one with 'set ${name} to ...')`;
@@ -173,22 +182,29 @@ export function kindOf(v) {
   return "a number";
 }
 
-export function show(v, nested = false) {
+// `showing` holds the values being shown further up: a list that holds itself shows as [...] where it
+// comes round again, and a record or dictionary as (...).
+export function show(v, nested = false, showing = new Set()) {
   if (v === null) return "nothing";
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "string") return nested ? JSON.stringify(v) : v;
-  if (isList(v)) return `[${v.map((x) => show(x, true)).join(", ")}]`;
   if (v instanceof Closure) return `<function ${v.fn.name}>`;
-  if (isRecord(v)) {
-    const fields = Object.keys(v);
-    return fields.length ? `(record with ${fields.map((f) => `${f} ${show(v[f], true)}`).join(", ")})` : "(empty record)";
-  }
-  if (isDictionary(v)) {
-    const entries = [...v].map(([key, value]) => `${show(key, true)} is ${show(value, true)}`);
-    return entries.length ? `(dictionary where ${entries.join(", ")})` : "(empty dictionary)";
-  }
   if (isBytes(v)) return `(${plural(v.length, "byte")}${v.length ? `: ${v.join(", ")}` : ""})`;
-  return String(v);
+  if (!isList(v) && !isRecord(v) && !isDictionary(v)) return String(v);
+  if (showing.has(v)) return isList(v) ? "[...]" : "(...)";
+  showing.add(v);
+  const inner = (x) => show(x, true, showing);
+  let text;
+  if (isList(v)) text = `[${v.map(inner).join(", ")}]`;
+  else if (isRecord(v)) {
+    const fields = Object.keys(v);
+    text = fields.length ? `(record with ${fields.map((f) => `${f} ${inner(v[f])}`).join(", ")})` : "(empty record)";
+  } else {
+    const entries = [...v].map(([key, value]) => `${inner(key)} is ${inner(value)}`);
+    text = entries.length ? `(dictionary where ${entries.join(", ")})` : "(empty dictionary)";
+  }
+  showing.delete(v); // the same value twice side by side, not inside itself, shows in full both times
+  return text;
 }
 
 // ---------- what operations do, shared by both engines ----------

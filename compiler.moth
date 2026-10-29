@@ -362,12 +362,14 @@ to parse with tokens, reading
     end
 
     # The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
-    # names are kept apart (see prefixed), and it can be used again as another.
+    # names are kept apart (see prefixed), and it can be used again as another. Files are read once for each
+    # set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's ").
     to use_file with name_token, alias
         set wanted to value of name_token
-        set key to wanted
+        set within to within of reading
+        set key to within + wanted
         if alias is not nothing
-            set key to wanted + " as " + alias
+            set key to key + " as " + alias
         end
         if contains(open of reading, wanted)
             fail with problem(name_token, "'" + wanted + "' is already being read, so it can't be used here: files can't use each other in a circle")
@@ -388,7 +390,11 @@ to parse with tokens, reading
         add key to loaded_now
         set open_now to open of reading
         add wanted to open_now
+        if alias is not nothing
+            set within of reading to within + alias + "'s "
+        end
         set inner to parse(tokenize(text, wanted), reading)
+        set within of reading to within
         set still_open to empty list # all but the last
         for each n from 1 to length of open_now - 1
             add item n of open_now to still_open
@@ -1572,7 +1578,7 @@ end
 # values the JavaScript returns.
 to compile with source, files
     set ats to empty list
-    set reading to record with files files, loaded empty list, open empty list
+    set reading to record with files files, loaded empty list, open empty list, within ""
     set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading))
     set slots to empty list
     for each slot from 1 to length of names of scope of main

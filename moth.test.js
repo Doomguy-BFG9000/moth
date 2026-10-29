@@ -139,6 +139,12 @@ const PROGRAMS = [
   ["if no\n    say 1\nelse\n    if yes\n        say 2\n    end\nend\nsay 3", "2\n3"],
   ["if no\n    say 1\nelse if yes\n    say 2\nelse\n    if no\n        say 3\n    else\n        say 4\n    end\nend", "2"],
   ["set x to 5\nif x is 1\n    say \"one\"\nelse\n    if x is 5\n        say \"five\"\n    else if x is 6\n        say \"six\"\n    end\n    say \"done\"\nend", "five\ndone"],
+  // a list, record or dictionary that holds itself shows [...] or (...) where it comes round again
+  ["set l to list of 1\nadd l to l\nsay length of l\nsay l\nsay l as text", "2\n[1, [...]]\n[1, [...]]"],
+  ["set r to record with name 1\nset me of r to r\nsay r", "(record with name 1, me (...))"],
+  ["set d to dictionary where \"a\" is 1\nset item \"me\" of d to d\nsay d", "(dictionary where \"a\" is 1, \"me\" is (...))"],
+  ["set a to list of 1\nadd a to a\nset b to list of 1\nadd b to b\nsay a is b\nadd 2 to b\nsay a is b", "yes\nno"],
+  ["set shared to list of 1\nsay list of shared, shared", "[[1], [1]]"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -1077,4 +1083,17 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
       ["test_escapes", undefined], ["test_mistakes", undefined],
     ], engine);
   }
+});
+
+// ---------- a file used inside a module ----------
+
+// A module that uses a file plainly gets its own copy of it, under the module's name, and the program can
+// still use the same file for itself.
+test("a file used inside a module is the module's own, and the program can use it too", () => {
+  const files = { "lib.moth": "set x to 1\nto twice with n\n    return n * 2\nend", "m.moth": 'use "lib.moth"\nto get\n    return twice(x)\nend' };
+  const reading = { files: (name) => files[name] };
+  const program = 'use "m.moth" as m\nuse "lib.moth"\nset x to 5\nsay x " " m\'s get() " " m\'s x " " twice(x)';
+  for (const engine of ENGINES) assert.equal(output(program, { engine, ...reading }), "5 2 1 10", engine);
+  const moth = mothCompiler(COMPILER);
+  assert.deepEqual(compiled((s) => moth(s, files), program), compiled((s) => compileToJs(s, reading), program));
 });
