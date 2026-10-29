@@ -901,6 +901,15 @@ hold them to agreeing.
   in one builder that grows as it needs to. Text sorts by its UTF-16, as
   JavaScript's does, and stops at JavaScript's longest text with the engines'
   mistake.
+- **Records and dictionaries.** A record keeps its fields in order, each named
+  by one of the program's own texts, so finding a field compares pointers. A
+  dictionary keeps its entries in the order keys came, with an index beside
+  them to find one by its hash; a removed entry keeps its place, marked. A
+  number key is the number to 15 digits, as the engines' are, which needs the
+  double nearest a 15-digit decimal: one exact division when the power of ten
+  is 10^22 or less, and big whole numbers below that. A misspelled field or key
+  gets the engines' "Did you mean ...?", from the same edit distance over
+  UTF-16.
 - **Checked.** 400 random programs made from what it takes, 27 written for what's
   easy to get wrong, and every test program and 300 broken ones it can take, on
   the system the tests run on, against the JavaScript engine's output, mistakes,

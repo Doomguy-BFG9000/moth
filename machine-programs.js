@@ -64,6 +64,22 @@ export const MACHINE_CASES = [
   "repeat \"a\" times\n    say 1\nend",
   "set l to list of 1, 2, 3\nsay item 2 of l\nsay item (0 - 1) of l",
   "set s to \"ab\"\nrepeat while yes\n    add s to s\nend",
+  // records and dictionaries: made, changed, shown, compared, gone through, and their mistakes
+  "set sam to record with name \"Sam\", age 20\nsay sam\nsay name of sam \" is \" age of sam\nset age of sam to 21\nset city of sam to \"Pune\"\nsay sam\nsay record with x 1, x 2\nset r to record with items list of 1, 2, inner record with deep \"yes\"\nsay r\nsay deep of inner of r\nsay (record with a 1, b 2) is (record with b 2, a 1)\nsay (record with a 1, b 2) is (record with a 1, b 3)\nsay (record with a 1) is (record with a 1, b 2)\nset me to record with self nothing\nset self of me to me\nsay me\nset people to list of (record with name \"Ana\"), (record with name \"Bo\")\nfor each p in people\n    say name of p\nend\nsay length of people",
+  "set sam to record with name \"Sam\", age 20\nsay nme of sam",
+  "set x to 5\nsay name of x",
+  "set x to \"text\"\nset name of x to 1",
+  "set sam to record with name \"Sam\", age 20, height 1.8\nsay weight of sam",
+  "set ages to dictionary where \"Sam\" is 20, \"Ana\" is 31\nsay ages\nset item \"Bo\" of ages to 7\nsay item \"Bo\" of ages\nsay length of ages\nremove \"Ana\" from ages\nsay ages\nsay \"Sam\" is in ages\nsay \"Ana\" is in ages\nfor each person in ages\n    say person \": \" item person of ages\nend\nsay keys of ages\nset d to dictionary where 0.3 is \"found\", 1 is \"one\", -0 is \"zero\"\nsay item (0.1 + 0.2) of d\nsay (0.1 + 0.2) is in d\nsay item 0 of d\nset item (0.1 + 0.2) of d to \"again\"\nsay d\nsay keys of d\nset e to empty dictionary\nsay e\nsay length of e\nfor each i from 1 to 100\n    set item i of e to i * i\nend\nsay length of e \" \" item 50 of e\nfor each i from 1 to 100\n    if i is divisible by 3\n        remove i from e\n    end\nend\nsay length of e \" \" item 50 of e\nsay 51 is in e\nsay (dictionary where \"a\" is 1, \"b\" is 2) is (dictionary where \"b\" is 2, \"a\" is 1)\nsay (dictionary where \"a\" is 1) is (dictionary where \"a\" is 2)\nset counts to empty dictionary\nfor each w in list of \"the\", \"cat\", \"the\", \"hat\", \"the\"\n    if w is in counts\n        set item w of counts to item w of counts + 1\n    else\n        set item w of counts to 1\n    end\nend\nsay counts\nset nested to dictionary where \"list\" is list of 1, 2, \"rec\" is record with x 1\nsay nested\nsay yes is in counts\nsay (list of 1) is in counts",
+  "set ages to dictionary where \"Sam\" is 20, \"Ana\" is 31\nsay item \"Sma\" of ages",
+  "set ages to dictionary where \"Sam\" is 20\nsay item \"Zed\" of ages",
+  "set d to dictionary where yes is 1",
+  "set d to empty dictionary\nset item (list of 1) of d to 2",
+  "set d to dictionary where 1 is 2\nremove 5 from d",
+  "set l to list of 1\nremove 1 from l",
+  "say keys of (list of 1)",
+  "set d to dictionary where 1 is 2\nsay item nothing of d",
+  "set d to dictionary where 2.5 is \"x\"\nsay item 2.50000000000001 of d\nsay item 2.6 of d",
 ];
 
 export function machinePrograms(seed, count) {

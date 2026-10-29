@@ -31,8 +31,8 @@ const USAGE = `usage:
   moth build --exe <file.moth> [--target windows|linux]
                               compile it to machine code with machine.moth, Moth's own compiler, and
                               nothing else: <file>.exe for Windows, or <file> for Linux; so far it
-                              takes numbers, yes, no and nothing, text, lists, variables, say, if,
-                              loops and functions
+                              takes numbers, yes, no and nothing, text, lists, records, dictionaries,
+                              variables, say, if, loops and functions
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
   moth js <file.moth>         show the JavaScript the JIT makes
   moth wasm <file.moth>       show the WebAssembly module the third engine makes
