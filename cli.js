@@ -3,7 +3,7 @@
 import { readFileSync, readSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, MothError } from "./moth.js";
+import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -115,6 +115,7 @@ function report(err, source, file) {
   if (!(err instanceof MothError)) throw err;
   const where = err.file ?? file; // a mistake in a file the program uses is shown in that file
   console.error(`${where ? `${where}:${err.line}:${err.col}: ${err.reason}` : err.message}\n${excerpt(err.file ? sources.get(err.file) ?? "" : source, err)}`);
+  if (err.trail.length) console.error(describeTrail(err.trail)); // the calls that led there
 }
 
 function build(file, source) {
@@ -131,11 +132,13 @@ ${vm}
 ${readDisk}
 {
   const source = ${JSON.stringify(source)};
+  const used = ${JSON.stringify(Object.fromEntries([...sources].filter(([, text]) => text !== undefined)))}; // for a mistake in a file it uses
   try {
     execute(${program}, console.log, Infinity, undefined, undefined, { read: readDisk, write: (name, data) => writeFileSync(name, data) }, process.argv.slice(2));
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
-    console.error(${JSON.stringify(basename(file))} + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(source, err));
+    console.error((err.file ?? ${JSON.stringify(basename(file))}) + ":" + err.line + ":" + err.col + ": " + err.reason + "\\n" + excerpt(err.file ? used[err.file] ?? "" : source, err));
+    if (err.trail.length) console.error(describeTrail(err.trail));
     process.exitCode = 1;
   }
 }

@@ -2,14 +2,16 @@
 // can copy this file into a compiled program as its runtime.
 
 // `value` is set by `fail with value`, so a program that called Moth code (see load()) can read it.
+// `trail` is the calls that led to the mistake (see trailOf).
 export class MothError extends Error {
-  constructor(at, message, value) {
+  constructor(at, message, value, trail = []) {
     super(`${at.file ? `${at.file}, ` : ""}line ${at.line}: ${message}`); // file: a file the program uses
     this.file = at.file || undefined;
     this.line = at.line;
     this.col = at.col;
     this.reason = message;
     this.value = value;
+    this.trail = trail;
     this.incomplete = at.type === "eof"; // the code ended too early, so the shell asks for more lines
   }
 }
@@ -20,11 +22,32 @@ export class MothError extends Error {
 export const catchable = (err) => err instanceof MothError && !err.final;
 export const caughtValue = (err) => (err.value !== undefined ? err.value : err.reason);
 
-export const fail = (at, message, value, final = false) => {
-  const err = new MothError(at, message, value);
+export const fail = (at, message, value, final = false, trail = []) => {
+  const err = new MothError(at, message, value, trail);
   if (final) err.final = true;
   throw err;
 };
+
+// The calls in progress when a mistake happened, innermost first: the function each was running, and where
+// it was called from. `calls` is [{ name, at }], innermost first. A function that called itself from the
+// same spot many times running is one entry, with how many `times`, so deep recursion is one line.
+export function trailOf(calls) {
+  const trail = [];
+  for (const { name, at } of calls) {
+    const last = trail.at(-1);
+    if (last && last.name === name && last.line === at.line && last.col === at.col && last.file === at.file) last.times++;
+    else trail.push({ name, line: at.line, col: at.col, file: at.file, times: 1 });
+  }
+  return trail;
+}
+
+// A trail as lines to show under the mistake, at most `limit` of them.
+export function describeTrail(trail, limit = 10) {
+  const lines = trail.slice(0, limit).map(({ name, line, file, times }) =>
+    `  in '${name}', called from ${file ? `${file}, ` : ""}line ${line}${times > 1 ? ` (${times.toLocaleString("en")} times)` : ""}`);
+  if (trail.length > limit) lines.push(`  ... and ${trail.length - limit} more`);
+  return lines.join("\n");
+}
 
 // Edits needed to turn one word into another, counting a swap of two neighbours as one ("sya" -> "say").
 function distance(a, b) {
@@ -853,7 +876,7 @@ export class Machine {
       const failure = err instanceof RangeError ? new Failure("a value got too big to fit in memory") : err;
       if (!(failure instanceof Failure)) throw err;
       const handler = failure.final ? undefined : this.handlers.pop();
-      if (!handler) fail(fn.at[pc], failure.message, failure.value, failure.final);
+      if (!handler) fail(fn.at[pc], failure.message, failure.value, failure.final, this.trail(fn));
       // back to where the `try` began: its function, its stack, then on to its `if it fails`
       frames.length = handler.frames;
       ({ fn, env, base } = handler);
@@ -866,6 +889,18 @@ export class Machine {
     }
     Object.assign(this, { fn, env, ip, base, steps, stack });
     return why;
+  }
+
+  // The calls in progress, for a mistake (see trailOf), while `fn` runs. Each frame was saved by a CALL, which
+  // has two operands, so the call it made is the instruction three before where it returns to.
+  trail(fn) {
+    const calls = [];
+    for (let i = this.frames.length - 1; i >= 0; i--) {
+      const caller = this.frames[i];
+      calls.push({ name: fn.name, at: caller.fn.at[caller.ip - 3] });
+      fn = caller.fn;
+    }
+    return trailOf(calls);
   }
 
   // For a debugger: the functions being run (outermost first), and every variable with a value that the

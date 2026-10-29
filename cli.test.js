@@ -92,12 +92,16 @@ test("moth wasm shows the WebAssembly module the third engine makes", (t) => {
   assert.match(result.stdout, /^;; \d+ bytes\n\(func \$init[\s\S]*\(func \$main[\s\S]*call \$moth\.say/);
 });
 
-test("moth run finds a used file next to the program, and points into it when it fails", (t) => {
+test("moth run finds a used file next to the program, and points into it when it fails, with the calls that led there", (t) => {
   const file = tempFile(t, "main.moth", 'use "lib.moth"\nsay double(21)\nbreak_it');
   writeFileSync(join(file, "..", "lib.moth"), "to double with n\n    return n * 2\nend\nto break_it\n    say 1 / 0\nend");
   const result = moth(["run", file]);
   assert.equal(result.stdout, "42\n");
-  assert.equal(result.stderr, "lib.moth:5:11: can't divide by zero\n    say 1 / 0\n          ^\n");
+  assert.equal(result.stderr, "lib.moth:5:11: can't divide by zero\n    say 1 / 0\n          ^\n  in 'break_it', called from line 3\n");
+  // a built program shows the trail too
+  assert.equal(moth(["build", file]).status, 0);
+  const built = node([file.replace(/\.moth$/, ".mjs")]);
+  assert.equal(built.stderr, "lib.moth:5:11: can't divide by zero\n    say 1 / 0\n          ^\n  in 'break_it', called from line 3\n");
 });
 
 test("moth run answers ask from what's typed in", (t) => {

@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -189,25 +189,36 @@ const MAX_DEPTH = 2000;
 function helpers(ats, print, draw, maxSteps, answer, disk, args = []) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
+    const calls = trail();
     depth = 0;
-    fail(at, message, value);
+    fail(at, message, value, false, calls);
   });
   const turtle = new Turtle(draw);
   let steps = 0;
   let depth = 0; // a failed call needs no undoing: any error ends the run
+  const running = []; // for each call in progress, the function it runs, and where it was called (a position)
+  const from = [];
+  const trail = () => {
+    const calls = [];
+    for (let i = depth - 1; i >= 0; i--) calls.push({ name: running[i].fn.name, at: ats[from[i]] });
+    return trailOf(calls);
+  };
   const tick = (k) => {
     if (++steps > maxSteps) {
+      const calls = trail();
       depth = 0;
-      fail(ats[k], stoppedMessage(maxSteps), undefined, true); // final: no try catches it
+      fail(ats[k], stoppedMessage(maxSteps), undefined, true, calls); // final: no try catches it
     }
   };
   const enter = (f, argc, name, k) => {
     checkInputs(f, argc, name, errors[k]);
     tick(k);
-    if (++depth > MAX_DEPTH) {
+    if (depth >= MAX_DEPTH) {
       depth = 0;
       throw new TooDeep();
     }
+    running[depth] = f;
+    from[depth++] = k;
   };
   const leave = (result) => (depth--, result);
   const ordered = (op, test) => (a, b, k) => (typeof a === "number" && typeof b === "number" ? test(a, b) : compare(op, a, b, errors[k]));

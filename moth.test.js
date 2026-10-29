@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, MothError } from "./moth.js";
+import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -519,7 +519,7 @@ function outcome(source, engine) {
   } catch (err) {
     if (!(err instanceof MothError)) assert.fail(`the ${engine} crashed with ${err.stack}\non this program:\n${source}`);
     assert.ok(err.line >= 1 && err.line <= source.split("\n").length && err.col >= 1, `bad position ${err.line}:${err.col} in:\n${source}`);
-    return { said, drawn, error: [err.message, err.col] };
+    return { said, drawn, error: [err.message, err.col, err.trail] };
   }
 }
 
@@ -863,4 +863,47 @@ test("use ... as keeps a file's names apart, on all three engines and in the com
   for (const source of [program, ...mistakes.map(([source]) => source)]) {
     assert.deepEqual(compiled((s) => moth(s, files), source), compiled((s) => compileToJs(s, reading), source), source);
   }
+});
+
+// ---------- error trails ----------
+
+// Each engine keeps track of the calls in progress its own way (the VM's frames, the JIT's arrays, an array
+// inside the WebAssembly module), and all three must give the same trail. The fuzzer compares them too.
+test("a mistake inside functions shows the calls that led to it, the same on all three engines", () => {
+  const files = { "lib.moth": "to boom\n    say 1 / 0\nend\nto go\n    boom()\nend" };
+  const cases = [
+    [[
+      "to average with numbers",
+      "    set total to 0",
+      "    for each n in numbers",
+      "        add n to total",
+      "    end",
+      "    return total / length of numbers",
+      "end",
+      "to report with groups",
+      "    for each g in groups",
+      '        say "average: " average(g)',
+      "    end",
+      "end",
+      "report(list of (list of 1, 2), empty list)",
+    ], [["average", 10, 1], ["report", 13, 1]], "  in 'average', called from line 10\n  in 'report', called from line 13"],
+    [["to countdown with n", "    if n is 0", "        say 1 / 0", "    end", "    countdown(n - 1)", "end", "countdown(3)"],
+      [["countdown", 5, 3], ["countdown", 7, 1]], "  in 'countdown', called from line 5 (3 times)\n  in 'countdown', called from line 7"],
+    [["to countdown with n", "    if n is 0", "        say 1 / 0", "    end", "    countdown(n - 1)", "end", "countdown(5000)"], // handed to the VM
+      [["countdown", 5, 5000], ["countdown", 7, 1]], "  in 'countdown', called from line 5 (5,000 times)\n  in 'countdown', called from line 7"],
+    [['use "lib.moth" as lib', "lib's go()"],
+      [["lib's boom", 5, 1], ["lib's go", 2, 1]], "  in 'lib's boom', called from lib.moth, line 5\n  in 'lib's go', called from line 2"],
+    [["to safe", "    try", "        say 1 / 0", "    if it fails", "        say 2", "    end", "end", "safe()", "say 1 / 0"], [], ""],
+    [["to spin", "    repeat while yes", "    end", "end", "spin()"], [["spin", 5, 1]], "  in 'spin', called from line 5"],
+  ];
+  for (const [lines, expected, shown] of cases) {
+    const source = lines.join("\n");
+    const vm = error(source, { engine: "vm", files: (name) => files[name], maxSteps: 100_000 });
+    assert.deepEqual(vm.trail.map(({ name, line, times }) => [name, line, times]), expected, source);
+    assert.equal(describeTrail(vm.trail), shown, source);
+    for (const engine of ["jit", "wasm"]) assert.deepEqual(error(source, { engine, files: (name) => files[name], maxSteps: 100_000 }).trail, vm.trail, `${engine}: ${source}`);
+  }
+  const deep = error("to dive with n\n    dive(n + 1)\nend\ndive(1)", { engine: "vm" }); // the VM's own limit
+  assert.equal(deep.reason, "too much recursion: a function kept calling itself");
+  assert.equal(describeTrail(deep.trail), "  in 'dive', called from line 2 (99,999 times)\n  in 'dive', called from line 4");
 });

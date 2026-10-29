@@ -7,7 +7,7 @@ import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
-export { MothError, excerpt } from "./vm.js";
+export { MothError, excerpt, describeTrail } from "./vm.js";
 
 // ---------- tokens ----------
 

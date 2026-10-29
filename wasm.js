@@ -12,7 +12,7 @@ import { Module, Code, ref, refNull } from "./wasm-binary.js";
 import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, makeRecord, fieldOf,
-  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile } from "./vm.js";
+  recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -811,6 +811,10 @@ class WasmCompiler extends Scope {
     this.tick(k);
     this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.add").e("global.set", ctx.depth).e("global.get", ctx.depth).e("i32.const", MAX_DEPTH).e("i32.gt_s");
     this.e("if").e("call", im.tooDeep).e("unreachable").e("end");
+    // for a mistake's trail: where this call is, and the function it runs, at 2 * depth - 2 and 2 * depth - 1
+    this.e("global.get", ctx.calls).e("global.get", ctx.depth).e("i32.const", 1).e("i32.shl").e("i32.const", 2).e("i32.sub").e("i32.const", k).e("array.set", T.ids);
+    this.e("global.get", ctx.calls).e("global.get", ctx.depth).e("i32.const", 1).e("i32.shl").e("i32.const", 1).e("i32.sub");
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 3).e("array.set", T.ids);
     this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 1);
     for (const a of args) this.e("local.get", a);
     this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 0).e("ref.cast", T.fn(args.length)).e("call_ref", T.fn(args.length)).note(e.name);
@@ -976,6 +980,7 @@ export function compileToWasmModule(program) {
     steps: named("steps", m.global(F64, true, new Code().emit("f64.const", 0))),
     maxSteps: named("maxSteps", m.global(F64, true, new Code().emit("f64.const", Infinity))),
     depth: named("depth", m.global(I32, true, new Code().emit("i32.const", 0))),
+    calls: named("calls", m.global(ref(T.ids), false, new Code().emit("i32.const", 2 * MAX_DEPTH).emit("array.new_default", T.ids))), // see call()
     init: m.func("init", [], []), // makes the text the program holds
     texts: [],
     id(name) {
@@ -999,6 +1004,17 @@ export function compileToWasmModule(program) {
   };
   const main = new WasmCompiler(null, "main", [], program, ctx);
   m.export("main", main.f.index);
+  // the calls in progress, for a mistake's trail: how many, and for each (outermost first), where it was made
+  // and the name of its function
+  for (const [label, params, write] of [
+    ["callDepth", [], (c) => c.emit("global.get", ctx.depth)],
+    ["callSite", [I32], (c) => c.emit("global.get", ctx.calls).emit("local.get", 0).emit("i32.const", 1).emit("i32.shl").emit("array.get", T.ids)],
+    ["callName", [I32], (c) => c.emit("global.get", ctx.calls).emit("local.get", 0).emit("i32.const", 1).emit("i32.shl").emit("i32.const", 1).emit("i32.add").emit("array.get", T.ids)],
+  ]) {
+    const f = m.func(label, params, [I32]);
+    write(f.code);
+    m.export(label, f.index);
+  }
   return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts };
 }
 
@@ -1020,8 +1036,13 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     lastError = err;
     throw err;
   };
+  const trail = () => {
+    const calls = [];
+    for (let i = x.callDepth() - 1; i >= 0; i--) calls.push({ name: names[x.callName(i)], at: ats[x.callSite(i)] });
+    return trailOf(calls);
+  };
   const errors = ats.map((at) => (message, value) => {
-    const err = new MothError(at, message, value);
+    const err = new MothError(at, message, value, trail());
     err.wasm = failing;
     failing = undefined;
     throwing(err);
@@ -1115,7 +1136,7 @@ function instantiate(module, { ats, names, messages, texts }, print, draw, maxSt
     callable: (f, name, k) => callable(toJs(f), names[name], errors[k]),
     checkInputs: (f, argc, name, k) => checkInputs(toJs(f), argc, names[name], errors[k]),
     stopped: (k) => {
-      const err = new MothError(ats[k], stoppedMessage(maxSteps));
+      const err = new MothError(ats[k], stoppedMessage(maxSteps), undefined, trail());
       err.final = true; // no try catches it
       throwing(err);
     },

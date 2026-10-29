@@ -1,6 +1,6 @@
 // Runs one Moth program off the page's main thread, so a loop that never ends can't freeze the page:
 // the page just ends this worker when Stop is pressed.
-import { run, memoryDisk, excerpt, MothError } from "./moth.js";
+import { run, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more
 const MAX_LINES = 10_000;
@@ -56,6 +56,7 @@ onmessage = ({ data: { source, engine, answers = [], files = {} } }) => {
   } catch (err) {
     if (err instanceof Waiting) return; // the page asks, and runs it again
     flush();
-    postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}` : `Moth itself crashed: ${err.message}` });
+    const trail = err instanceof MothError && err.trail.length ? `\n${describeTrail(err.trail)}` : ""; // the calls that led there
+    postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}${trail}` : `Moth itself crashed: ${err.message}` });
   }
 };
