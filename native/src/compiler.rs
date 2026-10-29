@@ -7,6 +7,74 @@ use crate::value::{closest, Value};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+// An instruction as the machine runs it: its opcode and up to three operands, read out of the code once, and
+// where the next instruction starts (see Function::decoded)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Ins {
+    pub op: u8,
+    pub a: i32,
+    pub b: i32,
+    pub c: i32,
+    pub d: i32, // and for an instruction made of several (see fuse), theirs
+    pub e: i32,
+    pub f: i32,
+    pub next: u32,
+}
+
+// A few instructions that often come together become one, at the first one's place, which then goes on to
+// where the last one would have. The ones after keep their places too, so a jump to one of them still works.
+// Whatever fails in the second or third reports the place of that one, which the instruction keeps.
+fn fuse(code: &mut [Ins]) {
+    let mut starts = vec![];
+    let mut ip = 0;
+    while ip < code.len() {
+        starts.push(ip);
+        ip = code[ip].next as usize;
+    }
+    for (k, &i) in starts.iter().enumerate() {
+        let at = |j: usize| starts.get(k + j).map(|&p| (p, code[p]));
+        let (Some((_, x)), second, third) = (at(0), at(1), at(2)) else { continue };
+        let fused = match (x.op as i32, second, third) {
+            (op::GET, Some((_, y)), Some((p, z))) if y.op as i32 == op::CONST && z.op as i32 == op::COMPARE => {
+                Some(Ins { op: op::GET_CONST_COMPARE as u8, d: y.a, e: z.a, f: p as i32, next: z.next, ..x })
+            }
+            (op::GET, Some((_, y)), Some((p, z)))
+                if y.op as i32 == op::CONST && [op::ADD, op::SUB, op::MUL, op::DIV].contains(&(z.op as i32)) =>
+            {
+                Some(Ins { op: op::GET_CONST_MATH as u8, d: y.a, e: z.op as i32, f: p as i32, next: z.next, ..x })
+            }
+            (op::GET, Some((_, y)), Some((p, z))) if y.op as i32 == op::GET && z.op as i32 == op::COMPARE => {
+                Some(Ins { op: op::GET_GET_COMPARE as u8, d: z.a, e: k as i32 + 1, f: p as i32, next: z.next, ..x })
+            }
+            (op::GET, Some((_, y)), Some((p, z)))
+                if y.op as i32 == op::GET && [op::ADD, op::SUB, op::MUL, op::DIV].contains(&(z.op as i32)) =>
+            {
+                Some(Ins { op: op::GET_GET_MATH as u8, d: z.op as i32, e: k as i32 + 1, f: p as i32, next: z.next, ..x })
+            }
+            (op::ITER_NEXT, Some((_, y)), _) if y.op as i32 == op::SET => {
+                Some(Ins { op: op::ITER_SET as u8, b: y.a, c: y.b, next: y.next, ..x })
+            }
+            (op::RANGE_NEXT, Some((_, y)), _) if y.op as i32 == op::SET => {
+                Some(Ins { op: op::RANGE_SET as u8, b: y.a, c: y.b, next: y.next, ..x })
+            }
+            (op::GET, Some((p, y)), _) if y.op as i32 == op::ADD_TO => {
+                Some(Ins { op: op::GET_ADD_TO as u8, d: y.a, e: y.b, f: p as i32, next: y.next, ..x })
+            }
+            (op::GET, Some((_, y)), _) if y.op as i32 == op::SET => Some(Ins { op: op::GET_SET as u8, d: y.a, e: y.b, next: y.next, ..x }),
+            (op::CONST, Some((_, y)), _) if y.op as i32 == op::SET => {
+                Some(Ins { op: op::CONST_SET as u8, b: y.a, c: y.b, next: y.next, ..x })
+            }
+            _ => None,
+        };
+        if let Some(mut f) = fused {
+            if [op::GET_GET_COMPARE, op::GET_GET_MATH].contains(&(f.op as i32)) {
+                f.e = starts[f.e as usize] as i32; // where the second GET is
+            }
+            code[i] = f;
+        }
+    }
+}
+
 // Each opcode and how many operands follow it, in vm.js's order
 pub const OPCODES: [(&str, usize); 55] = [
     ("GET", 3),
@@ -121,6 +189,16 @@ pub mod op {
     pub const RANDOM: i32 = 52;
     pub const HANDLE: i32 = 53;
     pub const EVERY: i32 = 54;
+    // Instructions the machine makes of a few that often come together (see fuse), which bytecode never holds
+    pub const RANGE_SET: i32 = 100; // RANGE_NEXT, then SET the count's variable
+    pub const GET_ADD_TO: i32 = 101; // GET, then ADD_TO
+    pub const GET_CONST_COMPARE: i32 = 102; // GET, CONST, COMPARE
+    pub const GET_CONST_MATH: i32 = 103; // GET, CONST, then ADD, SUB, MUL or DIV
+    pub const CONST_SET: i32 = 104; // CONST, then SET
+    pub const GET_SET: i32 = 105; // GET, then SET
+    pub const ITER_SET: i32 = 106; // ITER_NEXT, then SET the loop's variable
+    pub const GET_GET_COMPARE: i32 = 107; // GET, GET, COMPARE
+    pub const GET_GET_MATH: i32 = 108; // GET, GET, then ADD, SUB, MUL or DIV
 }
 use op::*;
 
@@ -178,9 +256,45 @@ pub struct Function {
     pub consts: Vec<Const>,
     pub at: Vec<Option<Pos>>, // where each instruction came from, at the instruction's own index
     pub written: std::collections::HashMap<usize, Rc<str>>, // each number constant as written, by its place
+    pub flat: std::cell::OnceCell<bool>, // whether it makes no functions, so its variables needn't outlive a call (see vm.rs)
+    pub decoded: std::cell::OnceCell<Rc<[Ins]>>, // its code as the machine runs it
 }
 
 impl Function {
+    // Whether nothing made while it runs can keep its variables: it makes no function, sets up no handler. Then
+    // a call keeps them on the machine's own list of locals, not in an environment of their own.
+    // The code with each instruction read out once, at the instruction's own index: the machine runs this
+    pub fn decoded(&self) -> Rc<[Ins]> {
+        self.decoded
+            .get_or_init(|| {
+                let mut out = vec![Ins::default(); self.code.len()];
+                let mut ip = 0;
+                while ip < self.code.len() {
+                    let op = self.code[ip];
+                    let n = OPCODES[op as usize].1;
+                    let arg = |k: usize| if k < n { self.code[ip + 1 + k] } else { 0 };
+                    out[ip] = Ins { op: op as u8, a: arg(0), b: arg(1), c: arg(2), next: (ip + 1 + n) as u32, ..Ins::default() };
+                    ip += 1 + n;
+                }
+                fuse(&mut out);
+                Rc::from(out)
+            })
+            .clone()
+    }
+
+    pub fn is_flat(&self) -> bool {
+        *self.flat.get_or_init(|| {
+            let mut ip = 0;
+            while ip < self.code.len() {
+                let op = self.code[ip];
+                if op == op::MAKE_FN || op == op::HANDLE || op == op::EVERY {
+                    return false;
+                }
+                ip += 1 + OPCODES[op as usize].1;
+            }
+            true
+        })
+    }
     pub fn text(&self, i: i32) -> Rc<str> {
         match &self.consts[i as usize] {
             Const::Val(Value::Text(t)) => t.clone(),
@@ -262,6 +376,8 @@ impl Compiler {
                 consts: vec![],
                 at: vec![],
                 written: Default::default(),
+                flat: Default::default(),
+                decoded: Default::default(),
             },
             slots: HashMap::new(),
             order: vec![],

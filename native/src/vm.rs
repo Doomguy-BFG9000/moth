@@ -892,11 +892,16 @@ pub fn new_env(f: &Function, parent: Option<Rc<Env>>) -> Rc<Env> {
     Rc::new(Env { parent, slots: RefCell::new(vec![Value::Unset; f.nslots + 1]) })
 }
 
+// A call in progress, saved while the function it called runs. A flat function (Function::is_flat) keeps its
+// variables in `locals` from `lbase` on, and `env` is then the environment it was made in; any other has an
+// environment of its own, made for the call.
 struct Frame {
     func: Rc<Function>,
     ip: usize,
     env: Rc<Env>,
     base: usize,
+    lbase: usize,
+    flat: bool,
 }
 
 struct Handler {
@@ -906,6 +911,9 @@ struct Handler {
     func: Rc<Function>,
     env: Rc<Env>,
     base: usize,
+    lbase: usize,
+    flat: bool,
+    locals: usize,
 }
 
 pub struct Machine<'h> {
@@ -932,11 +940,15 @@ impl<'h> Machine<'h> {
     // loop works on locals, and a mistake leaves it with `break 'run`, which keeps them in registers.
     pub fn run(&mut self, main: Rc<Function>, env: Rc<Env>) -> Result<(), MothError> {
         let mut func = main;
+        let mut code = func.decoded(); // func's code, as the machine runs it
         let mut env = env;
         let mut ip = 0usize;
         let mut base = 0usize;
         let mut steps = 0f64;
         let mut stack: Vec<Value> = Vec::with_capacity(64);
+        let mut locals: Vec<Value> = Vec::with_capacity(64); // flat functions' variables (see Frame)
+        let mut lbase = 0usize;
+        let mut flat = false;
         let mut frames: Vec<Frame> = Vec::new();
         let mut handlers: Vec<Handler> = Vec::new();
         let mut caught = Value::Nothing;
@@ -962,31 +974,131 @@ impl<'h> Machine<'h> {
                         stack.pop().unwrap()
                     };
                 }
+                // a variable's value, by its depth and slot (see Frame for where a flat function keeps them)
+                macro_rules! var {
+                    ($d:expr, $slot:expr) => {{
+                        let (d, slot) = ($d, $slot as usize);
+                        if !flat {
+                            env_at(&env, d).slots.borrow()[slot].clone()
+                        } else if d == 0 {
+                            locals[lbase + slot].clone()
+                        } else {
+                            env_at(&env, d - 1).slots.borrow()[slot].clone()
+                        }
+                    }};
+                }
+                macro_rules! set_var {
+                    ($d:expr, $slot:expr, $v:expr) => {{
+                        let (d, slot, v) = ($d, $slot as usize, $v);
+                        if !flat {
+                            env_at(&env, d).slots.borrow_mut()[slot] = v;
+                        } else if d == 0 {
+                            locals[lbase + slot] = v;
+                        } else {
+                            env_at(&env, d - 1).slots.borrow_mut()[slot] = v;
+                        }
+                    }};
+                }
+                // GET's value, or its mistake
+                macro_rules! got {
+                    ($ins:expr) => {{
+                        let v = var!($ins.a, $ins.b);
+                        if let Value::Unset = v {
+                            fail!(no_value(&func.text($ins.c)));
+                        }
+                        v
+                    }};
+                }
+                // ADD_TO's work: adds `value` to the variable at depth and slot, named by constant `name`
+                macro_rules! add_to {
+                    ($d:expr, $slot:expr, $name:expr, $value:expr) => {{
+                        let (d, slot, value) = ($d, $slot as usize, $value);
+                        let e = if flat && d > 0 { env_at(&env, d - 1) } else { env_at(&env, d) };
+                        let mut slots_of_env;
+                        let (slots, slot): (&mut [Value], usize) = if flat && d == 0 {
+                            (&mut locals[..], lbase + slot)
+                        } else {
+                            slots_of_env = e.slots.borrow_mut();
+                            (&mut slots_of_env[..], slot)
+                        };
+                        let updated = match (&mut slots[slot], &value) {
+                            (Value::Num(x), Value::Num(y)) => {
+                                *x += y;
+                                None
+                            }
+                            (Value::List(l), _) => {
+                                l.borrow_mut().push(value);
+                                None
+                            }
+                            (current, _) => Some(check!(add_into(current, &value, &func.text($name)))),
+                        };
+                        if let Some(u) = updated {
+                            slots[slot] = u;
+                        }
+                    }};
+                }
+                // ADD, SUB, MUL or DIV (by its opcode) of two values
+                macro_rules! math {
+                    ($op:expr, $a:expr, $b:expr) => {{
+                        let (op, a, b) = ($op, $a, $b);
+                        match (&a, &b) {
+                            (Value::Num(x), Value::Num(y)) if op != DIV || *y != 0.0 => Value::Num(match op {
+                                ADD => x + y,
+                                SUB => x - y,
+                                MUL => x * y,
+                                _ => x / y,
+                            }),
+                            _ if op == ADD => check!(plus(&a, &b)),
+                            _ => check!(arithmetic(
+                                if op == SUB {
+                                    "-"
+                                } else if op == MUL {
+                                    "*"
+                                } else {
+                                    "/"
+                                },
+                                &a,
+                                &b
+                            )),
+                        }
+                    }};
+                }
                 pc = ip;
-                let op = func.code[ip];
-                ip += 1;
+                let ins = code[ip];
+                let op = ins.op as i32;
+                ip = ins.next as usize;
                 match op {
                     GET => {
-                        let (d, slot) = (func.code[ip], func.code[ip + 1] as usize);
-                        let v = env_at(&env, d).slots.borrow()[slot].clone();
+                        let (d, slot) = (ins.a, ins.b as usize);
+                        let v = if !flat {
+                            env_at(&env, d).slots.borrow()[slot].clone()
+                        } else if d == 0 {
+                            locals[lbase + slot].clone()
+                        } else {
+                            env_at(&env, d - 1).slots.borrow()[slot].clone()
+                        };
                         if let Value::Unset = v {
-                            fail!(no_value(&func.text(func.code[ip + 2])));
+                            fail!(no_value(&func.text(ins.c)));
                         }
-                        ip += 3;
                         stack.push(v);
                     }
                     SET => {
                         let v = pop!();
-                        env_at(&env, func.code[ip]).slots.borrow_mut()[func.code[ip + 1] as usize] = v;
-                        ip += 2;
+                        let (d, slot) = (ins.a, ins.b as usize);
+                        if !flat {
+                            env_at(&env, d).slots.borrow_mut()[slot] = v;
+                        } else if d == 0 {
+                            locals[lbase + slot] = v;
+                        } else {
+                            env_at(&env, d - 1).slots.borrow_mut()[slot] = v;
+                        }
                     }
                     CONST => {
-                        let Const::Val(v) = &func.consts[func.code[ip] as usize] else { unreachable!() };
+                        let Const::Val(v) = &func.consts[ins.a as usize] else { unreachable!() };
                         stack.push(v.clone());
-                        ip += 1;
                     }
                     JUMP => {
-                        let to = func.code[ip] as usize;
+                        let to = ins.a as usize;
                         if to < ip {
                             steps += 1.0;
                             if steps > max_steps {
@@ -996,15 +1108,13 @@ impl<'h> Machine<'h> {
                         ip = to;
                     }
                     JUMP_IF_FALSE => {
-                        let to = func.code[ip] as usize;
-                        ip += 1;
+                        let to = ins.a as usize;
                         if !truthy(&pop!()) {
                             ip = to;
                         }
                     }
                     COMPARE => {
-                        let o = func.code[ip] as usize;
-                        ip += 1;
+                        let o = ins.a as usize;
                         let b = pop!();
                         let a = pop!();
                         let r = match (&a, &b) {
@@ -1060,18 +1170,23 @@ impl<'h> Machine<'h> {
                         }
                     }
                     GET_FN => {
-                        let f = env_at(&env, func.code[ip]).slots.borrow()[func.code[ip + 1] as usize].clone();
+                        let (d, slot) = (ins.a, ins.b as usize);
+                        let f = if !flat {
+                            env_at(&env, d).slots.borrow()[slot].clone()
+                        } else if d == 0 {
+                            locals[lbase + slot].clone()
+                        } else {
+                            env_at(&env, d - 1).slots.borrow()[slot].clone()
+                        };
                         match f {
                             Value::Func(_) => stack.push(f),
-                            Value::Unset => fail!(format!("there is no function called '{}'", func.text(func.code[ip + 2]))),
-                            other => fail!(format!("'{}' is {}, not a function", func.text(func.code[ip + 2]), kind_of(&other))),
+                            Value::Unset => fail!(format!("there is no function called '{}'", func.text(ins.c))),
+                            other => fail!(format!("'{}' is {}, not a function", func.text(ins.c), kind_of(&other))),
                         }
-                        ip += 3;
                     }
                     CALL => {
-                        let argc = func.code[ip] as usize;
-                        let name_at = func.code[ip + 1];
-                        ip += 2;
+                        let argc = ins.a as usize;
+                        let name_at = ins.b;
                         let first = stack.len() - argc;
                         let Value::Func(callee) = stack[first - 1].clone() else { unreachable!() };
                         let n = callee.func.params.len();
@@ -1096,16 +1211,35 @@ impl<'h> Machine<'h> {
                         if steps > max_steps {
                             break 'run stopped(max_steps);
                         }
-                        let inner = new_env(&callee.func, Some(callee.env.clone()));
-                        {
-                            let mut slots = inner.slots.borrow_mut();
-                            for (i, v) in stack.drain(first..).enumerate() {
-                                slots[i + 1] = v;
+                        let callee_flat = callee.func.is_flat();
+                        let (inner, inner_lbase) = if callee_flat {
+                            // its variables on `locals`, its inputs first after slot 0
+                            let lb = locals.len();
+                            locals.push(Value::Unset);
+                            locals.extend(stack.drain(first..));
+                            locals.resize(lb + callee.func.nslots + 1, Value::Unset);
+                            (callee.env.clone(), lb)
+                        } else {
+                            let inner = new_env(&callee.func, Some(callee.env.clone()));
+                            {
+                                let mut slots = inner.slots.borrow_mut();
+                                for (i, v) in stack.drain(first..).enumerate() {
+                                    slots[i + 1] = v;
+                                }
                             }
-                        }
+                            (inner, lbase)
+                        };
                         stack.pop();
                         let caller = std::mem::replace(&mut func, callee.func.clone());
-                        frames.push(Frame { func: caller, ip, env: std::mem::replace(&mut env, inner), base });
+                        code = func.decoded();
+                        frames.push(Frame {
+                            func: caller,
+                            ip,
+                            env: std::mem::replace(&mut env, inner),
+                            base,
+                            lbase: std::mem::replace(&mut lbase, inner_lbase),
+                            flat: std::mem::replace(&mut flat, callee_flat),
+                        });
                         ip = 0;
                         base = stack.len();
                     }
@@ -1120,17 +1254,22 @@ impl<'h> Machine<'h> {
                         let value = pop!();
                         stack.truncate(base);
                         stack.push(value);
+                        if flat {
+                            locals.truncate(lbase);
+                        }
                         func = frame.func;
+                        code = func.decoded();
                         ip = frame.ip;
                         env = frame.env;
                         base = frame.base;
+                        lbase = frame.lbase;
+                        flat = frame.flat;
                     }
                     POP => {
                         stack.pop();
                     }
                     AND => {
-                        let to = func.code[ip] as usize;
-                        ip += 1;
+                        let to = ins.a as usize;
                         if truthy(stack.last().unwrap()) {
                             stack.pop();
                         } else {
@@ -1138,8 +1277,7 @@ impl<'h> Machine<'h> {
                         }
                     }
                     OR => {
-                        let to = func.code[ip] as usize;
-                        ip += 1;
+                        let to = ins.a as usize;
                         if truthy(stack.last().unwrap()) {
                             ip = to;
                         } else {
@@ -1156,8 +1294,7 @@ impl<'h> Machine<'h> {
                         stack.push(Value::Bool(!truthy(&v)));
                     }
                     LIST => {
-                        let n = func.code[ip] as usize;
-                        ip += 1;
+                        let n = ins.a as usize;
                         let items = stack.split_off(stack.len() - n);
                         stack.push(list(items));
                     }
@@ -1200,8 +1337,7 @@ impl<'h> Machine<'h> {
                         check!(put_item(&seq, &i, v));
                     }
                     DICT => {
-                        let n = func.code[ip] as usize;
-                        ip += 1;
+                        let n = ins.a as usize;
                         let start = stack.len() - n;
                         let mut d = Dict::default();
                         for pair in stack[start..].chunks(2) {
@@ -1226,29 +1362,95 @@ impl<'h> Machine<'h> {
                     }
                     ADD_TO => {
                         let value = pop!();
-                        let e = env_at(&env, func.code[ip]);
-                        let slot = func.code[ip + 1] as usize;
-                        let mut slots = e.slots.borrow_mut();
-                        let updated = match (&mut slots[slot], &value) {
-                            (Value::Num(x), Value::Num(y)) => {
-                                *x += y;
-                                None
-                            }
-                            (Value::List(l), _) => {
-                                l.borrow_mut().push(value);
-                                None
-                            }
-                            (current, _) => Some(check!(add_into(current, &value, &func.text(func.code[ip + 2])))),
-                        };
-                        if let Some(u) = updated {
-                            slots[slot] = u;
+                        add_to!(ins.a, ins.b, ins.c, value);
+                    }
+                    // the instructions fuse() makes: each does what its parts would, and fails as they would
+                    RANGE_SET => {
+                        let top = stack.len();
+                        let (Value::Num(next), Value::Num(last)) = (&stack[top - 2], &stack[top - 1]) else { unreachable!() };
+                        let (next, last) = (*next, *last);
+                        if num::at_most(next, last) {
+                            stack[top - 2] = Value::Num(next + 1.0);
+                            set_var!(ins.b, ins.c, Value::Num(next));
+                        } else {
+                            stack.truncate(top - 2);
+                            ip = ins.a as usize;
                         }
-                        drop(slots);
-                        ip += 3;
+                    }
+                    GET_ADD_TO => {
+                        let value = got!(ins);
+                        pc = ins.f as usize;
+                        add_to!(ins.d, ins.e, code[pc].c, value);
+                    }
+                    GET_SET => {
+                        let value = got!(ins);
+                        set_var!(ins.d, ins.e, value);
+                    }
+                    ITER_SET => {
+                        let next = {
+                            let Value::Iter(it) = stack.last().unwrap() else { unreachable!() };
+                            let mut it = it.borrow_mut();
+                            if it.i < it.items.len() {
+                                it.i += 1;
+                                Some(it.items[it.i - 1].clone())
+                            } else {
+                                None
+                            }
+                        };
+                        match next {
+                            Some(v) => set_var!(ins.b, ins.c, v),
+                            None => {
+                                stack.pop();
+                                ip = ins.a as usize;
+                            }
+                        }
+                    }
+                    GET_GET_COMPARE => {
+                        let a = got!(ins);
+                        pc = ins.e as usize;
+                        let b = got!(code[pc]);
+                        let o = ins.d as usize;
+                        let r = match (&a, &b) {
+                            (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => compare_numbers(o, *x, *y),
+                            _ => {
+                                pc = ins.f as usize;
+                                check!(compare(o, &a, &b))
+                            }
+                        };
+                        stack.push(Value::Bool(r));
+                    }
+                    GET_GET_MATH => {
+                        let a = got!(ins);
+                        pc = ins.e as usize;
+                        let b = got!(code[pc]);
+                        pc = ins.f as usize;
+                        stack.push(math!(ins.d, a, b));
+                    }
+                    CONST_SET => {
+                        let Const::Val(v) = &func.consts[ins.a as usize] else { unreachable!() };
+                        set_var!(ins.b, ins.c, v.clone());
+                    }
+                    GET_CONST_COMPARE => {
+                        let a = got!(ins);
+                        let Const::Val(b) = &func.consts[ins.d as usize] else { unreachable!() };
+                        let o = ins.e as usize;
+                        let r = match (&a, b) {
+                            (Value::Num(x), Value::Num(y)) if o < 5 || (o == 5 && *y != 0.0) => compare_numbers(o, *x, *y),
+                            _ => {
+                                pc = ins.f as usize;
+                                check!(compare(o, &a, b))
+                            }
+                        };
+                        stack.push(Value::Bool(r));
+                    }
+                    GET_CONST_MATH => {
+                        let a = got!(ins);
+                        let Const::Val(b) = &func.consts[ins.d as usize] else { unreachable!() };
+                        pc = ins.f as usize;
+                        stack.push(math!(ins.e, a, b.clone()));
                     }
                     SAY => {
-                        let n = func.code[ip] as usize;
-                        ip += 1;
+                        let n = ins.a as usize;
                         let start = stack.len() - n;
                         let mut line = String::new();
                         for p in &stack[start..] {
@@ -1266,8 +1468,7 @@ impl<'h> Machine<'h> {
                         }
                     },
                     REPEAT_NEXT => {
-                        let exit = func.code[ip] as usize;
-                        ip += 1;
+                        let exit = ins.a as usize;
                         let top = stack.len() - 1;
                         let Value::Num(left) = stack[top] else { unreachable!() };
                         if left > 0.0 {
@@ -1284,8 +1485,7 @@ impl<'h> Machine<'h> {
                         }
                     }
                     RANGE_NEXT => {
-                        let exit = func.code[ip] as usize;
-                        ip += 1;
+                        let exit = ins.a as usize;
                         let top = stack.len();
                         let (Value::Num(next), Value::Num(last)) = (&stack[top - 2], &stack[top - 1]) else { unreachable!() };
                         let (next, last) = (*next, *last);
@@ -1303,8 +1503,7 @@ impl<'h> Machine<'h> {
                         stack.push(Value::Iter(Rc::new(RefCell::new(Iter { items, i: 0 }))));
                     }
                     ITER_NEXT => {
-                        let exit = func.code[ip] as usize;
-                        ip += 1;
+                        let exit = ins.a as usize;
                         let next = {
                             let Value::Iter(it) = stack.last().unwrap() else { unreachable!() };
                             let mut it = it.borrow_mut();
@@ -1324,14 +1523,12 @@ impl<'h> Machine<'h> {
                         }
                     }
                     MAKE_FN => {
-                        let Const::Func(f) = &func.consts[func.code[ip] as usize] else { unreachable!() };
+                        let Const::Func(f) = &func.consts[ins.a as usize] else { unreachable!() };
                         stack.push(Value::Func(Rc::new(Closure { func: f.clone(), env: env.clone() })));
-                        ip += 1;
                     }
-                    UNDEFINED => fail!(func.text(func.code[ip]).to_string()),
+                    UNDEFINED => fail!(func.text(ins.a).to_string()),
                     RECORD => {
-                        let Const::Fields(fields) = &func.consts[func.code[ip] as usize] else { unreachable!() };
-                        ip += 1;
+                        let Const::Fields(fields) = &func.consts[ins.a as usize] else { unreachable!() };
                         let start = stack.len() - fields.len();
                         let mut r = Record::default();
                         for (f, v) in fields.iter().zip(stack.drain(start..)) {
@@ -1340,8 +1537,7 @@ impl<'h> Machine<'h> {
                         stack.push(Value::Record(Rc::new(RefCell::new(r))));
                     }
                     FIELD => {
-                        let k = func.code[ip];
-                        ip += 1;
+                        let k = ins.a;
                         let record = pop!();
                         let Value::Record(r) = &record else {
                             fail!(format!("can't take '{}' of {}", func.text(k), kind_of(&record)));
@@ -1358,16 +1554,14 @@ impl<'h> Machine<'h> {
                         }
                     }
                     RECORD_REF => {
-                        let k = func.code[ip];
-                        ip += 1;
+                        let k = ins.a;
                         let record = stack.last().unwrap();
                         if !matches!(record, Value::Record(_)) {
                             fail!(format!("can only change '{}' of a record, not {}", func.text(k), kind_of(record)));
                         }
                     }
                     SET_FIELD => {
-                        let field = func.text(func.code[ip]);
-                        ip += 1;
+                        let field = func.text(ins.a);
                         let value = pop!();
                         let Value::Record(r) = pop!() else { unreachable!() };
                         r.borrow_mut().set(field, value);
@@ -1382,8 +1576,7 @@ impl<'h> Machine<'h> {
                         }
                     }
                     READ => {
-                        let bytes = func.code[ip] == 1;
-                        ip += 1;
+                        let bytes = ins.a == 1;
                         let name = pop!();
                         let Value::Text(n) = &name else {
                             fail!(format!("a file name is text, not {}", kind_of(&name)));
@@ -1413,14 +1606,12 @@ impl<'h> Machine<'h> {
                         }
                     }
                     HANDLE => {
-                        let event = EVENTS[func.code[ip] as usize];
-                        ip += 1;
+                        let event = EVENTS[ins.a as usize];
                         stack.pop(); // the handler
                         self.listeners.push(Listener { event, interval: None });
                     }
                     EVERY => {
-                        let unit = func.code[ip] as f64;
-                        ip += 1;
+                        let unit = ins.a as f64;
                         stack.pop(); // the handler
                         match pop!() {
                             Value::Num(x) if x > 0.0 && x != f64::INFINITY => {
@@ -1449,9 +1640,8 @@ impl<'h> Machine<'h> {
                         stack.push(list(args.iter().map(|a| text(a)).collect()));
                     }
                     EXPECT => {
-                        let o = func.code[ip];
-                        let negate = func.code[ip + 1] == 1;
-                        ip += 2;
+                        let o = ins.a;
+                        let negate = ins.b == 1;
                         if o < 0 {
                             let v = pop!();
                             if !truthy(&v) {
@@ -1471,22 +1661,41 @@ impl<'h> Machine<'h> {
                     }
                     TRY => {
                         handlers.push(Handler {
-                            ip: func.code[ip] as usize,
+                            ip: ins.a as usize,
                             frames: frames.len(),
                             stack: stack.len(),
                             func: func.clone(),
                             env: env.clone(),
                             base,
+                            lbase,
+                            flat,
+                            locals: locals.len(),
                         });
-                        ip += 1;
                     }
                     END_TRY => {
                         handlers.pop();
                     }
                     CAUGHT => stack.push(caught.clone()),
                     BUILTIN => {
-                        let index = func.code[ip] as usize;
-                        ip += 1;
+                        let index = ins.a as usize;
+                        // `a bit and b`, `bit or`, `bit xor` (7, 8, 9) on whole numbers from 0 to 2^53 - 1: straight here
+                        if (7..=9).contains(&index) {
+                            let top = stack.len();
+                            if let (Value::Num(x), Value::Num(y)) = (&stack[top - 2], &stack[top - 1]) {
+                                let whole = |n: f64| num::is_integer(n) && (0.0..=MAX_BITS).contains(&n);
+                                if whole(*x) && whole(*y) {
+                                    let (a, b) = (*x as u64, *y as u64);
+                                    let made = match index {
+                                        7 => a & b,
+                                        8 => a | b,
+                                        _ => a ^ b,
+                                    };
+                                    stack.truncate(top - 2);
+                                    stack.push(Value::Num(made as f64));
+                                    continue;
+                                }
+                            }
+                        }
                         let start = stack.len() - BUILTINS[index].1;
                         let made = check!(builtin(index, &stack[start..]));
                         stack.truncate(start);
@@ -1498,13 +1707,12 @@ impl<'h> Machine<'h> {
                         break 'run Failure { message, value: Some(v), last: false };
                     }
                     TURTLE => {
-                        let action = func.code[ip] as usize;
-                        ip += 1;
+                        let action = ins.a as usize;
                         let bare = matches!(TURTLE_ACTIONS[action], "up" | "down" | "clear");
                         let value = if bare { None } else { stack.pop() };
                         check!(self.turtle.act(action, value, self.host));
                     }
-                    LINE => ip += 1,
+                    LINE => {}
                     HALT => break 'run Failure { message: String::new(), value: None, last: true },
                     _ => unreachable!("opcode {op}"),
                 }
@@ -1523,8 +1731,12 @@ impl<'h> Machine<'h> {
             // back to where the `try` began: its function, its stack, then on to its `if it fails`
             frames.truncate(h.frames);
             func = h.func;
+            code = func.decoded();
             env = h.env;
             base = h.base;
+            lbase = h.lbase;
+            flat = h.flat;
+            locals.truncate(h.locals);
             stack.truncate(h.stack);
             ip = h.ip;
             caught = match failure.value {

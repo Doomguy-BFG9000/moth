@@ -12,3 +12,5 @@ path = "src/main.rs"
 [profile.release]
 opt-level = 3
 debug = false
+codegen-units = 1 # one unit, so the machine's loop is optimised as a whole
+lto = "fat"

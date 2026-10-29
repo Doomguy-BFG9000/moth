@@ -237,7 +237,19 @@ impl<'t> Reader<'t> {
             });
         }
         let nslots = names.len() - 1;
-        Ok(Function { name, params, kinds, nslots, names, code, consts, at, written })
+        Ok(Function {
+            name,
+            params,
+            kinds,
+            nslots,
+            names,
+            code,
+            consts,
+            at,
+            written,
+            flat: Default::default(),
+            decoded: Default::default(),
+        })
     }
 }
 

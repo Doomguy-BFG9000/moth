@@ -142,6 +142,9 @@ pub fn at_most(a: f64, b: f64) -> bool {
 // whole, to 15 digits
 pub fn divisible(a: f64, b: f64) -> bool {
     if is_integer(a) && is_integer(b) {
+        if a.abs() < 9007199254740992.0 && b.abs() < 9007199254740992.0 {
+            return (a as i64) % (b as i64) == 0; // the same answer for whole numbers this size, without a float's remainder
+        }
         a % b == 0.0
     } else {
         is_integer(canon(a / b))
