@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -141,7 +141,7 @@ test("moth run passes on arguments, and the program reads and writes files where
   writeFileSync(join(dir, "in.txt"), "hello");
   const inDir = (args) => spawnSync(process.execPath, args, { cwd: dir, encoding: "utf8" });
   for (const [engine, out] of [["jit", "a.txt"], ["wasm", "b.txt"], ["vm", "c.txt"]]) {
-    const result = inDir([CLI, "run", file, "--engine", engine, "in.txt", out]);
+    const result = inDir([CLI, "run", file, "--engine", engine, "--allow-read", "--allow-write", "in.txt", out]);
     assert.equal(result.stdout, `wrote ${out}\n`, engine);
     assert.equal(readFileSync(join(dir, out), "utf8"), "HELLO", engine);
   }
@@ -149,9 +149,52 @@ test("moth run passes on arguments, and the program reads and writes files where
   const built = inDir([file.replace(/\.moth$/, ".mjs"), "in.txt", "d.txt"]);
   assert.equal(built.stdout, "wrote d.txt\n");
   assert.equal(readFileSync(join(dir, "d.txt"), "utf8"), "HELLO");
-  const missing = inDir([CLI, "run", file, "nowhere.txt", "e.txt"]);
+  const missing = inDir([CLI, "run", file, "--allow-read", "nowhere.txt", "e.txt"]);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /shout\.moth:1:13: there is no file called 'nowhere\.txt'/);
+});
+
+// a site on this computer, for going online: it serves /sales.csv, and nothing else
+async function site(t) {
+  const script = [
+    "const server = require('node:http').createServer((request, reply) => {",
+    "  if (request.url !== '/sales.csv') return reply.writeHead(404).end('no');",
+    "  reply.writeHead(200, { 'content-type': 'text/csv' }).end('Name,Price\\nTea,2.5\\nCake,4\\n');",
+    "});",
+    "server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address().port)));",
+  ].join("\n");
+  const server = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => server.kill());
+  const port = await new Promise((resolve) => server.stdout.once("data", (d) => resolve(String(d))));
+  return `http://127.0.0.1:${port}`;
+}
+
+test("moth run asks before a program reads or writes a file or goes online, and --allow-... let it", async (t) => {
+  const url = await site(t);
+  const file = tempFile(t, "copy.moth", [
+    'write uppercase of read "in.txt" to "out.txt"',
+    'say "copied"',
+    `set sales to read table "${url}/sales.csv"`,
+    "say total of price in sales",
+    "try",
+    `    say read "${url}/missing"`,
+    "if it fails with why",
+    "    say why",
+    "end",
+  ].join("\n"));
+  const dir = dirname(file);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  const inDir = (...flags) => spawnSync(process.execPath, [CLI, "run", file, ...flags], { cwd: dir, encoding: "utf8", input: "" }); // no one to ask
+  const none = inDir();
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /copy\.moth:1:20: can't read 'in\.txt': this program isn't allowed to read files \(start it with --allow-read\)/);
+  assert.match(inDir("--allow-read").stderr, /can't write 'out\.txt': this program isn't allowed to write files \(start it with --allow-write\)/);
+  assert.match(inDir("--allow-read", "--allow-write").stderr, /can't read 'http:.*sales\.csv': this program isn't allowed to go online \(start it with --allow-net\)/);
+  for (const flags of [["--allow-read", "--allow-write", "--allow-net"], ["--allow-all"], ["--engine", "wasm", "--allow-all"]]) {
+    const all = inDir(...flags);
+    assert.equal(all.stdout, `copied\n6.5\ncan't read '${url}/missing': the site answered 404\n`, all.stderr);
+  }
+  assert.equal(readFileSync(join(dir, "out.txt"), "utf8"), "HELLO");
 });
 
 // ---------- moth test ----------

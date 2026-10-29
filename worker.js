@@ -28,6 +28,30 @@ const due = () => performance.now() - sent > 50 && flush(); // stream while the 
 let source = "";
 let files = {};
 // A mistake ends the program, or the app; anything else that goes wrong is Moth's own.
+// A page has no files of its own: `write` makes them, for this run. `read "https://..."` reads a site, if the
+// site lets pages read it; the browser keeps the program to what any page can do.
+function pageDisk() {
+  const files = memoryDisk();
+  return {
+    read: (name, asBytes) => {
+      if (!/^https?:\/\//i.test(name)) return files.read(name, asBytes);
+      const request = new XMLHttpRequest(); // a worker may wait for it
+      request.open("GET", name, false);
+      if (asBytes) request.overrideMimeType("text/plain; charset=x-user-defined");
+      try {
+        request.send();
+      } catch {
+        throw new Error("couldn't reach it (the site may not let pages read it)");
+      }
+      if (request.status === 0) throw new Error("couldn't reach it (the site may not let pages read it)");
+      if (request.status >= 400) throw new Error(`the site answered ${request.status}`);
+      if (!asBytes) return request.responseText;
+      return Uint8Array.from(request.responseText, (c) => c.charCodeAt(0) & 0xff);
+    },
+    write: files.write,
+  };
+}
+
 function failed(err) {
   if (err instanceof Waiting) {
     flush();
@@ -91,7 +115,7 @@ onmessage = ({ data }) => {
       engine,
       ask,
       files: (name) => files[name],
-      disk: memoryDisk(), // a page has no files of its own: `write` makes them, for this run
+      disk: pageDisk(), // a page has no files of its own: `write` makes them, for this run
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
     }) ?? null;
     flush();

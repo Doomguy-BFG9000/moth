@@ -3,7 +3,7 @@
 // write and fail exactly alike, and compile to the same bytecode. Build it first: cargo build --release in native/.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -277,7 +277,7 @@ test("moth-native as WebAssembly needs nothing but WASI, and agrees with the Jav
 test("moth-native as WebAssembly runs a program's files, its answers and its mistakes, and builds Moth's compiler with itself", { skip: skip || noWasm }, (t) => {
   const dir = tempDir(t);
   writeFileSync(join(dir, "main.moth"), 'set name to ask "Name?"\nwrite "hi " + name to "out.txt"\nsay read "out.txt"\nsay item 9 of list of 1');
-  const ran = onWasm(["run", "main.moth"], { cwd: dir, input: "Sam\n" });
+  const ran = onWasm(["run", "main.moth", "--allow-all"], { cwd: dir, input: "Sam\n" });
   assert.equal(ran.stdout, "Name? Sam\nhi Sam\n");
   assert.equal(ran.stderr, "main.moth:4:5: there is no item 9, the list only has 1 item\nsay item 9 of list of 1\n    ^\n");
   assert.equal(ran.status, 1);
@@ -324,7 +324,7 @@ test("moth-native run prints, fails, asks, reads, writes and draws as moth run d
   ].join("\n"));
   writeFileSync(join(dir, "bad.moth"), 'use "shapes.moth"\nto deep with n\n    return area(n, "x")\nend\nsay deep(2)');
   let picture;
-  const [js, rust] = both(["run", "main.moth", "one", "two"], { cwd: dir, input: "Sam\n" }, () => {
+  const [js, rust] = both(["run", "main.moth", "--allow-all", "one", "two"], { cwd: dir, input: "Sam\n" }, () => {
     picture = readFileSync(join(dir, "main.svg"), "utf8"); // what moth drew, before moth-native draws it again
     rmSync(join(dir, "main.svg"));
   });
@@ -340,6 +340,42 @@ test("moth-native run prints, fails, asks, reads, writes and draws as moth run d
   const [jsMissing, rustMissing] = both(["run", "nowhere.moth"], { cwd: dir });
   assert.equal(rustMissing.status, jsMissing.status);
   assert.equal(rustMissing.stderr.replace("moth-native:", "moth:"), jsMissing.stderr);
+});
+
+// a site on this computer, for going online: it serves /sales.csv, and nothing else
+async function site(t) {
+  const script = [
+    "const server = require('node:http').createServer((request, reply) => {",
+    "  if (request.url !== '/sales.csv') return reply.writeHead(404).end('no');",
+    "  reply.writeHead(200, { 'content-type': 'text/csv' }).end('Name,Price\\nTea,2.5\\nCake,4\\n');",
+    "});",
+    "server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address().port)));",
+  ].join("\n");
+  const server = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+  t.after(() => server.kill());
+  const port = await new Promise((resolve) => server.stdout.once("data", (d) => resolve(String(d))));
+  return `http://127.0.0.1:${port}`;
+}
+
+test("moth-native run asks before a program reads, writes or goes online, as moth run does", { skip }, async (t) => {
+  const url = await site(t);
+  const dir = tempDir(t);
+  writeFileSync(join(dir, "in.txt"), "hello");
+  writeFileSync(join(dir, "copy.moth"), [
+    'write uppercase of read "in.txt" to "out.txt"',
+    `set sales to read table "${url}/sales.csv"`,
+    "say sales",
+    `say read "${url}/missing"`,
+  ].join("\n"));
+  for (const flags of [[], ["--allow-read"], ["--allow-read", "--allow-write"], ["--allow-all"]]) {
+    const [js, rust] = both(["run", "copy.moth", ...flags], { cwd: dir, input: "" });
+    assert.equal(rust.status, js.status, flags.join(" "));
+    assert.equal(rust.stdout, js.stdout, flags.join(" "));
+    assert.equal(rust.stderr, js.stderr, flags.join(" "));
+  }
+  const [, rust] = both(["run", "copy.moth", "--allow-all"], { cwd: dir, input: "" });
+  assert.match(rust.stdout, /\(record with name "Tea", price 2\.5\)/);
+  assert.match(rust.stderr, /the site answered 404/);
 });
 
 test("moth-native test and moth-native bytecode say what moth test and moth bytecode say", { skip }, (t) => {

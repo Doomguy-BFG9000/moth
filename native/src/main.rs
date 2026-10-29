@@ -23,7 +23,9 @@ use vm::{Drawn, FileData, Host, Machine};
 const USAGE: &str = "usage:
   moth-native run <file.moth> [arguments...]
                               run a program; if it draws, the drawing goes to <file>.svg; what follows
-                              the file is the program's arguments
+                              the file is the program's arguments. It asks before the program reads or
+                              writes a file or goes online; --allow-read, --allow-write, --allow-net or
+                              --allow-all, first, let it without asking
   moth-native test [files...] run the tests: each function named test_..., on its own; with no file,
                               every file ending in .test.moth here and in the folders inside
   moth-native build <file.moth>
@@ -77,11 +79,96 @@ struct Terminal {
     random: Box<dyn FnMut() -> f64>,
     pending: Vec<u8>,          // what's been read of the input but not yet asked for
     said: Option<Vec<String>>, // for `test`: what it said, kept instead of printed
+    permits: Option<Permits>,  // what the program may do; None for `test`, which may do anything
+}
+
+// ---------- permissions: what a program may do, as Deno has them (cli.js's permissions) ----------
+// `moth-native run` asks before a program reads a file, writes one, or goes online (`read "https://..."`).
+// At a terminal the person running it is asked, once for each file or site, or for all of them with 'a';
+// anywhere else the answer is no, unless it was started with --allow-read, --allow-write, --allow-net or
+// --allow-all.
+const PERMISSIONS: [(&str, &str, &str); 3] =
+    [("read", "read files", "--allow-read"), ("write", "write files", "--allow-write"), ("go online to", "go online", "--allow-net")];
+const READ: usize = 0;
+const WRITE: usize = 1;
+const NET: usize = 2;
+
+#[derive(Default)]
+struct Permits {
+    all: [bool; 3],                         // read, write and go online: allowed for everything
+    asked: HashMap<(usize, String), bool>, // what the person was asked, and said
+}
+
+// `--allow-read` and the rest, before a program's own arguments: what they allow
+fn allow_flag(flag: &str) -> Option<&'static [usize]> {
+    match flag {
+        "--allow-read" => Some(&[READ]),
+        "--allow-write" => Some(&[WRITE]),
+        "--allow-net" => Some(&[NET]),
+        "--allow-all" => Some(&[READ, WRITE, NET]),
+        _ => None,
+    }
+}
+
+fn is_site(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+// a site's page, as `read` gets a file, by curl
+#[cfg(not(target_family = "wasm"))]
+fn fetch(url: &str) -> Result<Vec<u8>, String> {
+    let ran = std::process::Command::new("curl")
+        .args(["-sSL", "--max-time", "60", "-w", "\n%{http_code}", url])
+        .output()
+        .map_err(|e| format!("couldn't reach it (curl, which goes online for moth-native, didn't run: {e})"))?;
+    let mut body = ran.stdout;
+    let end = body.iter().rposition(|&b| b == b'\n').unwrap_or(0);
+    let status: u32 = String::from_utf8_lossy(&body[end..]).trim().parse().unwrap_or(0);
+    body.truncate(end);
+    if !ran.status.success() || status == 0 {
+        let why = String::from_utf8_lossy(&ran.stderr).trim().trim_start_matches("curl: ").to_string();
+        let why = match why.split_once(") ") {
+            Some((code, rest)) if code.starts_with('(') => rest.to_string(), // "(6) Could not resolve host": the words
+            _ => why,
+        };
+        return Err(format!("couldn't reach it ({})", if why.is_empty() { "no answer".into() } else { why }));
+    }
+    if status >= 400 {
+        return Err(format!("the site answered {status}"));
+    }
+    Ok(body)
+}
+#[cfg(target_family = "wasm")]
+fn fetch(_: &str) -> Result<Vec<u8>, String> {
+    Err("couldn't reach it (WebAssembly can't go online)".into())
 }
 
 impl Terminal {
     fn new(args: Vec<String>, random: Box<dyn FnMut() -> f64>) -> Terminal {
-        Terminal { out: std::io::BufWriter::new(std::io::stdout()), drawn: vec![], args, random, pending: vec![], said: None }
+        Terminal { out: std::io::BufWriter::new(std::io::stdout()), drawn: vec![], args, random, pending: vec![], said: None, permits: None }
+    }
+
+    // whether the program may do this (READ, WRITE or NET) to this file or site, asking if there's a person to ask
+    fn permit(&mut self, kind: usize, what: &str) -> Result<(), String> {
+        let Some(permits) = &self.permits else { return Ok(()) };
+        let key = (kind, what.to_string());
+        if !permits.all[kind] && !permits.asked.contains_key(&key) && std::io::stdin().is_terminal() && std::io::stderr().is_terminal() {
+            let _ = self.out.flush();
+            eprint!("moth-native: let this program {} '{what}'? (y = yes, a = yes to all, n = no) ", PERMISSIONS[kind].0);
+            let answer = self.read_line().unwrap_or_default().trim().to_lowercase();
+            let permits = self.permits.as_mut().unwrap();
+            if answer == "a" || answer == "all" {
+                permits.all[kind] = true;
+            }
+            permits.asked.insert(key.clone(), ["y", "yes", "a", "all"].contains(&answer.as_str()));
+        }
+        let permits = self.permits.as_ref().unwrap();
+        if permits.all[kind] || permits.asked.get(&key) == Some(&true) {
+            return Ok(());
+        }
+        let (_, doing, flag) = PERMISSIONS[kind];
+        Err(format!("this program isn't allowed to {doing} (start it with {flag})"))
     }
 
     // A line of standard input: from a terminal it waits for Enter, from a pipe it takes the next line. None at the end.
@@ -150,6 +237,13 @@ impl Host for Terminal {
         Some(answer)
     }
     fn read(&mut self, name: &str, bytes: bool) -> Option<Result<Option<FileData>, String>> {
+        let as_data = |data: Vec<u8>| if bytes { FileData::Bytes(data) } else { FileData::Text(String::from_utf8_lossy(&data).into_owned()) };
+        if let Err(why) = self.permit(if is_site(name) { NET } else { READ }, name) {
+            return Some(Err(why));
+        }
+        if is_site(name) {
+            return Some(fetch(name).map(|data| Some(as_data(data))));
+        }
         Some(match std::fs::read(name) {
             Ok(data) => Ok(Some(if bytes { FileData::Bytes(data) } else { FileData::Text(String::from_utf8_lossy(&data).into_owned()) })),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -157,6 +251,9 @@ impl Host for Terminal {
         })
     }
     fn write(&mut self, name: &str, data: FileData) -> Option<Result<(), String>> {
+        if let Err(why) = self.permit(WRITE, name) {
+            return Some(Err(why));
+        }
         let bytes = match data {
             FileData::Text(t) => t.into_bytes(),
             FileData::Bytes(b) => b,
@@ -324,7 +421,16 @@ fn run_command(file: &str, args: Vec<String>) -> i32 {
     };
     let sources = Sources::beside(file);
     let mut real = Real::new();
+    let mut args = args;
+    let mut permits = Permits::default();
+    while let Some(kinds) = args.first().and_then(|a| allow_flag(a)) {
+        for &k in kinds {
+            permits.all[k] = true;
+        }
+        args.remove(0);
+    }
     let mut terminal = Terminal::new(args, Box::new(move || real.number()));
+    terminal.permits = Some(permits);
     let result = if bytecode::is_bytecode(&source) {
         // compiled already: the program's own source, if it's beside it, is only for showing mistakes
         let program = match bytecode::read(&source) {

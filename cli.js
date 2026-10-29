@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
 import { readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { run, test, format, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
@@ -10,7 +11,9 @@ const USAGE = `usage:
   moth run <file.moth> [arguments...]
                               run a program; if it draws, the drawing goes to <file>.svg; what follows
                               the file is the program's arguments (put --engine wasm or --engine vm
-                              first to pick the engine; the JIT is the default)
+                              first to pick the engine; the JIT is the default). It asks before the
+                              program reads or writes a file or goes online; --allow-read,
+                              --allow-write, --allow-net or --allow-all, first, let it without asking
   moth test [files...]        run the tests: each function named test_..., on its own; with no file,
                               every file ending in .test.moth here and in the folders inside
                               (--engine wasm or --engine vm picks the engine)
@@ -89,7 +92,57 @@ function readDisk(name, asBytes) {
     throw err;
   }
 }
-const disk = { read: readDisk, write: (name, data) => writeFileSync(name, data) };
+// ---------- permissions: what a program may do, as Deno has them ----------
+// `moth run` asks before a program reads a file, writes one, or goes online (`read "https://..."`). At a
+// terminal the person running it is asked, once for each file or site, or for all of them with 'a'; anywhere
+// else the answer is no, unless moth was started with --allow-read, --allow-write, --allow-net or --allow-all.
+const PERMISSIONS = { read: ["read", "read files", "--allow-read"], write: ["write", "write files", "--allow-write"], net: ["go online to", "go online", "--allow-net"] };
+const ALLOW_FLAGS = { "--allow-read": ["read"], "--allow-write": ["write"], "--allow-net": ["net"], "--allow-all": ["read", "write", "net"] };
+function permissions(allowed) {
+  const asked = new Map();
+  const person = process.stdin.isTTY && process.stderr.isTTY;
+  return (kind, what) => {
+    const key = `${kind} ${what}`;
+    if (!allowed.has(kind) && !asked.has(key) && person) {
+      process.stderr.write(`moth: let this program ${PERMISSIONS[kind][0]} '${what}'? (y = yes, a = yes to all, n = no) `);
+      const answer = (readLine() ?? "").trim().toLowerCase();
+      if (answer === "a" || answer === "all") allowed.add(kind);
+      asked.set(key, ["y", "yes", "a", "all"].includes(answer));
+    }
+    if (!allowed.has(kind) && !asked.get(key)) throw new Error(`this program isn't allowed to ${PERMISSIONS[kind][1]} (start it with ${PERMISSIONS[kind][2]})`);
+  };
+}
+
+// a site's page, as `read` gets a file: fetched by another Node, so this one can wait for it
+function fetchSync(url, asBytes) {
+  const script = [
+    "try {",
+    "  const reply = await fetch(process.argv[1]);",
+    "  if (!reply.ok) throw new Error(`the site answered ${reply.status}`);",
+    "  process.stdout.write(Buffer.from(await reply.arrayBuffer()));",
+    "} catch (err) {",
+    "  process.stderr.write(err.message === 'fetch failed' ? `couldn't reach it (${err.cause?.message ?? 'no answer'})` : err.message);",
+    "  process.exitCode = 3;",
+    "}",
+  ].join("\n");
+  const ran = spawnSync(process.execPath, ["--input-type=module", "-e", script, url], { maxBuffer: 1 << 30 });
+  if (ran.status !== 0) throw new Error(ran.stderr.toString("utf8").trim() || "couldn't reach it");
+  return asBytes ? new Uint8Array(ran.stdout) : ran.stdout.toString("utf8");
+}
+
+// The files where moth runs, and sites, each read or written only once `permit` lets it
+const isSite = (name) => /^https?:\/\//i.test(name);
+const guardedDisk = (permit) => ({
+  read: (name, asBytes) => {
+    permit(isSite(name) ? "net" : "read", name);
+    return isSite(name) ? fetchSync(name, asBytes) : readDisk(name, asBytes);
+  },
+  write: (name, data) => {
+    permit("write", name);
+    writeFileSync(name, data);
+  },
+});
+const disk = guardedDisk(() => {}); // for `moth test`, which runs the tests of one's own code
 
 // file:line:col: kind: message, then the line with the spot marked. Returns whether anything will fail.
 function checkFile(file, source) {
@@ -340,7 +393,7 @@ ${script}
 }
 
 function shell() {
-  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")), disk }); // `use` reads from the folder it runs in
+  const enter = session(console.log, { files: besides(join(process.cwd(), "shell")), disk: guardedDisk(permissions(new Set())) }); // `use` reads from the folder it runs in
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "moth> " });
   const rawMode = (on) => process.stdin.isTTY && process.stdin.setRawMode(on);
   let pending = ""; // the lines of a block that hasn't reached its `end` yet
@@ -508,7 +561,12 @@ function main([command, file, ...extra]) {
   const web = command === "build" && file === "--web";
   if (web) file = extra.shift();
   let engine = "jit";
-  if (command === "run" && extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
+  const allowed = new Set(); // what `run` lets the program do without asking
+  while (command === "run") {
+    if (extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
+    else if (Object.hasOwn(ALLOW_FLAGS, extra[0] ?? "")) for (const kind of ALLOW_FLAGS[extra.shift()]) allowed.add(kind);
+    else break;
+  }
   const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own
   if (!command) return shell();
   if (command === "bootstrap" && !file) return bootstrap();
@@ -527,7 +585,7 @@ function main([command, file, ...extra]) {
   try {
     if (command === "run") {
       const drawn = [];
-      const app = run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk, args, random: Math.random, ...reading(file) });
+      const app = run(source, console.log, { draw: (line) => drawn.push(line), ask: askAtTerminal, engine, disk: guardedDisk(permissions(allowed)), args, random: Math.random, ...reading(file) });
       if (app) console.error(`${basename(file)} is an app: it waits for keys, clicks or time, which a terminal can't give it. Open it in the playground, or make a web page of it with: moth build --web ${file}`);
       if (drawn.length) {
         const out = file.replace(/\.moth$/i, "") + ".svg";
