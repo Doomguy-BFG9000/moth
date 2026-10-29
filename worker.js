@@ -37,7 +37,10 @@ function failed(err) {
   }
   flush();
   const trail = err instanceof MothError && err.trail.length ? `\n${describeTrail(err.trail)}` : ""; // the calls that led there
-  postMessage({ error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}${trail}` : `Moth itself crashed: ${err.message}` });
+  postMessage({
+    error: err instanceof MothError ? `Error: ${err.message}\n${excerpt(err.file ? files[err.file] ?? "" : source, err)}${trail}` : `Moth itself crashed: ${err.message}`,
+    mistake: err instanceof MothError && !err.file ? { line: err.line, col: err.col, reason: err.reason } : undefined, // for a Fix button
+  });
   app = null;
 }
 

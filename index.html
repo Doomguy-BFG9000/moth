@@ -146,6 +146,11 @@
     #problems button { display: block; width: 100%; padding: 3px 14px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
     #problems button:hover { background: var(--raised); }
     #problems .bad { color: #ff9d8a; } #problems .meh { color: #e8c98a; }
+    #problems li { display: flex; align-items: center; gap: 8px; padding-right: 14px; }
+    #problems li > button:first-child { flex: 1; }
+    button.fix { flex: none; padding: 2px 10px; border-radius: 999px; color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); border-color: #f2ac3a; font: 600 12px var(--sans); white-space: nowrap; }
+    button.fix:hover:not(:disabled) { background: linear-gradient(#ffd383, #f6b54a); }
+    #output button.fix { margin: 6px 0 2px; }
 
     /* the code while debugging: numbered lines, the next one lit */
     #lines { position: relative; flex: 1; margin: 0; padding: 12px 12px 12px 48px; overflow: auto; }
@@ -363,7 +368,7 @@ Did you mean 'total'?</pre></div>
 
   <script type="module">
     import examples from "./examples.js";
-    import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, MothError } from "./moth.js";
+    import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, suggestedFix, MothError } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -456,6 +461,8 @@ Did you mean 'total'?</pre></div>
         if (!p.file) button.onclick = () => jumpTo(p); // only this file is in the editor
         const li = document.createElement("li");
         li.append(button);
+        const fix = !p.file && fixButton({ line: p.line, col: p.col, reason: p.message });
+        if (fix) li.append(fix);
         return li;
       }));
       $("hint").textContent = problems.length
@@ -536,10 +543,32 @@ Did you mean 'total'?</pre></div>
       status.textContent = message;
     }
 
-    function fail(text) {
+    function fail(text, mistake) {
       output.classList.add("error");
       output.append(text);
+      const fix = mistake && fixButton(mistake);
+      if (fix) output.append("\n", fix);
       finish("");
+    }
+
+    // A button that puts a mistake right, where it says how (see suggestedFix in moth.js): the misspelled name
+    // becomes the one it meant, `>` becomes `is greater than`. The change can be undone with Ctrl+Z.
+    function fixButton(mistake) {
+      const fix = suggestedFix(code.value, mistake);
+      if (!fix) return null;
+      const button = Object.assign(document.createElement("button"), { type: "button", className: "fix", textContent: `Fix: ${fix.text}` });
+      button.title = `Put '${fix.text}' on line ${fix.line}`;
+      button.onclick = () => {
+        const start = code.value.split("\n").slice(0, fix.line - 1).reduce((n, l) => n + l.length + 1, 0) + fix.col - 1;
+        code.focus();
+        code.setSelectionRange(start, start + fix.length);
+        if (!document.execCommand("insertText", false, fix.text)) { // the browser's own undoable way, if it has one
+          code.setRangeText(fix.text, start, start + fix.length, "end");
+          refreshEditor();
+        }
+        button.disabled = true;
+      };
+      return button;
     }
 
     // Moth programs kept in files of their own (compiler.moth, neural.moth), fetched the first time they're needed
@@ -643,7 +672,7 @@ Did you mean 'total'?</pre></div>
           }
         }
         if (data.question !== undefined) return waitForAnswer(data.question);
-        if (data.error) fail(data.error);
+        if (data.error) fail(data.error, data.mistake);
         if (data.done) {
           if (data.empty && !data.app) output.append("(no output)");
           const engine = { jit: "the JIT", wasm: "WebAssembly", vm: "the VM" }[$("engine").value];

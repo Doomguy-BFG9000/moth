@@ -986,6 +986,36 @@ export function check(source, options) {
   }
 }
 
+// ---------- fixing ----------
+
+// symbols from other languages, and the Moth words that mean the same (`=` alone could mean set or is, and `%`
+// a remainder, so those get no fix)
+const SYMBOL_FIXES = { "<=": "is at most", ">=": "is at least", "!=": "is not", "==": "is", "<": "is less than", ">": "is greater than" };
+
+// The fix a mistake points to, for a Fix button: a misspelled name ("'totl' has no value yet. Did you mean
+// 'total'?") becomes the name it meant, and a symbol from another language (`>`) the Moth words for it. Gives
+// { line, col, length, text } (put `text` in place of `length` characters at line:col), or null. It checks the
+// code really has the misspelling at that spot, so a fix can't land anywhere else.
+export function suggestedFix(source, { line, col, reason }) {
+  const text = source.split(/\r?\n/)[line - 1];
+  if (text === undefined || !reason) return null;
+  const at = col - 1;
+  const meant = reason.match(/\. Did you mean '([^' ]+)'\?$/);
+  const wrong = reason.match(/^(?:there is no function called |this record has no )?'([^' ]+)'/);
+  if (meant && wrong) {
+    const name = wrong[1];
+    const written = text.slice(at, at + name.length);
+    if (written.toLowerCase() === name && !/\w/.test(text[at + name.length] ?? "") && !/\w/.test(text[at - 1] ?? "")) {
+      return { line, col, length: name.length, text: meant[1] };
+    }
+  }
+  if (/^I don't understand '[<>!=]'/.test(reason)) {
+    const symbol = [text.slice(at, at + 2), text[at]].find((s) => Object.hasOwn(SYMBOL_FIXES, s));
+    if (symbol) return { line, col, length: symbol.length, text: SYMBOL_FIXES[symbol] };
+  }
+  return null;
+}
+
 // ---------- tidying ----------
 
 // One line of code as its pieces, as written, and its comment: [{ type, text, col }], comment or null.

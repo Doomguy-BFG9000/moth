@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { run, test as testMoth, format, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
@@ -1018,4 +1018,31 @@ test("a handler's mistake says where, each event gets its own steps, and going t
     assert.deepEqual(said, ["total 1", "deep 627074", "total 6002", "total 6003"], engine);
     assert.throws(() => app.send("key", ["x"]), { name: "Error", message: "line 10: can't divide by zero" }, engine);
   }
+});
+
+// ---------- fixing ----------
+
+test("suggestedFix puts a misspelled name or a symbol from another language right, and only where the code has it", () => {
+  const fixOf = (source) => {
+    let p = check(source).find((q) => q.kind === "error" || q.kind === "fails");
+    if (!p) {
+      try {
+        run(source, () => {});
+      } catch (err) {
+        p = { line: err.line, col: err.col, message: err.reason };
+      }
+    }
+    return suggestedFix(source, { line: p.line, col: p.col, reason: p.message });
+  };
+  assert.deepEqual(fixOf("set total to 1\nsay totl"), { line: 2, col: 5, length: 4, text: "total" });
+  assert.deepEqual(fixOf("set Total to 1\nsay TOTL"), { line: 2, col: 5, length: 4, text: "total" }); // whatever the capitals
+  assert.deepEqual(fixOf('sya "hi"'), { line: 1, col: 1, length: 3, text: "say" });
+  assert.deepEqual(fixOf("to greet\n    say 1\nend\ngret()"), { line: 4, col: 1, length: 4, text: "greet" });
+  assert.deepEqual(fixOf('set pet to record with name "Rex"\nsay nmae of pet'), { line: 2, col: 5, length: 4, text: "name" }); // found only by running
+  assert.deepEqual(fixOf("if 3 > 2\n    say 1\nend"), { line: 1, col: 6, length: 1, text: "is greater than" });
+  assert.deepEqual(fixOf("if 3 >= 2\n    say 1\nend"), { line: 1, col: 6, length: 2, text: "is at least" });
+  assert.deepEqual(fixOf("if 3 != 2\n    say 1\nend"), { line: 1, col: 6, length: 2, text: "is not" });
+  assert.equal(fixOf("set x = 5"), null); // set, or is? Only the person knows
+  assert.equal(suggestedFix("say totals", { line: 1, col: 5, reason: "'totl' has no value yet. Did you mean 'total'?" }), null); // not what the code has there
+  assert.equal(suggestedFix("say x", { line: 3, col: 1, reason: "'x' has no value yet. Did you mean 'y'?" }), null); // no such line
 });
