@@ -177,8 +177,7 @@ byte, with no assembler, linker or other compiler. So far it takes the core of
 the language: numbers, yes, no and nothing, variables, `say`, `if`, the loops,
 and functions, which is enough for [`math.moth`](math.moth). What it makes does
 exactly what `moth run` does, down to how a number is shown, how two numbers
-compare to 15 digits, and the calls a mistake lists. fib(30) takes 0.08 s, start
-to finish, against 0.21 s with `moth run`:
+compare to 15 digits, and the calls a mistake lists:
 
 ```text
 $ moth build --exe fib.moth
@@ -187,9 +186,31 @@ $ ./fib.exe
 832040
 ```
 
-It's the first step to a Moth that needs neither JavaScript nor Rust: once it
-takes the parts of Moth that its own code uses, it can make machine code of
-itself.
+Against C and Python, with the same four programs written in each
+([`versus/`](versus)), every one timed from start to finish, it's 9 to 32 times
+as fast as Python, and 2.3 to 8 times as slow as C:
+
+| `npm run versus` | C | Moth, machine code | `moth run` | Python |
+|:--|--:|--:|--:|--:|
+| fib(32): 7 million calls | 25 ms | 58 ms | 272 ms | 508 ms |
+| adding 1 to 100,000,000 | 42 ms | 341 ms | 703 ms | 9.5 s |
+| primes up to 300,000 | 78 ms | 182 ms | 252 ms | 2.0 s |
+| 30,000,000 steps of decimal maths | 55 ms | 138 ms | 337 ms | 4.4 s |
+
+On Windows 11, with MSVC's `cl /O2` and Python 3.13. Some of C's lead is what
+Moth promises and C doesn't: C works in whole numbers here, where Moth's
+numbers are decimals compared to 15 digits, and Moth checks every step for a
+mistake, like adding `nothing` to a number. The rest is room to grow: machine.moth
+keeps every value in memory rather than in the processor's registers, and
+always works in decimals, even for a count that is only ever whole.
+
+**Is Moth standalone yet?** Halfway. What `moth build --exe` makes runs with
+nothing else installed, but making it still takes Node.js, which runs
+machine.moth. The rest of the way: text, lists, records and dictionaries in
+machine code, which need memory that grows as a program runs; reading and
+writing files; and then machine.moth compiling itself into a `moth.exe` that
+builds every program, itself included, into exactly the same bytes. From
+then on Moth needs neither JavaScript nor Rust.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -721,6 +742,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
+| [`versus/`](versus) | The same four programs in Moth, C and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |

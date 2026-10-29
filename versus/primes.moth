@@ -1,0 +1,16 @@
+set count to 0
+for each n from 2 to 300000
+    set prime to yes
+    set d to 2
+    repeat while d * d is at most n
+        if n is divisible by d
+            set prime to no
+            stop
+        end
+        add 1 to d
+    end
+    if prime
+        add 1 to count
+    end
+end
+say count

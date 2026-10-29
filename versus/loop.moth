@@ -1,0 +1,5 @@
+set total to 0
+for each i from 1 to 100000000
+    add i to total
+end
+say total
