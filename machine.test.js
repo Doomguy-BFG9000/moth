@@ -100,6 +100,25 @@ test("garbage: programs that make far more than they keep say what moth run says
   }
 });
 
+// A line is kept once for every place on it a mistake can happen, so a long one with thousands of them (a
+// trained network's weights, say) stays small, and a mistake at its end still shows it as moth run does.
+test("a long line with thousands of places a mistake can happen stays small", { skip }, () => {
+  const numbers = Array.from({ length: 4000 }, (_, i) => `-${(i % 97) / 10}`).join(", ");
+  const source = `set x to list of ${numbers}, -"a"\nsay length of x\n`;
+  const bytes = machine(source, { target, name: "long.moth" });
+  assert.ok(bytes.length < 1_000_000, `${bytes.length} bytes`);
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "long");
+    writeFileSync(exe, bytes);
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { encoding: "utf8", maxBuffer: 1 << 24 });
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, onEngine(source, "long.moth"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // machine.moth, made into machine code, compiling itself: the bytes must be the ones it makes on Node.js. The
 // driver's own names start with zz_, as a file used `as` a name shares its functions' variables with the
 // program's top level.

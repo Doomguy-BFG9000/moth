@@ -2275,12 +2275,24 @@ to emit_mistakes with a
     lea(a, rsp, mem(rax, 32))
     jmp_r(a, rcx)
     mark(a, uncaught)
-    load(a, rsi, rip("err_site")) # the line, with its spot marked
+    load(a, rsi, rip("err_site")) # the line, then as much of its marker as comes before the spot, then ^
     load32(a, rax, mem(rsi, 0))
     alu(a, "add", rsi, rax)
     alui(a, "add", rsi, 4)
+    load32(a, rax, mem(rsi, 8))
+    push_r(a, rax)
+    load(a, rsi, mem(rsi, 0))
+    push_r(a, rsi)
     load32(a, rcx, mem(rsi, 0))
     alui(a, "add", rsi, 4)
+    call_to(a, "rt_e_text")
+    pop_r(a, rsi)
+    load32(a, rax, mem(rsi, 0))
+    alu(a, "add", rsi, rax)
+    alui(a, "add", rsi, 8)
+    pop_r(a, rcx)
+    call_to(a, "rt_e_text")
+    point_at_text(a, "^")
     call_to(a, "rt_e_text")
     mov_rr(a, rbx, rbp) # the calls in progress, innermost first, one line for a run of the same call
     movi(a, r12, -1)
@@ -8040,7 +8052,8 @@ to new_state with a, program_name, files, source, target
     end
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
-        main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary
+        main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
+        line_entries empty dictionary
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -8051,6 +8064,9 @@ end
 
 # where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
 # ^ under the spot
+# Where a mistake can happen, once each: "file:line:col: ", then where its line is, and how many bytes of the
+# line's marker go before the ^. The line and its marker are kept once for all the places on it, so a long
+# line with many places, as a list of thousands of numbers is, stays the size it is.
 to site_of with fc, at
     set st to st of fc
     set a to a of st
@@ -8064,20 +8080,37 @@ to site_of with fc, at
         set where_name to name of st
     end
     set head to (where_name + ":" + line of at + ":" + col of at + ": ") as bytes
-    set tail to ("\n" + excerpt_of(st, file of at, line of at, col of at)) as bytes
+    set entry to line_entry(st, file of at, line of at)
     set ro to rodata of a
     set label to "S" + length of ro
     rodata_here(a, label)
     put32(ro, length of head)
     put_all(ro, head)
-    put32(ro, length of tail)
-    put_all(ro, tail)
+    absolute(a, "rodata", length of ro, label of entry, 0)
+    put64(ro, 0)
+    set marks to marks of entry
+    set upto to col of at - 1
+    if upto is less than 0
+        set upto to 0
+    end
+    if upto is greater than length of marks - 1
+        set upto to length of marks - 1
+    end
+    put32(ro, item (upto + 1) of marks)
     set item key of table to label
     return label
 end
 
 # vm.js's excerpt: the line, and under it a ^ at the column, with the line's own tabs kept so it lines up
-to excerpt_of with st, file, line_no, col
+# A line of a file, once each, as vm.js's excerpt shows it: "\n", the line and "\n", then its marker, a space
+# for each UTF-16 unit and the line's own tabs and spaces kept, so a ^ after part of it lines up. `marks`
+# says, for each number of units into the line, how many of the marker's bytes go before the ^.
+to line_entry with st, file, line_no
+    set entries to line_entries of st
+    set entry_key to file + ":" + line_no
+    if entry_key is in entries
+        return item entry_key of entries
+    end
     set table to lines of st
     if not (file is in table)
         set all to empty list
@@ -8091,12 +8124,9 @@ to excerpt_of with st, file, line_no, col
     if line_no is at most length of all
         set line_text to item line_no of all
     end
+    set marks to list of 0
     set marker to ""
-    set units to 0
     for each c in line_text
-        if units is at least col - 1
-            stop
-        end
         set w to front's width(c)
         if js_space(c)
             add c to marker
@@ -8105,9 +8135,24 @@ to excerpt_of with st, file, line_no, col
         else
             add " " to marker
         end
-        add w to units
+        set made to length of (marker as bytes)
+        repeat w times
+            add made to marks
+        end
     end
-    return line_text + "\n" + marker + "^"
+    set a to a of st
+    set ro to rodata of a
+    set label to "E" + length of ro
+    rodata_here(a, label)
+    set shown to ("\n" + line_text + "\n") as bytes
+    put32(ro, length of shown)
+    put_all(ro, shown)
+    set marker_bytes to marker as bytes
+    put32(ro, length of marker_bytes)
+    put_all(ro, marker_bytes)
+    set entry to record with label label, marks marks
+    set item entry_key of entries to entry
+    return entry
 end
 
 to code_point with c
