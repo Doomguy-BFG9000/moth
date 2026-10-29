@@ -145,6 +145,7 @@ fn builtin_syntax(w: &str) -> Option<(Option<&'static str>, Option<&'static str>
     })
 }
 const BIT_WORDS: [&str; 3] = ["and", "or", "xor"];
+const AGGREGATES: [&str; 4] = ["total", "average", "largest", "smallest"]; // `total of prices`
 // what an input can say it is, in the order of KINDS in vm.js
 pub const KINDS: [&str; 8] = ["a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"];
 const AS_WORDS: [&str; 4] = ["bytes", "text", "hex", "binary"];
@@ -452,7 +453,15 @@ impl<'a, 'f> Parser<'a, 'f> {
                 return self.expected("'in' or 'from'");
             }
             let list = self.expression()?;
-            let body = self.loop_body(&t)?;
+            // `for each row in sales where price of row is greater than 10`: the body runs only for the rows that pass
+            let filter = match self.word("where") {
+                Some(w) => Some((self.expression()?, w.pos())),
+                None => None,
+            };
+            let mut body = self.loop_body(&t)?;
+            if let Some((cond, at)) = filter {
+                body = vec![Stmt::If { cond, then: body, otherwise: vec![], at }];
+            }
             return one(Stmt::Each { name: variable, list, body, at });
         }
         if self.word("to").is_some() {
@@ -617,6 +626,11 @@ impl<'a, 'f> Parser<'a, 'f> {
             return one(Stmt::Turtle { action: "clear", value: None, at });
         }
         if self.word("draw").is_some() {
+            if self.is_word("chart") && self.word_ahead(1, "of") {
+                self.pos += 2; // `draw chart of sales`
+                let value = self.column(true)?;
+                return one(Stmt::Turtle { action: "chart", value: Some(value), at });
+            }
             let shape = ["box", "circle"].into_iter().find(|w| self.is_word(w) && self.word_ahead(1, "at"));
             if let Some(shape) = shape {
                 self.pos += 2;
@@ -773,6 +787,21 @@ impl<'a, 'f> Parser<'a, 'f> {
         Ok(left)
     }
 
+    // `price in sales`, after `total of` and `draw chart of`: the price of each row; anything else is the rest,
+    // a whole expression after `draw chart of`, one value after `total of`
+    fn column(&mut self, whole: bool) -> R<Expr> {
+        let t = self.peek().clone();
+        let named = t.kind == Kind::Word && !RESERVED.contains(&t.text.as_str()) && self.word_ahead(1, "in") && self.unit_at(self.pos + 2).is_none();
+        if named {
+            self.pos += 2;
+        }
+        let rest = if whole { self.expression()? } else { self.unary()? };
+        if !named {
+            return Ok(rest);
+        }
+        Ok(Expr::Builtin("column".into(), vec![Expr::Value(Lit::Text(Rc::from(t.text.as_str())), t.pos()), rest], t.pos()))
+    }
+
     fn additive(&mut self) -> R<Expr> {
         let mut left = self.multiplicative()?;
         while let Some(t) = self.sym("+").or_else(|| self.sym("-")) {
@@ -912,12 +941,22 @@ impl<'a, 'f> Parser<'a, 'f> {
             return Ok(Expr::Ask(Box::new(question), at));
         }
         if self.word("read").is_some() {
+            if self.word("table").is_some() {
+                let of = self.additive()?; // `read table "sales.csv"`
+                return Ok(Expr::Builtin("table".into(), vec![Expr::Read { bytes: false, of: Box::new(of), at: at.clone() }], at));
+            }
             let bytes = self.word("bytes").is_some();
             let of = self.additive()?;
             return Ok(Expr::Read { bytes, of: Box::new(of), at });
         }
         if self.word("arguments").is_some() {
             return Ok(Expr::Arguments(at));
+        }
+        // `total of prices`, `average of price in sales`, `largest of`, `smallest of`
+        if t.kind == Kind::Word && AGGREGATES.contains(&t.text.as_str()) && self.word_ahead(1, "of") {
+            self.pos += 2;
+            let arg = self.column(false)?;
+            return Ok(Expr::Builtin(t.text.clone(), vec![arg], at));
         }
         // `random number from 1 to 6`: `random` alone is still a name
         if self.is_word("random") && self.word_ahead(1, "number") && self.word_ahead(2, "from") {

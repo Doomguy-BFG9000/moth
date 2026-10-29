@@ -76,7 +76,7 @@ test("the Rust engine agrees with the JavaScript VM on 5,000 randomly broken pro
 });
 
 test("the Rust engine agrees with the JavaScript VM on 1,500 generated programs, files and arguments too", { skip }, () => {
-  const disk = { "file.txt": { text: "hello\nworld" }, "data.bin": { bytes: [1, 2, 3] } };
+  const disk = { "file.txt": { text: "hello\nworld" }, "data.bin": { bytes: [1, 2, 3] }, "data.csv": { text: "Name,Price, x\n\"a, b\",1.5,\r\n\nb,-2,\"q\"\"uote\"\nc,3\n" } };
   agree(generatePrograms(2026, 1500).map((source) => ({ source, maxSteps: 5_000, disk, args: ["one", "2"], bytecode: true })), "a generated program");
 });
 
@@ -178,6 +178,39 @@ test("the Rust engine shows numbers, rounds and draws exactly as JavaScript does
     "end",
   ].join("\n");
   agree([1, 2, 3, 4, 5].flatMap((seed) => [{ source: numbers, seed }, { source: turtle, seed }]), "numbers");
+});
+
+test("the Rust engine reads tables, works them out and draws charts as JavaScript does", { skip }, () => {
+  const tables = [
+    'Name,Price,Qty\nApple,1.5,10\nPear,2,3\n"Big, red melon",12.25,1\nKiwi,,\n',
+    '﻿City Name,2024,2024, ,Ünïcode Ω,a__b\r\n"x ""quoted"" y",-0.5,7,,é,\r\n\r\n"line\nbreak",1e5, 3 ,x\n',
+    "only,a,header",
+    "",
+    "\n\n",
+    'a\n"unclosed, quote\n1,2',
+    "n\n1\n2\n3\n4.25\n-7\n",
+  ];
+  const jobs = tables.map((text) => ({
+    source: [
+      'set rows to read table "t.csv"',
+      "say rows",
+      "for each row in rows where row is not nothing",
+      "    say row",
+      "end",
+      "try",
+      "    say total of n in rows \" \" average of n in rows \" \" largest of n in rows \" \" smallest of n in rows",
+      "    draw chart of n in rows",
+      "if it fails with why",
+      "    say why",
+      "end",
+    ].join("\n"),
+    disk: { "t.csv": { text } },
+  }));
+  jobs.push({ source: 'draw chart of (dictionary where "Mon" is 5 km, "Tue" is 300 m, "Wed" is nothing, 4 is 0 m)\ndraw chart of (list of 1, -2.5, 0.1 + 0.2)\ndraw chart of empty list' });
+  jobs.push({ source: "say total of (list of 1 hour, 30 minutes, nothing) \" \" average of (list of 2 kg, 500 g) \" \" largest of (list of \"b\", \"a\")" });
+  jobs.push({ source: "say total of (list of 1, 2 km)" });
+  jobs.push({ source: "draw chart of (list of 1, \"a\")" });
+  agree(jobs, "a table");
 });
 
 test("the Rust engine treats text as JavaScript does: every character's upper and lower case, lengths, bytes", { skip }, () => {

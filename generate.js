@@ -57,7 +57,7 @@ export function generatePrograms(seed, count) {
     const v = pick(VARIABLES);
     const e = (d = 2) => expr(d, ctx);
     const nested = depth < 3;
-    const kinds = ["set", "set", "set", "say", "say", "add", "setItem", "setField", "remove", "expect", "write", "call", "fail"];
+    const kinds = ["set", "set", "set", "say", "say", "add", "setItem", "setField", "remove", "expect", "write", "call", "fail", "chart"];
     if (nested) kinds.push("if", "if", "repeat", "each", "count", "try", "while");
     if (ctx.loop) kinds.push("stop");
     if (ctx.inFunction) kinds.push("return");
@@ -70,6 +70,7 @@ export function generatePrograms(seed, count) {
       case "remove": return void lines.push(`${pad}remove ${wrap(e(1))} from ${v}`);
       case "expect": return void lines.push(`${pad}expect ${chance(0.5) ? e() : `${wrap(e(1))} is ${wrap(e(1))}`}`);
       case "write": return void lines.push(`${pad}write ${e(1)} to ${pick(['"out.txt"', '"file.txt"', "t"])}`);
+      case "chart": return void lines.push(`${pad}draw chart of ${chance(0.3) ? `${pick(FIELDS)} in ` : ""}${e()}`);
       case "fail": return void (chance(0.3) && lines.push(`${pad}fail with ${e(1)}`));
       case "stop": return void lines.push(`${pad}stop`);
       case "return": return void lines.push(`${pad}return ${e(1)}`);
@@ -91,7 +92,7 @@ export function generatePrograms(seed, count) {
         block(lines, depth + 1, { ...ctx, loop: true }, 1 + random(3));
         return void lines.push(`${pad}end`);
       case "each":
-        lines.push(`${pad}for each ${v} in ${e()}`);
+        lines.push(`${pad}for each ${v} in ${e()}${chance(0.3) ? ` where ${e()}` : ""}`);
         block(lines, depth + 1, { ...ctx, loop: true }, 1 + random(3));
         return void lines.push(`${pad}end`);
       case "count":
@@ -127,7 +128,7 @@ export function generatePrograms(seed, count) {
   function expr(depth, ctx) {
     if (depth <= 0 || chance(0.25)) return atom(ctx.params);
     const e = () => wrap(expr(depth - 1, ctx));
-    switch (random(26)) {
+    switch (random(28)) {
       case 0: return `${e()} ${pick(["+", "-", "*", "/"])} ${e()}`;
       case 1: return `list of ${e()}, ${e()}`;
       case 2: return `record with ${pick(FIELDS)} ${e()}, ${pick(FIELDS)} ${e()}`;
@@ -147,7 +148,7 @@ export function generatePrograms(seed, count) {
       case 16: return `shift ${e()} ${pick(["left", "right"])} by ${e()}`;
       case 17: return `${e()} as ${pick(["text", "bytes", "hex", "binary"])}`;
       case 18: return `${pick(["0", "1", "3", e()])} bytes`;
-      case 19: return `read ${pick(["", "bytes "])}${pick(['"file.txt"', '"data.bin"', '"missing.txt"', e()])}`;
+      case 19: return `read ${pick(["", "bytes ", "table "])}${pick(['"file.txt"', '"data.bin"', '"data.csv"', '"missing.txt"', e()])}`;
       case 20: return `-${e()}`;
       case 21: {
         if (!ctx.functions.length) return atom(ctx.params);
@@ -156,6 +157,8 @@ export function generatePrograms(seed, count) {
       }
       case 22: return `${pick(["1", "2.5", "0x10", "3", "0"])} ${pick(["km", "m", "miles", "feet", "hours", "minutes", "seconds", "kg", "g", "litres", "ml"])}`;
       case 23: return `${e()} in ${pick(["km", "m", "miles", "hours", "seconds", "g", "ml"])}`;
+      case 24: return `${pick(["total", "average", "largest", "smallest"])} of ${e()}`;
+      case 25: return `${pick(["total", "average", "largest", "smallest"])} of ${pick(FIELDS)} in ${e()}`;
       default: return atom(ctx.params);
     }
   }

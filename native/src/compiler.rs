@@ -125,7 +125,7 @@ pub mod op {
 use op::*;
 
 // Moth's built-in operations, in vm.js's BUILTINS order, with how many inputs each takes
-pub const BUILTINS: [(&str, usize); 19] = [
+pub const BUILTINS: [(&str, usize); 25] = [
     ("uppercase", 1),
     ("lowercase", 1),
     ("split", 2),
@@ -145,9 +145,15 @@ pub const BUILTINS: [(&str, usize); 19] = [
     ("as binary", 1),
     ("unit", 2), // `5 km`
     ("in", 2),   // `trip in miles`
+    ("table", 1), // `read table "sales.csv"`
+    ("column", 2), // `price in sales`, after `total of` and `draw chart of`
+    ("total", 1),
+    ("average", 1),
+    ("largest", 1),
+    ("smallest", 1),
 ];
-pub const TURTLE_ACTIONS: [&str; 13] =
-    ["forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text"];
+pub const TURTLE_ACTIONS: [&str; 14] =
+    ["forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text", "chart"];
 pub const EVENTS: [&str; 3] = ["key", "click", "drag"];
 const STATEMENT_WORDS: [&str; 20] = [
     "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write",

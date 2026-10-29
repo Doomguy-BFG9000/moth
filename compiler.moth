@@ -242,7 +242,10 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
     "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
-    "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in"
+    "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
+    "average", "largest", "smallest"
+# `total of prices`: these words and `of` work out something from a list
+set aggregates to list of "total", "average", "largest", "smallest"
 # the words of the units an amount can have (`5 km`), each way vm.js's UNITS writes them
 set unit_words to list of "mm", "cm", "m", "km", "millimetre", "millimetres", "centimetre", "centimetres", "metre", "metres",
     "kilometre", "kilometres", "millimeter", "millimeters", "centimeter", "centimeters", "meter", "meters", "kilometer",
@@ -545,7 +548,18 @@ to parse with tokens, reading
             if not word("in")
                 expected("'in' or 'from'")
             end
-            return record with kind "each", name variable, over expression(), body loop_body(t), at t
+            set over to expression()
+            set where_token to word("where") # `for each row in sales where price of row is greater than 10`
+            set filter to nothing
+            if where_token
+                set filter to expression()
+            end
+            set body to loop_body(t)
+            if where_token # the body runs only for the rows that pass
+                set guarded to list of (record with kind "if", cond filter, then body, otherwise empty list, at where_token)
+                set body to guarded
+            end
+            return record with kind "each", name variable, over over, body body, at t
         end
         if word("to")
             set fn_name to take_name("a function name")
@@ -725,6 +739,10 @@ to parse with tokens, reading
             return record with kind "turtle", action "clear", value nothing, at t
         end
         if word("draw") # `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
+            if is_word("chart") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "of" # `draw chart of sales`
+                set pos to pos + 2
+                return record with kind "turtle", action "chart", value column_or(yes), at t
+            end
             set shape to ""
             for each w in list of "box", "circle"
                 if shape is "" and is_word(w) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "at"
@@ -899,6 +917,26 @@ to parse with tokens, reading
         return left
     end
 
+    # `price in sales`, after `total of` and `draw chart of`: the price of each row; anything else is the rest,
+    # a whole expression after `draw chart of`, one value after `total of`
+    to column_or with whole
+        set field_token to peek()
+        if type of field_token is "word" and not contains(reserved, value of field_token) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "in" and not unit_at(pos + 2)
+            set pos to pos + 2
+            set column_args to list of (record with kind "value", type "string", value value of field_token, at field_token)
+            add column_rest(whole) to column_args
+            return record with kind "builtin", name "column", args column_args, at field_token
+        end
+        return column_rest(whole)
+    end
+
+    to column_rest with whole
+        if whole
+            return expression()
+        end
+        return unary()
+    end
+
     to additive
         set left to multiplicative()
         set t to match("+") or match("-")
@@ -1038,7 +1076,11 @@ to parse with tokens, reading
         if word("ask") # `ask "How old are you? "`
             return record with kind "ask", question additive(), at t
         end
-        if word("read") # `read "notes.txt"`, `read bytes "photo.png"`
+        if word("read") # `read "notes.txt"`, `read bytes "photo.png"`, `read table "sales.csv"`
+            if word("table")
+                set read_args to list of (record with kind "read", binary no, subject additive(), at t)
+                return record with kind "builtin", name "table", args read_args, at t
+            end
             set as_bytes to no
             if word("bytes")
                 set as_bytes to yes
@@ -1047,6 +1089,12 @@ to parse with tokens, reading
         end
         if word("arguments")
             return record with kind "arguments", at t
+        end
+        # `total of prices`, `average of price in sales`, `largest of`, `smallest of`
+        if type of t is "word" and contains(aggregates, value of t) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "of"
+            set pos to pos + 2
+            set aggregate_args to list of column_or(no)
+            return record with kind "builtin", name value of t, args aggregate_args, at t
         end
         # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
         if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"
@@ -1477,7 +1525,8 @@ end
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
 set event_names to list of "key", "click", "drag" # in the order of EVENTS in vm.js
-set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text"
+set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text",
+    "chart"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"

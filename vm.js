@@ -145,7 +145,7 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
-  "to", "clear", "box", "circle", "text"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`
+  "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
 // the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
 export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
@@ -499,6 +499,77 @@ const bitwise = (op, a, b) => (op(Math.floor(a / 2 ** 32), Math.floor(b / 2 ** 3
 // what the checker calls each measure, as a type
 export const MEASURE_TYPES = ["distance", "time", "weight", "volume"];
 
+const isNumberText = (text) => /^\s*-?\d+(\.\d+)?\s*$/.test(text); // a number as Moth writes them, spaces around it allowed
+
+// ---------- tables: `read table "sales.csv"`, `total of price in sales` ----------
+
+// A CSV file's text as a table: a list of records, one for each row after the first, whose cells name the
+// fields (in lower case, with _ for anything but letters, digits and _). A cell that is a number is that
+// number, an empty one (or one the row is missing) is nothing, and any other is text. Cells in "quotes" can hold commas, line
+// breaks and "" for a quote; blank lines are skipped.
+export function tableOf(text, error) {
+  needText("'read table'", text, error);
+  const rows = [];
+  let [row, cell, quoted] = [[], "", false];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c !== '"') cell += c;
+      else if (text[i + 1] === '"') (cell += '"'), i++;
+      else quoted = false;
+    } else if (c === '"' && cell === "") quoted = true;
+    else if (c === ",") row.push(cell), (cell = "");
+    else if (c === "\n" || c === "\r") {
+      row.push(cell);
+      rows.push(row);
+      [row, cell] = [[], ""];
+      if (c === "\r" && text[i + 1] === "\n") i++;
+    } else cell += c;
+  }
+  if (cell !== "" || row.length) row.push(cell), rows.push(row);
+  const [header, ...data] = rows.filter((r) => r.length > 1 || r[0] !== "");
+  if (!header) return [];
+  const used = new Set();
+  const names = header.map((cell, i) => {
+    let name = cell.replace(/[A-Z]/g, (c) => c.toLowerCase()).replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    if (name === "") name = `column_${i + 1}`;
+    else if (/^[0-9]/.test(name)) name = `column_${name}`;
+    while (used.has(name)) name += `_${i + 1}`;
+    used.add(name);
+    return name;
+  });
+  return data.map((r) => makeRecord(names, names.map((_, j) => (j >= r.length || r[j] === "" ? null : isNumberText(r[j]) ? Number(r[j]) : r[j]))));
+}
+
+// What `total of`, `average of`, `largest of` and `smallest of` work on: the items that aren't nothing (as a
+// spreadsheet skips empty cells)
+function present(what, list, error) {
+  if (!isList(list)) error(`'${what} of' needs a list, not ${kindOf(list)}`);
+  return list.filter((x) => x !== null);
+}
+
+// `total of`, and `average of` before it divides: numbers, or amounts of one measure (in the first one's unit)
+function sumOf(what, items, error) {
+  let sum = 0;
+  items.forEach((x, i) => {
+    if (typeof x !== "number" && !isQuantity(x)) error(`'${what} of' needs numbers, not ${kindOf(x)}`);
+    if (i === 0) sum = x;
+    else if (typeof sum === "number" && typeof x === "number") sum += x;
+    else if (sameMeasure(sum, x)) sum = new Quantity(sum.amount + amountIn(x, sum.unit), sum.unit);
+    else error(`'${what} of' can't add ${kindOf(x)} to ${kindOf(sum)}`);
+  });
+  return sum;
+}
+
+// `largest of`, `smallest of`: the first of the items no other beats
+function extreme(what, list, error) {
+  const items = present(what, list, error);
+  if (!items.length) error(`'${what} of' needs a list with something in it`);
+  let best = items[0];
+  for (let i = 1; i < items.length; i++) if (compare(what === "largest" ? "greater than" : "less than", items[i], best, error)) best = items[i];
+  return best;
+}
+
 export const BUILTINS = [
   { name: "uppercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'uppercase of'", t, error).toUpperCase() },
   { name: "lowercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'lowercase of'", t, error).toLowerCase() },
@@ -524,7 +595,7 @@ export const BUILTINS = [
       if (typeof text === "number") return text;
       if (isQuantity(text)) return text.amount; // the number alone: `number of (trip in miles)`
       needText("'number of'", text, error);
-      if (!/^\s*-?\d+(\.\d+)?\s*$/.test(text)) error(`${show(text, true)} isn't a number`); // a number as Moth writes them
+      if (!isNumberText(text)) error(`${show(text, true)} isn't a number`);
       return Number(text);
     },
   },
@@ -604,6 +675,28 @@ export const BUILTINS = [
       return new Quantity(amountIn(q, unit), unit);
     },
   },
+  // `read table "sales.csv"` (the parser makes these), `price in sales` (the price of each row: only after
+  // `total of` and the like), and what can be worked out from a list
+  { name: "table", needs: [["text"]], gives: "list", run: ([text], error) => tableOf(text, error) },
+  {
+    name: "column", needs: [["text"], ["list"]], gives: "list",
+    run: ([field, rows], error) => {
+      if (!isList(rows)) error(`'${field} in' needs a list of records, not ${kindOf(rows)}`);
+      return rows.map((row) => fieldOf(row, field, error));
+    },
+  },
+  { name: "total", needs: [["list"]], gives: null, run: ([list], error) => sumOf("total", present("total", list, error), error) },
+  {
+    name: "average", needs: [["list"]], gives: null,
+    run: ([list], error) => {
+      const items = present("average", list, error);
+      const sum = sumOf("average", items, error);
+      if (!items.length) error("'average of' needs a list with something in it");
+      return isQuantity(sum) ? new Quantity(sum.amount / items.length, sum.unit) : sum / items.length;
+    },
+  },
+  { name: "largest", needs: [["list"]], gives: null, run: ([list], error) => extreme("largest", list, error) },
+  { name: "smallest", needs: [["list"]], gives: null, run: ([list], error) => extreme("smallest", list, error) },
 ];
 
 // `ask question`: the answer, as text. `answer` is whoever can answer (a person at a terminal, a page): it gets
@@ -733,6 +826,31 @@ export class Turtle {
       const [x, y, size] = numbers("'draw ... at'", rest.map((n, i) => (i === 2 && n === null ? 16 : n))); // 16 when no size is given
       if (size <= 0) error(`text's size is a number above 0, not ${show(size)}`);
       this.draw({ shape: "text", text: show(text), x, y, size, color: this.color });
+    } else if (name === "chart") {
+      // `draw chart of sales`: a bar for each number (or amount) in a list, or each value of a dictionary,
+      // labelled with its place in the list or its key. The longest bar is 200 long, each 30 wide and 10 from
+      // the next, from (0, 0), with its value at its end; nothing has a label and no bar.
+      const isDict = isDictionary(value);
+      if (!isList(value) && !isDict) error(`'draw chart of' needs a list or a dictionary, not ${kindOf(value)}`);
+      const values = isDict ? [...value.values()] : value;
+      const labels = isDict ? [...value.keys()].map((k) => show(k)) : values.map((_, i) => String(i + 1));
+      const first = values.find((v) => v !== null);
+      const sizes = values.map((v) => {
+        if (v === null) return null;
+        if (isQuantity(first) ? !sameMeasure(first, v) : typeof v !== "number") error(`'draw chart of' needs numbers, or amounts of one measure, not ${kindOf(v)}`);
+        return isQuantity(v) ? amountIn(v, first.unit) : v;
+      });
+      let biggest = 0;
+      for (const n of sizes) if (n !== null && Math.abs(n) > biggest) biggest = Math.abs(n);
+      const scale = biggest === 0 ? 0 : 200 / biggest;
+      sizes.forEach((n, i) => {
+        const [x, height] = [i * 40, n === null ? 0 : round(n * scale)];
+        if (n !== null) {
+          this.draw({ shape: "box", x, y: Math.min(height, 0), width: 30, height: Math.abs(height), color: this.color });
+          this.draw({ shape: "text", text: show(values[i]), x, y: Math.max(height, 0) + 4, size: 12, color: this.color });
+        }
+        this.draw({ shape: "text", text: labels[i], x, y: Math.min(height, 0) - 18, size: 12, color: this.color });
+      });
     } else if (name === "left" || name === "right") {
       this.heading += name === "left" ? value : -value;
     } else if (name === "color") {

@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity } from "./vm.js";
+  Quantity, isQuantity, isRecord } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -508,6 +508,8 @@ function declareExports(m, T, R) {
   fn("byteAt", [EQ, I32], [I32], (c) => bytesOf(c, T, 0).emit("local.get", 1).emit("array.get_u", T.u8));
   fn("makeBytes", [I32], [EQ], (c) => c.emit("local.get", 0).emit("array.new_default", T.u8).emit("struct.new", T.bytes));
   fn("makeQty", [F64, I32], [EQ], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("struct.new", T.qty));
+  fn("makeRecord", [], [EQ], (c) => c.emit("call", R.newRecord));
+  fn("putField", [EQ, I32, EQ], [], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", R.setField));
   fn("qtyAmount", [EQ], [F64], (c) => c.emit("local.get", 0).emit("ref.cast", T.qty).emit("struct.get", T.qty, 0));
   fn("qtyUnit", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.qty).emit("struct.get", T.qty, 1));
   fn("setByte", [EQ, I32, I32], [], (c) => bytesOf(c, T, 0).emit("local.get", 1).emit("local.get", 2).emit("array.set", T.u8));
@@ -1350,6 +1352,15 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     if (typeof v === "number") return x.makeNum(v);
     if (typeof v === "string") return x.makeText(v);
     if (isQuantity(v)) return x.makeQty(v.amount, v.unit);
+    if (isRecord(v)) { // a table's row: its fields by the module's ids for their names, new names given new ones
+      const record = x.makeRecord();
+      for (const name of Object.keys(v)) {
+        let id = names.indexOf(name);
+        if (id < 0) id = names.push(name) - 1;
+        x.putField(record, id, toWasm(v[name]));
+      }
+      return record;
+    }
     if (v instanceof Map) return x.makeHost(new Map([...v].map(([key, value]) => [key, toWasm(value)])), TAGS.dictionary);
     if (v instanceof Uint8Array) {
       const bytes = x.makeBytes(v.length); // all 0 to start with

@@ -517,6 +517,32 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
             other => t(shown(other, false)?),
         },
         "as hex" => Ok(text(&num::radix(bits("'as hex'", &args[0])?, 16))),
+        "table" => table_of(need_text("'read table'", &args[0])?),
+        "column" => {
+            let field = need_text("a column", &args[0])?;
+            let Value::List(rows) = &args[1] else {
+                return oops(format!("'{field} in' needs a list of records, not {}", kind_of(&args[1])));
+            };
+            let rows = rows.borrow().clone();
+            let mut column = Vec::with_capacity(rows.len());
+            for row in &rows {
+                column.push(field_of(row, field)?);
+            }
+            Ok(list(column))
+        }
+        "total" => sum_of("total", &present("total", &args[0])?),
+        "average" => {
+            let items = present("average", &args[0])?;
+            let sum = sum_of("average", &items)?;
+            let n = items.len() as f64;
+            match sum {
+                _ if items.is_empty() => oops("'average of' needs a list with something in it".into()),
+                Value::Qty(a, u) => Ok(Value::Qty(a / n, u)),
+                Value::Num(a) => Ok(Value::Num(a / n)),
+                _ => unreachable!(),
+            }
+        }
+        "largest" | "smallest" => extreme(name, &args[0]),
         // `5 km` (the parser makes these) and `trip in miles`
         "unit" => {
             let word = need_text("a unit", &args[1])?;
@@ -535,6 +561,150 @@ fn builtin(index: usize, args: &[Value]) -> Res<Value> {
         }
         _ => Ok(text(&num::radix(bits("'as binary'", &args[0])?, 2))),
     }
+}
+
+// ---------- tables: `read table "sales.csv"`, `total of price in sales` (vm.js's tableOf and the rest) ----------
+
+// A CSV file's text as a table: a list of records, one for each row after the first, whose cells name the
+// fields (in lower case, with _ for anything but letters, digits and _). A cell that is a number is that
+// number, an empty one (or one the row is missing) is nothing, and any other is text. Cells in "quotes" can
+// hold commas, line breaks and "" for a quote; blank lines are skipped.
+fn table_of(csv: &str) -> Res<Value> {
+    let chars: Vec<char> = csv.chars().collect();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let (mut row, mut cell, mut quoted) = (Vec::new(), String::new(), false);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if quoted {
+            if c != '"' {
+                cell.push(c);
+            } else if chars.get(i + 1) == Some(&'"') {
+                cell.push('"');
+                i += 1;
+            } else {
+                quoted = false;
+            }
+        } else if c == '"' && cell.is_empty() {
+            quoted = true;
+        } else if c == ',' {
+            row.push(std::mem::take(&mut cell));
+        } else if c == '\n' || c == '\r' {
+            row.push(std::mem::take(&mut cell));
+            rows.push(std::mem::take(&mut row));
+            if c == '\r' && chars.get(i + 1) == Some(&'\n') {
+                i += 1;
+            }
+        } else {
+            cell.push(c);
+        }
+        i += 1;
+    }
+    if !cell.is_empty() || !row.is_empty() {
+        row.push(cell);
+        rows.push(row);
+    }
+    let mut rows = rows.into_iter().filter(|r| r.len() > 1 || !r[0].is_empty());
+    let Some(header) = rows.next() else { return Ok(list(vec![])) };
+    let mut names: Vec<Rc<str>> = Vec::new();
+    for (i, cell) in header.iter().enumerate() {
+        let mut made = String::new();
+        let mut in_run = false;
+        for c in cell.chars().map(|c| c.to_ascii_lowercase()) {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                made.push(c);
+                in_run = false;
+            } else if !in_run {
+                made.push('_');
+                in_run = true;
+            }
+        }
+        let mut name = made.trim_matches('_').to_string();
+        if name.is_empty() {
+            name = format!("column_{}", i + 1);
+        } else if name.starts_with(|c: char| c.is_ascii_digit()) {
+            name = format!("column_{name}");
+        }
+        while names.iter().any(|n| **n == *name) {
+            name += &format!("_{}", i + 1);
+        }
+        names.push(Rc::from(name.as_str()));
+    }
+    let mut table = Vec::new();
+    for r in rows {
+        let mut record = Record::default();
+        for (j, name) in names.iter().enumerate() {
+            let value = match r.get(j) {
+                None => Value::Nothing,
+                Some(c) if c.is_empty() => Value::Nothing,
+                Some(c) => match number_of(c) {
+                    Some(n) => Value::Num(n),
+                    None => text(c),
+                },
+            };
+            record.fields.push((name.clone(), value));
+        }
+        table.push(Value::Record(Rc::new(RefCell::new(record))));
+    }
+    Ok(list(table))
+}
+
+// `price of row`, for a table's column
+fn field_of(record: &Value, field: &str) -> Res<Value> {
+    let Value::Record(r) = record else {
+        return oops(format!("can't take '{field}' of {}", kind_of(record)));
+    };
+    let found = r.borrow().get(field).cloned();
+    match found {
+        Some(v) => Ok(v),
+        None => {
+            let names: Vec<String> = r.borrow().fields.iter().map(|(n, _)| n.to_string()).collect();
+            let guess = closest(field, &names).map(|g| format!(". Did you mean '{g}'?")).unwrap_or_default();
+            oops(format!("this record has no '{field}'{guess}"))
+        }
+    }
+}
+
+// What `total of`, `average of`, `largest of` and `smallest of` work on: the items that aren't nothing (as a
+// spreadsheet skips empty cells)
+fn present(what: &str, v: &Value) -> Res<Vec<Value>> {
+    match v {
+        Value::List(l) => Ok(l.borrow().iter().filter(|x| !matches!(x, Value::Nothing)).cloned().collect()),
+        _ => oops(format!("'{what} of' needs a list, not {}", kind_of(v))),
+    }
+}
+
+// `total of`, and `average of` before it divides: numbers, or amounts of one measure (in the first one's unit)
+fn sum_of(what: &str, items: &[Value]) -> Res<Value> {
+    let mut sum = Value::Num(0.0);
+    for (i, x) in items.iter().enumerate() {
+        if !matches!(x, Value::Num(_) | Value::Qty(..)) {
+            return oops(format!("'{what} of' needs numbers, not {}", kind_of(x)));
+        }
+        sum = match (&sum, x) {
+            _ if i == 0 => x.clone(),
+            (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
+            (Value::Qty(a, u), Value::Qty(b, v)) if measure_of(*u) == measure_of(*v) => Value::Qty(a + amount_in(*b, *v, *u), *u),
+            _ => return oops(format!("'{what} of' can't add {} to {}", kind_of(x), kind_of(&sum))),
+        };
+    }
+    Ok(sum)
+}
+
+// `largest of`, `smallest of`: the first of the items no other beats
+fn extreme(what: &str, v: &Value) -> Res<Value> {
+    let items = present(what, v)?;
+    if items.is_empty() {
+        return oops(format!("'{what} of' needs a list with something in it"));
+    }
+    let op = if what == "largest" { 2 } else { 1 }; // greater than, less than
+    let mut best = items[0].clone();
+    for x in &items[1..] {
+        if compare(op, x, &best)? {
+            best = x.clone();
+        }
+    }
+    Ok(best)
 }
 
 // whether a value is what an input says it is (a place in KINDS; -1 says nothing)
@@ -636,6 +806,55 @@ impl Turtle {
                     return oops(format!("a circle's size is 0 or more, not {}", num::display(p[2])));
                 }
                 host.draw(Drawn::Circle { x: p[0], y: p[1], radius: p[2], color: self.color.clone() });
+            }
+            "chart" => {
+                // `draw chart of sales`: a bar for each number (or amount) in a list, or each value of a dictionary,
+                // labelled with its place in the list or its key. The longest bar is 200 long, each 30 wide and 10
+                // from the next, from (0, 0), with its value at its end; nothing has a label and no bar.
+                let (values, labels): (Vec<Value>, Vec<String>) = match &value {
+                    Value::Dict(d) => {
+                        let d = d.borrow();
+                        let keys = d.keys();
+                        let mut labels = Vec::with_capacity(keys.len());
+                        for k in &keys {
+                            labels.push(shown(&k.value(), false)?);
+                        }
+                        (keys.iter().map(|k| d.get(k).unwrap()).collect(), labels)
+                    }
+                    Value::List(l) => {
+                        let items = l.borrow().clone();
+                        let labels = (1..=items.len()).map(|i| i.to_string()).collect();
+                        (items, labels)
+                    }
+                    other => return oops(format!("'draw chart of' needs a list or a dictionary, not {}", kind_of(other))),
+                };
+                let first = values.iter().find(|v| !matches!(v, Value::Nothing));
+                let mut sizes = Vec::with_capacity(values.len());
+                for v in &values {
+                    sizes.push(match (v, first) {
+                        (Value::Nothing, _) => None,
+                        (Value::Num(n), Some(Value::Num(_))) => Some(*n),
+                        (Value::Qty(n, u), Some(Value::Qty(_, f))) if measure_of(*u) == measure_of(*f) => Some(amount_in(*n, *u, *f)),
+                        _ => return oops(format!("'draw chart of' needs numbers, or amounts of one measure, not {}", kind_of(v))),
+                    });
+                }
+                let mut biggest = 0.0f64;
+                for n in sizes.iter().flatten() {
+                    if n.abs() > biggest {
+                        biggest = n.abs();
+                    }
+                }
+                let scale = if biggest == 0.0 { 0.0 } else { 200.0 / biggest };
+                for (i, n) in sizes.iter().enumerate() {
+                    let x = (i * 40) as f64;
+                    let height = n.map_or(0.0, |n| round2(n * scale));
+                    if n.is_some() {
+                        host.draw(Drawn::Box { x, y: height.min(0.0), width: 30.0, height: height.abs(), color: self.color.clone() });
+                        let text = shown(&values[i], false)?;
+                        host.draw(Drawn::Text { text, x, y: height.max(0.0) + 4.0, size: 12.0, color: self.color.clone() });
+                    }
+                    host.draw(Drawn::Text { text: labels[i].clone(), x, y: height.min(0.0) - 18.0, size: 12.0, color: self.color.clone() });
+                }
             }
             "text" => {
                 let all = items();

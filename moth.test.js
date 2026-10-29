@@ -546,6 +546,41 @@ function loggedDisk(start) {
   return disk;
 }
 
+test("tables: read table, for each ... where, total of, average of, largest of, and charts, on all three engines", () => {
+  const source = [
+    'set sales to read table "sales.csv"',
+    "say length of sales \" rows: \" item 1 of sales",
+    "for each row in sales where price of row is not nothing and price of row is greater than 1.6",
+    "    say name of row",
+    "end",
+    "say total of price in sales \" \" average of price in sales \" \" largest of qty in sales \" \" smallest of name in sales",
+    "say total of (list of 5 km, 300 m) \" \" average of (list of 1 hour, 30 minutes)",
+    "draw chart of price in sales",
+  ].join("\n");
+  const csv = 'Name,Price,Qty\nApple,1.5,10\nPear,2,3\n"Big, red melon",12.25,1\nKiwi,,\n';
+  const drawings = [];
+  for (const engine of ENGINES) {
+    const drawn = [];
+    const said = output(source, { engine, disk: memoryDisk({ "sales.csv": csv }), draw: (d) => drawn.push(d) });
+    assert.equal(said, [
+      '4 rows: (record with name "Apple", price 1.5, qty 10)',
+      "Pear",
+      "Big, red melon",
+      "15.75 5.25 10 Apple",
+      "5.3 km 0.75 hours",
+    ].join("\n"), engine);
+    drawings.push(drawn);
+  }
+  assert.deepEqual(drawings[0].slice(0, 3), [
+    { shape: "box", x: 0, y: 0, width: 30, height: 24.49, color: "#4f8ff7" },
+    { shape: "text", text: "1.5", x: 0, y: 28.49, size: 12, color: "#4f8ff7" },
+    { shape: "text", text: "1", x: 0, y: -18, size: 12, color: "#4f8ff7" },
+  ]);
+  assert.equal(drawings[0].length, 10); // three bars with their values and labels, and Kiwi's label alone
+  assert.deepEqual(drawings[1], drawings[0]);
+  assert.deepEqual(drawings[2], drawings[0]);
+});
+
 test("programs read and write files, and get their arguments, on all three engines", () => {
   const source = [
     'write "one\\ntwo" to "notes.txt"',
@@ -858,7 +893,7 @@ test("generated programs: the engines, the compiler in Moth, the formatter and t
   const moth = mothCompiler(COMPILER);
   const world = (engine, source) => {
     const said = [];
-    const disk = memoryDisk({ "file.txt": "hello\nworld", "data.bin": new Uint8Array([1, 2, 3]) });
+    const disk = memoryDisk({ "file.txt": "hello\nworld", "data.bin": new Uint8Array([1, 2, 3]), "data.csv": "Name,Price, x\n\"a, b\",1.5,\r\n\nb,-2,\"q\"\"uote\"\nc,3\n" });
     try {
       run(source, (line) => said.push(line), { engine, maxSteps: 5_000, disk, args: ["one", "2"] });
       return { said, files: [...disk.files] };

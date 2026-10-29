@@ -82,6 +82,7 @@ const RESERVED = new Set([
   "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
+const AGGREGATES = ["total", "average", "largest", "smallest"]; // `total of prices`: these words and `of` work out something from a list
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
   ["join", [null, "with"]], ["position", ["of", "in"]], ["keys", ["of"]]]);
 // `a bit and b`, `a bit or b`, `a bit xor b`; `bit` alone is still a name
@@ -239,7 +240,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         return { kind: "count", name: variable, from, to: expression(), body: loopBody(t), at: t };
       }
       if (!word("in")) expected("'in' or 'from'");
-      return { kind: "each", name: variable, list: expression(), body: loopBody(t), at: t };
+      const list = expression();
+      const where = word("where"); // `for each row in sales where price of row is greater than 10`
+      const cond = where && expression();
+      const body = loopBody(t);
+      return { kind: "each", name: variable, list, body: where ? [{ kind: "if", cond, then: body, otherwise: [], at: where }] : body, at: t };
     }
     if (word("to")) {
       const fnName = name("a function name");
@@ -328,6 +333,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("clear")) return { kind: "turtle", action: "clear", value: null, at: t }; // wipe the picture
     if (word("draw")) { // `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
+      if (isWord("chart") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") { // `draw chart of sales`
+        pos += 2;
+        return { kind: "turtle", action: "chart", value: column(expression), at: t };
+      }
       const shape = ["box", "circle"].find((w) => isWord(w) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "at");
       if (shape) {
         pos += 2;
@@ -426,6 +435,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return left;
   }
 
+  // `price in sales`, after `total of` and `draw chart of`: the price of each row; anything else is `rest()`
+  function column(rest) {
+    if (!check("word") || RESERVED.has(peek().value) || tokens[pos + 1].type !== "word" || tokens[pos + 1].value !== "in" || unitAt(pos + 2)) return rest();
+    const field = tokens[pos];
+    pos += 2;
+    return { kind: "builtin", name: "column", args: [{ kind: "value", value: field.value, at: field }, rest()], at: field };
+  }
+
   function additive() {
     let left = multiplicative();
     for (let t; (t = match("+") || match("-")); ) left = { kind: "math", op: t.type, left, right: multiplicative(), at: t };
@@ -510,10 +527,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
     if (word("read")) { // `read "notes.txt"`, `read bytes "photo.png"`: `of` is the file's name
+      if (word("table")) return { kind: "builtin", name: "table", args: [{ kind: "read", bytes: false, of: additive(), at: t }], at: t };
       const bytes = Boolean(word("bytes"));
       return { kind: "read", bytes, of: additive(), at: t };
     }
-    if (word("arguments")) return { kind: "arguments", at: t }; // what the program was started with: `moth run tool.moth a b`
+    if (word("arguments")) return { kind: "arguments", at: t };
+    // `total of prices`, `average of price in sales`, `largest of`, `smallest of`
+    if (t.type === "word" && AGGREGATES.includes(t.value) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") {
+      pos += 2;
+      return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
+    } // what the program was started with: `moth run tool.moth a b`
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
       pos += 3;
