@@ -28,11 +28,13 @@ const USAGE = `usage:
   moth build --web <file.moth>
                               make it into <file>.html: one web page, with nothing else needed, that
                               runs it in any browser; an app there gets keys, clicks and its timers
-  moth build --exe <file.moth> [--target windows|linux]
+  moth build --exe <file.moth> [--target windows|linux] [--allow-...]
                               compile it to machine code with machine.moth, Moth's own compiler, and
-                              nothing else: <file>.exe for Windows, or <file> for Linux; so far it
-                              takes numbers, yes, no and nothing, text, lists, records, dictionaries,
-                              bytes, variables, say, if, loops, functions, try and most helpers
+                              nothing else: <file>.exe for Windows, or <file> for Linux, which asks
+                              as run does, allowing what --allow flags after the file allow; so far
+                              it takes numbers, yes, no and nothing, text, lists, records,
+                              dictionaries, bytes, variables, say, if, loops, functions, try, files,
+                              ask, arguments and most helpers
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
   moth js <file.moth>         show the JavaScript the JIT makes
   moth wasm <file.moth>       show the WebAssembly module the third engine makes
@@ -142,11 +144,11 @@ function report(err, source, file) {
 
 // The program as machine code, made by machine.moth, Moth's machine-code back end written in Moth: a file of
 // its own, which runs with nothing else installed.
-function buildExe(file, source, target) {
+function buildExe(file, source, target, allow) {
   compile(source, reading(file)); // reads the files it uses, and stops at a mistake in them as run would
   const files = Object.fromEntries([...sources].filter(([, text]) => text !== undefined));
   const here = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
-  const bytes = machineCompiler(here("machine.moth"), here("compiler.moth"))(source, { files, target, name: basename(file) });
+  const bytes = machineCompiler(here("machine.moth"), here("compiler.moth"))(source, { files, target, name: basename(file), allow });
   const out = file.replace(/\.moth$/i, "") + (target === "windows" ? ".exe" : "");
   writeFileSync(out, bytes);
   if (target === "linux") chmodSync(out, 0o755);
@@ -530,7 +532,12 @@ function main([command, file, ...extra]) {
   const exe = command === "build" && file === "--exe";
   if (web || exe) file = extra.shift();
   let target = process.platform === "win32" ? "windows" : "linux";
-  if (exe && extra[0] === "--target" && ["windows", "linux"].includes(extra[1])) [target, extra] = [extra[1], extra.slice(2)];
+  const flags = []; // the --allow flags `build --exe` builds into the program, as moth-native's does
+  while (exe && extra.length) {
+    if (extra[0] === "--target" && ["windows", "linux"].includes(extra[1])) [target, extra] = [extra[1], extra.slice(2)];
+    else if (addAllow(allowed, extra[0])) flags.push(extra.shift());
+    else break;
+  }
   let engine = "jit";
   while (command === "run" && extra.length) {
     if (extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
@@ -565,7 +572,7 @@ function main([command, file, ...extra]) {
       }
     }
     else if (command === "check") return checkFile(file, source) ? 1 : 0;
-    else if (exe) buildExe(file, source, target);
+    else if (exe) buildExe(file, source, target, flags);
     else if (command === "build") (web ? buildWeb : build)(file, source, allowed);
     else if (command === "js") console.log(compileToJs(source, reading(file)).source);
     else if (command === "wasm") {
