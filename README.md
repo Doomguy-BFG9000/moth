@@ -497,7 +497,9 @@ engine, checked bit for bit on a million numbers.
 **As one WebAssembly file.** The same engine builds into `moth-native.wasm`,
 which runs in any WebAssembly runtime with WASI, the standard way for
 WebAssembly to reach files and a terminal. It asks its runtime for nothing
-else: no JavaScript is involved, and the tests check it agrees with the others.
+else, and on every push CI runs it in wasmtime, which has no JavaScript in it,
+on every test program and 1,000 broken ones, and has it build Moth's compiler
+with itself.
 
 ```bash
 cd native && rustup target add wasm32-wasip1 && cargo build --release --target wasm32-wasip1

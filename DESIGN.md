@@ -684,7 +684,10 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   JavaScript anywhere. The one change is the stack: a runtime may give
   WebAssembly as little as half a megabyte, so that build stops code nested
   past 500 levels and values past 1,000 with Moth's own message, where the
-  stack would have run out with a crash. The tests run it under Node's WASI, which is written in C.
+  stack would have run out with a crash. CI runs it in wasmtime, a runtime with
+  no JavaScript in it. Node 24's own WASI runs it too, so the tests use that
+  when wasmtime isn't there, but Node 22's crashed on it with a segfault inside
+  Node, even for a two-line program: a reason to test in a real runtime.
 - **Moth builds itself without JavaScript.** compiler.moth gained a second back
   end, about 500 lines of Moth, that writes the bytecode moth.js's compiler
   makes, in a text format both it and the Rust engine read and write
