@@ -697,11 +697,81 @@ a readable listing as it goes, which `moth wasm` and the playground show.
   bootstrap` runs compiler.moth on the Rust engine to compile itself, runs what
   that made to do it again, and again: Moth's compiler, written in Moth, run by
   Rust, building itself, with JavaScript nowhere in the loop.
-- **Numbers as written, as JavaScript reads them.** compiler.moth keeps number
-  tokens as text, so the bytecode back end has to make numbers of them the way
-  JavaScript's `Number()` does. Decimals go through `number of`; `0x` and `0b`
-  numbers past 2^53 are rounded by hand, half to even, from their bits.
+- **Numbers as written.** compiler.moth keeps number tokens as text, and the
+  bytecode keeps each number constant as it was written (`const number 0x1F`),
+  which both compilers have, so neither has to print a float the other can
+  match: Moth itself shows numbers to 15 digits (section 23), which would lose
+  the rest. The reader makes the number from the text, `0x` and `0b` included,
+  as JavaScript's `Number()` would.
 - **The old trap, once more.** In Moth a `set` inside a function changes a
   variable of the top level with the same name, and defining a function counts.
   The new back end's helper `here` would have been overwritten by `resolve`'s
   own `set here to scope`, as `place` was before: it's `code_length` instead.
+
+## 23. Everyday numbers and data
+
+Seven features meant to make Moth better than Python at the things people
+first program for: sums of money, trips, recipes, spreadsheets. Each runs on
+all four engines, the checker and the compiler written in Moth, and the tests
+hold them to agreeing.
+
+- **Fix buttons.** A misspelled name or a symbol from another language already
+  got a message saying what was meant; `suggestedFix` turns that into an edit
+  (the spot, what's there, what goes there), checked against the code so it only
+  replaces what the message names, and the playground puts a **Fix** button on
+  the problem.
+- **Inputs that say what they are.** `to area with width as a number` stores a
+  kind for each input; a call checks them after it checks how many there are,
+  so the message names the input: `'area' needs width to be a number, not
+  text`. A function whose inputs say nothing carries no list at all, so calls
+  to it cost nothing more. The checker starts each such input with that type,
+  which lets it see more mistakes inside the function.
+- **Numbers like a spreadsheet.** Arithmetic stays the computer's own: binary
+  floats, fast. What changed is what a number counts as. `canon(x)` is x to 15
+  significant digits (`Number(x.toPrecision(15))`), and a number is shown,
+  compared, used as a key, an item's place or a count of times by its canon:
+  `0.1 + 0.2` shows as `0.3`, is `0.3`, and finds the key `0.3`. Most
+  comparisons never call it: two equal numbers, two whole numbers, or two
+  further apart than 15 digits can tell are answered at once, so loops of whole
+  numbers run as fast as before. The Rust engine rounds to 15 digits with
+  `{:.14e}`, which breaks a tie to the even digit where `toPrecision` goes up;
+  a tie only happens when the number is exactly 16 digits long ending in 5, so
+  that one case is rounded by hand from all of the float's digits.
+- **Units.** `5 km` is an amount: a number and a unit's place in one table,
+  which every engine has in the same order. Amounts of one measure add,
+  subtract and compare in the left one's unit (`5 km + 300 m` is `5.3 km`),
+  `in` converts, and anything else is the same mistake as any other wrong
+  kind: `can't use '+' on a distance and a time`. A unit's word only counts as
+  a unit straight after a number written out (or after `in`), so `say "Day " day` still means
+  the variable. In WebAssembly an amount is its own struct of an f64 and an
+  i32, so it never touches the dictionary code that `T.host` values go through.
+  One optimisation had to give: WebAssembly kept a variable unboxed when every
+  value it got was "a number or a mistake", and `-`, `*` and `/` counted as
+  that. Now `2 * x` can be an amount, so a product only counts when both sides
+  are numbers; a difference or a quotient still counts when its left side is,
+  since a number less (or over) an amount is a mistake.
+- **Tables.** `read table "sales.csv"` is the builtin `table` around a `read`,
+  so files, sites and the permissions below come for free. Each row is a
+  record named by the header, folded to lower case with `_` for anything else
+  (`Unit Price` is `unit_price`); headers starting with a digit get `column_`
+  in front, because JavaScript puts number-like keys of an object first and
+  the Rust engine keeps the order it was given. Empty cells are nothing, and
+  `total of`, `average of`, `largest of` and `smallest of` skip them, as a
+  spreadsheet does. `for each row in sales where ...` is only parsing: the body
+  becomes an `if`, so no engine needed a change. After `total of`, `price in
+  sales` is always a column, even when the second word is also a unit's (`steps
+  in week`): that clash came up in the first example written with it. A row reaching WebAssembly
+  from JavaScript needs ids for its field names, which only exist for names in
+  the program, so a new name gets the next id when it arrives.
+- **Charts.** `draw chart of` is a turtle action like `draw box`: one function
+  in vm.js and one in Rust work out the bars (the longest 200 long, each 30 wide)
+  and draw boxes and text, rounded as every drawing is, so the pictures match
+  byte for byte.
+- **Asking first.** `moth run` and `moth-native run` give a program a disk that
+  asks before each file it reads or writes and each site it reads, the way
+  Deno does: a person at a terminal is asked; a script gets no, unless moth was
+  started with `--allow-read`, `--allow-write`, `--allow-net` or `--allow-all`.
+  A refusal is an ordinary mistake, so `try` catches it. Reading a site has to
+  wait for it, since `read` gives its answer at once: Node fetches it in a
+  second Node and waits for that to finish, the Rust engine runs `curl`, and the
+  playground's worker uses a request that waits, which only workers may do.

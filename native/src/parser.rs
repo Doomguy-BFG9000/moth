@@ -791,7 +791,7 @@ impl<'a, 'f> Parser<'a, 'f> {
     // a whole expression after `draw chart of`, one value after `total of`
     fn column(&mut self, whole: bool) -> R<Expr> {
         let t = self.peek().clone();
-        let named = t.kind == Kind::Word && !RESERVED.contains(&t.text.as_str()) && self.word_ahead(1, "in") && self.unit_at(self.pos + 2).is_none();
+        let named = t.kind == Kind::Word && !RESERVED.contains(&t.text.as_str()) && self.word_ahead(1, "in");
         if named {
             self.pos += 2;
         }

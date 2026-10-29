@@ -35,6 +35,7 @@ const EXAMPLES = {
   "Functions": "Hello, Sam!\nfib(20) is 6765",
   "Counter": "Ticked 3 times",
   "Records": 'Sam is 20\nAna is 31\n(record with name "Sam", age 21)',
+  "Data": "Trip: 5.3 km, or 3.29326731885787 miles\nTime: 165 minutes\n0.1 + 0.2 is 0.3\nTue was a good day\nWed was a good day\nAverage: 7425 steps",
   "Primes": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]",
   "Guess": "Guess my number (1 to 100): 50\nLower\nGuess my number (1 to 100): 25\nHigher\nGuess my number (1 to 100): 37\nYes! 37 in 3 tries",
 };

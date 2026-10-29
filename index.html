@@ -263,8 +263,11 @@
 Did you mean 'total'?</pre></div>
         <div class="feature"><h3>Games and apps</h3><p>Keys, clicks and timers. Snake is 110 lines, and <code>moth build --web</code> turns it into one web page.</p></div>
         <div class="feature"><h3>Four engines that agree</h3><p>A bytecode VM, a JIT to JavaScript, WebAssembly that Moth writes byte by byte, and a Rust engine with no JavaScript at all. Thousands of random programs check they say the same.</p></div>
-        <div class="feature"><h3>A compiler written in Moth</h3><p>2,300 lines of Moth that compile any Moth program, itself included, to exactly what the JIT writes, byte for byte. With the Rust engine it builds itself with no JavaScript at all.</p></div>
+        <div class="feature"><h3>A compiler written in Moth</h3><p>2,400 lines of Moth that compile any Moth program, itself included, to exactly what the JIT writes, byte for byte. With the Rust engine it builds itself with no JavaScript at all.</p></div>
         <div class="feature"><h3>Debug backwards</h3><p>Step through a run in either direction: the line about to run, every variable, and the picture as it was.</p></div>
+        <div class="feature"><h3>Numbers that add up</h3><p><code>0.1 + 0.2</code> is <code>0.3</code>, as in a spreadsheet. Numbers can have units: <code>5 km + 300 m</code> is <code>5.3 km</code>, and adding a time to a distance is a mistake that says so.</p></div>
+        <div class="feature"><h3>Tables and charts</h3><p><code>read table "sales.csv"</code>, then <code>for each row in sales where ...</code>, <code>total of price in sales</code> and <code>draw chart of price in sales</code>.</p></div>
+        <div class="feature"><h3>Asks first</h3><p>On your computer, a program asks before it reads or writes your files or goes online, as Deno does. <code>--allow-read</code> and the rest let it without asking.</p></div>
       </div>
     </section>
 
@@ -382,14 +385,17 @@ Did you mean 'total'?</pre></div>
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
-      + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width").split(" "));
+      + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width "
+      + "table total average largest smallest chart").split(" "));
+    // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
+    const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
     const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
     // `marks` maps a line number to the columns the checker flagged there, which get a wavy underline.
     function highlight(source, marks = new Map()) {
       return source.split("\n").map((text, i) => {
         const flagged = marks.get(i + 1);
-        return text.replace(/(#.*)|("(?:\\.|[^"\\])*"?)|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)|([^#"\w])/g, (all, comment, str, number, word, other, offset) => {
+        return text.replace(new RegExp(String.raw`(#.*)|("(?:\\.|[^"\\])*"?)|\b(\d+(?:\.\d+)?\b${UNIT})|([A-Za-z_]\w*)|([^#"\w])`, "g"), (all, comment, str, number, word, other, offset) => {
           const html = comment ? `<span class="c">${escape(comment)}</span>`
             : str ? `<span class="s">${escape(str)}</span>`
             : number ? `<span class="n">${number}</span>`

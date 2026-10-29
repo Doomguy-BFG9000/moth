@@ -921,7 +921,7 @@ to parse with tokens, reading
     # a whole expression after `draw chart of`, one value after `total of`
     to column_or with whole
         set field_token to peek()
-        if type of field_token is "word" and not contains(reserved, value of field_token) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "in" and not unit_at(pos + 2)
+        if type of field_token is "word" and not contains(reserved, value of field_token) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "in"
             set pos to pos + 2
             set column_args to list of (record with kind "value", type "string", value value of field_token, at field_token)
             add column_rest(whole) to column_args

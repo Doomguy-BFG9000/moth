@@ -108,6 +108,26 @@ end
 set age of sam to 21
 say sam`,
 
+  "Data": `# numbers with units, a table worked out, and a chart
+set trip to 5 km + 300 m
+say "Trip: " trip ", or " trip in miles
+say "Time: " 2 hours + 45 minutes in minutes
+say "0.1 + 0.2 is " 0.1 + 0.2
+
+# a table is a list of records: read table "steps.csv" makes one from a file
+set week to list of (record with day "Mon", steps 4200), (record with day "Tue", steps 8100),
+    (record with day "Wed", steps 10500), (record with day "Thu", steps 6900)
+for each row in week where steps of row is at least 7000
+    say day of row " was a good day"
+end
+say "Average: " average of steps in week " steps"
+
+set by_day to empty dictionary
+for each row in week
+    set item (day of row) of by_day to steps of row
+end
+draw chart of by_day`,
+
   "Guess": `# a guessing game: answer in the box under the output
 set secret to 37
 set tries to 0

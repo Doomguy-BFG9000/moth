@@ -437,7 +437,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
   // `price in sales`, after `total of` and `draw chart of`: the price of each row; anything else is `rest()`
   function column(rest) {
-    if (!check("word") || RESERVED.has(peek().value) || tokens[pos + 1].type !== "word" || tokens[pos + 1].value !== "in" || unitAt(pos + 2)) return rest();
+    if (!check("word") || RESERVED.has(peek().value) || tokens[pos + 1].type !== "word" || tokens[pos + 1].value !== "in") return rest();
     const field = tokens[pos];
     pos += 2;
     return { kind: "builtin", name: "column", args: [{ kind: "value", value: field.value, at: field }, rest()], at: field };
