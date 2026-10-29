@@ -951,6 +951,14 @@ hold them to agreeing.
   called `total` and `k`, and since a file used `as` a name shares its
   functions' variables with the program's top level, machine.moth's own loops
   counted with them and never ended.
+- **Long lines.** Each place a mistake can happen kept its own copy of its line,
+  for the excerpt under the message, so the trained handwriting network, whose
+  weights are lines of 8,000 numbers, each `-` a place, made hundreds of
+  megabytes and broke the compiler. Now a line and its marker are kept once,
+  and each place keeps only how many of the marker's bytes go before the `^`:
+  4,000 negative numbers on a line went from 53 MB of program to 419 KB. The
+  digit reader then runs as a program of its own, 3.5 times as fast as `moth
+  run`, and training it 2.3 times.
 - **Files, questions and arguments.** `read`, `write`, `ask` and `arguments`
   do what they do in a program `moth-native build --exe` makes, which `moth
   run` matches. A file is read or written, or a site read, only once the
