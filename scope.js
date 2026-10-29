@@ -2,7 +2,7 @@
 // the JavaScript compiler (jit.js), so the two can't disagree about what a name refers to.
 import { noValue, closest } from "./vm.js";
 
-const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write"];
+const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect"];
 
 // Names each function sets. Inputs and functions made with `to` always belong to the function itself;
 // a name it `set`s (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.

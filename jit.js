@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -108,6 +108,11 @@ class JsCompiler extends Scope {
         return `removeKey(${this.expr(s.key)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "write":
         return `write(${this.expr(s.value)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
+      case "expect": {
+        const c = s.cond;
+        if (c.kind !== "compare") return `expectYes(${this.expr(c)}, ${this.pos(s.at)});`;
+        return `expect(${q(c.op)}, ${c.negate}, ${this.expr(c.left)}, ${this.expr(c.right)}, ${this.pos(s.at)});`;
+      }
       case "try": { // the call depth when it began, so catching a mistake deep in calls can put it back
         const t = this.temp();
         const body = this.block(s.body);
@@ -282,6 +287,8 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = []) {
     read: (name, asBytes, k) => readFile(name, asBytes, disk, errors[k]),
     write: (value, name, k) => writeFile(value, name, disk, errors[k]),
     args: () => [...args],
+    expect: (op, negate, a, b, k) => expectThat(op, negate, a, b, errors[k]),
+    expectYes: (value, k) => expectYes(value, errors[k]),
   };
 }
 export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));

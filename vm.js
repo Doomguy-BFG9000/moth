@@ -113,11 +113,12 @@ export const OPCODES = [
   ["REMOVE", 0],
   ["READ", 1], // the operand is 1 to read bytes, 0 to read text
   ["WRITE", 0], ["ARGUMENTS", 0],
+  ["EXPECT", 2], // which comparison (COMPARE_OPS), or -1 for just a value that must be yes; and 1 for `is not`
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width"];
 
@@ -474,6 +475,17 @@ export function askFor(question, answer, error) {
   const reply = answer(show(question));
   if (reply === null || reply === undefined) error("there was no answer to this question: the input ended");
   return String(reply);
+}
+
+// `expect a is b`, or any comparison: a mistake if it isn't so, which says what each side was
+export function expectThat(op, negate, a, b, error) {
+  if (compare(op, a, b, error) !== negate) return;
+  error(`expected ${show(a, true)} ${negate ? "not " : ""}to be${op === "is" ? "" : ` ${op}`} ${show(b, true)}`);
+}
+
+// `expect done`: the value must be yes
+export function expectYes(value, error) {
+  if (!truthy(value)) error(`expected yes, but got ${show(value, true)}`);
 }
 
 // `read "notes.txt"` (as text) and `read bytes "photo.png"`. `disk` is whatever holds the files: it has
@@ -835,6 +847,16 @@ export class Machine {
           case ARGUMENTS:
             stack.push([...this.args]); // a new list each time, so changing one can't change the next
             break;
+          case EXPECT: {
+            const op = code[ip];
+            if (op < 0) expectYes(stack.pop(), oops);
+            else {
+              const b = stack.pop();
+              expectThat(COMPARE_OPS[op], code[ip + 1] === 1, stack.pop(), b, oops);
+            }
+            ip += 2;
+            break;
+          }
           case TRY:
             this.handlers.push({ ip: code[ip++], frames: frames.length, stack: stack.length, fn, env, base });
             break;

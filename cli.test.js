@@ -153,3 +153,33 @@ test("moth run passes on arguments, and the program reads and writes files where
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /shout\.moth:1:13: there is no file called 'nowhere\.txt'/);
 });
+
+// ---------- moth test ----------
+
+test("moth test runs the tests in a file, or every .test.moth file in a folder, and fails if one does", (t) => {
+  const file = tempFile(t, "math.test.moth", "to double with n\n    return n * 2\nend\nto test_double\n    expect double(2) is 4\nend\nto test_wrong\n    say \"trying\"\n    expect double(3) is 7\nend");
+  const dir = dirname(file);
+  const result = moth(["test", file]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, [
+    "✓ test_double",
+    "✗ test_wrong",
+    `    ${file}:9:5: expected 6 to be 7`,
+    "        expect double(3) is 7",
+    "        ^",
+    "    it said:",
+    "      trying",
+    "1 passed, 1 failed",
+    "",
+  ].join("\n"));
+  writeFileSync(join(dir, "ok.test.moth"), "to test_fine\n    expect 1 is 1\nend");
+  writeFileSync(join(dir, "math.test.moth"), "to test_double\n    expect 2 * 2 is 4\nend");
+  const all = spawnSync(process.execPath, [CLI, "test", "--engine", "wasm"], { cwd: dir, encoding: "utf8" });
+  assert.equal(all.status, 0);
+  assert.equal(all.stdout, "math.test.moth\n✓ test_double\nok.test.moth\n✓ test_fine\n2 passed\n");
+  const empty = mkdtempSync(join(tmpdir(), "moth-"));
+  t.after(() => rmSync(empty, { recursive: true, force: true }));
+  const none = spawnSync(process.execPath, [CLI, "test"], { cwd: empty, encoding: "utf8" });
+  assert.match(none.stderr, /no tests found/);
+  assert.equal(none.status, 1);
+});

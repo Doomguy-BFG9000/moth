@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // The `moth` command: run, check or compile a program, show what it compiles to, or start the Moth shell.
-import { readFileSync, readSync, writeFileSync } from "node:fs";
+import { readFileSync, readSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, test, compile, compileToJs, compileToWasmBytes, mothCompiler, check, disassemble, session, excerpt, describeTrail, MothError } from "./moth.js";
 
 const USAGE = `usage:
   moth                        start the Moth shell
@@ -11,6 +11,9 @@ const USAGE = `usage:
                               run a program; if it draws, the drawing goes to <file>.svg; what follows
                               the file is the program's arguments (put --engine wasm or --engine vm
                               first to pick the engine; the JIT is the default)
+  moth test [files...]        run the tests: each function named test_..., on its own; with no file,
+                              every file ending in .test.moth here and in the folders inside
+                              (--engine wasm or --engine vm picks the engine)
   moth check <file.moth>      find mistakes without running it
   moth build <file.moth>      compile it to <file>.mjs, which runs with plain node
   moth bytecode <file.moth>   show the bytecode the compiler makes for the VM
@@ -199,7 +202,77 @@ function bootstrap() {
   console.log("fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it");
 }
 
+// One file's tests: a tick or a cross for each, and for one that failed, its mistake, the calls that led
+// there, and what it said before. Returns how many passed and failed.
+function testFile(file, source, engine) {
+  let failed = 0;
+  const results = test(source, { engine, disk, ...reading(file) });
+  for (const { name, said, error } of results) {
+    const label = name ?? basename(file);
+    if (!error) {
+      console.log(`✓ ${label}`);
+      continue;
+    }
+    failed++;
+    console.log(`✗ ${label}`);
+    const where = error.file ?? file;
+    const lines = [`${where}:${error.line}:${error.col}: ${error.reason}`, ...excerpt(error.file ? sources.get(error.file) ?? "" : source, error).split("\n")];
+    if (error.trail.length) lines.push(...describeTrail(error.trail).split("\n"));
+    if (said.length) lines.push("it said:", ...said.map((line) => `  ${line}`));
+    console.log(lines.map((line) => `    ${line}`).join("\n"));
+  }
+  return { passed: results.length - failed, failed };
+}
+
+// Every file ending in .test.moth in a folder and the folders inside it, but not node_modules or hidden ones.
+function findTests(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...findTests(path));
+    else if (entry.name.endsWith(".test.moth")) found.push(path);
+  }
+  return found;
+}
+
+// `moth test`: the files' tests, then how many passed. Fails if any test, or any file, did.
+function tests(files, engine) {
+  if (!files.length) files = findTests(".");
+  if (!files.length) {
+    console.error("moth: no tests found: name a file, or put tests in files ending in .test.moth");
+    return 1;
+  }
+  let [passed, failed] = [0, 0];
+  for (const file of files) {
+    if (files.length > 1) console.log(file);
+    let source;
+    try {
+      source = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+      const counts = testFile(file, source, engine);
+      passed += counts.passed;
+      failed += counts.failed;
+    } catch (err) {
+      if (source === undefined) console.error(`moth: can't read ${file} (${err.code === "ENOENT" ? "no such file" : err.message})`);
+      else report(err, source, file); // a mistake that stops the file from being read at all
+      failed++;
+    }
+  }
+  console.log(`${passed} passed${failed ? `, ${failed} failed` : ""}`);
+  return failed ? 1 : 0;
+}
+
 function main([command, file, ...extra]) {
+  if (command === "test") {
+    const rest = [file, ...extra].filter((a) => a !== undefined);
+    const at = rest.indexOf("--engine");
+    const engine = at >= 0 ? rest.splice(at, 2)[1] : "jit";
+    if (!["jit", "wasm", "vm"].includes(engine)) {
+      console.error(USAGE);
+      return 2;
+    }
+    return tests(rest, engine);
+  }
   let engine = "jit";
   if (command === "run" && extra[0] === "--engine" && ["jit", "wasm", "vm"].includes(extra[1])) [engine, extra] = [extra[1], extra.slice(2)];
   const args = command === "run" ? extra.splice(0) : []; // what's left after the file is the program's own

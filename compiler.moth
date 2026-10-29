@@ -239,7 +239,7 @@ end
 set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or",
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
     "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-    "byte", "bytes", "as", "shift", "read", "write", "arguments"
+    "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary"
@@ -590,6 +590,9 @@ to parse with tokens, reading
             expect_word("from")
             return record with kind "remove", key key, target unary(), at t
         end
+        if word("expect") # `expect total(2, 3) is 5`
+            return record with kind "expect", cond expression(), at t
+        end
         if word("write") # `write "hello" to "notes.txt"`
             set value to expression()
             expect_word("to")
@@ -927,7 +930,7 @@ end
 
 # ---------- which variable each name means ----------
 
-set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write"
+set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect"
 
 # Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
 # name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
@@ -1024,6 +1027,9 @@ to rename with node, alias, top, hidden
         rename(cond of node, alias, top, hidden)
         rename_all(then of node, alias, top, hidden)
         rename_all(otherwise of node, alias, top, hidden)
+    end
+    if what is "expect"
+        rename(cond of node, alias, top, hidden)
     end
     if what is "while"
         rename(cond of node, alias, top, hidden)
@@ -1410,6 +1416,18 @@ to js_statement with scope, s
     end
     if what is "write"
         return "write(" + js_expr(scope, value of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
+    end
+    if what is "expect"
+        set c to cond of s
+        if kind of c is not "compare"
+            return "expectYes(" + js_expr(scope, c) + ", " + remember(at of s) + ");"
+        end
+        set negated to "false"
+        if negate of c
+            set negated to "true"
+        end
+        set head to "expect(" + quote(op of c) + ", " + negated + ", " + js_expr(scope, left of c) + ", "
+        return head + js_expr(scope, right of c) + ", " + remember(at of s) + ");"
     end
     if what is "try" # the call depth when it began, so catching a mistake deep in calls can put it back
         set t to temp(scope)

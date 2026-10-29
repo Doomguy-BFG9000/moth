@@ -79,7 +79,7 @@ const RESERVED = new Set([
   "set", "add", "say", "if", "else", "end", "repeat", "while", "for", "to", "return", "and", "or", "not", "is", "yes", "no",
   "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
   "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
-  "byte", "bytes", "as", "shift", "read", "write", "arguments"]);
+  "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
 const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["number", ["of"]], ["split", [null, "by"]],
@@ -262,6 +262,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("from");
       return { kind: "remove", key, target: unary(), at: t };
     }
+    if (word("expect")) return { kind: "expect", cond: expression(), at: t }; // `expect total(2, 3) is 5`
     if (word("write")) { // `write "hello" to "notes.txt"`: the file's name is its target
       const value = expression();
       expectWord("to");
@@ -496,7 +497,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -684,6 +685,16 @@ class Compiler extends Scope {
         this.expr(s.value);
         this.expr(s.target);
         this.emit(s.at, WRITE);
+        return;
+      case "expect": // a comparison keeps both its sides, to say what they were
+        if (s.cond.kind === "compare") {
+          this.expr(s.cond.left);
+          this.expr(s.cond.right);
+          this.emit(s.at, EXPECT, COMPARE_OPS.indexOf(s.cond.op), s.cond.negate ? 1 : 0);
+        } else {
+          this.expr(s.cond);
+          this.emit(s.at, EXPECT, -1, 0);
+        }
         return;
       case "try": {
         const handler = this.jump(s.at, TRY);
@@ -931,6 +942,29 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   }
 }
 const copy = (v) => (v instanceof Uint8Array ? v.slice() : v); // bytes a program read could be changed after
+
+// Runs a file's tests: each function at its top level named test_something, on its own, in a fresh run of
+// the file, so one test can't spoil another. A mistake in it, like an `expect` that isn't so, fails it. A
+// file with no tests is one test itself. Gives [{ name, said, error }], `error` only for a test that failed,
+// whose trail leaves out the call that started the test. Options as for run(); a file that can't be read
+// at all throws, as in run().
+export function test(source, options = {}) {
+  const program = build(source, (body) => body, options);
+  const names = program.filter((s) => s.kind === "define" && s.name.startsWith("test_")).map((s) => s.name);
+  const last = source.split("\n").length; // the call that starts a test goes on the line after this one
+  const one = (name) => {
+    const said = [];
+    try {
+      run(name ? `${source}\n${name}()` : source, (line) => said.push(line), options);
+      return { name, said };
+    } catch (err) {
+      if (!(err instanceof MothError)) throw err;
+      err.trail = err.trail.filter((t) => t.file || t.line <= last);
+      return { name, said, error: err };
+    }
+  };
+  return names.length ? names.map(one) : [one(null)];
+}
 
 // Files kept in memory, for a page or a test: `start` gives the first ones, by name, as text or bytes.
 export function memoryDisk(start = {}) {

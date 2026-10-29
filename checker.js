@@ -224,6 +224,15 @@ class Checker extends Scope {
         this.willFail(s.at, () => this.known(type()) && type() !== "dictionary" && removeKey("a", SAMPLES[type()], found));
         return;
       }
+      case "expect": { // whether it is so is up to the values; only comparing kinds that can't be compared is certain to fail
+        const c = s.cond;
+        if (c.kind !== "compare") return this.expr(c);
+        this.expr(c.left);
+        this.expr(c.right);
+        const [left, right] = [this.type(c.left), this.type(c.right)];
+        if (c.op !== "is") this.willFail(s.at, () => this.known(left(), right()) && compare(c.op, this.sample(c.left), this.sample(c.right), found));
+        return;
+      }
       case "write": { // whether the file can be written isn't known, so only a name that isn't text is certain to fail
         this.expr(s.value);
         this.expr(s.target);

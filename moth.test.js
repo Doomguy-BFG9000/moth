@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { run, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, test as testMoth, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 
@@ -132,6 +132,9 @@ const PROGRAMS = [
   ["set b to 2 bytes\ntry\n    set byte 1 of b to 256\nif it fails with why\n    say why\nend\nsay b\nset c to b as bytes\nset byte 2 of c to 9\nsay b \" \" c", "a byte is a whole number from 0 to 255, not 256\n(2 bytes: 0, 0)\n(2 bytes: 0, 0) (2 bytes: 0, 9)"],
   // files and arguments, where a run has none
   ["say arguments\nsay length of arguments\nset a to arguments\nadd 1 to a\nsay arguments", "[]\n0\n[]"],
+  // expect: nothing happens when it is so; otherwise it says what each side was
+  ["expect 1 + 1 is 2\nexpect \"a\" is not \"b\"\nexpect 3 is in list of 1, 2, 3\nexpect 2 is at most 2\nexpect yes\nexpect 1\nsay \"ok\"", "ok"],
+  ["try\n    expect 1 is 2\nif it fails with why\n    say why\nend\nto check with n\n    expect n is greater than 0\n    return n\nend\nsay check(5)", "expected 1 to be 2\n5"],
 ];
 
 test("programs print what they should, on all three engines", () => {
@@ -258,6 +261,19 @@ const ERRORS = [
   ["say read bytes list of 1", "line 1: a file name is text, not a list"],
   ["set arguments to 1", "line 1: 'arguments' is a Moth word, so it can't be used as a variable name"],
   ["write \"a\" \"b\"", "line 1: expected 'to' but found \"b\""],
+  // expect: nothing happens when it is so; otherwise it says what each side was
+  ["expect 1 + 1 is 3", "line 1: expected 2 to be 3"],
+  ["expect \"a\" is not \"a\"", "line 1: expected \"a\" not to be \"a\""],
+  ["expect 5 is less than 2", "line 1: expected 5 to be less than 2"],
+  ["expect \"x\" is in list of \"a\", \"b\"", "line 1: expected \"x\" to be in [\"a\", \"b\"]"],
+  ["expect 7 is divisible by 2", "line 1: expected 7 to be divisible by 2"],
+  ["expect 1 is not at least 0", "line 1: expected 1 not to be at least 0"],
+  ["expect nothing", "line 1: expected yes, but got nothing"],
+  ["expect not yes", "line 1: expected yes, but got no"],
+  ["expect 1 is less than \"a\"", "line 1: can't check if a number is less than text"],
+  ["set expect to 1", "line 1: 'expect' is a Moth word, so it can't be used as a variable name"],
+  ["expect", "line 1: expected a value but found the end of the code"],
+  ["to check with n\n    expect n is greater than 0\nend\ncheck(-1)", "line 2: expected -1 to be greater than 0"],
 ];
 
 test("mistakes give a clear message, on all three engines", () => {
@@ -939,4 +955,44 @@ test("WebAssembly's fast paths for bytes, bits and dictionaries agree with the o
     assert.deepEqual(outcome(source, "jit"), vm, `jit: ${source}`);
     assert.deepEqual(outcome(source, "wasm"), vm, `wasm: ${source}`);
   }
+});
+
+// ---------- moth test ----------
+
+// Each test_ function runs on its own, in a fresh run of the file: test_two doesn't see what test_one did.
+test("test() runs each test_ function on its own, and says why one failed, on all three engines", () => {
+  const source = [
+    "set count to 0",
+    "to average with numbers",
+    "    return 10 / length of numbers",
+    "end",
+    "to test_one",
+    "    add 1 to count",
+    "    expect count is 1",
+    "end",
+    "to test_two",
+    "    add 1 to count",
+    '    say "count is " count',
+    "    expect count is 2",
+    "end",
+    "to test_three",
+    "    expect average(empty list) is 1",
+    "end",
+    "to helper",
+    "    expect 1 is 2",
+    "end",
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const results = testMoth(source, { engine });
+    assert.deepEqual(results.map((r) => [r.name, r.said, r.error?.message]), [
+      ["test_one", [], undefined],
+      ["test_two", ["count is 1"], "line 12: expected 1 to be 2"],
+      ["test_three", [], "line 3: can't divide by zero"],
+    ], engine);
+    assert.deepEqual(results[2].error.trail.map((t) => [t.name, t.line]), [["average", 15]], engine); // not the call that started it
+    assert.deepEqual(results[1].error.trail, [], engine);
+  }
+  const [whole] = testMoth("say 1\nexpect 1 is 2"); // no tests: the file is one
+  assert.deepEqual([whole.name, whole.said, whole.error.message], [null, ["1"], "line 2: expected 1 to be 2"]);
+  assert.throws(() => testMoth("to test_a\n    say 1"), /'to' from line 1 is missing its 'end'/);
 });
