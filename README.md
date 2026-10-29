@@ -185,7 +185,7 @@ file in `moth build --exe` let it:
 
 ```text
 $ moth build --exe fib.moth
-compiled fib.moth to machine code for Windows -> fib.exe (11,776 bytes)
+compiled fib.moth to machine code for Windows -> fib.exe (50,176 bytes)
 $ ./fib.exe
 832040
 ```
@@ -208,14 +208,32 @@ mistake, like adding `nothing` to a number. The rest is room to grow: machine.mo
 keeps every value in memory rather than in the processor's registers, and
 always works in decimals, even for a count that is only ever whole.
 
-**Is Moth standalone yet?** Nearly. What `moth build --exe` makes runs with
-nothing else installed, and machine.moth, made into machine code, already
-compiles itself into exactly the bytes it makes on Node.js, in 1.9 s against
-Node.js's 5.1 s, with a garbage collector keeping it to 535 MB. Making a
-program still starts from Node.js, though. A program in machine code can now
-read and write files and take its arguments, so the rest of the way is a
-`moth.exe`: machine.moth, with a few lines around it that read a program and
-write the one it makes. From then on Moth needs neither JavaScript nor Rust.
+**Is Moth standalone yet?** Yes. [`moth.moth`](moth.moth) is Moth's command
+line, written in Moth: it reads a program and the files it uses, compiles it
+with machine.moth and writes the program it makes. Made into machine code, it's
+`moth.exe` (`moth` on Linux), which needs neither JavaScript nor Rust, nor any
+other compiler, and builds itself into exactly the bytes Node.js built it into,
+in about 3 seconds:
+
+```text
+$ moth build moth.moth --allow-read --allow-write
+compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
+$ moth build tools/wordcount.moth --allow-read
+compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (81,408 bytes)
+$ tools/wordcount.exe tools/story.txt 3
+290 words, 107 different ones
+the  ██████████████████████████████ 45
+and  █████████████ 20
+it   ███████ 11
+```
+
+It builds for the system it runs on, or the other one with `--target windows`
+or `--target linux`, and a Linux moth.exe and a Windows one build each other
+byte for byte too. The first one comes from Node.js
+(`node cli.js build --exe moth.moth --allow-read --allow-write`) or from
+[the releases](https://github.com/samyyy2423/moth/releases); after that, each
+builds the next. It takes the part of Moth machine.moth takes; the playground,
+drawing and apps still run on the JavaScript engine.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -747,6 +765,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
+| [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
 | [`versus/`](versus) | The same four programs in Moth, C and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |

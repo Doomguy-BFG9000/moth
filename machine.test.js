@@ -172,6 +172,34 @@ test("machine.moth's functions never set a name its top level or compiler.moth's
   const set = (source) => [...source.matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]);
   assert.deepEqual(set(here("machine.moth")).filter((n) => top.has(n)), []);
   assert.deepEqual([...new Set(set(here("compiler.moth")))].filter((n) => top.has(n)), []);
+  // moth.moth uses machine.moth as a name, so no function in any of the three may set what its top level makes
+  const mothTop = new Set([...here("moth.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
+  for (const file of ["moth.moth", "machine.moth", "compiler.moth"]) assert.deepEqual([...new Set(set(here(file)))].filter((n) => mothTop.has(n)), [], file);
+});
+
+// Standalone Moth: moth.moth and machine.moth, made into machine code, are moth.exe (moth on Linux), which
+// builds a program that uses a file and builds itself, into the same bytes Node.js made it from.
+test("moth.exe builds programs, and itself into the same bytes", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
+  try {
+    const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth"].map((f) => [f, here(f)]));
+    const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write"] });
+    const moth = executable(dir, "moth-first");
+    writeFileSync(moth, made);
+    if (target === "linux") chmodSync(moth, 0o755);
+    for (const [name, text] of Object.entries(sources)) writeFileSync(join(dir, name), text);
+    writeFileSync(join(dir, "lib.moth"), "to twice with t\n    return t + t\nend\n");
+    writeFileSync(join(dir, "hi.moth"), 'use "lib.moth" as lib\nsay lib\'s twice("ab")\nsay uppercase of "straße"\n');
+    const built = spawnSync(moth, ["build", "hi.moth"], { cwd: dir, encoding: "utf8" });
+    assert.equal(built.status, 0, built.stdout + built.stderr);
+    assert.match(built.stdout, /^compiled hi\.moth to machine code for (Windows|Linux) -> hi(\.exe)? \(.* bytes\)\n$/);
+    assert.equal(spawnSync(executable(dir, "hi"), [], { encoding: "utf8" }).stdout, "abab\nSTRASSE\n");
+    const again = spawnSync(moth, ["build", "moth.moth", "--allow-read", "--allow-write"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+    assert.equal(again.status, 0, again.stdout + again.stderr);
+    assert.ok(Buffer.from(made).equals(readFileSync(executable(dir, "moth"))), "moth.exe built itself into different bytes");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a program becomes the same bytes each time, as a PE file for Windows and an ELF file for Linux", () => {

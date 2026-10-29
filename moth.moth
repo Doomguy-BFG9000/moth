@@ -1,0 +1,245 @@
+# Standalone Moth. This file and machine.moth, made into machine code by machine.moth itself, are moth.exe
+# (moth on Linux), which compiles a Moth program into a program of its own with neither JavaScript nor Rust:
+#
+#     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
+#
+# The first moth.exe comes from Node.js, or from a moth.exe from GitHub's releases; after that it builds
+# itself, into the same bytes:
+#
+#     node cli.js build --exe moth.moth --allow-read --allow-write
+#     moth build moth.moth --allow-read --allow-write
+#
+# A file used `as` a name shares its functions' variables with the program's top level, so every name made
+# here starts with cli_, which machine.moth and compiler.moth never use.
+
+use "machine.moth" as machine
+
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-read] [--allow-write] [--allow-net] [--allow-all]\n  compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file> for Linux,\n  for the system moth runs on unless --target says; the --allow flags let it read or write files, or read\n  sites, without asking, and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those"
+
+# the folder a file is in, with its last / or \, or "" for the folder moth runs in
+to cli_folder_of with cli_path
+    set cli_cut to 0
+    for each cli_k from 1 to length of cli_path
+        set cli_c to item cli_k of cli_path
+        if cli_c is "/" or cli_c is "\\"
+            set cli_cut to cli_k
+        end
+    end
+    set cli_out to ""
+    for each cli_k from 1 to cli_cut
+        add item cli_k of cli_path to cli_out
+    end
+    return cli_out
+end
+
+to cli_name_of with cli_path
+    set cli_folder to cli_folder_of(cli_path)
+    set cli_out to ""
+    for each cli_k from length of cli_folder + 1 to length of cli_path
+        add item cli_k of cli_path to cli_out
+    end
+    return cli_out
+end
+
+# the files a program's lines `use`, by the names they give, as written
+to cli_used_by with cli_source
+    set cli_found to empty list
+    for each cli_line in split cli_source by "\n"
+        set cli_rest to cli_line
+        repeat while length of cli_rest is greater than 0 and (item 1 of cli_rest is " " or item 1 of cli_rest is "\t")
+            set cli_rest to cli_tail(cli_rest, 2)
+        end
+        if length of cli_rest is greater than 5 and cli_first(cli_rest, 5) is "use \""
+            set cli_name to ""
+            set cli_k to 6
+            repeat while cli_k is at most length of cli_rest and item cli_k of cli_rest is not "\""
+                add item cli_k of cli_rest to cli_name
+                add 1 to cli_k
+            end
+            add cli_name to cli_found
+        end
+    end
+    return cli_found
+end
+
+# a text from its character `cli_from` on
+to cli_tail with cli_text, cli_from
+    set cli_out to ""
+    for each cli_k from cli_from to length of cli_text
+        add item cli_k of cli_text to cli_out
+    end
+    return cli_out
+end
+
+# a text's first `cli_n` characters
+to cli_first with cli_text, cli_n
+    set cli_out to ""
+    for each cli_k from 1 to cli_n
+        add item cli_k of cli_text to cli_out
+    end
+    return cli_out
+end
+
+# 1234567 as 1,234,567
+to cli_grouped with cli_n
+    set cli_digits to "" + cli_n
+    set cli_out to ""
+    for each cli_k from 1 to length of cli_digits
+        if cli_k is greater than 1 and cli_three(length of cli_digits - cli_k + 1)
+            add "," to cli_out
+        end
+        add item cli_k of cli_digits to cli_out
+    end
+    return cli_out
+end
+
+# whether n is a multiple of 3
+to cli_three with cli_n
+    set cli_left to cli_n
+    repeat while cli_left is greater than 2
+        set cli_left to cli_left - 3
+    end
+    return cli_left is 0
+end
+
+# file:line:col: the reason, then the line with a ^ under the spot, as moth run shows a mistake
+to cli_report with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
+    set cli_at to at of cli_why
+    set cli_file to file of cli_at
+    set cli_source to cli_main_source
+    set cli_where to cli_main_file
+    if cli_file is not ""
+        set cli_where to cli_file
+        for each cli_k from 1 to length of cli_names
+            if item cli_k of cli_names is cli_file
+                set cli_source to item cli_k of cli_texts
+            end
+        end
+    end
+    set cli_lines to split cli_source by "\n"
+    set cli_text to ""
+    if line of cli_at is at most length of cli_lines
+        set cli_text to item (line of cli_at) of cli_lines
+    end
+    set cli_mark to ""
+    for each cli_k from 1 to col of cli_at - 1
+        if cli_k is at most length of cli_text and item cli_k of cli_text is "\t"
+            add "\t" to cli_mark
+        else
+            add " " to cli_mark
+        end
+    end
+    say cli_where + ":" + line of cli_at + ":" + col of cli_at + ": " + reason of cli_why + "\n" + cli_text + "\n" + cli_mark + "^"
+end
+
+to cli_build with cli_path, cli_target, cli_allowing
+    set cli_folder to cli_folder_of(cli_path)
+    set cli_source to read cli_path
+    set cli_names to empty list # every file it uses, and the files they use, by the names `use` gives
+    set cli_texts to empty list
+    set cli_waiting to cli_used_by(cli_source)
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_waiting
+        set cli_name to item cli_k of cli_waiting
+        add 1 to cli_k
+        if not (cli_name is in cli_names)
+            try
+                set cli_text to read cli_folder + cli_name
+                add cli_name to cli_names
+                add cli_text to cli_texts
+                for each cli_more in cli_used_by(cli_text)
+                    add cli_more to cli_waiting
+                end
+            if it fails
+                # compile_machine says there is no file called that, at the line that uses it
+            end
+        end
+    end
+    set cli_program to cli_name_of(cli_path)
+    try
+        set cli_bytes to machine's compile_allowing(cli_source, cli_names, cli_texts, cli_target, cli_program, cli_allowing)
+    if it fails with cli_why
+        cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
+        return no
+    end
+    set cli_out to cli_path
+    if length of cli_out is greater than 5 and cli_tail(cli_out, length of cli_out - 4) is ".moth"
+        set cli_out to cli_first(cli_out, length of cli_out - 5)
+    end
+    set cli_system to "Linux"
+    if cli_target is "windows"
+        set cli_out to cli_out + ".exe"
+        set cli_system to "Windows"
+    end
+    write cli_bytes as bytes to cli_out
+    say "compiled " + cli_path + " to machine code for " + cli_system + " -> " + cli_out + " (" + cli_grouped(length of cli_bytes) + " bytes)"
+    return yes
+end
+
+# what moth runs on: Linux has /proc, Windows doesn't
+to cli_host
+    try
+        if length of (read bytes "/proc/version") is at least 0
+            return "linux"
+        end
+    if it fails
+        return "windows"
+    end
+end
+
+# --allow-read, --allow-write, --allow-net or --allow-all, each maybe with =names
+to cli_allow_flag with cli_flag
+    for each cli_kind in list of "read", "write", "net", "all"
+        set cli_start to "--allow-" + cli_kind
+        if cli_flag is cli_start
+            return yes
+        end
+        if length of cli_flag is greater than length of cli_start + 1 and cli_first(cli_flag, length of cli_start + 1) is cli_start + "="
+            return cli_kind is not "all"
+        end
+    end
+    return no
+end
+
+# the arguments: `build`, the file, maybe --target, and any --allow flags. In a function, as anything a
+# function sets that the top level sets too is the top level's, and the other functions here count with
+# cli_k as well.
+to cli_main
+    set cli_given to arguments
+    set cli_target to nothing
+    set cli_flags to empty list
+    set cli_file to nothing
+    set cli_fine to length of cli_given is at least 2 and item 1 of cli_given is "build"
+    set cli_k to 2
+    repeat while cli_fine and cli_k is at most length of cli_given
+        set cli_arg to item cli_k of cli_given
+        if cli_arg is "--target" and cli_k is less than length of cli_given and cli_target is nothing
+            set cli_target to item (cli_k + 1) of cli_given
+            set cli_fine to cli_target is "windows" or cli_target is "linux"
+            add 2 to cli_k
+        else if cli_allow_flag(cli_arg)
+            add cli_arg to cli_flags
+            add 1 to cli_k
+        else if cli_file is nothing and not (length of cli_arg is greater than 1 and cli_first(cli_arg, 2) is "--")
+            set cli_file to cli_arg
+            add 1 to cli_k
+        else
+            set cli_fine to no
+        end
+    end
+    if cli_file is nothing
+        set cli_fine to no
+    end
+    if not cli_fine
+        say cli_usage
+    else
+        if cli_target is nothing
+            set cli_target to cli_host()
+        end
+        if not cli_build(cli_file, cli_target, cli_flags)
+            fail with "the program has a mistake"
+        end
+    end
+end
+
+cli_main()

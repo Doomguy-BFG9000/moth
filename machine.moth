@@ -9848,7 +9848,11 @@ to emit_file_io with a, target
             mov_rr(a, rdi, rax)
             mark(a, again)
             movi(a, rsi, item 2 of way)
-            movi(a, rdx, 438) # 0o666, less the umask
+            if item 1 of way is "rt_file_open_read"
+                movi(a, rdx, 438) # 0o666, less the umask
+            else
+                mov_rr(a, rdx, r8) # as the writer says, less the umask
+            end
             sys_call(a, 2)
             alui(a, "cmp", rax, -4)
             jcc(a, cc_e, again)
@@ -10989,6 +10993,25 @@ to emit_writing with a, target
     jcc(a, cc_ne, nul_name)
     call_to(a, "rt_file_path")
     mov_rr(a, rbx, rax)
+    if target is "linux" # bytes that are a Linux program can run, as moth build --exe makes them: 0o777, else 0o666
+        set plain_file to new_label(a)
+        movi(a, r8, 438)
+        mov_rr(a, rcx, r12)
+        shifti(a, "shr", rcx, 48)
+        alui(a, "cmp", rcx, kind_bytes)
+        jcc(a, cc_ne, plain_file)
+        mov_rr(a, rcx, r12)
+        untag(a, rcx)
+        load(a, rdx, mem(rcx, 0))
+        alui(a, "cmp", rdx, 4)
+        jcc(a, cc_b, plain_file)
+        load(a, rdx, mem(rcx, 8))
+        load32(a, rdx, mem(rdx, 0))
+        alui(a, "cmp", rdx, 0x464C457F) # 0x7F, then "ELF"
+        jcc(a, cc_ne, plain_file)
+        movi(a, r8, 511)
+        mark(a, plain_file)
+    end
     call_to(a, "rt_file_open_write")
     alui(a, "cmp", rax, -1)
     jcc(a, cc_e, failed)

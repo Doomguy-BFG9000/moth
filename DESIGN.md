@@ -994,6 +994,22 @@ hold them to agreeing.
   values the runtime keeps (the file's name, why it failed, and what a person
   answered) sit among the collector's roots. It can't go online yet, so a
   site the program may read says it couldn't be reached.
+- **moth.exe.** moth.moth is the command line, in Moth: `moth build file.moth`,
+  with `--target` and the `--allow` flags. It reads the program, then every
+  file a `use` line names, and the files those use, gives them all to
+  machine.moth's `compile_allowing`, and writes what comes back; a mistake is
+  shown as `moth run` shows it. Made into machine code with `--allow-read
+  --allow-write`, it builds itself into the bytes Node.js made it, in 2.8 s,
+  and so does what that builds; a Linux one and a Windows one build each other
+  byte for byte. It finds which system it's on by whether it can read
+  /proc/version. On Linux, bytes that start like a Linux program are written
+  so they can run, as `moth build --exe` makes them.
+- **The trap, a fourth time.** The first moth.exe stopped after reading
+  machine.moth, sure compiler.moth wasn't there. Its top level counted through
+  the arguments with `cli_k`, so every function's `cli_k` was that one, and
+  the function that reads a file's `use` lines counted with it too, up to
+  400,000. Everything moth.moth does is in functions now, and the test for
+  such names covers moth.moth.
 - **A trap, twice.** In Moth a `set` inside a function changes a top-level
   variable of the same name, and a file used `as` a name shares its functions'
   variables with the program's top level. A label called `here` in machine.moth
