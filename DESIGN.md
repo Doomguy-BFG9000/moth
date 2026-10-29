@@ -888,6 +888,19 @@ hold them to agreeing.
   finish, against 0.21 s with `moth run` and 0.42 s with `moth-native run`, and
   30 million rounds of a loop 0.16 s against 0.33 s and 1.05 s. Next it needs
   text, lists and records, which need memory that grows.
+- **Memory, text and lists.** A value that lives in memory is a pointer whose top
+  16 bits say what it is, which makes it a NaN arithmetic never makes, so a sum
+  of two numbers still costs no more than before. Memory comes from the system
+  64 MB at a time and is handed out from the front, never given back: simple,
+  quick, and enough for a program that runs and ends. A text is its length in
+  bytes and in characters, and where its UTF-8 bytes are, which come from a
+  separate run of their own, so a text whose bytes were the last given out
+  grows in place: `add c to text` in a loop copies each character once, not the
+  whole text each time. A character of a text is a text that shares its bytes.
+  What `say` says, what `+` joins and a mistake's message are all put together
+  in one builder that grows as it needs to. Text sorts by its UTF-16, as
+  JavaScript's does, and stops at JavaScript's longest text with the engines'
+  mistake.
 - **Checked.** 400 random programs made from what it takes, 27 written for what's
   easy to get wrong, and every test program and 300 broken ones it can take, on
   the system the tests run on, against the JavaScript engine's output, mistakes,

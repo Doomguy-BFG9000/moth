@@ -56,10 +56,24 @@ set bits_no to list of 2, 0, 0, 0, 0, 0, 248, 127
 set bits_yes to list of 3, 0, 0, 0, 0, 0, 248, 127
 set bits_unset to list of 4, 0, 0, 0, 0, 0, 248, 127
 set bits_made to list of 5, 0, 0, 0, 0, 0, 248, 127
+# A value in memory is a pointer with its kind in the top 16 bits, which make it a NaN no arithmetic makes
+# either: text, a list, a record, a dictionary, bytes or a function.
+set kind_text to 65529
+set kind_list to 65530
+set kind_record to 65531
+set kind_dict to 65532
+set kind_bytes to 65533
+set kind_function to 65534
+set kind_tags to list of 0, kind_text, 0, kind_list, kind_record, kind_dict, kind_bytes, kind_function # by what an input says it is
+set tag_text to list of 0, 0, 0, 0, 0, 0, 0xF9, 0xFF
+set tag_list to list of 0, 0, 0, 0, 0, 0, 0xFA, 0xFF
 
 set out_cap to 65536 # bytes of output kept before they are written
 set limbs to 20 # 64-bit pieces of a big whole number: room for 10^340 times 2^54
 set stack_size to 268435456 # 256 MB: 100,000 calls in progress, each with up to 2 KB
+set wide_cap to 16384 # UTF-16 units written to a console at a time
+set max_text to 536870888 # JavaScript's longest text, in UTF-16 units: a longer one is a mistake there, so here too
+set too_big to "a value got too big to fit in memory"
 set frame_limit to 2048
 set deepest to 100000 # calls in progress at once, as every engine allows
 set kind_names to list of "a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"
@@ -207,7 +221,8 @@ end
 
 to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
-        bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary
+        bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
+        absolutes empty list, text_objects empty dictionary
     set code of made to hot of made
     return made
 end
@@ -268,6 +283,40 @@ to reserve with a, name, size, alignment
     set table to labels of a
     set item name of table to record with section "bss", at start
     set bss of a to start + size
+end
+
+# the 8-byte address of `name` (plus `addend`) goes at `at` in the read-only data ("rodata") or the data
+to absolute with a, section, at, name, addend
+    set fixes to absolutes of a
+    add record with section section, at at, label name, addend addend to fixes
+end
+
+# a text the program writes, as a value in the read-only data: its length in bytes and in characters, then
+# where its bytes are, which is just after; once each
+to text_object with a, t
+    set known to text_objects of a
+    if t is in known
+        return item t of known
+    end
+    set ro to rodata of a
+    pad_to(ro, 16)
+    set name to "X" + length of ro
+    rodata_here(a, name)
+    set raw_bytes to t as bytes
+    put64(ro, length of raw_bytes)
+    put64(ro, length of t)
+    absolute(a, "rodata", length of ro, name, 24)
+    put64(ro, 0)
+    put_all(ro, raw_bytes)
+    set item t of known to name
+    return name
+end
+
+to load_text with a, x, t
+    lea(a, rax, rip(text_object(a, t)))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, x, rax)
 end
 
 # a text's UTF-8 bytes in the read-only data, once each: its label and how many bytes
@@ -419,10 +468,6 @@ end
 
 to load8 with a, dst, at
     enc(a, empty list, no, (list of 0x0F, 0xB6), dst, at, empty list)
-end
-
-to load16 with a, dst, at
-    enc(a, empty list, no, (list of 0x0F, 0xB7), dst, at, empty list)
 end
 
 # the low byte of al, cl, dl or bl
@@ -683,26 +728,6 @@ to emit_output with a
     rep_movsb(a)
     ret(a)
 
-    # rt_out_value: rax: a value goes out as `say` shows it
-    set room to new_label(a)
-    mark(a, "rt_out_value")
-    load(a, rdx, rip("out_len"))
-    alui(a, "add", rdx, 32)
-    alui(a, "cmp", rdx, out_cap)
-    jcc(a, cc_be, room)
-    push_r(a, rax)
-    call_to(a, "rt_flush_out")
-    pop_r(a, rax)
-    mark(a, room)
-    load(a, rdx, rip("out_len"))
-    lea(a, rdi, rip("out_buf"))
-    alu(a, "add", rdi, rdx)
-    call_to(a, "rt_show")
-    lea(a, rax, rip("out_buf"))
-    alu(a, "sub", rdi, rax)
-    store(a, rip("out_len"), rdi)
-    ret(a)
-
     # rt_out_line: the end of a line
     set spare to new_label(a)
     set now to new_label(a)
@@ -738,34 +763,6 @@ to emit_output with a
     call_to(a, "rt_write")
     storei(a, rip("out_len"), 0)
     mark(a, idle)
-    ret(a)
-
-    # rt_show: rax, rdi: a value as `say` shows it, written at rdi, which ends up after it
-    set shown_nothing to new_label(a)
-    set shown_no to new_label(a)
-    set shown_yes to new_label(a)
-    mark(a, "rt_show")
-    movi64(a, rcx, bits_nothing)
-    alu(a, "cmp", rax, rcx)
-    jcc(a, cc_e, shown_nothing)
-    inc_r(a, rcx)
-    alu(a, "cmp", rax, rcx)
-    jcc(a, cc_e, shown_no)
-    inc_r(a, rcx)
-    alu(a, "cmp", rax, rcx)
-    jcc(a, cc_e, shown_yes)
-    jmp_to(a, "rt_fmt")
-    mark(a, shown_nothing)
-    point_at_text(a, "nothing")
-    rep_movsb(a)
-    ret(a)
-    mark(a, shown_no)
-    point_at_text(a, "no")
-    rep_movsb(a)
-    ret(a)
-    mark(a, shown_yes)
-    point_at_text(a, "yes")
-    rep_movsb(a)
     ret(a)
 end
 
@@ -1769,10 +1766,14 @@ to emit_compares with a
     # mistake, with the two values in err_a and err_b, and err_why 1 for dividing by zero.
     for each test in list of "lt", "gt", "ge", "le"
         set wrong to new_label(a)
+        set odd to new_label(a)
+        set decided to new_label(a)
+        set not_before to new_label(a)
         mark(a, "rt_cmp_" + test)
-        special_jump(a, xmm0, wrong)
-        special_jump(a, xmm1, wrong)
+        odd_jump(a, xmm0, odd)
+        odd_jump(a, xmm1, odd)
         call_to(a, "rt_order")
+        mark(a, decided)
         if test is "lt"
             alui(a, "cmp", rax, 1)
             setcc(a, cc_e, rax)
@@ -1788,15 +1789,34 @@ to emit_compares with a
         end
         movzx8(a, rax, rax)
         ret(a)
+        mark(a, odd) # two texts compare as their UTF-16 does
+        movq_rx(a, rax, xmm0)
+        shifti(a, "shr", rax, 48)
+        alui(a, "cmp", rax, kind_text)
+        jcc(a, cc_ne, wrong)
+        movq_rx(a, rax, xmm1)
+        shifti(a, "shr", rax, 48)
+        alui(a, "cmp", rax, kind_text)
+        jcc(a, cc_ne, wrong)
+        movq_rx(a, rax, xmm0)
+        movq_rx(a, rdx, xmm1)
+        call_to(a, "rt_text_order")
+        alui(a, "cmp", rax, -1) # as rt_order has it: 1 before, 0 the same, 2 after
+        jcc(a, cc_ne, not_before)
+        movi(a, rax, 1)
+        jmp_to(a, decided)
+        mark(a, not_before)
+        alu(a, "add", rax, rax)
+        jmp_to(a, decided)
         mark(a, wrong)
         cmp_mistake(a, 0)
     end
 
-    # `is`: numbers as rt_order has them; nothing, yes and no as themselves
+    # `is`: numbers as rt_order has them, anything else as rt_equal does
     set odd to new_label(a)
     mark(a, "rt_cmp_is")
-    special_jump(a, xmm0, odd)
-    special_jump(a, xmm1, odd)
+    odd_jump(a, xmm0, odd)
+    odd_jump(a, xmm1, odd)
     call_to(a, "rt_order")
     test_rr(a, rax, rax)
     setcc(a, cc_e, rax)
@@ -1805,10 +1825,7 @@ to emit_compares with a
     mark(a, odd)
     movq_rx(a, rax, xmm0)
     movq_rx(a, rdx, xmm1)
-    alu(a, "cmp", rax, rdx)
-    setcc(a, cc_e, rax)
-    movzx8(a, rax, rax)
-    ret(a)
+    jmp_to(a, "rt_equal")
 
     # `is divisible by`: whole numbers by their remainder, anything else by whether a / b is whole to 15 digits
     set wrong to new_label(a)
@@ -1821,8 +1838,8 @@ to emit_compares with a
     set b_whole to new_label(a)
     set a_ok to new_label(a)
     mark(a, "rt_cmp_div")
-    special_jump(a, xmm0, wrong)
-    special_jump(a, xmm1, wrong)
+    odd_jump(a, xmm0, wrong)
+    odd_jump(a, xmm1, wrong)
     movq_rx(a, rax, xmm1)
     shifti(a, "shl", rax, 1)
     jcc(a, cc_e, by_zero)
@@ -1932,7 +1949,7 @@ to emit_compares with a
     set whole_count to new_label(a)
     mark(a, "rt_repeat")
     movsd_store(a, rip("err_a"), xmm0)
-    special_jump(a, xmm0, bad)
+    odd_jump(a, xmm0, bad)
     finite_jump(a, xmm0, bad)
     movq_rx(a, rax, xmm0)
     test_rr(a, rax, rax)
@@ -1959,11 +1976,11 @@ to emit_compares with a
     movi(a, rax, 2)
     ret(a)
 
-    # rt_any_special: rax is 1 if xmm2 or xmm1 is nothing, yes or no
+    # rt_any_odd: rax is 1 if xmm2 or xmm1 isn't a plain number
     set found to new_label(a)
-    mark(a, "rt_any_special")
-    special_jump(a, xmm2, found)
-    special_jump(a, xmm1, found)
+    mark(a, "rt_any_odd")
+    odd_jump(a, xmm2, found)
+    odd_jump(a, xmm1, found)
     movi(a, rax, 0)
     ret(a)
     mark(a, found)
@@ -2041,20 +2058,16 @@ end
 to emit_mistakes with a
     mark(a, "rt_e_start") # rsi: where it happened: "file:line:col: " then "\n" and the line
     store(a, rip("err_site"), rsi)
-    storei(a, rip("ebuf_len"), 0)
+    call_to(a, "rt_b_reset")
+    load(a, rsi, rip("err_site"))
     load32(a, rcx, mem(rsi, 0))
     alui(a, "add", rsi, 4)
     mark(a, "rt_e_text") # rsi, rcx: these bytes
-    load(a, rax, rip("ebuf_len"))
-    lea(a, rdi, rip("ebuf"))
-    alu(a, "add", rdi, rax)
-    alu(a, "add", rax, rcx)
-    store(a, rip("ebuf_len"), rax)
-    rep_movsb(a)
-    ret(a)
+    jmp_to(a, "rt_b_bytes")
 
     set kind_nothing to new_label(a)
     set kind_bool to new_label(a)
+    set in_memory to new_label(a)
     mark(a, "rt_e_kind") # rax: what kind of value it is
     movi64(a, rcx, bits_nothing)
     alu(a, "cmp", rax, rcx)
@@ -2065,39 +2078,44 @@ to emit_mistakes with a
     inc_r(a, rcx)
     alu(a, "cmp", rax, rcx)
     jcc(a, cc_e, kind_bool)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ae, in_memory)
     point_at_text(a, "a number")
-    jmp_to(a, "rt_e_text")
+    jmp_to(a, "rt_b_bytes")
     mark(a, kind_nothing)
     point_at_text(a, "nothing")
-    jmp_to(a, "rt_e_text")
+    jmp_to(a, "rt_b_bytes")
     mark(a, kind_bool)
     point_at_text(a, "yes/no")
-    jmp_to(a, "rt_e_text")
+    jmp_to(a, "rt_b_bytes")
+    mark(a, in_memory)
+    set n to kind_text
+    for each word in list of "text", "a list", "a record", "a dictionary", "bytes", "a function"
+        set other to new_label(a)
+        alui(a, "cmp", rax, n)
+        jcc(a, cc_ne, other)
+        point_at_text(a, word)
+        jmp_to(a, "rt_b_bytes")
+        mark(a, other)
+        add 1 to n
+    end
+    point_at_text(a, "a value")
+    jmp_to(a, "rt_b_bytes")
 
-    mark(a, "rt_e_shown") # rax: a value as `say` shows it
-    load(a, rdx, rip("ebuf_len"))
-    lea(a, rdi, rip("ebuf"))
-    alu(a, "add", rdi, rdx)
-    call_to(a, "rt_show")
-    lea(a, rax, rip("ebuf"))
-    alu(a, "sub", rdi, rax)
-    store(a, rip("ebuf_len"), rdi)
-    ret(a)
+    mark(a, "rt_e_shown") # rax, rdx: a value as `say` shows it, rdx 1 inside a list
+    jmp_to(a, "rt_b_value")
 
     mark(a, "rt_e_plain") # rax: a whole number's digits
     call_to(a, "rt_digits")
     lea(a, rsi, rip("dbuf"))
-    jmp_to(a, "rt_e_text")
+    jmp_to(a, "rt_b_bytes")
 
     set first_group to new_label(a)
     set groups to new_label(a)
     set grouped to new_label(a)
     mark(a, "rt_e_grouped") # rax: a whole number with commas, as toLocaleString writes it
     call_to(a, "rt_digits")
-    load(a, rax, rip("ebuf_len"))
-    lea(a, rdi, rip("ebuf"))
-    alu(a, "add", rdi, rax)
-    lea(a, rsi, rip("dbuf"))
     mov_rr(a, r9, rcx)
     mov_rr(a, rax, rcx)
     movi(a, rdx, 0)
@@ -2107,22 +2125,24 @@ to emit_mistakes with a
     jcc(a, cc_ne, first_group)
     movi(a, rdx, 3)
     mark(a, first_group)
+    lea(a, r10, rip("dbuf"))
+    mov_rr(a, rsi, r10)
     mov_rr(a, rcx, rdx)
     alu(a, "sub", r9, rdx)
-    rep_movsb(a)
+    alu(a, "add", r10, rdx)
+    call_to(a, "rt_b_bytes")
     mark(a, groups)
     test_rr(a, r9, r9)
     jcc(a, cc_e, grouped)
-    store8i(a, mem(rdi, 0), 44)
-    inc_r(a, rdi)
+    movi(a, rax, 44)
+    call_to(a, "rt_b_byte")
+    mov_rr(a, rsi, r10)
     movi(a, rcx, 3)
     alui(a, "sub", r9, 3)
-    rep_movsb(a)
+    alui(a, "add", r10, 3)
+    call_to(a, "rt_b_bytes")
     jmp_to(a, groups)
     mark(a, grouped)
-    lea(a, rax, rip("ebuf"))
-    alu(a, "sub", rdi, rax)
-    store(a, rip("ebuf_len"), rdi)
     ret(a)
 
     set walk to new_label(a)
@@ -2193,8 +2213,8 @@ to emit_mistakes with a
     call_to(a, "rt_e_text")
     call_to(a, "rt_flush_out")
     movi(a, rdi, 2)
-    lea(a, rsi, rip("ebuf"))
-    load(a, rdx, rip("ebuf_len"))
+    load(a, rsi, rip("b_ptr"))
+    load(a, rdx, rip("b_len"))
     call_to(a, "rt_write")
     movi(a, rcx, 1)
     jmp_to(a, "rt_exit")
@@ -2226,11 +2246,1485 @@ to emit_mistakes with a
     ret(a)
 end
 
+# ---------- the runtime: memory ----------
+# Values that live in memory come from rt_alloc: big blocks from the system, handed out from the front and
+# never given back, which is simple and quick, and enough for a program that runs and ends. A text's bytes
+# come from rt_bytes instead, one after another, so a text whose bytes were the last given out can grow in
+# place: `add c to text` in a loop copies each character once, not the whole text each time.
+
+to emit_memory with a, target
+    # rt_alloc: rcx: that many bytes of zeroed memory, 16-aligned, in rax; every other register is kept
+    set again to new_label(a)
+    set more to new_label(a)
+    mark(a, "rt_alloc")
+    push_r(a, rcx)
+    push_r(a, rdx)
+    alui(a, "add", rcx, 15)
+    alui(a, "and", rcx, -16)
+    mark(a, again)
+    load(a, rax, rip("heap_top"))
+    mov_rr(a, rdx, rax)
+    alu(a, "add", rdx, rcx)
+    alu_load(a, "cmp", rdx, rip("heap_end"))
+    jcc(a, cc_a, more)
+    store(a, rip("heap_top"), rdx)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
+    mark(a, more)
+    call_to(a, "rt_grow")
+    jmp_to(a, again)
+
+    # rt_bytes: rcx: room for that many bytes in rax; every other register is kept
+    set fits to new_label(a)
+    set sized to new_label(a)
+    mark(a, "rt_bytes")
+    push_r(a, rdx)
+    load(a, rax, rip("bytes_top"))
+    mov_rr(a, rdx, rax)
+    alu(a, "add", rdx, rcx)
+    alu_load(a, "cmp", rdx, rip("bytes_end"))
+    jcc(a, cc_be, fits)
+    push_r(a, rcx) # a new block, of 1 MB or more
+    alui(a, "cmp", rcx, 1048576)
+    jcc(a, cc_ae, sized)
+    movi(a, rcx, 1048576)
+    mark(a, sized)
+    call_to(a, "rt_alloc")
+    store(a, rip("bytes_top"), rax)
+    alu(a, "add", rax, rcx)
+    store(a, rip("bytes_end"), rax)
+    pop_r(a, rcx)
+    load(a, rax, rip("bytes_top"))
+    mov_rr(a, rdx, rax)
+    alu(a, "add", rdx, rcx)
+    mark(a, fits)
+    store(a, rip("bytes_top"), rdx)
+    pop_r(a, rdx)
+    ret(a)
+
+    # rt_grow: rcx: at least that much more memory from the system, 64 MB at a time; every register is kept
+    set enough to new_label(a)
+    set none to new_label(a)
+    mark(a, "rt_grow")
+    for each r in list of rcx, rdx, rsi, rdi, r8, r9, r10, r11
+        push_r(a, r)
+    end
+    mov_rr(a, rax, rcx)
+    alui(a, "add", rax, 65536)
+    alui(a, "cmp", rax, 67108864)
+    jcc(a, cc_ae, enough)
+    movi(a, rax, 67108864)
+    mark(a, enough)
+    alui(a, "add", rax, 65535)
+    alui(a, "and", rax, -65536)
+    if target is "windows"
+        push_r(a, rbp)
+        mov_rr(a, rbp, rsp)
+        alui(a, "and", rsp, -16)
+        alui(a, "sub", rsp, 96)
+        for each k from 0 to 5
+            movsd_store(a, mem(rsp, 32 + 8 * k), k)
+        end
+        mov_rr(a, rdi, rax)
+        movi(a, rcx, 0)
+        mov_rr(a, rdx, rdi)
+        movi(a, r8, 0x3000) # MEM_COMMIT and MEM_RESERVE
+        movi(a, r9, 4) # PAGE_READWRITE
+        call_import(a, "imp_VirtualAlloc")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, none)
+        store(a, rip("heap_top"), rax)
+        alu(a, "add", rax, rdi)
+        store(a, rip("heap_end"), rax)
+        for each k from 0 to 5
+            movsd_load(a, k, mem(rsp, 32 + 8 * k))
+        end
+        mov_rr(a, rsp, rbp)
+        pop_r(a, rbp)
+    else
+        mov_rr(a, rsi, rax)
+        movi(a, rdi, 0)
+        movi(a, rdx, 3) # PROT_READ and PROT_WRITE
+        movi(a, r10, 0x22) # MAP_PRIVATE and MAP_ANONYMOUS
+        movi(a, r8, -1)
+        movi(a, r9, 0)
+        movi(a, rax, 9) # mmap
+        raw(a, list of 0x0F, 0x05)
+        alui(a, "cmp", rax, -4096)
+        jcc(a, cc_a, none)
+        store(a, rip("heap_top"), rax)
+        alu(a, "add", rax, rsi)
+        store(a, rip("heap_end"), rax)
+    end
+    for each r in list of r11, r10, r9, r8, rdi, rsi, rdx, rcx
+        pop_r(a, r)
+    end
+    ret(a)
+    mark(a, none)
+    call_to(a, "rt_flush_out")
+    point_at_text(a, "a value got too big to fit in memory\n")
+    mov_rr(a, rdx, rcx)
+    movi(a, rdi, 2)
+    call_to(a, "rt_write")
+    movi(a, rcx, 1)
+    jmp_to(a, "rt_exit")
+end
+
+# ---------- the runtime: the builder, and showing values ----------
+# What `say` says, text that `+` joins, and a mistake's message are all put together in one builder, which
+# grows as it needs to. Nothing that uses it runs Moth code while it does, so one is enough.
+
+to emit_builder with a
+    mark(a, "rt_b_reset")
+    storei(a, rip("b_len"), 0)
+    ret(a)
+
+    # rt_b_room: rcx: room for that many more bytes; every register but rax is kept
+    set roomy to new_label(a)
+    set doubled to new_label(a)
+    set least to new_label(a)
+    mark(a, "rt_b_room")
+    load(a, rax, rip("b_len"))
+    alu(a, "add", rax, rcx)
+    alu_load(a, "cmp", rax, rip("b_cap"))
+    jcc(a, cc_be, roomy)
+    for each r in list of rcx, rdx, rsi, rdi
+        push_r(a, r)
+    end
+    mov_rr(a, rdx, rax)
+    load(a, rax, rip("b_cap"))
+    alu(a, "add", rax, rax)
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_ae, doubled)
+    mov_rr(a, rax, rdx)
+    mark(a, doubled)
+    alui(a, "cmp", rax, 4096)
+    jcc(a, cc_ae, least)
+    movi(a, rax, 4096)
+    mark(a, least)
+    store(a, rip("b_cap"), rax)
+    mov_rr(a, rcx, rax)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    rep_movsb(a)
+    store(a, rip("b_ptr"), rax)
+    for each r in list of rdi, rsi, rdx, rcx
+        pop_r(a, r)
+    end
+    mark(a, roomy)
+    ret(a)
+
+    # rt_b_bytes: rsi, rcx: these bytes; uses rax, rcx, rsi and rdi
+    mark(a, "rt_b_bytes")
+    call_to(a, "rt_b_room")
+    load(a, rdi, rip("b_ptr"))
+    load(a, rax, rip("b_len"))
+    alu(a, "add", rdi, rax)
+    alu(a, "add", rax, rcx)
+    store(a, rip("b_len"), rax)
+    rep_movsb(a)
+    ret(a)
+
+    # rt_b_byte: the byte in al; uses rax, rcx and rdi
+    mark(a, "rt_b_byte")
+    push_r(a, rax)
+    movi(a, rcx, 1)
+    call_to(a, "rt_b_room")
+    pop_r(a, rax)
+    load(a, rdi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    alu(a, "add", rdi, rcx)
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rcx)
+    store(a, rip("b_len"), rcx)
+    ret(a)
+
+    # rt_b_chars: rsi, rcx: how many characters those UTF-8 bytes are, in rax; uses rcx, rdx and rsi
+    set counting to new_label(a)
+    set follower to new_label(a)
+    set counted to new_label(a)
+    mark(a, "rt_b_chars")
+    movi(a, rax, 0)
+    mark(a, counting)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, counted)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "and", rdx, 0xC0)
+    alui(a, "cmp", rdx, 0x80)
+    jcc(a, cc_e, follower)
+    inc_r(a, rax)
+    mark(a, follower)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, counting)
+    mark(a, counted)
+    ret(a)
+
+    # rt_text_from: rsi, rcx: a new text of those bytes, in rax
+    mark(a, "rt_text_from")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rcx)
+    call_to(a, "rt_bytes")
+    mov_rr(a, rbx, rax)
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    rep_movsb(a)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    call_to(a, "rt_b_chars")
+    mov_rr(a, r12, rax)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    store(a, mem(rax, 0), r13)
+    store(a, mem(rax, 8), r12)
+    store(a, mem(rax, 16), rbx)
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    mark(a, "rt_b_text") # the builder's bytes as a new text, in rax
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    jmp_to(a, "rt_text_from")
+
+    mark(a, "rt_say_end") # what the builder holds, as a line of output; rax is 0, or 3 if it's too long
+    set line_fits to new_label(a)
+    call_to(a, "rt_b_fits")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, line_fits)
+    ret(a)
+    mark(a, line_fits)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_out_line")
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_join: xmm2 and xmm1 shown and joined, as `+` joins text, into xmm0, with rax 0, or 3 if that's longer
+    # than JavaScript's longest text. When the first is text whose bytes were the last given out, the second
+    # goes straight after them, and the new text shares them.
+    set general to new_label(a)
+    set redo to new_label(a)
+    set fits_after to new_label(a)
+    set too_long to new_label(a)
+    mark(a, "rt_join")
+    movsd_store(a, rip("j_a"), xmm2)
+    movsd_store(a, rip("j_b"), xmm1)
+    call_to(a, "rt_b_reset")
+    movq_rx(a, rax, xmm2)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_ne, general)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rdx, mem(rax, 16))
+    alu(a, "add", rdx, rcx)
+    alu_load(a, "cmp", rdx, rip("bytes_top"))
+    jcc(a, cc_ne, general)
+    load(a, rax, rip("j_b"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    load(a, rax, rip("j_a")) # past the longest text?
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "add", rcx, rip("b_len"))
+    alui(a, "cmp", rcx, max_text)
+    jcc(a, cc_be, fits_after)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    call_to(a, "rt_units")
+    push_r(a, rax)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_units")
+    pop_r(a, rcx)
+    alu(a, "add", rax, rcx)
+    alui(a, "cmp", rax, max_text)
+    jcc(a, cc_a, too_long)
+    mark(a, fits_after)
+    load(a, rcx, rip("b_len"))
+    load(a, rax, rip("bytes_top"))
+    alu(a, "add", rax, rcx)
+    alu_load(a, "cmp", rax, rip("bytes_end"))
+    jcc(a, cc_a, redo)
+    load(a, rdi, rip("bytes_top"))
+    load(a, rsi, rip("b_ptr"))
+    rep_movsb(a)
+    store(a, rip("bytes_top"), rdi)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_b_chars")
+    mov_rr(a, r8, rax)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    load(a, rdx, rip("j_a"))
+    untag(a, rdx)
+    load(a, rcx, mem(rdx, 0))
+    alu_load(a, "add", rcx, rip("b_len"))
+    store(a, mem(rax, 0), rcx)
+    load(a, rcx, mem(rdx, 8))
+    alu(a, "add", rcx, r8)
+    store(a, mem(rax, 8), rcx)
+    load(a, rcx, mem(rdx, 16))
+    store(a, mem(rax, 16), rcx)
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, redo)
+    call_to(a, "rt_b_reset")
+    mark(a, general)
+    load(a, rax, rip("j_a"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    load(a, rax, rip("j_b"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    call_to(a, "rt_b_fits")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, too_long)
+    call_to(a, "rt_b_text")
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, too_long)
+    movi(a, rax, 3)
+    ret(a)
+
+    # rt_b_fits: rax is 0 if what the builder holds is no longer than JavaScript's longest text, else 3
+    set fine to new_label(a)
+    mark(a, "rt_b_fits")
+    load(a, rcx, rip("b_len"))
+    alui(a, "cmp", rcx, max_text)
+    jcc(a, cc_be, fine)
+    load(a, rsi, rip("b_ptr"))
+    call_to(a, "rt_units")
+    alui(a, "cmp", rax, max_text)
+    jcc(a, cc_be, fine)
+    movi(a, rax, 3)
+    ret(a)
+    mark(a, fine)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_units: rsi, rcx: how many UTF-16 units those UTF-8 bytes are, in rax: one for each character, and
+    # one more for each past U+FFFF; uses rcx, rdx and rsi
+    set unit_loop to new_label(a)
+    set unit_follower to new_label(a)
+    set unit_done to new_label(a)
+    mark(a, "rt_units")
+    movi(a, rax, 0)
+    mark(a, unit_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, unit_done)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 0xF0)
+    jcc(a, cc_b, unit_follower)
+    inc_r(a, rax)
+    mark(a, unit_follower)
+    alui(a, "and", rdx, 0xC0)
+    alui(a, "cmp", rdx, 0x80)
+    set not_lead to new_label(a)
+    jcc(a, cc_e, not_lead)
+    inc_r(a, rax)
+    mark(a, not_lead)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, unit_loop)
+    mark(a, unit_done)
+    ret(a)
+
+    # rt_plus: if xmm2 or xmm1 is text, they join into xmm0 and rax is 1 (or 3 if too long); else rax is 0,
+    # and both are kept
+    set joining to new_label(a)
+    mark(a, "rt_plus")
+    movq_rx(a, rax, xmm2)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, joining)
+    movq_rx(a, rax, xmm1)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, joining)
+    movi(a, rax, 0)
+    ret(a)
+    set joined to new_label(a)
+    mark(a, joining)
+    call_to(a, "rt_join")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, joined)
+    movi(a, rax, 1)
+    mark(a, joined)
+    ret(a)
+
+    emit_show(a)
+end
+
+# rt_b_value: rax, rdx: a value as `say` shows it goes in the builder; with rdx 1 it is inside a list, where
+# text shows in quotes, as JSON writes it. A list inside itself shows as [...]. rbx and r12 to r15 are kept.
+to emit_show with a
+    set odd to new_label(a)
+    set done to new_label(a)
+    set said_nothing to new_label(a)
+    set said_no to new_label(a)
+    set said_yes to new_label(a)
+    set said_text to new_label(a)
+    set said_list to new_label(a)
+    set quoted to new_label(a)
+    set each_byte to new_label(a)
+    set closing to new_label(a)
+    set plain_byte to new_label(a)
+    set unicode to new_label(a)
+    set look to new_label(a)
+    set fresh to new_label(a)
+    set inside to new_label(a)
+    set items_loop to new_label(a)
+    set no_comma to new_label(a)
+    set items_done to new_label(a)
+    mark(a, "rt_b_value")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, rbx, rax)
+    mov_rr(a, r12, rdx)
+    movq_xr(a, xmm0, rax)
+    odd_jump(a, xmm0, odd)
+    movi(a, rcx, 32) # a number
+    call_to(a, "rt_b_room")
+    load(a, rdi, rip("b_ptr"))
+    alu_load(a, "add", rdi, rip("b_len"))
+    mov_rr(a, rax, rbx)
+    call_to(a, "rt_fmt")
+    alu_load(a, "sub", rdi, rip("b_ptr"))
+    store(a, rip("b_len"), rdi)
+    jmp_to(a, done)
+    mark(a, odd)
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rbx, rcx)
+    jcc(a, cc_e, said_nothing)
+    inc_r(a, rcx)
+    alu(a, "cmp", rbx, rcx)
+    jcc(a, cc_e, said_no)
+    inc_r(a, rcx)
+    alu(a, "cmp", rbx, rcx)
+    jcc(a, cc_e, said_yes)
+    mov_rr(a, r13, rbx)
+    untag(a, r13)
+    mov_rr(a, rax, rbx)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, said_text)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_e, said_list)
+    b_text(a, "<internal>")
+    jmp_to(a, done)
+    mark(a, said_nothing)
+    b_text(a, "nothing")
+    jmp_to(a, done)
+    mark(a, said_no)
+    b_text(a, "no")
+    jmp_to(a, done)
+    mark(a, said_yes)
+    b_text(a, "yes")
+    jmp_to(a, done)
+    mark(a, said_text)
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, quoted)
+    load(a, rcx, mem(r13, 0))
+    load(a, rsi, mem(r13, 16))
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, done)
+    mark(a, quoted)
+    movi(a, rax, 34)
+    call_to(a, "rt_b_byte")
+    movi(a, r14, 0)
+    mark(a, each_byte)
+    alu_load(a, "cmp", r14, mem(r13, 0))
+    jcc(a, cc_ae, closing)
+    load(a, rax, mem(r13, 16))
+    alu(a, "add", rax, r14)
+    load8(a, rax, mem(rax, 0))
+    inc_r(a, r14)
+    for each escape in list of (list of 34, "\\\""), (list of 92, "\\\\"), (list of 8, "\\b"), (list of 12, "\\f"),
+        (list of 10, "\\n"), (list of 13, "\\r"), (list of 9, "\\t")
+        set other to new_label(a)
+        alui(a, "cmp", rax, item 1 of escape)
+        jcc(a, cc_ne, other)
+        b_text(a, item 2 of escape)
+        jmp_to(a, each_byte)
+        mark(a, other)
+    end
+    alui(a, "cmp", rax, 32)
+    jcc(a, cc_b, unicode)
+    mark(a, plain_byte)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, each_byte)
+    mark(a, unicode) # another control character: \u and four hex digits
+    push_r(a, rax)
+    b_text(a, "\\u00")
+    pop_r(a, rax)
+    push_r(a, rax)
+    shifti(a, "shr", rax, 4)
+    hex_digit(a)
+    pop_r(a, rax)
+    alui(a, "and", rax, 15)
+    hex_digit(a)
+    jmp_to(a, each_byte)
+    mark(a, closing)
+    movi(a, rax, 34)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, done)
+    mark(a, said_list)
+    load(a, rax, rip("showing")) # already being shown, further out?
+    mark(a, look)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, fresh)
+    alu_load(a, "cmp", r13, mem(rax, 8))
+    jcc(a, cc_e, inside)
+    load(a, rax, mem(rax, 0))
+    jmp_to(a, look)
+    mark(a, inside)
+    b_text(a, "[...]")
+    jmp_to(a, done)
+    mark(a, fresh)
+    push_r(a, r13)
+    load(a, rax, rip("showing"))
+    push_r(a, rax)
+    store(a, rip("showing"), rsp)
+    movi(a, rax, 91)
+    call_to(a, "rt_b_byte")
+    movi(a, r14, 0)
+    mark(a, items_loop)
+    alu_load(a, "cmp", r14, mem(r13, 0))
+    jcc(a, cc_ae, items_done)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, no_comma)
+    b_text(a, ", ")
+    mark(a, no_comma)
+    load(a, rax, mem(r13, 16))
+    mov_rr(a, rcx, r14)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    movi(a, rdx, 1)
+    call_to(a, "rt_b_value")
+    inc_r(a, r14)
+    jmp_to(a, items_loop)
+    mark(a, items_done)
+    movi(a, rax, 93)
+    call_to(a, "rt_b_byte")
+    pop_r(a, rax)
+    store(a, rip("showing"), rax)
+    pop_r(a, rax)
+    mark(a, done)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# the hex digit for the number in rax goes in the builder
+to hex_digit with a
+    set letter to new_label(a)
+    set put to new_label(a)
+    alui(a, "cmp", rax, 10)
+    jcc(a, cc_ae, letter)
+    alui(a, "add", rax, 48)
+    jmp_to(a, put)
+    mark(a, letter)
+    alui(a, "add", rax, 87)
+    mark(a, put)
+    call_to(a, "rt_b_byte")
+end
+
+to b_text with a, t
+    point_at_text(a, t)
+    call_to(a, "rt_b_bytes")
+end
+
+# ---------- the runtime: text and lists ----------
+# A text is 24 bytes: how many bytes, how many characters, and where its UTF-8 bytes are, which may be
+# shared with a longer text. A list is 24 bytes too: how many items, room for how many, and where they are.
+
+to emit_sequences with a
+    # rt_decode: rsi: the character starting there, as a number, in rax; uses rcx and rdx
+    set decoded to new_label(a)
+    set three to new_label(a)
+    set four to new_label(a)
+    set tail to new_label(a)
+    set tail_loop to new_label(a)
+    mark(a, "rt_decode")
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 0x80)
+    jcc(a, cc_b, decoded)
+    alui(a, "cmp", rax, 0xE0)
+    jcc(a, cc_ae, three)
+    alui(a, "and", rax, 31)
+    movi(a, rcx, 1)
+    jmp_to(a, tail)
+    mark(a, three)
+    alui(a, "cmp", rax, 0xF0)
+    jcc(a, cc_ae, four)
+    alui(a, "and", rax, 15)
+    movi(a, rcx, 2)
+    jmp_to(a, tail)
+    mark(a, four)
+    alui(a, "and", rax, 7)
+    movi(a, rcx, 3)
+    mark(a, tail)
+    push_r(a, rsi)
+    mark(a, tail_loop)
+    inc_r(a, rsi)
+    shifti(a, "shl", rax, 6)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "and", rdx, 63)
+    alu(a, "or", rax, rdx)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, tail_loop)
+    pop_r(a, rsi)
+    mark(a, decoded)
+    ret(a)
+
+    # rt_text_order: rax, rdx, two texts: rax is -1, 0 or 1 as the first comes before, with or after the
+    # second, comparing them as JavaScript does, by their UTF-16
+    set scan to new_label(a)
+    set prefix to new_label(a)
+    set diff to new_label(a)
+    set decode to new_label(a)
+    set before to new_label(a)
+    set after to new_label(a)
+    set ordered to new_label(a)
+    set shorter to new_label(a)
+    mark(a, "rt_text_order")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, r8, rax)
+    untag(a, r8)
+    mov_rr(a, r9, rdx)
+    untag(a, r9)
+    load(a, rsi, mem(r8, 16))
+    load(a, rdi, mem(r9, 16))
+    load(a, rcx, mem(r8, 0))
+    alu_load(a, "cmp", rcx, mem(r9, 0))
+    jcc(a, cc_be, shorter)
+    load(a, rcx, mem(r9, 0))
+    mark(a, shorter)
+    movi(a, r10, 0)
+    mark(a, scan)
+    alu(a, "cmp", r10, rcx)
+    jcc(a, cc_ae, prefix)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r10)
+    load8(a, rax, mem(rax, 0))
+    mov_rr(a, rdx, rdi)
+    alu(a, "add", rdx, r10)
+    load8(a, rdx, mem(rdx, 0))
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_ne, diff)
+    inc_r(a, r10)
+    jmp_to(a, scan)
+    mark(a, prefix)
+    load(a, rax, mem(r8, 0))
+    alu_load(a, "cmp", rax, mem(r9, 0))
+    jcc(a, cc_b, before)
+    jcc(a, cc_a, after)
+    movi(a, rax, 0)
+    jmp_to(a, ordered)
+    mark(a, diff) # back to where that character starts
+    test_rr(a, r10, r10)
+    jcc(a, cc_e, decode)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r10)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "and", rax, 0xC0)
+    alui(a, "cmp", rax, 0x80)
+    jcc(a, cc_ne, decode)
+    dec_r(a, r10)
+    jmp_to(a, diff)
+    mark(a, decode)
+    push_r(a, rsi)
+    alu(a, "add", rsi, r10)
+    call_to(a, "rt_decode")
+    mov_rr(a, rbx, rax)
+    pop_r(a, rsi)
+    push_r(a, rsi)
+    mov_rr(a, rsi, rdi)
+    alu(a, "add", rsi, r10)
+    call_to(a, "rt_decode")
+    mov_rr(a, r12, rax)
+    pop_r(a, rsi)
+    utf16_key(a, rbx)
+    utf16_key(a, r12)
+    alu(a, "cmp", rbx, r12)
+    jcc(a, cc_b, before)
+    mark(a, after)
+    movi(a, rax, 1)
+    jmp_to(a, ordered)
+    mark(a, before)
+    movi(a, rax, -1)
+    mark(a, ordered)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_equal: rax, rdx: rax is 1 if the two values are the same, as `is` has it, else 0. A list is the same
+    # as another with the same items; one that holds itself counts as the same where it comes round again.
+    set a_odd to new_label(a)
+    set both to new_label(a)
+    set texts to new_label(a)
+    set lists to new_label(a)
+    set look to new_label(a)
+    set next_pair to new_label(a)
+    set fresh to new_label(a)
+    set each to new_label(a)
+    set all_same to new_label(a)
+    set differ to new_label(a)
+    set unwind to new_label(a)
+    set same to new_label(a)
+    set different to new_label(a)
+    set out to new_label(a)
+    mark(a, "rt_equal")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, rbx, rax)
+    mov_rr(a, r12, rdx)
+    movq_xr(a, xmm0, rbx)
+    movq_xr(a, xmm1, r12)
+    odd_jump(a, xmm0, a_odd)
+    odd_jump(a, xmm1, different)
+    call_to(a, "rt_order")
+    test_rr(a, rax, rax)
+    setcc(a, cc_e, rax)
+    movzx8(a, rax, rax)
+    jmp_to(a, out)
+    mark(a, a_odd)
+    odd_jump(a, xmm1, both)
+    jmp_to(a, different)
+    mark(a, both)
+    alu(a, "cmp", rbx, r12)
+    jcc(a, cc_e, same)
+    mov_rr(a, rax, rbx)
+    shifti(a, "shr", rax, 48)
+    mov_rr(a, rdx, r12)
+    shifti(a, "shr", rdx, 48)
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_ne, different)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, texts)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_e, lists)
+    jmp_to(a, different)
+    mark(a, texts)
+    untag(a, rbx)
+    untag(a, r12)
+    load(a, rcx, mem(rbx, 0))
+    alu_load(a, "cmp", rcx, mem(r12, 0))
+    jcc(a, cc_ne, different)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, same)
+    load(a, rsi, mem(rbx, 16))
+    load(a, rdi, mem(r12, 16))
+    raw(a, list of 0xF3, 0xA6) # repe cmpsb
+    jcc(a, cc_ne, different)
+    jmp_to(a, same)
+    mark(a, lists)
+    mov_rr(a, r13, rbx)
+    untag(a, r13)
+    mov_rr(a, r14, r12)
+    untag(a, r14)
+    load(a, rax, rip("comparing"))
+    mark(a, look)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, fresh)
+    alu_load(a, "cmp", r13, mem(rax, 8))
+    jcc(a, cc_ne, next_pair)
+    alu_load(a, "cmp", r14, mem(rax, 16))
+    jcc(a, cc_e, same)
+    mark(a, next_pair)
+    load(a, rax, mem(rax, 0))
+    jmp_to(a, look)
+    mark(a, fresh)
+    load(a, rax, mem(r13, 0))
+    alu_load(a, "cmp", rax, mem(r14, 0))
+    jcc(a, cc_ne, different)
+    push_r(a, r14)
+    push_r(a, r13)
+    load(a, rax, rip("comparing"))
+    push_r(a, rax)
+    store(a, rip("comparing"), rsp)
+    movi(a, rbx, 0)
+    mark(a, each)
+    alu_load(a, "cmp", rbx, mem(r13, 0))
+    jcc(a, cc_ae, all_same)
+    mov_rr(a, rcx, rbx)
+    shifti(a, "shl", rcx, 3)
+    load(a, rax, mem(r13, 16))
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    load(a, rdx, mem(r14, 16))
+    alu(a, "add", rdx, rcx)
+    load(a, rdx, mem(rdx, 0))
+    call_to(a, "rt_equal")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, differ)
+    inc_r(a, rbx)
+    jmp_to(a, each)
+    mark(a, all_same)
+    movi(a, r12, 1)
+    jmp_to(a, unwind)
+    mark(a, differ)
+    movi(a, r12, 0)
+    mark(a, unwind)
+    pop_r(a, rax)
+    store(a, rip("comparing"), rax)
+    pop_r(a, rax)
+    pop_r(a, rax)
+    mov_rr(a, rax, r12)
+    jmp_to(a, out)
+    mark(a, same)
+    movi(a, rax, 1)
+    jmp_to(a, out)
+    mark(a, different)
+    movi(a, rax, 0)
+    mark(a, out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_contains: rax, rdx, two texts: rax is 1 if the second has the first in it
+    set yes_found to new_label(a)
+    set not_found to new_label(a)
+    set start_at to new_label(a)
+    mark(a, "rt_contains")
+    mov_rr(a, r8, rax)
+    untag(a, r8)
+    mov_rr(a, r9, rdx)
+    untag(a, r9)
+    load(a, rcx, mem(r8, 0))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, yes_found)
+    load(a, r10, mem(r9, 0))
+    alu(a, "cmp", r10, rcx)
+    jcc(a, cc_b, not_found)
+    alu(a, "sub", r10, rcx)
+    movi(a, r11, 0)
+    mark(a, start_at)
+    alu(a, "cmp", r11, r10)
+    jcc(a, cc_a, not_found)
+    load(a, rsi, mem(r9, 16))
+    alu(a, "add", rsi, r11)
+    load(a, rdi, mem(r8, 16))
+    load(a, rcx, mem(r8, 0))
+    raw(a, list of 0xF3, 0xA6)
+    jcc(a, cc_e, yes_found)
+    inc_r(a, r11)
+    jmp_to(a, start_at)
+    mark(a, yes_found)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, not_found)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_cmp_in: xmm0 is in xmm1: an item of a list, or text in text
+    set in_list to new_label(a)
+    set in_text to new_label(a)
+    set wrong to new_label(a)
+    set looking to new_label(a)
+    set found to new_label(a)
+    set missing to new_label(a)
+    set list_out to new_label(a)
+    mark(a, "rt_cmp_in")
+    movq_rx(a, rax, xmm1)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_e, in_list)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, in_text)
+    jmp_to(a, wrong)
+    mark(a, in_list)
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    movq_rx(a, r12, xmm0)
+    mov_rr(a, r13, rax)
+    untag(a, r13)
+    movi(a, rbx, 0)
+    mark(a, looking)
+    alu_load(a, "cmp", rbx, mem(r13, 0))
+    jcc(a, cc_ae, missing)
+    load(a, rdx, mem(r13, 16))
+    mov_rr(a, rcx, rbx)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rdx, rcx)
+    load(a, rdx, mem(rdx, 0))
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_equal")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, found)
+    inc_r(a, rbx)
+    jmp_to(a, looking)
+    mark(a, found)
+    movi(a, rax, 1)
+    jmp_to(a, list_out)
+    mark(a, missing)
+    movi(a, rax, 0)
+    mark(a, list_out)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, in_text)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, wrong)
+    movq_rx(a, rax, xmm0)
+    movq_rx(a, rdx, xmm1)
+    jmp_to(a, "rt_contains")
+    mark(a, wrong)
+    cmp_mistake(a, 0)
+
+    # rt_length: xmm0: how many characters a text has, or items a list, into xmm0; rax is 0, or 2 for a
+    # mistake, with the value in err_a
+    set of_text to new_label(a)
+    set of_list to new_label(a)
+    set counted to new_label(a)
+    mark(a, "rt_length")
+    movsd_store(a, rip("err_a"), xmm0)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    untag(a, rax)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, of_text)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_e, of_list)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, of_text)
+    load(a, rax, mem(rax, 8))
+    jmp_to(a, counted)
+    mark(a, of_list)
+    load(a, rax, mem(rax, 0))
+    mark(a, counted)
+    cvtsi2sd(a, xmm0, rax)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_index: xmm1, an item's number, which must be whole to 15 digits: rax 0, with the whole number in rcx
+    # and xmm1; or rax 1
+    set bad to new_label(a)
+    set whole to new_label(a)
+    set positive to new_label(a)
+    set huge to new_label(a)
+    set tiny to new_label(a)
+    mark(a, "rt_index")
+    odd_jump(a, xmm1, bad)
+    finite_jump(a, xmm1, bad)
+    is_whole(a, xmm1, whole)
+    movq_rx(a, rax, xmm1)
+    push_r(a, rax)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    call_to(a, "rt_canon_int")
+    pop_r(a, r8)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, bad)
+    test_rr(a, r8, r8)
+    jcc(a, cc_ns, positive)
+    unary(a, "neg", rcx)
+    mark(a, positive)
+    cvtsi2sd(a, xmm1, rcx)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, whole) # a number past 2^62 is past every list's end, or before its start
+    ucomisd(a, xmm1, rip(number_place(a, list of 0, 0, 0, 0, 0, 0, 0xD0, 0x43)))
+    jcc(a, cc_ae, huge)
+    ucomisd(a, xmm1, rip(number_place(a, list of 0, 0, 0, 0, 0, 0, 0xD0, 0xC3)))
+    jcc(a, cc_be, tiny)
+    cvttsd2si(a, rcx, xmm1)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, huge)
+    movi(a, rcx, 1)
+    shifti(a, "shl", rcx, 62)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, tiny)
+    movi(a, rcx, 1)
+    shifti(a, "shl", rcx, 62)
+    unary(a, "neg", rcx)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, bad)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_seq_index: xmm0 a list or text, xmm1 an item's number, rdx 1 to change it: rax 0 with the number
+    # (from 1) in rcx; or rax 2 for a mistake, with err_why saying which (see rt_why_item)
+    set kind_ok to new_label(a)
+    set cant_change to new_label(a)
+    set whole_index to new_label(a)
+    set text_length to new_label(a)
+    set compare_length to new_label(a)
+    set low to new_label(a)
+    set high to new_label(a)
+    set failed to new_label(a)
+    mark(a, "rt_seq_index")
+    movsd_store(a, rip("err_a"), xmm0)
+    movsd_store(a, rip("err_b"), xmm1)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_e, kind_ok)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_ne, cant_change)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_e, kind_ok)
+    storei(a, rip("err_why"), 3)
+    jmp_to(a, failed)
+    mark(a, cant_change)
+    storei(a, rip("err_why"), 2)
+    jmp_to(a, failed)
+    mark(a, kind_ok)
+    call_to(a, "rt_index")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, whole_index)
+    storei(a, rip("err_why"), 4)
+    jmp_to(a, failed)
+    mark(a, whole_index)
+    movsd_store(a, rip("err_b"), xmm1)
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_l, low)
+    load(a, rax, rip("err_a"))
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    untag(a, rax)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, text_length)
+    load(a, r8, mem(rax, 0))
+    jmp_to(a, compare_length)
+    mark(a, text_length)
+    load(a, r8, mem(rax, 8))
+    mark(a, compare_length)
+    alu(a, "cmp", rcx, r8)
+    jcc(a, cc_g, high)
+    movsd_load(a, xmm0, rip("err_a"))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, low)
+    storei(a, rip("err_why"), 5)
+    jmp_to(a, failed)
+    mark(a, high)
+    store(a, rip("err_len"), r8)
+    storei(a, rip("err_why"), 6)
+    mark(a, failed)
+    movi(a, rax, 2)
+    ret(a)
+
+    # rt_item: xmm0's item xmm1 into xmm0; rax as rt_seq_index's
+    set of_chars to new_label(a)
+    mark(a, "rt_item")
+    movi(a, rdx, 0)
+    call_to(a, "rt_seq_index")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, "rt_item_out")
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    untag(a, rax)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, of_chars)
+    load(a, rax, mem(rax, 16))
+    dec_r(a, rcx)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    movsd_load(a, xmm0, mem(rax, 0))
+    movi(a, rax, 0)
+    mark(a, "rt_item_out")
+    ret(a)
+    mark(a, of_chars)
+    call_to(a, "rt_char_at")
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_item_ref: checks that item xmm1 of xmm0 can be changed: rax as rt_seq_index's, with the item's
+    # number in xmm1 and xmm0 kept
+    mark(a, "rt_item_ref")
+    movi(a, rdx, 1)
+    jmp_to(a, "rt_seq_index")
+
+    # rt_set_item: item xmm1 of the list xmm0, which rt_item_ref has checked, gets xmm2; rax is 0
+    mark(a, "rt_set_item")
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    cvttsd2si(a, rcx, xmm1)
+    dec_r(a, rcx)
+    shifti(a, "shl", rcx, 3)
+    load(a, rax, mem(rax, 16))
+    alu(a, "add", rax, rcx)
+    movsd_store(a, mem(rax, 0), xmm2)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_char_at: rax a text (untagged), rcx a character's number (from 1): that character, as a text that
+    # shares its bytes, in rax
+    set seek to new_label(a)
+    set not_lead to new_label(a)
+    set at_char to new_label(a)
+    mark(a, "rt_char_at")
+    load(a, rsi, mem(rax, 16))
+    movi(a, r8, 0)
+    movi(a, r9, 0)
+    mark(a, seek)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r8)
+    load8(a, r10, mem(rax, 0))
+    alui(a, "and", r10, 0xC0)
+    alui(a, "cmp", r10, 0x80)
+    jcc(a, cc_e, not_lead)
+    inc_r(a, r9)
+    alu(a, "cmp", r9, rcx)
+    jcc(a, cc_e, at_char)
+    mark(a, not_lead)
+    inc_r(a, r8)
+    jmp_to(a, seek)
+    mark(a, at_char)
+    alu(a, "add", rsi, r8)
+    jmp_to(a, "rt_char_view")
+
+    # rt_char_view: rsi, a character's first byte: that character as a text, in rax; uses rcx and rdx
+    mark(a, "rt_char_view")
+    char_size(a)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    store(a, mem(rax, 0), rdx)
+    storei(a, mem(rax, 8), 1)
+    store(a, mem(rax, 16), rsi)
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    ret(a)
+
+    # rt_items: xmm0: what `for each` goes through, as items in rdx (rcx of them), a copy so that changing the
+    # list doesn't change them; rax is 0, or 2 for a mistake, with the value in err_a
+    set list_items to new_label(a)
+    set text_items to new_label(a)
+    set each_char to new_label(a)
+    set chars_done to new_label(a)
+    mark(a, "rt_items")
+    movsd_store(a, rip("err_a"), xmm0)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    untag(a, rax)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_e, list_items)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, text_items)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, list_items)
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rax)
+    load(a, rcx, mem(rbx, 0))
+    mov_rr(a, r12, rcx)
+    shifti(a, "shl", rcx, 3)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, mem(rbx, 16))
+    mov_rr(a, rcx, r12)
+    rep_movsq(a)
+    mov_rr(a, rdx, rax)
+    mov_rr(a, rcx, r12)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, text_items)
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    mov_rr(a, rbx, rax)
+    load(a, rcx, mem(rbx, 8))
+    mov_rr(a, r12, rcx)
+    shifti(a, "shl", rcx, 3)
+    call_to(a, "rt_alloc")
+    mov_rr(a, r13, rax)
+    mov_rr(a, r14, rax)
+    load(a, rsi, mem(rbx, 16))
+    load(a, rbx, mem(rbx, 0))
+    alu(a, "add", rbx, rsi) # where the bytes end
+    mark(a, each_char)
+    alu(a, "cmp", rsi, rbx)
+    jcc(a, cc_ae, chars_done)
+    call_to(a, "rt_char_view")
+    store(a, mem(r14, 0), rax)
+    alui(a, "add", r14, 8)
+    alu(a, "add", rsi, rdx)
+    jmp_to(a, each_char)
+    mark(a, chars_done)
+    mov_rr(a, rdx, r13)
+    mov_rr(a, rcx, r12)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_list_make: rcx values, from rsi up, the last first (as they were pushed): a new list of them in rax
+    set least to new_label(a)
+    set copying to new_label(a)
+    set made to new_label(a)
+    mark(a, "rt_list_make")
+    push_r(a, rbx)
+    push_r(a, r12)
+    mov_rr(a, rbx, rcx)
+    mov_rr(a, r12, rsi)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    mov_rr(a, r9, rax)
+    mov_rr(a, rcx, rbx)
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_ae, least)
+    movi(a, rcx, 4)
+    mark(a, least)
+    store(a, mem(r9, 8), rcx)
+    shifti(a, "shl", rcx, 3)
+    call_to(a, "rt_alloc")
+    store(a, mem(r9, 16), rax)
+    store(a, mem(r9, 0), rbx)
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rcx, rbx)
+    mov_rr(a, rsi, rbx)
+    shifti(a, "shl", rsi, 3)
+    alu(a, "add", rsi, r12)
+    mark(a, copying)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, made)
+    alui(a, "sub", rsi, 8)
+    load(a, rax, mem(rsi, 0))
+    store(a, mem(rdi, 0), rax)
+    alui(a, "add", rdi, 8)
+    dec_r(a, rcx)
+    jmp_to(a, copying)
+    mark(a, made)
+    mov_rr(a, rax, r9)
+    movi64(a, rcx, tag_list)
+    alu(a, "or", rax, rcx)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_list_push: rax a list, rdx a value: the value goes at its end, with twice the room when it's full
+    set room to new_label(a)
+    mark(a, "rt_list_push")
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "cmp", rcx, mem(rax, 8))
+    jcc(a, cc_b, room)
+    push_r(a, rsi)
+    push_r(a, rdi)
+    mov_rr(a, r8, rax)
+    load(a, rcx, mem(r8, 8))
+    alu(a, "add", rcx, rcx)
+    store(a, mem(r8, 8), rcx)
+    shifti(a, "shl", rcx, 3)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, mem(r8, 16))
+    load(a, rcx, mem(r8, 0))
+    rep_movsq(a)
+    store(a, mem(r8, 16), rax)
+    mov_rr(a, rax, r8)
+    pop_r(a, rdi)
+    pop_r(a, rsi)
+    mark(a, room)
+    load(a, rcx, mem(rax, 0))
+    load(a, r8, mem(rax, 16))
+    mov_rr(a, r9, rcx)
+    shifti(a, "shl", r9, 3)
+    alu(a, "add", r8, r9)
+    store(a, mem(r8, 0), rdx)
+    inc_r(a, rcx)
+    store(a, mem(rax, 0), rcx)
+    ret(a)
+
+    # rt_add_into: `add xmm1 to` a variable holding xmm0, which is in memory: text grows, a list gets it at its
+    # end. xmm0 gets what the variable holds after; rax is 0, or 2 with err_a and err_b for a mistake, or 3
+    # for text too long
+    set grow_text to new_label(a)
+    set grow_list to new_label(a)
+    mark(a, "rt_add_into")
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, grow_text)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_e, grow_list)
+    movsd_store(a, rip("err_a"), xmm1)
+    movsd_store(a, rip("err_b"), xmm0)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, grow_text)
+    movapd(a, xmm2, xmm0)
+    jmp_to(a, "rt_join")
+    mark(a, grow_list)
+    movsd_store(a, rip("keep"), xmm0)
+    movq_rx(a, rdx, xmm1)
+    call_to(a, "rt_list_push")
+    movsd_load(a, xmm0, rip("keep"))
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_why_item: what was wrong with an item, from err_why, err_a (what it was of), err_b (its number) and
+    # err_len, into the builder
+    set why_3 to new_label(a)
+    set why_4 to new_label(a)
+    set why_5 to new_label(a)
+    set why_6 to new_label(a)
+    set of_list to new_label(a)
+    set counted to new_label(a)
+    set one to new_label(a)
+    mark(a, "rt_why_item")
+    load(a, rax, rip("err_why"))
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_e, why_3)
+    alui(a, "cmp", rax, 4)
+    jcc(a, cc_e, why_4)
+    alui(a, "cmp", rax, 5)
+    jcc(a, cc_e, why_5)
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_e, why_6)
+    b_text(a, "can only change items of a list, dictionary or bytes, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, why_3)
+    b_text(a, "can only take an item of a list, text, dictionary or bytes, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, why_4)
+    b_text(a, "item numbers must be whole numbers, not ")
+    load(a, rax, rip("err_b"))
+    movi(a, rdx, 1)
+    jmp_to(a, "rt_b_value")
+    mark(a, why_5)
+    b_text(a, "there is no item ")
+    load(a, rax, rip("err_b"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    b_text(a, ", items are counted from 1")
+    ret(a)
+    mark(a, why_6)
+    b_text(a, "there is no item ")
+    load(a, rax, rip("err_b"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    load(a, rax, rip("err_a"))
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_e, of_list)
+    b_text(a, ", the text only has ")
+    load(a, rax, rip("err_len"))
+    call_to(a, "rt_e_plain")
+    b_text(a, " letter")
+    jmp_to(a, counted)
+    mark(a, of_list)
+    b_text(a, ", the list only has ")
+    load(a, rax, rip("err_len"))
+    call_to(a, "rt_e_plain")
+    b_text(a, " item")
+    mark(a, counted)
+    load(a, rax, rip("err_len"))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_e, one)
+    movi(a, rax, 115)
+    call_to(a, "rt_b_byte")
+    mark(a, one)
+    ret(a)
+end
+
+# rdx gets how many bytes the UTF-8 character at rsi has
+to char_size with a
+    set sized to new_label(a)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 0x80)
+    movi(a, rdx, 1)
+    jcc(a, cc_b, sized)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 0xE0)
+    movi(a, rdx, 2)
+    jcc(a, cc_b, sized)
+    load8(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 0xF0)
+    movi(a, rdx, 3)
+    jcc(a, cc_b, sized)
+    movi(a, rdx, 4)
+    mark(a, sized)
+end
+
+# turns the character number in register r into one that sorts as UTF-16 does: those from U+E000 to U+FFFF
+# come after the ones past U+FFFF, whose first UTF-16 unit is below U+E000
+to utf16_key with a, r
+    set kept to new_label(a)
+    alui(a, "cmp", r, 0xE000)
+    jcc(a, cc_b, kept)
+    alui(a, "cmp", r, 0x10000)
+    jcc(a, cc_ae, kept)
+    alui(a, "add", r, 0x110000)
+    mark(a, kept)
+end
+
+# jumps if xmm x is a value in memory; uses rax
+to pointer_jump with a, x, name
+    movq_rx(a, rax, x)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ae, name)
+end
+
+# jumps if xmm x isn't a plain number: nothing, yes, no, or a value in memory; uses rax and rcx
+to odd_jump with a, x, name
+    special_jump(a, x, name)
+    pointer_jump(a, x, name)
+end
+
+# the pointer in a value's bits, in register r: its low 48 bits
+to untag with a, r
+    shifti(a, "shl", r, 16)
+    shifti(a, "shr", r, 16)
+end
+
 # ---------- the runtime: the system ----------
 # rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
 # code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
 
-to emit_windows with a, wide_cap
+to emit_windows with a
     mark(a, "start")
     alui(a, "sub", rsp, 40)
     movi(a, rcx, -11)
@@ -2258,14 +3752,19 @@ to emit_windows with a, wide_cap
     set chosen to new_label(a)
     set files to new_label(a)
     set console to new_label(a)
-    set chunk to new_label(a)
-    set pieces to new_label(a)
+    set piece to new_label(a)
+    set back to new_label(a)
+    set whole_piece to new_label(a)
+    set units to new_label(a)
+    set next_piece to new_label(a)
     set done to new_label(a)
     mark(a, "rt_write")
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
     push_r(a, r14)
+    push_r(a, rsi)
+    push_r(a, rdi)
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
     alui(a, "and", rsp, -16)
@@ -2298,50 +3797,61 @@ to emit_windows with a, wide_cap
     alu(a, "add", r12, rax)
     alu(a, "sub", r13, rax)
     jmp_to(a, files)
-    mark(a, console) # a console: as UTF-16, so every character shows
-    movi(a, rcx, 65001)
-    movi(a, rdx, 0)
-    mov_rr(a, r8, r12)
-    mov_rr(a, r9, r13)
-    lea(a, rax, rip("wbuf"))
-    store(a, mem(rsp, 32), rax)
-    storei(a, mem(rsp, 40), wide_cap)
-    call_import(a, "imp_MultiByteToWideChar")
-    mov32_rr(a, r13, rax)
-    lea(a, r12, rip("wbuf"))
-    mark(a, pieces)
+    mark(a, console) # a console: as UTF-16, so every character shows, 8 KB at a time
+    mark(a, piece)
     test_rr(a, r13, r13)
     jcc(a, cc_e, done)
     mov_rr(a, r14, r13)
     alui(a, "cmp", r14, 8192)
-    jcc(a, cc_be, chunk)
+    jcc(a, cc_be, whole_piece)
     movi(a, r14, 8192)
-    mov_rr(a, rax, r14) # not between the two halves of a character past 65,535
-    alu(a, "add", rax, rax)
-    alu(a, "add", rax, r12)
-    load16(a, rax, mem(rax, -2))
-    alui(a, "cmp", rax, 0xD800)
-    jcc(a, cc_b, chunk)
-    alui(a, "cmp", rax, 0xDBFF)
-    jcc(a, cc_a, chunk)
+    mark(a, back) # not in the middle of a character
+    mov_rr(a, rax, r12)
+    alu(a, "add", rax, r14)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "and", rax, 0xC0)
+    alui(a, "cmp", rax, 0x80)
+    jcc(a, cc_ne, whole_piece)
     dec_r(a, r14)
-    mark(a, chunk)
+    jmp_to(a, back)
+    mark(a, whole_piece)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    mov_rr(a, r8, r12)
+    mov_rr(a, r9, r14)
+    lea(a, rax, rip("wbuf"))
+    store(a, mem(rsp, 32), rax)
+    storei(a, mem(rsp, 40), wide_cap)
+    call_import(a, "imp_MultiByteToWideChar")
+    mov32_rr(a, rdi, rax)
+    lea(a, rsi, rip("wbuf"))
+    mark(a, units)
+    test_rr(a, rdi, rdi)
+    jcc(a, cc_e, next_piece)
     mov_rr(a, rcx, rbx)
-    mov_rr(a, rdx, r12)
-    mov_rr(a, r8, r14)
+    mov_rr(a, rdx, rsi)
+    mov_rr(a, r8, rdi)
     lea(a, r9, mem(rsp, 48))
     storei(a, mem(rsp, 32), 0)
     call_import(a, "imp_WriteConsoleW")
     test32(a, rax)
     jcc(a, cc_e, done)
-    mov_rr(a, rax, r14)
+    load32(a, rax, mem(rsp, 48))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, done)
+    alu(a, "sub", rdi, rax)
     alu(a, "add", rax, rax)
-    alu(a, "add", r12, rax)
+    alu(a, "add", rsi, rax)
+    jmp_to(a, units)
+    mark(a, next_piece)
+    alu(a, "add", r12, r14)
     alu(a, "sub", r13, r14)
-    jmp_to(a, pieces)
+    jmp_to(a, piece)
     mark(a, done)
     mov_rr(a, rsp, rbp)
     pop_r(a, rbp)
+    pop_r(a, rdi)
+    pop_r(a, rsi)
     pop_r(a, r14)
     pop_r(a, r13)
     pop_r(a, r12)
@@ -2410,24 +3920,20 @@ to emit_runtime with st
     emit_bignums(a)
     emit_compares(a)
     emit_mistakes(a)
-    set biggest to out_cap
-    if ebuf_size of st is greater than biggest
-        set biggest to ebuf_size of st
-    end
-    if longest_text of st is greater than biggest
-        set biggest to longest_text of st
-    end
+    emit_memory(a, target of st)
+    emit_builder(a)
+    emit_sequences(a)
     if target of st is "windows"
-        emit_windows(a, biggest)
-        reserve(a, "wbuf", 2 * biggest, 16)
+        emit_windows(a)
+        reserve(a, "wbuf", 2 * wide_cap, 16)
     else
         emit_linux(a)
         reserve(a, "stack", stack_size, 16)
     end
     reserve(a, "out_buf", out_cap, 16)
-    reserve(a, "ebuf", ebuf_size of st, 16)
-    for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "ebuf_len", "err_site", "err_a",
-        "err_b", "err_why", "o_a", "o_b", "o_ma", "o_na", "t_prev"
+    for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
+        "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev", "heap_top", "heap_end", "bytes_top", "bytes_end",
+        "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep"
         reserve(a, name, 8, 8)
     end
     reserve(a, "scratch", 64, 16)
@@ -2462,7 +3968,7 @@ set node_words to dictionary where "list" is "a list", "record" is "a record", "
     "try" is "'try'"
 
 to not_yet with at, what
-    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, variables, say, if, loops and functions can")
+    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, variables, say, if, loops and functions can")
 end
 
 to not_yet_node with node
@@ -2484,16 +3990,12 @@ end
 to new_state with a, program_name, files, source, target
     set sources to empty dictionary
     set item "" of sources to source
-    set biggest to length of (source as bytes)
     for each f in files
         set item (name of f) of sources to text of f
-        if length of (text of f as bytes) is greater than biggest
-            set biggest to length of (text of f as bytes)
-        end
     end
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, trail_keys empty dictionary, functions empty dictionary, fn_slots empty dictionary, main_scope nothing,
-        target target, ebuf_size 65536 + 3 * biggest, longest_text 0
+        target target
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -2614,6 +4116,10 @@ to fail_stub with fc, at, message
     set a to a of fc
     set site to site_of(fc, at)
     set was to enter_cold(a)
+    set over to new_label(a) # made while writing cold code: around it, so that code doesn't run into it
+    if was is "cold"
+        jmp_to(a, over)
+    end
     set label to new_label(a)
     mark(a, label)
     lea(a, rsi, rip(site))
@@ -2621,6 +4127,7 @@ to fail_stub with fc, at, message
     point_at_text(a, message)
     call_to(a, "rt_e_text")
     jmp_to(a, "rt_e_end")
+    mark(a, over)
     leave_cold(a, was)
     return label
 end
@@ -2865,6 +4372,22 @@ to gen_statement with fc, s
         jmp_to(a, exit of loops of fc)
     else if what is "call"
         gen_call(fc, s, yes)
+    else if what is "setItem" # checked before the value is worked out, as the engines check it
+        set target to target of s
+        gen_pair(fc, subject of target, index of target)
+        call_to(a, "rt_item_ref")
+        why_stub(fc, at of target, "rt_why_item")
+        push_value(fc)
+        movapd(a, xmm0, xmm1)
+        push_value(fc)
+        gen_expr(fc, value of s)
+        movapd(a, xmm2, xmm0)
+        pop_value(fc, xmm1)
+        pop_value(fc, xmm0)
+        call_to(a, "rt_set_item")
+        why_stub(fc, at of target, "rt_why_item")
+    else if what is "each"
+        gen_each(fc, s)
     else if what is "fail" # the mistake says the value, as `say` shows it
         if is_text(value of s)
             jmp_to(a, fail_stub(fc, at of s, value of value of s))
@@ -2873,6 +4396,7 @@ to gen_statement with fc, s
             movsd_store(a, rip("err_a"), xmm0)
             stub_start(fc, at of s)
             load(a, rax, rip("err_a"))
+            movi(a, rdx, 0)
             call_to(a, "rt_e_shown")
             jmp_to(a, "rt_e_end")
         end
@@ -2905,29 +4429,26 @@ to gen_say with fc, s
             add 1 to waiting
         end
     end
+    call_to(a, "rt_b_reset")
     set j to 0
-    set line_size to 0
     for each part in parts of s
         if is_text(part)
             if value of part is not ""
-                point_at_text(a, value of part)
-                call_to(a, "rt_out_text")
-                set line_size to line_size + length of (value of part as bytes)
+                b_text(a, value of part)
             end
         else
             load(a, rax, mem(rsp, 8 * (waiting - 1 - j)))
-            call_to(a, "rt_out_value")
+            movi(a, rdx, 0)
+            call_to(a, "rt_b_value")
             add 1 to j
         end
     end
-    call_to(a, "rt_out_line")
+    call_to(a, "rt_say_end")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, fail_stub(fc, at of s, too_big))
     if waiting is greater than 0
         alui(a, "add", rsp, 8 * waiting)
         set pushed of fc to pushed of fc - waiting
-    end
-    set st to st of fc
-    if line_size is greater than longest_text of st
-        set longest_text of st to line_size
     end
 end
 
@@ -2964,25 +4485,70 @@ to gen_add with fc, s
     jcc(a, cc_p, odd_after)
     mark(a, second_back)
     movsd_store(a, place, xmm0)
+    set added to new_label(a)
+    mark(a, added)
     set was to enter_cold(a)
-    mark(a, odd_before) # the variable is NaN: no value yet, or nothing, yes or no, or the number NaN
+    set in_memory to new_label(a)
+    set kinds to new_label(a)
+    mark(a, odd_before) # the variable is NaN: no value yet, nothing, yes or no, text or a list, or the number NaN
     movq_rx(a, rax, xmm0)
     movi64(a, rcx, bits_unset)
     alu(a, "cmp", rax, rcx)
     jcc(a, cc_e, unset)
     special_jump(a, xmm0, wrong)
+    pointer_jump(a, xmm0, in_memory)
     jmp_to(a, first_back)
-    mark(a, odd_after) # the sum is NaN: is what's added nothing, yes or no?
+    mark(a, in_memory) # text grows; a list gets it at its end
+    call_to(a, "rt_add_into")
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, kinds)
+    jcc(a, cc_a, fail_stub(fc, at of s, too_big))
+    movsd_store(a, place, xmm0)
+    jmp_to(a, added)
+    mark(a, odd_after) # the sum is NaN: isn't what's added a number?
     set wrong_after to new_label(a)
-    special_jump(a, xmm1, wrong_after)
+    odd_jump(a, xmm1, wrong_after)
     jmp_to(a, second_back)
     mark(a, wrong_after)
     movapd(a, xmm0, xmm2)
     mark(a, wrong)
     movsd_store(a, rip("err_a"), xmm1)
     movsd_store(a, rip("err_b"), xmm0)
+    mark(a, kinds)
     two_kinds(fc, at of s, "can't add ", " to ")
     leave_cold(a, was)
+end
+
+# `for each x in`: a copy of the items, gone through by place
+to gen_each with fc, s
+    set a to a of fc
+    gen_expr(fc, over of s)
+    call_to(a, "rt_items")
+    kind_stub(fc, at of s, "can only go through a list, text, dictionary or bytes, not ")
+    set items_at to hidden_place(fc)
+    set count_at to hidden_place(fc)
+    set next_at to hidden_place(fc)
+    store(a, items_at, rdx)
+    store(a, count_at, rcx)
+    storei(a, next_at, 0)
+    set top to new_label(a)
+    set exit to new_label(a)
+    mark(a, top)
+    load(a, rax, next_at)
+    alu_load(a, "cmp", rax, count_at)
+    jcc(a, cc_ae, exit)
+    load(a, rcx, items_at)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rcx, rdx)
+    movsd_load(a, xmm0, mem(rcx, 0))
+    inc_r(a, rax)
+    store(a, next_at, rax)
+    store_var(fc, name of s, at of s)
+    gen_loop_body(fc, body of s, exit)
+    jmp_to(a, top)
+    mark(a, exit)
+    set hidden of fc to hidden of fc - 3
 end
 
 to gen_repeat with fc, s
@@ -3011,6 +4577,7 @@ to gen_repeat with fc, s
     stub_start(fc, at of s)
     stub_text(a, "repeat needs a whole number of times, not ")
     load(a, rax, rip("err_a"))
+    movi(a, rdx, 1)
     call_to(a, "rt_e_shown")
     jmp_to(a, "rt_e_end")
     leave_cold(a, was)
@@ -3058,7 +4625,7 @@ to gen_count with fc, s
     set was to enter_cold(a)
     mark(a, odd)
     movapd(a, xmm2, xmm0)
-    call_to(a, "rt_any_special")
+    call_to(a, "rt_any_odd")
     test_rr(a, rax, rax)
     jcc(a, cc_e, back)
     movsd_store(a, rip("err_a"), xmm2)
@@ -3070,7 +4637,7 @@ end
 # ---------- conditions ----------
 
 set compare_names to dictionary where "is" is "is", "less than" is "lt", "greater than" is "gt", "at least" is "ge",
-    "at most" is "le", "divisible by" is "div"
+    "at most" is "le", "divisible by" is "div", "in" is "in"
 
 # jumps to `label` when what `e` is counts as `goal` (only no and nothing count as false)
 to gen_cond with fc, e, label, goal
@@ -3137,9 +4704,6 @@ end
 # both sides of a comparison, then rt_cmp_...: rax is 1 if it holds, else 0
 to gen_compare with fc, e
     set a to a of fc
-    if not (op of e is in compare_names)
-        not_yet(at of e, "'is in'")
-    end
     set test to item (op of e) of compare_names
     gen_pair(fc, left of e, right of e)
     call_to(a, "rt_cmp_" + test)
@@ -3217,9 +4781,60 @@ to gen_expr with fc, e
         movq_xr(a, xmm0, rcx)
     else if what is "negate"
         gen_negate(fc, e)
+    else if what is "list"
+        for each part in items of e
+            gen_expr(fc, part)
+            push_value(fc)
+        end
+        set n to length of items of e
+        movi(a, rcx, n)
+        mov_rr(a, rsi, rsp)
+        call_to(a, "rt_list_make")
+        movq_xr(a, xmm0, rax)
+        if n is greater than 0
+            alui(a, "add", rsp, 8 * n)
+            set pushed of fc to pushed of fc - n
+        end
+    else if what is "length"
+        gen_expr(fc, subject of e)
+        call_to(a, "rt_length")
+        kind_stub(fc, at of e, "'length of' needs a list, text, dictionary or bytes, not ")
+    else if what is "item"
+        gen_pair(fc, subject of e, index of e)
+        call_to(a, "rt_item")
+        why_stub(fc, at of e, "rt_why_item")
     else
         not_yet_node(e)
     end
+end
+
+# after a call to the runtime: if rax isn't 0, the mistake is `message` and what kind of value err_a is
+to kind_stub with fc, at, message
+    set a to a of fc
+    set wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, wrong)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    stub_start(fc, at)
+    stub_text(a, message)
+    stub_kind(a, "err_a")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+end
+
+# after a call to the runtime: if rax isn't 0, `why` says what the mistake is
+to why_stub with fc, at, why
+    set a to a of fc
+    set wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, wrong)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    stub_start(fc, at)
+    call_to(a, why)
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
 end
 
 to gen_value with fc, e, x
@@ -3234,7 +4849,7 @@ to gen_value with fc, e, x
     else if type is "nothing"
         load_bits(a, x, bits_nothing)
     else
-        not_yet(at of e, "text")
+        load_text(a, x, value of e)
     end
 end
 
@@ -3284,10 +4899,16 @@ to gen_math with fc, e
     jcc(a, cc_p, odd)
     mark(a, back)
     set was to enter_cold(a)
-    mark(a, odd) # NaN: from nothing, yes or no, or just NaN
-    call_to(a, "rt_any_special")
+    mark(a, odd) # NaN: from something that isn't a number, or just NaN
+    call_to(a, "rt_any_odd")
     test_rr(a, rax, rax)
     jcc(a, cc_e, back)
+    if op is "+" # text joins
+        call_to(a, "rt_plus")
+        alui(a, "cmp", rax, 1)
+        jcc(a, cc_e, back)
+        jcc(a, cc_a, fail_stub(fc, at of e, too_big))
+    end
     mark(a, wrong)
     movsd_store(a, rip("err_a"), xmm2)
     movsd_store(a, rip("err_b"), xmm1)
@@ -3295,7 +4916,7 @@ to gen_math with fc, e
     if op is "/"
         mark(a, by_zero)
         movapd(a, xmm2, xmm0)
-        call_to(a, "rt_any_special")
+        call_to(a, "rt_any_odd")
         test_rr(a, rax, rax)
         jcc(a, cc_ne, wrong)
         jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
@@ -3317,7 +4938,7 @@ to gen_negate with fc, e
     movq_xr(a, xmm0, rax)
     set was to enter_cold(a)
     mark(a, odd)
-    special_jump(a, xmm0, wrong)
+    odd_jump(a, xmm0, wrong)
     jmp_to(a, back)
     mark(a, wrong)
     movsd_store(a, rip("err_a"), xmm0)
@@ -3394,6 +5015,15 @@ to check_kind with fc, e, f, i, k, n
         alu(a, "sub", rdx, rcx)
         alui(a, "cmp", rdx, 3)
         jcc(a, cc_b, wrong)
+        mov_rr(a, rdx, rax)
+        shifti(a, "shr", rdx, 48)
+        alui(a, "cmp", rdx, kind_text)
+        jcc(a, cc_ae, wrong)
+    else if k is 1 or k is 3 or k is 4 or k is 5 or k is 6 or k is 7
+        mov_rr(a, rdx, rax)
+        shifti(a, "shr", rdx, 48)
+        alui(a, "cmp", rdx, item (k + 1) of kind_tags)
+        jcc(a, cc_ne, wrong)
     else if k is 2
         movi64(a, rcx, bits_no)
         alu(a, "cmp", rax, rcx)
@@ -3401,8 +5031,6 @@ to check_kind with fc, e, f, i, k, n
         inc_r(a, rcx)
         alu(a, "cmp", rax, rcx)
         jcc(a, cc_ne, wrong)
-    else
-        jmp_to(a, wrong)
     end
     mark(a, fine)
     set was to enter_cold(a)
@@ -3463,6 +5091,34 @@ to place_labels with a, bases
     return text
 end
 
+# where a label is, now that each part of the file has its address
+to label_address with a, bases, name
+    set table to labels of a
+    if not (name is in table)
+        fail with "machine.moth has no label called " + name
+    end
+    set target to item name of table
+    if section of target is "cold"
+        return item "hot" of bases + length of hot of a + at of target
+    end
+    return item (section of target) of bases + at of target
+end
+
+# the 8-byte addresses absolute() asked for, now that everything has its place
+to place_absolutes with a, bases, image_base
+    for each fix in absolutes of a
+        set out to data of a
+        if section of fix is "rodata"
+            set out to rodata of a
+        end
+        set eight to empty list
+        put64(eight, image_base + label_address(a, bases, label of fix) + addend of fix)
+        for each k from 1 to 8
+            set item (at of fix + k) of out to item k of eight
+        end
+    end
+end
+
 to label_offset with a, name
     set target to item name of labels of a
     if section of target is "cold"
@@ -3472,7 +5128,8 @@ to label_offset with a, name
 end
 
 to windows_file with a
-    set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess"
+    set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess",
+        "VirtualAlloc"
     set text_size to length of hot of a + length of cold of a
     set text_rva to 4096
     set rdata_rva to align_up(text_rva + text_size, 4096)
@@ -3523,6 +5180,7 @@ to windows_file with a
     set image_size to align_up(data_rva + data_virtual, 4096)
     set bases to dictionary where "hot" is text_rva, "rodata" is rdata_rva, "data" is data_rva, "bss" is bss_rva
     set text to place_labels(a, bases)
+    place_absolutes(a, bases, 0x140000000)
     set text_raw to align_up(text_size, 512)
     set rdata_raw to align_up(length of rodata of a, 512)
     set data_raw to align_up(length of dat, 512)
@@ -3628,6 +5286,7 @@ to linux_file with a
     set bss_at to data_at + length of dat
     set bases to dictionary where "hot" is base + text_at, "rodata" is base + rodata_at, "data" is base + data_at, "bss" is base + bss_at
     set text to place_labels(a, bases)
+    place_absolutes(a, bases, 0)
     set out to empty list
     put_all(out, list of 0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0) # ELF, 64-bit, little-endian
     repeat 8 times

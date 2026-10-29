@@ -66,8 +66,8 @@ test("machine code says, fails and exits exactly as moth run does", { skip }, ()
 
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
-  not('say "a" + 1', /^line 1: text can't become machine code yet/);
-  not("set l to list of 1, 2", /^line 1: a list can't become machine code yet/);
+  not('set d to dictionary where "a" is 1', /^line 1: a dictionary can't become machine code yet/);
+  not("set r to record with x 1", /^line 1: a record can't become machine code yet/);
   not("to f\n    to g\n        say 1\n    end\nend", /^line 2: a function made inside a function can't become machine code yet/);
   not("to f\n    return 1\nend\nset g to f", /^line 4: a function used as a value \('f'\) can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it

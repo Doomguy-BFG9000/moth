@@ -173,11 +173,11 @@ fixed point: the compiler written in Moth compiles itself to exactly what the JI
 **Machine code, from Moth alone.** [`machine.moth`](machine.moth) is a third
 back end, written in Moth: it turns a program into a Windows `.exe` or a Linux
 program, writing every x86-64 instruction and the file around them byte by
-byte, with no assembler, linker or other compiler. So far it takes the core of
-the language: numbers, yes, no and nothing, variables, `say`, `if`, the loops,
-and functions, which is enough for [`math.moth`](math.moth). What it makes does
+byte, with no assembler, linker or other compiler. So far it takes numbers,
+yes, no and nothing, text, lists, variables, `say`, `if`, the loops, and
+functions, which is enough for [`math.moth`](math.moth). What it makes does
 exactly what `moth run` does, down to how a number is shown, how two numbers
-compare to 15 digits, and the calls a mistake lists:
+compare to 15 digits, how text sorts, and the calls a mistake lists:
 
 ```text
 $ moth build --exe fib.moth
@@ -206,8 +206,8 @@ always works in decimals, even for a count that is only ever whole.
 
 **Is Moth standalone yet?** Halfway. What `moth build --exe` makes runs with
 nothing else installed, but making it still takes Node.js, which runs
-machine.moth. The rest of the way: text, lists, records and dictionaries in
-machine code, which need memory that grows as a program runs; reading and
+machine.moth. The rest of the way: records, dictionaries, `try`, the text
+helpers and functions made inside functions in machine code; reading and
 writing files; and then machine.moth compiling itself into a `moth.exe` that
 builds every program, itself included, into exactly the same bytes. From
 then on Moth needs neither JavaScript nor Rust.
@@ -842,11 +842,12 @@ unboxed numbers were all caught, some only by the fuzzer.
   JavaScript's engine, which has years of tuning behind it, is faster still.
   Building one needs `rustc`, and a very big program takes minutes. It has no
   limit on its steps, so a loop that never ends runs until it's stopped.
-- `moth build --exe` takes only the core of Moth so far: text only as the
-  words of a `say`, and no lists, records, dictionaries, files, `try`, drawing,
-  or functions made inside functions; anything else stops with a mistake that
-  says it can't become machine code yet. It makes programs for x86-64 Windows
-  and Linux, not for Macs.
+- `moth build --exe` takes only part of Moth so far: no records,
+  dictionaries, bytes, units, `try`, the text helpers (`split`, `join`,
+  `uppercase` and the rest), files, drawing, or functions made inside
+  functions; anything else stops with a mistake that says it can't become
+  machine code yet. Memory a program takes isn't given back until it ends.
+  It makes programs for x86-64 Windows and Linux, not for Macs.
 - The Rust engine runs code and values nested deeper than JavaScript's stack
   allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
   with a mistake, and Rust carries on. As WebAssembly, whose stack is smaller,
