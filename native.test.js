@@ -212,8 +212,12 @@ process.exitCode = wasi.start(await WebAssembly.instantiate(module, wasi.getImpo
 `;
 const runner = join(mkdtempSync(join(tmpdir(), "moth-wasi-")), "run.mjs");
 writeFileSync(runner, WASI_RUNNER);
+// With MOTH_WASI=wasmtime (as CI has it) it runs in wasmtime, a WebAssembly runtime with no JavaScript in it;
+// otherwise in Node's own WASI
 function onWasm(args, options) {
-  const ran = spawnSync(process.execPath, ["--no-warnings", runner, ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options });
+  const ran = process.env.MOTH_WASI === "wasmtime"
+    ? spawnSync("wasmtime", ["run", "--dir", ".", WASM, ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options })
+    : spawnSync(process.execPath, ["--no-warnings", runner, ...args], { encoding: "utf8", maxBuffer: 1 << 30, ...options });
   // everything about a run that went wrong, so a failure says why
   ran.why = `status ${ran.status}, signal ${ran.signal}, error ${ran.error?.message}\n${ran.stderr}`;
   return ran;
