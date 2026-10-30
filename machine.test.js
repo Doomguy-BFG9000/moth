@@ -176,6 +176,30 @@ test("machine.moth's and moth.moth's functions never set a name their own top le
   }
 });
 
+// A file used `as` a name keeps its own top level, and one used as two names is two copies, in machine code as
+// on the JavaScript engine: the program's `total` and `k` are made before it uses the file whose function
+// counts with names of its own, and each copy of the counter counts for itself.
+test("a file used as two names is two copies in machine code, each keeping its own top level", { skip }, () => {
+  const files = {
+    "counter.moth": "set count to 0\nto bump\n    add 1 to count\n    return count\nend",
+    "tally.moth": "to tally with things\n    set total to 0\n    for each k in things\n        add k to total\n    end\n    return total\nend",
+  };
+  const source = 'set total to 100\nset k to "mine"\nuse "counter.moth" as a\nuse "counter.moth" as b\nuse "tally.moth" as t\nsay a\'s bump() " " a\'s bump() " " b\'s bump()\nsay t\'s tally((list of 1, 2, 3)) " " total " " k\n';
+  let want = "";
+  run(source, (line) => (want += `${line}\n`), { files: (name) => files[name] });
+  assert.equal(want, "1 2 1\n6 100 mine\n");
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "copies");
+    writeFileSync(exe, machine(source, { files, target, name: "copies.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { encoding: "utf8" });
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: want, stderr: "", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a program becomes the same bytes each time, as a PE file for Windows and an ELF file for Linux", () => {
   const source = MACHINE_CASES[2];
   const windows = machine(source, { target: "windows", name: "f.moth" });

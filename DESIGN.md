@@ -1087,6 +1087,10 @@ hold them to agreeing.
   function by its code; compiler.moth, which can't tell two equal lists apart,
   numbers each function as it parses it. Both give every variable the same slot,
   and the tests hold compiler.moth to the JIT, byte for byte, as before.
+- **Two copies in machine code.** machine.moth found each top-level function by
+  the line and column of its `to`, which two copies of one file share, so a file
+  used as two names lost one copy's functions and the build stopped. It goes by
+  the parser's number for each function now, and a test builds two copies.
 - **What changed.** One test program said `1` and now stops: f sets `x`, the top
   level calls f, says `x`, and only then sets it. f's `x` is its own, so `say x`
   finds the top level's, which has no value yet. Of everything written in Moth
