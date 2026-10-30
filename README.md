@@ -12,7 +12,7 @@ Written from scratch in JavaScript, with no dependencies.</p>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
-<a href="https://github.com/samyyy2423/moth/releases/tag/v1.7.0">Release 1.7</a>
+<a href="https://github.com/samyyy2423/moth/releases/tag/v1.8.0">Release 1.8</a>
 </p>
 
 <p>
@@ -180,19 +180,20 @@ $ ./fib.exe
 832040
 ```
 
-Against C and Python, with the same four programs written in each
+Against C, Rust and Python, with the same four programs written in each
 ([`versus/`](versus)), every one timed from start to finish, it's about as fast
-as C on three of them and 1.4 times as slow on function calls, and 10 to 210
-times as fast as Python:
+as C and Rust on primes and decimal maths, as fast as C on a plain loop (which
+Rust does twice as fast again), 1.4 times as slow as both on function calls,
+and 10 to 200 times as fast as Python:
 
-| `npm run versus` | C | Moth, machine code | JavaScript engine | Python |
-|:--|--:|--:|--:|--:|
-| fib(32): 7 million calls | 34 ms | 49 ms | 282 ms | 522 ms |
-| adding 1 to 100,000,000 | 51 ms | 50 ms | 739 ms | 10.5 s |
-| primes up to 300,000 | 86 ms | 85 ms | 260 ms | 2.0 s |
-| 30,000,000 steps of decimal maths | 61 ms | 62 ms | 348 ms | 4.7 s |
+| `npm run versus` | C | Rust | Moth, machine code | JavaScript engine | Python |
+|:--|--:|--:|--:|--:|--:|
+| fib(32): 7 million calls | 37 ms | 36 ms | 50 ms | 309 ms | 554 ms |
+| adding 1 to 100,000,000 | 52 ms | 26 ms | 54 ms | 800 ms | 11.1 s |
+| primes up to 300,000 | 88 ms | 90 ms | 91 ms | 284 ms | 2.4 s |
+| 30,000,000 steps of decimal maths | 66 ms | 72 ms | 69 ms | 380 ms | 5.2 s |
 
-On Windows 11, with MSVC's `cl /O2` and Python 3.13. Moth still keeps its
+On Windows 11, with MSVC's `cl /O2`, `rustc -O` (Rust 1.89) and Python 3.13. Moth still keeps its
 promises in these: numbers are decimals compared to 15 digits, and every step
 that could go wrong is checked. machine.moth gets there by knowing, as it
 writes the code, what each variable is sure to hold, and leaving out the
@@ -738,7 +739,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
-| [`versus/`](versus) | The same four programs in Moth, C and Python, and `npm run versus`, which times them |
+| [`versus/`](versus) | The same four programs in Moth, C, Rust and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
@@ -932,7 +933,7 @@ unboxed numbers were all caught, some only by the fuzzer.
 ```bash
 npm test                     # everything above, in a few minutes
 npm run bench                # the engines, timed
-npm run versus               # Moth against C and Python
+npm run versus               # Moth against C, Rust and Python
 node bootstrap.mjs           # moth.exe (moth on Linux), made from the source
 python -m http.server        # then open http://localhost:8000 for the playground
 ```
