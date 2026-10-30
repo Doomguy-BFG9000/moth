@@ -227,7 +227,7 @@ end
 to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
-        absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no
+        absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, units no
     set code of made to hot of made
     return made
 end
@@ -1882,6 +1882,15 @@ to emit_compares with a
         movzx8(a, rax, rax)
         ret(a)
         mark(a, odd) # two texts compare as their UTF-16 does
+        if units of a # two amounts of one measure, in the first's unit
+            set not_amounts to new_label(a)
+            call_to(a, "rt_q_pair")
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, not_amounts)
+            call_to(a, "rt_order")
+            jmp_to(a, decided)
+            mark(a, not_amounts)
+        end
         movq_rx(a, rax, xmm0)
         shifti(a, "shr", rax, 48)
         alui(a, "cmp", rax, kind_text)
@@ -2171,6 +2180,12 @@ to emit_mistakes with a
     inc_r(a, rcx)
     alu(a, "cmp", rax, rcx)
     jcc(a, cc_e, kind_bool)
+    if units of a # an amount: what it measures
+        mov_rr(a, rdx, rax)
+        shifti(a, "shr", rdx, 48)
+        alui(a, "cmp", rdx, kind_quantity)
+        jcc(a, cc_e, "rt_q_kind")
+    end
     shifti(a, "shr", rax, 48)
     alui(a, "cmp", rax, kind_text)
     jcc(a, cc_ae, in_memory)
@@ -3016,7 +3031,11 @@ to emit_collect with a
     shifti(a, "shr", rdx, 48)
     jcc(a, cc_e, address)
     alui(a, "sub", rdx, kind_text)
-    alui(a, "cmp", rdx, kind_function - kind_text)
+    if units of a # amounts are in memory too
+        alui(a, "cmp", rdx, kind_quantity - kind_text)
+    else
+        alui(a, "cmp", rdx, kind_function - kind_text)
+    end
     jcc(a, cc_a, word)
     untag(a, rax)
     mark(a, address)
@@ -3722,6 +3741,15 @@ to emit_show with a
     alui(a, "cmp", rax, kind_function)
     set said_function to new_label(a)
     jcc(a, cc_e, said_function)
+    if units of a # an amount: `5.3 km`
+        set not_amount to new_label(a)
+        alui(a, "cmp", rax, kind_quantity)
+        jcc(a, cc_ne, not_amount)
+        mov_rr(a, rax, r13)
+        call_to(a, "rt_q_show")
+        jmp_to(a, done)
+        mark(a, not_amount)
+    end
     b_text(a, "<internal>")
     jmp_to(a, done)
     mark(a, said_function)
@@ -4180,6 +4208,22 @@ to emit_sequences with a
     alui(a, "cmp", rax, kind_bytes)
     set byte_arrays to new_label(a)
     jcc(a, cc_e, byte_arrays)
+    if units of a # two amounts: of one measure, and the same amount in the first's unit to 15 digits
+        set not_amounts to new_label(a)
+        alui(a, "cmp", rax, kind_quantity)
+        jcc(a, cc_ne, not_amounts)
+        movq_xr(a, xmm0, rbx)
+        movq_xr(a, xmm1, r12)
+        call_to(a, "rt_q_pair")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, different)
+        call_to(a, "rt_order")
+        test_rr(a, rax, rax)
+        setcc(a, cc_e, rax)
+        movzx8(a, rax, rax)
+        jmp_to(a, out)
+        mark(a, not_amounts)
+    end
     jmp_to(a, different)
     mark(a, byte_arrays)
     untag(a, rbx)
@@ -5003,6 +5047,23 @@ to emit_sequences with a
     jcc(a, cc_e, grow_text)
     alui(a, "cmp", rdx, kind_list)
     jcc(a, cc_e, grow_list)
+    set add_wrong to new_label(a)
+    if units of a # an amount gets one of the same measure, in its unit
+        alui(a, "cmp", rdx, kind_quantity)
+        jcc(a, cc_ne, add_wrong)
+        movq_rx(a, r11, xmm0)
+        call_to(a, "rt_q_pair")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, add_wrong)
+        sse_math(a, "+", xmm0, reg_at(xmm1))
+        mov_rr(a, rax, r11)
+        untag(a, rax)
+        load(a, rcx, mem(rax, 8))
+        call_to(a, "rt_q_make")
+        movi(a, rax, 0)
+        ret(a)
+    end
+    mark(a, add_wrong)
     movsd_store(a, rip("err_a"), xmm1)
     movsd_store(a, rip("err_b"), xmm0)
     movi(a, rax, 2)
@@ -6508,6 +6569,19 @@ to emit_builtins with a
     ret(a)
     mark(a, "rt_number_odd")
     movsd_store(a, rip("err_a"), xmm0)
+    if units of a # an amount: the number alone
+        set not_amount to new_label(a)
+        movq_rx(a, rax, xmm0)
+        shifti(a, "shr", rax, 48)
+        alui(a, "cmp", rax, kind_quantity)
+        jcc(a, cc_ne, not_amount)
+        movq_rx(a, rax, xmm0)
+        untag(a, rax)
+        movsd_load(a, xmm0, mem(rax, 0))
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, not_amount)
+    end
     need_text(a, xmm0, "'number of'")
     movq_rx(a, rax, xmm0)
     untag(a, rax)
@@ -7737,6 +7811,379 @@ to emit_functions with a
     b_text(a, ", not ")
     load(a, rax, rip("err_a"))
     jmp_to(a, "rt_e_kind")
+end
+
+# ---------- the runtime: amounts with units ----------
+# `5 km`, as vm.js's Quantity has it: an amount of a unit, 16 bytes that never change, the amount and which
+# of vm.js's UNITS it is in, with a kind of its own. A program with no amount in it gets none of this, and is
+# the same bytes it was before amounts could become machine code; one with an amount in it is written a
+# second time, knowing that, so the slow paths of its arithmetic look for amounts too (see compile_allowing).
+
+set kind_quantity to 65535
+set tag_quantity to list of 0, 0, 0, 0, 0, 0, 0xFF, 0xFF
+# vm.js's MEASURES and UNITS: each unit as it is written for one and for many, what it measures, and how many
+# of that measure's base unit (a metre, a second, a gram, a litre) it is
+set measure_words to list of "a distance", "a time", "a weight", "a volume"
+set unit_rows to list of (list of "mm", "mm", 0, 0.001), (list of "cm", "cm", 0, 0.01), (list of "m", "m", 0, 1),
+    (list of "km", "km", 0, 1000), (list of "millimetre", "millimetres", 0, 0.001),
+    (list of "centimetre", "centimetres", 0, 0.01), (list of "metre", "metres", 0, 1),
+    (list of "kilometre", "kilometres", 0, 1000), (list of "millimeter", "millimeters", 0, 0.001),
+    (list of "centimeter", "centimeters", 0, 0.01), (list of "meter", "meters", 0, 1),
+    (list of "kilometer", "kilometers", 0, 1000), (list of "inch", "inches", 0, 0.0254), (list of "foot", "feet", 0, 0.3048),
+    (list of "yard", "yards", 0, 0.9144), (list of "mile", "miles", 0, 1609.344),
+    (list of "millisecond", "milliseconds", 1, 0.001), (list of "second", "seconds", 1, 1),
+    (list of "minute", "minutes", 1, 60), (list of "hour", "hours", 1, 3600), (list of "day", "days", 1, 86400),
+    (list of "week", "weeks", 1, 604800), (list of "mg", "mg", 2, 0.001), (list of "g", "g", 2, 1),
+    (list of "kg", "kg", 2, 1000), (list of "milligram", "milligrams", 2, 0.001), (list of "gram", "grams", 2, 1),
+    (list of "kilogram", "kilograms", 2, 1000), (list of "ounce", "ounces", 2, 28.349523125),
+    (list of "pound", "pounds", 2, 453.59237), (list of "tonne", "tonnes", 2, 1000000), (list of "ml", "ml", 3, 0.001),
+    (list of "millilitre", "millilitres", 3, 0.001), (list of "litre", "litres", 3, 1),
+    (list of "milliliter", "milliliters", 3, 0.001), (list of "liter", "liters", 3, 1)
+
+# which of unit_rows a unit's word is, from 0
+to unit_slot with unit_word
+    set unit_at to 0
+    for each row in unit_rows
+        if item 1 of row is unit_word or item 2 of row is unit_word
+            return unit_at
+        end
+        add 1 to unit_at
+    end
+    return -1
+end
+
+# register dst: where the unit numbered in register r has its row of unit_table; r is kept
+to unit_row with a, dst, r
+    lea(a, dst, rip("unit_table"))
+    shifti(a, "shl", r, 5)
+    alu(a, "add", dst, r)
+    shifti(a, "shr", r, 5)
+end
+
+# an amount the program writes, `5 km`, in the read-only data, once each: its label. It is never changed, and
+# the collector only looks where blocks are, so it can stay there.
+to quantity_place with a, eight, slot
+    set key to "q" + slot + ":"
+    for each b in eight
+        set key to key + b + ","
+    end
+    set known to numbers of a
+    if key is in known
+        return item key of known
+    end
+    set ro to rodata of a
+    pad_to(ro, 16)
+    set name to "Q" + length of ro
+    rodata_here(a, name)
+    put_all(ro, eight)
+    put64(ro, slot)
+    set item key of known to name
+    return name
+end
+
+to emit_units with a
+    set word_objects to empty list # each unit's two words, and each measure's name, as texts of the program's
+    for each row in unit_rows
+        add text_object(a, item 1 of row) to word_objects
+        add text_object(a, item 2 of row) to word_objects
+    end
+    set measure_objects to empty list
+    for each measure in measure_words
+        add text_object(a, measure) to measure_objects
+    end
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "unit_table") # 32 bytes for each unit: how many of the base unit, what it measures, its words
+    set n to 0
+    for each row in unit_rows
+        put_all(ro, double_bytes(item 4 of row))
+        put64(ro, item 3 of row)
+        for each k from 1 to 2
+            absolute(a, "rodata", length of ro, item (2 * n + k) of word_objects, 0)
+            put64(ro, 0)
+        end
+        add 1 to n
+    end
+    table_of_texts(a, "measure_table", measure_objects)
+
+    # rt_q_make: xmm0 an amount and rcx a unit: an amount of that unit, new, in xmm0; keeps every register but
+    # rax and rcx
+    mark(a, "rt_q_make")
+    push_r(a, rcx)
+    movi(a, rcx, 16)
+    call_to(a, "rt_alloc_raw")
+    pop_r(a, rcx)
+    movsd_store(a, mem(rax, 0), xmm0)
+    store(a, mem(rax, 8), rcx)
+    movi64(a, rcx, tag_quantity)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    ret(a)
+
+    # rt_q_amount_in: rax an amount (untagged) and rcx a unit of the same measure: how much of that unit it is,
+    # in xmm0, as vm.js's amountIn works it out; uses rdx and r8
+    set as_is to new_label(a)
+    mark(a, "rt_q_amount_in")
+    movsd_load(a, xmm0, mem(rax, 0))
+    load(a, rdx, mem(rax, 8))
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_e, as_is)
+    unit_row(a, r8, rdx)
+    sse_math(a, "*", xmm0, mem(r8, 0))
+    unit_row(a, r8, rcx)
+    sse_math(a, "/", xmm0, mem(r8, 0))
+    mark(a, as_is)
+    ret(a)
+
+    # rt_q_measure: rax a value: what it measures (0 to 3, as measure_words has them) in rax if it is an
+    # amount, else -1; keeps every register but rdx
+    set not_amount to new_label(a)
+    mark(a, "rt_q_measure")
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_quantity)
+    jcc(a, cc_ne, not_amount)
+    untag(a, rax)
+    load(a, rax, mem(rax, 8))
+    unit_row(a, rdx, rax)
+    load(a, rax, mem(rdx, 8))
+    ret(a)
+    mark(a, not_amount)
+    movi(a, rax, -1)
+    ret(a)
+
+    # rt_q_pair: xmm0 and xmm1: if both are amounts of one measure, xmm0 gets the first's amount and xmm1 the
+    # second's in the first's unit, with rax 0; else rax 1, and both are kept. Uses rcx, rdx and r8 to r10.
+    set not_pair to new_label(a)
+    mark(a, "rt_q_pair")
+    movq_rx(a, rax, xmm1)
+    call_to(a, "rt_q_measure")
+    mov_rr(a, r9, rax)
+    movq_rx(a, rax, xmm0)
+    call_to(a, "rt_q_measure")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, not_pair)
+    alu(a, "cmp", rax, r9)
+    jcc(a, cc_ne, not_pair)
+    movq_rx(a, r10, xmm0)
+    untag(a, r10)
+    movq_rx(a, rax, xmm1)
+    untag(a, rax)
+    load(a, rcx, mem(r10, 8))
+    call_to(a, "rt_q_amount_in")
+    movapd(a, xmm1, xmm0)
+    movsd_load(a, xmm0, mem(r10, 0))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_pair)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_q_in: xmm0 a value and rcx a unit: the value `in` that unit, a new amount in xmm0, with rax 0; or rax 2
+    # if it isn't an amount of what the unit measures, with it in err_a
+    set wrong_measure to new_label(a)
+    mark(a, "rt_q_in")
+    movsd_store(a, rip("err_a"), xmm0)
+    push_r(a, rcx)
+    movq_rx(a, rax, xmm0)
+    call_to(a, "rt_q_measure")
+    pop_r(a, rcx)
+    unit_row(a, rdx, rcx)
+    alu_load(a, "cmp", rax, mem(rdx, 8))
+    jcc(a, cc_ne, wrong_measure)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    call_to(a, "rt_q_amount_in")
+    call_to(a, "rt_q_make")
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, wrong_measure)
+    movi(a, rax, 2)
+    ret(a)
+
+    # rt_q_negate: xmm0 a value that isn't a number: if it is an amount, its negative, new, in xmm0 with rax 1;
+    # else rax 0, and xmm0 is kept
+    set not_negated to new_label(a)
+    mark(a, "rt_q_negate")
+    movq_rx(a, rax, xmm0)
+    call_to(a, "rt_q_measure")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, not_negated)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 8))
+    load(a, rax, mem(rax, 0))
+    bit_op(a, "btc", rax, 63)
+    movq_xr(a, xmm0, rax)
+    call_to(a, "rt_q_make")
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, not_negated)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_q_math: rcx what (0 for +, 1 for -, 2 for *, 3 for /), and xmm2 and xmm1 the two sides, when they
+    # aren't both numbers: what vm.js's plus and arithmetic make of amounts, in xmm0 with rax 1; or rax 0 if
+    # they aren't amounts it works on, or 2 for dividing by zero, with xmm1 and xmm2 kept
+    set q_times to new_label(a)
+    set q_over to new_label(a)
+    set q_none to new_label(a)
+    set q_zero to new_label(a)
+    set q_done to new_label(a)
+    set q_out to new_label(a)
+    set q_minus to new_label(a)
+    set q_summed to new_label(a)
+    set q_number_first to new_label(a)
+    set q_by_amount to new_label(a)
+    set q_by_ready to new_label(a)
+    set q_divide to new_label(a)
+    mark(a, "rt_q_math")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    alui(a, "cmp", rbx, 2)
+    jcc(a, cc_e, q_times)
+    jcc(a, cc_a, q_over)
+    movapd(a, xmm0, xmm2) # + and -: two amounts of one measure, in the first's unit
+    call_to(a, "rt_q_pair")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, q_none)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_ne, q_minus)
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    jmp_to(a, q_summed)
+    mark(a, q_minus)
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    mark(a, q_summed)
+    movq_rx(a, rax, xmm2)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 8))
+    call_to(a, "rt_q_make")
+    jmp_to(a, q_done)
+    mark(a, q_times) # an amount times a number, either way round
+    movq_rx(a, rax, xmm2)
+    call_to(a, "rt_q_measure")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, q_number_first)
+    odd_jump(a, xmm1, q_none)
+    movq_rx(a, rax, xmm2)
+    untag(a, rax)
+    movsd_load(a, xmm0, mem(rax, 0))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    load(a, rcx, mem(rax, 8))
+    call_to(a, "rt_q_make")
+    jmp_to(a, q_done)
+    mark(a, q_number_first)
+    odd_jump(a, xmm2, q_none)
+    movq_rx(a, rax, xmm1)
+    call_to(a, "rt_q_measure")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, q_none)
+    movq_rx(a, rax, xmm1)
+    untag(a, rax)
+    movapd(a, xmm0, xmm2)
+    sse_math(a, "*", xmm0, mem(rax, 0))
+    load(a, rcx, mem(rax, 8))
+    call_to(a, "rt_q_make")
+    jmp_to(a, q_done)
+    mark(a, q_over) # an amount over a number, which gives an amount, or over one of the same measure, a number
+    movq_rx(a, rax, xmm2)
+    call_to(a, "rt_q_measure")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, q_none)
+    movapd(a, xmm0, xmm2)
+    odd_jump(a, xmm1, q_by_amount)
+    movapd(a, xmm3, xmm1)
+    movi(a, rbx, 0)
+    movq_rx(a, rax, xmm2)
+    untag(a, rax)
+    movsd_load(a, xmm0, mem(rax, 0))
+    jmp_to(a, q_by_ready)
+    mark(a, q_by_amount)
+    call_to(a, "rt_q_pair")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, q_none)
+    movapd(a, xmm3, xmm1)
+    movi(a, rbx, 1)
+    mark(a, q_by_ready) # xmm0 the amount, xmm3 what it's divided by
+    load_bits(a, xmm4, double_bytes(0))
+    ucomisd(a, xmm3, reg_at(xmm4))
+    jcc(a, cc_p, q_divide)
+    jcc(a, cc_e, q_zero)
+    mark(a, q_divide)
+    sse_math(a, "/", xmm0, reg_at(xmm3))
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_ne, q_done)
+    movq_rx(a, rax, xmm2)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 8))
+    call_to(a, "rt_q_make")
+    mark(a, q_done)
+    movi(a, rax, 1)
+    jmp_to(a, q_out)
+    mark(a, q_zero)
+    movi(a, rax, 2)
+    jmp_to(a, q_out)
+    mark(a, q_none)
+    movi(a, rax, 0)
+    mark(a, q_out)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_q_word: rax an amount (untagged): the word its unit is written with, for one if its amount is 1 or -1
+    # to 15 digits, else for many, as a text (untagged) in rax; uses rcx, rdx, rsi, rdi, r8 to r11 and xmm0 to
+    # xmm4
+    set many to new_label(a)
+    set worded to new_label(a)
+    mark(a, "rt_q_word")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    movsd_load(a, xmm0, mem(rbx, 0))
+    abs_sd(a, xmm0)
+    load_bits(a, xmm1, double_bytes(1))
+    call_to(a, "rt_order")
+    load(a, rcx, mem(rbx, 8))
+    unit_row(a, rdx, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, many)
+    load(a, rax, mem(rdx, 16))
+    jmp_to(a, worded)
+    mark(a, many)
+    load(a, rax, mem(rdx, 24))
+    mark(a, worded)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_q_show: rax an amount (untagged), as `say` shows it, into the builder: its amount, then its unit's word
+    mark(a, "rt_q_show")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    movi(a, rcx, 32)
+    call_to(a, "rt_b_room")
+    load(a, rdi, rip("b_ptr"))
+    alu_load(a, "add", rdi, rip("b_len"))
+    load(a, rax, mem(rbx, 0))
+    call_to(a, "rt_fmt")
+    alu_load(a, "sub", rdi, rip("b_ptr"))
+    store(a, rip("b_len"), rdi)
+    movi(a, rax, 32)
+    call_to(a, "rt_b_byte")
+    mov_rr(a, rax, rbx)
+    call_to(a, "rt_q_word")
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    pop_r(a, rbx)
+    jmp_to(a, "rt_b_bytes")
+
+    # rt_q_kind: rax an amount: what it measures, as vm.js's kindOf says it, into the builder
+    mark(a, "rt_q_kind")
+    call_to(a, "rt_q_measure")
+    shifti(a, "shl", rax, 3)
+    lea(a, rcx, rip("measure_table"))
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    jmp_to(a, "rt_b_bytes")
 end
 
 # ---------- Unicode's cases: made by tools/case-tables.mjs ----------
@@ -11448,6 +11895,9 @@ to emit_runtime with st
     emit_records(a)
     emit_builtins(a)
     emit_functions(a)
+    if units of a
+        emit_units(a)
+    end
     emit_files(a, target of st, allowed of st)
     emit_gc_tables(a)
     if uses_case of st or windowed
@@ -15368,7 +15818,7 @@ to new_state with a, program_name, files, source, target
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
-        uses_random no
+        uses_random no, uses_units no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -15697,6 +16147,13 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
     set st to new_state(a, program_name, files, source, target)
     set allowed of st to allowing
     gen_program(st, body)
+    if uses_units of st # it has amounts in it: written again, so the slow paths of its arithmetic look for them
+        set a to new_asm()
+        set units of a to yes
+        set st to new_state(a, program_name, files, source, target)
+        set allowed of st to allowing
+        gen_program(st, body)
+    end
     emit_runtime(st)
     if target is "windows"
         return windows_file(a)
@@ -16657,6 +17114,23 @@ to gen_expr with fc, e
         gen_expr(fc, item 1 of args of e)
         call_to(a, "rt_keys")
         kind_stub(fc, at of e, "'keys of' needs a dictionary, not ")
+    else if what is "builtin" and name of e is "unit" # `5 km`: an amount the program writes, which is a number
+        set uses_units of st of fc to yes
+        set amount_node to item 1 of args of e
+        set amount_slot to unit_slot(value of item 2 of args of e)
+        lea(a, rax, rip(quantity_place(a, literal_bytes(value of amount_node, at of amount_node), amount_slot)))
+        movi64(a, rcx, tag_quantity)
+        alu(a, "or", rax, rcx)
+        movq_xr(a, xmm0, rax)
+    else if what is "builtin" and name of e is "in" # `trip in miles`
+        set uses_units of st of fc to yes
+        set unit_word to value of item 2 of args of e
+        set amount_slot to unit_slot(unit_word)
+        gen_expr(fc, item 1 of args of e)
+        movi(a, rcx, amount_slot)
+        call_to(a, "rt_q_in")
+        set measured to item (item 3 of item (amount_slot + 1) of unit_rows + 1) of measure_words
+        kind_stub(fc, at of e, "'in " + unit_word + "' needs " + measured + ", not ")
     else if what is "builtin" and name of e is in builtin_routines
         if name of e is "uppercase" or name of e is "lowercase"
             set uses_case of st of fc to yes
@@ -16776,6 +17250,15 @@ to gen_math with fc, e
         jcc(a, cc_e, back)
         jcc(a, cc_a, fail_stub(fc, at of e, too_big))
     end
+    set amounts to new_label(a)
+    if units of a # amounts: added, taken away, scaled and divided
+        mark(a, amounts)
+        movi(a, rcx, (position of op in "+-*/") - 1)
+        call_to(a, "rt_q_math")
+        alui(a, "cmp", rax, 1)
+        jcc(a, cc_e, back)
+        jcc(a, cc_a, fail_stub(fc, at of e, "can't divide by zero"))
+    end
     mark(a, wrong)
     movsd_store(a, rip("err_a"), xmm2)
     movsd_store(a, rip("err_b"), xmm1)
@@ -16785,7 +17268,11 @@ to gen_math with fc, e
         movapd(a, xmm2, xmm0)
         call_to(a, "rt_any_odd")
         test_rr(a, rax, rax)
-        jcc(a, cc_ne, wrong)
+        if units of a
+            jcc(a, cc_ne, amounts)
+        else
+            jcc(a, cc_ne, wrong)
+        end
         jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
     end
     leave_cold(a, was)
@@ -16803,11 +17290,18 @@ to gen_negate with fc, e
     movq_rx(a, rax, xmm0)
     bit_op(a, "btc", rax, 63)
     movq_xr(a, xmm0, rax)
+    set negated to new_label(a)
+    mark(a, negated)
     set was to enter_cold(a)
     mark(a, odd)
     odd_jump(a, xmm0, wrong)
     jmp_to(a, back)
     mark(a, wrong)
+    if units of a # an amount: its negative
+        call_to(a, "rt_q_negate")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, negated)
+    end
     movsd_store(a, rip("err_a"), xmm0)
     stub_start(fc, at of e)
     stub_text(a, "'-' needs a number, not ")

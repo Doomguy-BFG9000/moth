@@ -83,7 +83,7 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
 
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
-  not("say 5 km", /^line 1: 'unit' can't become machine code yet/);
+  not("say 0x20000000000000", /^line 1: a hex or binary number this big can't become machine code yet/);
   not("draw chart of (list of 1, 2)", /^line 1: 'draw chart of' can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
 });
