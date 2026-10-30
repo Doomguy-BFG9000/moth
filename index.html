@@ -539,6 +539,45 @@ Did you mean 'total'?</pre></div>
         pen.fillText(text, 0, 0);
         pen.restore();
       };
+      // What's typed in a text box or a text area (DESIGN §41), inside its border: a letter every 10 across from
+      // 8 in, from the first column and line in view, in a font whose letters take the same room, a line every
+      // 20 from 20 below the top; what's selected behind it in light blue, and the cursor, while it has the
+      // focus, between two letters. An empty one shows its label in grey.
+      const typedIn = (d, { text, focused, cursor, anchor, left, top }, rows) => {
+        const letters = [...(text || d.label)];
+        const cols = Math.max(1, Math.floor((d.width - 16) / 10));
+        const [from, to] = text ? [Math.min(cursor, anchor), Math.max(cursor, anchor)] : [0, 0];
+        let [line, start, at] = [0, 0, [0, 0]];
+        for (let i = 0; i <= letters.length; i++) {
+          if (i === (text ? cursor : 0)) at = [line, i - start];
+          if (i === letters.length || letters[i] === "\n") {
+            const row = line - top;
+            if (row >= 0 && row < rows) {
+              const base = d.y + d.height - 20 - 20 * row;
+              for (let c = left; c < Math.min(left + cols, i - start); c++) {
+                const x = d.x + 8 + 10 * (c - left);
+                if (start + c >= from && start + c < to) {
+                  pen.fillStyle = "#b4d5fe";
+                  pen.fillRect(x, base - 4, 10, 20);
+                }
+                pen.fillStyle = text ? "#000000" : "#888888";
+                pen.save();
+                pen.translate(x, base);
+                pen.scale(1, -1);
+                pen.font = "16px ui-monospace, Consolas, monospace";
+                pen.fillText(letters[start + c], 0, 0);
+                pen.restore();
+              }
+            }
+            [line, start] = [line + 1, i + 1];
+          }
+        }
+        const [row, col] = [at[0] - top, at[1] - left];
+        if (focused && row >= 0 && row < rows && col >= 0 && col <= cols) {
+          pen.fillStyle = "#000000";
+          pen.fillRect(d.x + 7 + 10 * col, d.y + d.height - 24 - 20 * row, 2, 18);
+        }
+      };
       for (const d of shown) {
         if (d.textbox !== undefined || d.checkbox !== undefined || d.list !== undefined) continue; // drawn with its box
         pen.strokeStyle = pen.fillStyle = d.color; // a color name the browser doesn't know keeps the previous one
@@ -549,8 +588,7 @@ Did you mean 'total'?</pre></div>
           pen.fillStyle = "#ffffff";
           write(d.text, d.x + d.width / 2, d.y + 10, 16, "center");
           pen.restore();
-        } else if (d.shape === "textbox") { // white, in a border of the pen's colour
-          const { text, focused } = boxes.get(d.label);
+        } else if (d.shape === "textbox" || d.shape === "textarea") { // white, in a border of the pen's colour
           pen.fillRect(d.x, d.y, d.width, d.height);
           pen.save();
           pen.fillStyle = "#ffffff";
@@ -558,13 +596,7 @@ Did you mean 'total'?</pre></div>
           pen.beginPath();
           pen.rect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
           pen.clip();
-          pen.font = "16px system-ui, sans-serif";
-          const wide = pen.measureText(text).width;
-          const left = d.x + Math.min(8, d.width - 8 - wide); // a text too long to fit shows its end
-          pen.fillStyle = text ? "#000000" : "#888888"; // its label in grey while it's empty
-          write(text || d.label, text ? left : d.x + 8, d.y + 10, 16);
-          pen.fillStyle = "#000000";
-          if (focused) pen.fillRect((text ? left + wide : d.x + 8) + 1, d.y + 6, 2, 18); // the cursor, at the end
+          typedIn(d, boxes.get(d.label), d.shape === "textbox" ? 1 : Math.max(1, Math.floor((d.height - 8) / 20)));
           pen.restore();
         } else if (d.shape === "checkbox") { // a box in the pen's colour, white inside, ticked with a box of the pen's colour
           pen.fillRect(d.x, d.y, 20, 20);
@@ -574,26 +606,6 @@ Did you mean 'total'?</pre></div>
           pen.restore();
           if (ticks.get(d.label)) pen.fillRect(d.x + 5, d.y + 5, 10, 10);
           write(d.label, d.x + 28, d.y + 4, 16);
-        } else if (d.shape === "textarea") { // as a text box, a line every 20, showing its last lines
-          const { text, focused } = boxes.get(d.label);
-          pen.fillRect(d.x, d.y, d.width, d.height);
-          pen.save();
-          pen.fillStyle = "#ffffff";
-          pen.fillRect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
-          pen.beginPath();
-          pen.rect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
-          pen.clip();
-          const rows = Math.max(1, Math.floor((d.height - 8) / 20));
-          const lines = (text || d.label).split("\n").slice(-rows);
-          pen.fillStyle = text ? "#000000" : "#888888"; // its label in grey while it's empty
-          lines.forEach((line, i) => write(line, d.x + 8, d.y + d.height - 20 - 20 * i, 16));
-          if (focused) { // the cursor, after the last letter
-            pen.font = "16px system-ui, sans-serif";
-            const last = text ? lines.at(-1) : "";
-            pen.fillStyle = "#000000";
-            pen.fillRect(d.x + 9 + pen.measureText(last).width, d.y + d.height - 24 - 20 * (text ? lines.length - 1 : 0), 2, 18);
-          }
-          pen.restore();
         } else if (d.shape === "list") { // a row every 24 from the top, the chosen one in the pen's colour
           const { chosen, top, focused } = lists.get(d.label);
           const rows = Math.max(1, Math.floor(d.height / 24));
@@ -903,12 +915,47 @@ Did you mean 'total'?</pre></div>
     }
     const KEYS = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space", Enter: "enter", Escape: "escape", Backspace: "backspace" };
     const sendEvent = (event, inputs) => appRunning && worker?.postMessage({ event, inputs });
+    // A key: with Shift, an arrow, Home or End goes as "shift+left", for a text box to select with; with Ctrl
+    // (or a Mac's Command), a letter goes as "ctrl+a", and C, X and V copy, cut and paste, below (DESIGN §41)
     $("canvas").onkeydown = (e) => {
-      if (!appRunning || e.ctrlKey || e.metaKey || e.altKey || e.key === "Tab") return; // Tab still moves on
+      if (!appRunning || e.altKey || e.key === "Tab") return; // Tab still moves on
+      const name = KEYS[e.key] ?? e.key.toLowerCase();
+      if (e.ctrlKey || e.metaKey) {
+        if (/^[a-z]$/.test(name) && !"cxv".includes(name)) {
+          e.preventDefault();
+          sendEvent("key", [`ctrl+${name}`]);
+        }
+        return;
+      }
       e.preventDefault(); // arrows and space would scroll the page
-      sendEvent("key", [KEYS[e.key] ?? e.key.toLowerCase()]);
+      sendEvent("key", [e.shiftKey && ["left", "right", "up", "down", "home", "end"].includes(name) ? `shift+${name}` : name]);
       if ([...e.key].length === 1) sendEvent("type", [e.key]); // the letter as typed, for a text box (DESIGN §36)
     };
+    // the text box with the focus, as the picture last showed it, and what's selected in it
+    function selectedText() {
+      const boxes = new Map();
+      for (const d of sinceClear(drawing)) if (d.shape === "textbox" || d.shape === "textarea" || d.textbox !== undefined) boxes.set(d.label ?? d.textbox, d);
+      const box = [...boxes.values()].find((d) => d.focused);
+      return box ? [...box.text].slice(Math.min(box.cursor, box.anchor), Math.max(box.cursor, box.anchor)).join("") : "";
+    }
+    // Copying puts what's selected on the clipboard, and cutting does, then has the box take it off; pasting
+    // types what's on the clipboard, new lines and all, which a text box drops and a text area keeps
+    for (const kind of ["copy", "cut"]) {
+      document.addEventListener(kind, (e) => {
+        if (!appRunning || document.activeElement !== $("canvas")) return;
+        const text = selectedText();
+        e.preventDefault();
+        if (!text) return;
+        e.clipboardData.setData("text/plain", text);
+        if (kind === "cut") sendEvent("key", ["ctrl+x"]);
+      });
+    }
+    document.addEventListener("paste", (e) => {
+      if (!appRunning || document.activeElement !== $("canvas")) return;
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+      if (text) sendEvent("type", [text]);
+    });
     // where the pointer is, in the picture's own numbers: (0, 0) in the middle, y going up
     function spot(e) {
       const canvas = $("canvas");

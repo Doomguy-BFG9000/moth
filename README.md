@@ -211,7 +211,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (14,112,768 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (14,519,808 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -507,7 +507,7 @@ every 100 milliseconds                      # or: every 2 seconds, every 1 minut
 end
 
 draw button "Add" at 10, 200                # its size comes from its label
-draw text box "Name" at -200, 200           # 200 by 30; click it, then type
+draw text box "Name" at -200, 200           # 200 by 30; click it, type, select, copy, paste
 when the button "Add" is clicked            # a click on a button is its own
     say the text in the text box "Name"
     clear the text box "Name"               # empties it; plain `clear` keeps it
@@ -609,7 +609,8 @@ nothing to install.
   Moth writes it (Undo brings it back).
 - **Apps** keep running once they've set up: click the picture, and your keys,
   clicks and drags go to the program, or to its buttons, checkboxes and lists
-  and the box you clicked; the mouse wheel scrolls a list. Try **Snake**, **Paint** and **To-do**.
+  and the box you clicked; the mouse wheel scrolls a list, and a box takes the
+  arrows, Shift to select, and copying and pasting. Try **Snake**, **Paint** and **To-do**.
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
   number-guessing game that asks for answers), **Tune**, **Neural network**,
   and **Moth's own compiler**, running in your browser.
@@ -715,10 +716,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (14,112,768 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (14,519,808 bytes)
 ```
 
-That's the same 14,112,768 bytes Node.js made of it, and the moth.exe they make
+That's the same 14,519,808 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -815,6 +816,9 @@ calls that led there.
   engines, an app moved to the VM in the middle keeping what was typed, and the
   same in machine code, whose window must say, fail and draw as the JavaScript
   engine does, with [`apps/todo.moth`](apps/todo.moth) built and driven
+- editing what's typed: the cursor, selecting, cutting, a drag and a text area's
+  lines on all three engines, through a move to the VM, and in machine code's
+  window, whose pixels and clipboard were checked too
 - checkboxes, text areas and lists: ticks, choices, the arrow keys, the wheel
   and lines typed on all three engines and through a move to the VM, and in
   machine code's window, which must say, fail and draw as the JavaScript engine
@@ -889,12 +893,13 @@ unboxed numbers were all caught, some only by the fuzzer.
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
 - An app runs in the playground, and can't `ask` once it's running.
-- A text box holds one line of up to 40 letters, typed at its end: no arrow
-  keys, selecting, copying or pasting inside it. A button's size comes from how
+- A text box holds one line of up to 40 letters, and a text area 2,000, drawn a
+  letter every 10 pixels in a font whose letters take the same room: there's no
+  undo, and no double-click or Ctrl+arrow to go a word at a time. A text area
+  doesn't wrap long lines; it scrolls across. A button's size comes from how
   many letters its label has, not how wide they are, so a label of wide letters
   can reach its edges.
-- A text area holds up to 2,000 letters, typed at its end, and shows its last
-  lines without wrapping long ones. A list chooses one item at a time.
+- A list chooses one item at a time.
 - `use` without `as` puts a file's names in with the program's, where they can
   collide; `use ... as` keeps the file to itself, as if it ran alone, so its
   functions' variables are theirs and the program reaches it only through

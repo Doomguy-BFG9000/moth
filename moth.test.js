@@ -1424,10 +1424,10 @@ test("buttons and text boxes take their clicks and keys, and keep what's typed t
     assert.deepEqual(said, ["key a", "enter Hi", "added Hi", "deep Yo", "click 0 -200", "key b", "added Y"], engine);
     assert.deepEqual(drawn.slice(0, 5), [
       { clear: true },
-      { shape: "textbox", label: "Item", text: "", focused: false, x: -100, y: 100, width: 200, height: 30, color: "#4f8ff7" },
+      { shape: "textbox", label: "Item", text: "", focused: false, cursor: 0, anchor: 0, left: 0, top: 0, x: -100, y: 100, width: 200, height: 30, color: "#4f8ff7" },
       { shape: "button", text: "Add", x: 110, y: 100, width: 50, height: 30, color: "#4f8ff7" },
       { shape: "button", text: "Deep", x: 110, y: 60, width: 60, height: 30, color: "#4f8ff7" },
-      { textbox: "Item", text: "", focused: true },
+      { textbox: "Item", text: "", focused: true, cursor: 0, anchor: 0, left: 0, top: 0 },
     ], engine);
     drawings.push(drawn);
   }
@@ -1614,7 +1614,7 @@ test("checkboxes, text areas and lists take their clicks, keys and wheel, throug
   assert.deepEqual(drawings[2], drawings[0]);
   assert.deepEqual(drawings[0].filter((d) => d.shape === "list" || d.shape === "checkbox" || d.shape === "textarea").slice(0, 3), [
     { shape: "checkbox", label: "Dark", ticked: false, x: -200, y: 200, width: 68, height: 20, color: "#4f8ff7" },
-    { shape: "textarea", label: "Notes", text: "", focused: false, x: -200, y: 50, width: 250, height: 100, color: "#4f8ff7" },
+    { shape: "textarea", label: "Notes", text: "", focused: false, cursor: 0, anchor: 0, left: 0, top: 0, x: -200, y: 50, width: 250, height: 100, color: "#4f8ff7" },
     { shape: "list", label: "Fruits", items: ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "kiwi"], chosen: -1, top: 0, focused: false,
       x: 100, y: 0, width: 150, height: 96, color: "#4f8ff7" },
   ]);
@@ -1632,5 +1632,33 @@ test("a list's and a text area's sizes, and what they need", () => {
   ]) {
     for (const engine of ENGINES) assert.throws(() => run(source, () => {}, { engine }), { message }, `${engine}: ${source}`);
   }
+});
+
+// Editing what's typed (DESIGN §41): a click puts the cursor between the letters it's nearest, a letter
+// every 10 across from the first in view; the arrows, Home and End move it and select with Shift; what's
+// selected is replaced by what's typed, taken off by Backspace, Delete or Ctrl+X, and Ctrl+A selects it all.
+// A text area's up and down go between lines, and a drag from a click selects. With nothing focused, a key's
+// Shift is dropped and a key with Ctrl goes nowhere. A text box shows from its 9th letter once 26 are typed.
+const EDITOR = "draw text box \"Name\" at -200, 100\ndraw text area \"Notes\" at -200, -100 size 200 by 68\ndraw button \"Show\" at 100, 100\ndraw button \"Deep\" at 100, 50\nto deep with n\n    if n is 0\n        return the text in the text area \"Notes\"\n    end\n    return deep(n - 1)\nend\nwhen the button \"Show\" is clicked\n    say \"[\" + the text in the text box \"Name\" + \"] [\" + the text in the text area \"Notes\" + \"]\"\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" + deep(5000)\nend\nwhen a key is pressed with key\n    say \"key \" + key\nend\nwhen enter is pressed in the text box \"Name\" with words\n    say \"enter \" + words\nend";
+const EDIT_EVENTS = ["key shift+left","key ctrl+a","click -150 110","type Hello world","key left","key left","key left","key left","key left","key shift+left","key shift+left","key shift+left","key shift+left","key shift+left","key shift+left","type Big ","click 100 110","key home","key shift+end","key ctrl+x","type abcdefghijklmnopqrstuvwxyz","click -162 110","type _","key delete","click 100 110","key ctrl+a","key backspace","type xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","key enter","key right","key shift+home","key ctrl+c","key ctrl+v","type ab","click 100 110","click -190 -40","type one\ntwo\nthree\nfour","key up","key up","key shift+up","type !","click 100 110","key enter","key end","key shift+right","key shift+down","type ?","click 100 110","click -170 -60","drag -140 -80","drag -120 -80","type <>","click 100 110","click 105 60","key down","key down","key end","type Z","key up","key up","key up","key up","key home","key delete","click 100 110","click 0 -200","key shift+down","key ctrl+z","key up","click -190 -40","key ctrl+a","type 1\n2\n3\n4\n5","key up","key up","key up","click 100 110"];
+
+test("the cursor moves, selects and edits in text boxes and text areas, through a move to the VM, on all three engines", () => {
+  const drawings = [];
+  for (const engine of ENGINES) {
+    const said = [];
+    const drawn = [];
+    const app = run(EDITOR, (line) => said.push(line), { engine, draw: (d) => drawn.push(d) });
+    for (const event of EDIT_EVENTS) {
+      const [what, rest] = [event.slice(0, event.indexOf(" ")), event.slice(event.indexOf(" ") + 1)];
+      app.send(what, what === "key" || what === "type" ? [rest] : rest.split(" ").map(Number));
+    }
+    assert.deepEqual(said, ["key left","[Big world] []","[abcdefghijk_mnopqrstuvwxyz] []","enter xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","[ab] []","[ab] [one!\nthree\nfour]","[ab] [one!\n?four]","[ab] [one!\n?f<>]","deep one!\n?f<>","[ab] [ne!\n?f<>Z]","key down","key up","[ab] [1\n2\n3\n4\n5]"], engine);
+    assert.deepEqual(drawn.filter((d) => d.textbox === "Name" && d.left === 8)[0],
+      { textbox: "Name", text: "abcdefghijklmnopqrstuvwxyz", focused: true, cursor: 26, anchor: 26, left: 8, top: 0 }, engine);
+    assert.deepEqual(drawn.filter((d) => d.textbox === "Notes").slice(-2).map(({ cursor, anchor, top }) => [cursor, anchor, top]), [[5, 5, 2], [3, 3, 1]], engine);
+    drawings.push(drawn);
+  }
+  assert.deepEqual(drawings[1], drawings[0]);
+  assert.deepEqual(drawings[2], drawings[0]);
 });
 

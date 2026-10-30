@@ -1331,7 +1331,7 @@ end`, "click 0 10;type WWWW;click 0 -50");
   assert.equal(at(101, 15), BACKGROUND);
   assert.ok(count(-92, 20, 4, 26, (c) => rgb(c).every((v) => v < 64)) > 20, "the text typed into it is black");
   assert.ok(count(-92, 20, -56, -34, (c) => rgb(c).every((v) => v > 100 && v < 200)) > 10, "an empty one shows its label in grey");
-  assert.equal(at(-90, -45), "#000000"); // and the cursor, 1 after where its text starts, while it has the focus
+  assert.equal(at(-92, -45), "#000000"); // and the cursor, just before where its first letter goes, while it has the focus
   assert.equal(count(-32, -20, 6, 24, (c) => c !== "#ffffff"), 0); // the box that lost it has none after its text
 });
 
@@ -1393,6 +1393,23 @@ test("checkboxes, text areas and lists are drawn as the playground draws them", 
   assert.equal(after(102, 50), BLUE); // the list has the focus: a border 3 wide
   assert.deepEqual([after(200, 10), after(200, 30), after(245, 40), after(245, 60)], [BLUE, "#ffffff", BLUE, "#ffffff"]); // kiwi, chosen, in the last row; the bar lower down
   assert.ok(count(after, 108, 160, 4, 20, (c) => c === "#ffffff") > 10, "the chosen item's text, in white");
+});
+
+// moth.test.js's editing app (DESIGN §41): the cursor, Shift's selecting, Ctrl+A and Ctrl+X, a drag, a text
+// area's lines, and keys with Shift or Ctrl with nothing focused. The clipboard is the window's, and isn't
+// touched while the events come from MOTH_EVENTS.
+const EDITOR = "draw text box \"Name\" at -200, 100\ndraw text area \"Notes\" at -200, -100 size 200 by 68\ndraw button \"Show\" at 100, 100\ndraw button \"Deep\" at 100, 50\nto deep with n\n    if n is 0\n        return the text in the text area \"Notes\"\n    end\n    return deep(n - 1)\nend\nwhen the button \"Show\" is clicked\n    say \"[\" + the text in the text box \"Name\" + \"] [\" + the text in the text area \"Notes\" + \"]\"\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" + deep(5000)\nend\nwhen a key is pressed with key\n    say \"key \" + key\nend\nwhen enter is pressed in the text box \"Name\" with words\n    say \"enter \" + words\nend";
+const EDIT_EVENTS = "key shift+left;key ctrl+a;click -150 110;type Hello world;key left;key left;key left;key left;key left;key shift+left;key shift+left;key shift+left;key shift+left;key shift+left;key shift+left;type Big ;click 100 110;key home;key shift+end;key ctrl+x;type abcdefghijklmnopqrstuvwxyz;click -162 110;type _;key delete;click 100 110;key ctrl+a;key backspace;type xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;key enter;key right;key shift+home;key ctrl+c;key ctrl+v;type ab;click 100 110;click -190 -40;type one\ntwo\nthree\nfour;key up;key up;key shift+up;type !;click 100 110;key enter;key end;key shift+right;key shift+down;type ?;click 100 110;click -170 -60;drag -140 -80;drag -120 -80;type <>;click 100 110;click 105 60;key down;key down;key end;type Z;key up;key up;key up;key up;key home;key delete;click 100 110;click 0 -200;key shift+down;key ctrl+z;key up;click -190 -40;key ctrl+a;type 1\n2\n3\n4\n5;key up;key up;key up;click 100 110";
+
+test("the cursor, selecting and editing in the window are as app.send has them on the JavaScript engine", { skip: onWindows }, () => {
+  const got = picture(EDITOR, EDIT_EVENTS);
+  assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(EDITOR, EDIT_EVENTS));
+  // a letter every 10 from 8 in, what's selected behind its letters in light blue, and the cursor between two
+  const { at } = picture(EDITOR, "click -150 110;type Hello wide world;key home;" + "key right;".repeat(6) + "key shift+right;".repeat(4));
+  assert.deepEqual([at(-130, 124), at(-95, 124), at(-170, 124), at(-88, 124)], ["#b4d5fe", "#b4d5fe", "#ffffff", "#ffffff"]);
+  assert.equal(at(-92, 112), "#000000");
+  const ink = (x0) => { let n = 0; for (let x = x0; x < x0 + 10; x++) for (let y = 106; y < 124; y++) if (at(x, y) !== "#ffffff" && at(x, y) !== "#b4d5fe") n++; return n; };
+  assert.ok(ink(-192) > 5 && ink(-142) === 0 && ink(-132) > 5, "H, then a space, then w");
 });
 
 // ---------- sound ----------

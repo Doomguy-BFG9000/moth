@@ -1829,3 +1829,50 @@ hold them to agreeing.
   window against the JavaScript engine on three runs of events, clicks, keys,
   the wheel and lines typed, and its pixels; and on Windows and Linux, ticks and
   choices read before anything's clicked, and every mistake in what's drawn.
+
+## 41. Editing what's typed
+
+- **What it does.** A click in a text box or a text area puts the cursor between
+  the two letters nearest it, and a drag from there selects. The arrows, Home
+  and End move the cursor (up and down between a text area's lines, Home and
+  End to the ends of a line), and with Shift they select. What's typed takes the
+  place of what's selected; Backspace and Delete take it off, or the letter
+  before or after the cursor. Ctrl+A selects everything, and Ctrl+C, Ctrl+X and
+  Ctrl+V copy, cut and paste with the computer's clipboard. A box shows the part
+  of its text the cursor is in, moving across as it goes, and a text area moves
+  down too; long lines aren't wrapped. There's no undo yet.
+- **A letter every 10 pixels.** For a click to land between the same two letters
+  everywhere, every engine has to agree on where each letter is, and the
+  playground's fonts and Windows' measure text differently. So what's typed is
+  drawn a letter at a time, one every 10 pixels from 8 in, in a font whose
+  letters all take the same room (Consolas in the window, the browser's
+  monospace font in the playground), and where the cursor goes is worked out
+  from those numbers alone, as a button's size comes from its letters (§36). A
+  text box shows 18 letters at a time.
+- **Keys with Shift and Ctrl.** Hosts send them as `shift+left` and `ctrl+a`:
+  Shift only with a key that moves the cursor, Ctrl only with a letter. A box
+  with the focus uses them. With nothing focused, a key with Shift goes to the
+  program without it, so `when a key is pressed` still gets `left`, and a key
+  with Ctrl goes nowhere, as before; a list with the focus ignores Shift.
+- **The clipboard is the host's.** The Turtle never sees it. Copying is the host
+  reading what's selected (the playground from what the turtle last drew, the
+  window from the box's entry); cutting is that, then `ctrl+x`, for the box to
+  take it off; pasting is the host typing what's on the clipboard, which follows
+  typing's rules: a text box drops new lines, and a text area keeps them. The
+  window turns Windows' CR LF into new lines and back. While the events come
+  from MOTH_EVENTS it leaves the clipboard alone, so the tests never touch the
+  clipboard of the person running them.
+- **What's kept.** Where the cursor is, the other end of what's selected, and
+  the first column and line in view are kept by the box's label with its text,
+  through `clear`, and `clear the text box` puts the cursor back at the start.
+  The turtle reports them with the rest: `{ textbox, text, focused, cursor,
+  anchor, left, top }`. A place is counted in letters, as JavaScript's
+  `[...text]` counts them; machine code finds a letter in the UTF-8 bytes by
+  walking them, and a box's entry there grew from 16 bytes to 64.
+- **Tested.** A run of 76 events on all three engines, through a hand-over to the
+  VM, and in the window against the JavaScript engine: moves, Shift's selecting,
+  Ctrl+A, Ctrl+X, a drag, a 40-letter limit, a text area's lines and moving down
+  it, and keys with Shift and Ctrl with nothing focused; the window's pixels (the
+  selection's light blue, the cursor, a letter every 10); and the clipboard in a
+  real window, by hand: a copy, a cut of two lines (CR LF on the clipboard), and
+  a paste into a box.

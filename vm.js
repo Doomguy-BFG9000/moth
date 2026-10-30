@@ -1202,6 +1202,33 @@ export const AREA_LETTERS = 2000;
 export const LIST_ROW = 24;
 export const AREA_LINE = 20;
 const FOCUSABLE = new Set(["box", "area", "list"]);
+// What's typed in a box is drawn a letter to every LETTER_WIDE across, from 8 in, whatever the font, so a click
+// lands between the same two letters on every engine and in machine code (DESIGN §41)
+export const LETTER_WIDE = 10;
+
+// A key's name as hosts send it: "ctrl+" first for Ctrl (or a Mac's Command) with a letter, and "shift+" for
+// Shift with a key that moves the cursor, then the key's own name
+export function keyParts(name) {
+  const ctrl = typeof name === "string" && name.startsWith("ctrl+") && name.length > 5;
+  const rest = ctrl ? name.slice(5) : name;
+  const shift = typeof rest === "string" && rest.startsWith("shift+") && rest.length > 6;
+  return { ctrl, shift, key: shift ? rest.slice(6) : rest };
+}
+
+// where letter `at` of `letters` is, its lines split at "\n": [its line, and its place in that line], from 0
+function placeOf(letters, at) {
+  let [line, start] = [0, 0];
+  for (let i = 0; i < at; i++) if (letters[i] === "\n") [line, start] = [line + 1, i + 1];
+  return [line, at - start];
+}
+
+// the place in `letters` of letter `col` of line `line`, which there is, or the end of the line if it's shorter
+function placeAt(letters, line, col) {
+  let start = 0;
+  for (let l = 0; l < line; l++) start = letters.indexOf("\n", start) + 1;
+  const end = letters.indexOf("\n", start);
+  return start + Math.min(Math.max(col, 0), (end < 0 ? letters.length : end) - start);
+}
 
 // The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`
 // as { x1, y1, x2, y2, color, width }, with y going up.
@@ -1216,17 +1243,21 @@ export class Turtle {
     // through `clear` as what's typed is; and for each list, by its label, the items it shows, which of them
     // is chosen (by its place, from 0), and the first one in view
     Object.assign(this, { ticks: new Map(), items: new Map(), choices: new Map(), tops: new Map() });
+    // where the cursor is in each box, by its label, and what's selected (DESIGN §41); and the label of the
+    // box a drag selects in, the one last clicked
+    Object.assign(this, { edits: new Map(), selecting: null });
   }
 
   // Where an event goes once the picture's buttons and text boxes have seen it: [the event the handlers wait
   // for, the label they wait for (or undefined), their inputs], or null for none. A click inside a button is
   // its own, one inside a text box gives it the focus, and one anywhere else takes the focus away. While a box
-  // has the focus, every key is its: Backspace takes off the last letter and Enter is the box's; and "type"
-  // (the text typed, as it was typed) goes into it, up to BOX_LETTERS letters.
+  // has the focus, every key is its (see editIn), and "type" (the text typed, as it was typed) goes into it,
+  // up to BOX_LETTERS letters. A click in a box puts its cursor there, and a drag from it selects.
   // A click on a checkbox ticks it or unticks it, then goes to its handlers; one on a list gives it the focus
   // and chooses the item there. "scroll" ([x, y, lines], from a mouse wheel) scrolls the list under it. While a
   // text area has the focus, Enter starts a new line in it, up to AREA_LETTERS letters; while a list has it,
-  // the up and down arrows choose the item before or after, and no key goes anywhere else.
+  // the up and down arrows choose the item before or after, and no key goes anywhere else. A key with Ctrl
+  // goes nowhere but a box, and one with Shift goes to the program without it, as it always has.
   route(event, inputs) {
     const focused = this.focus === null ? null : this.widgets.findLast((w) => w.label === this.focus && FOCUSABLE.has(w.kind));
     if (this.focus !== null && !focused) this.focus = null; // its box is gone
@@ -1239,6 +1270,7 @@ export class Turtle {
     if (event === "click") {
       const [x, y] = inputs;
       const hit = at(x, y);
+      this.selecting = null;
       if (hit?.kind === "button") return ["button", hit.label, []];
       if (hit?.kind === "checkbox") {
         this.tick(hit.label, !this.ticks.get(hit.label));
@@ -1249,30 +1281,127 @@ export class Turtle {
         const row = (this.tops.get(hit.label) ?? 0) + Math.floor((hit.y + hit.height - y) / LIST_ROW);
         return row < this.items.get(hit.label).length ? this.choose(hit, row) : null;
       }
-      return hit ? null : [event, undefined, inputs];
+      if (hit) { // a text box or a text area: its cursor where it was clicked
+        const place = this.placeIn(hit, x, y);
+        this.edited(hit.label, this.texts.get(hit.label) ?? "", place, place, hit);
+        this.selecting = hit.label;
+        return null;
+      }
+      return [event, undefined, inputs];
     }
-    if (!focused) return event === "type" ? null : [event, undefined, inputs];
+    if (event === "drag" && focused && focused.kind !== "list" && this.selecting === focused.label) { // selecting, from the click
+      this.edited(focused.label, this.texts.get(focused.label) ?? "", this.placeIn(focused, inputs[0], inputs[1]), this.editOf(focused.label).anchor, focused);
+      return null;
+    }
+    const { ctrl, key } = keyParts(inputs[0]);
+    if (!focused) return event === "type" || (event === "key" && ctrl) ? null : [event, undefined, event === "key" ? [key] : inputs];
     if (event !== "key" && event !== "type") return [event, undefined, inputs];
     if (focused.kind === "list") {
       const count = this.items.get(focused.label).length;
       const now = this.choices.get(focused.label) ?? -1;
-      if (event === "key" && (inputs[0] === "up" || inputs[0] === "down") && count) {
-        const next = Math.max(0, Math.min(count - 1, inputs[0] === "up" ? now - 1 : now + 1));
+      if (event === "key" && !ctrl && (key === "up" || key === "down") && count) {
+        const next = Math.max(0, Math.min(count - 1, key === "up" ? now - 1 : now + 1));
         if (next !== now) return this.choose(focused, next);
       }
       return null;
     }
-    const letters = [...(this.texts.get(this.focus) ?? "")];
-    const most = focused.kind === "area" ? AREA_LETTERS : BOX_LETTERS;
+    return this.editIn(focused, event, inputs);
+  }
+
+  // A key, or text typed, in the text box or text area `box`, which has the focus. The arrows, Home and End
+  // move the cursor (up and down only in a text area, Home and End to the ends of its line), and select with
+  // Shift; an arrow with something selected and no Shift goes to that end of it. Backspace and Delete take off
+  // what's selected, or the letter before or after the cursor. Enter is a text box's (its handlers, with its
+  // text) and a new line in a text area. Ctrl+A selects everything and Ctrl+X takes off what's selected:
+  // copying it, and pasting, which comes as text typed, are the host's (DESIGN §41). Text typed takes the
+  // place of what's selected, with as many letters as there's room for; a text area keeps new lines in it.
+  editIn(box, event, inputs) {
+    const label = box.label;
+    const letters = [...(this.texts.get(label) ?? "")];
+    const { cursor, anchor } = this.editOf(label);
+    const [from, to] = [Math.min(cursor, anchor), Math.max(cursor, anchor)];
+    const most = box.kind === "area" ? AREA_LETTERS : BOX_LETTERS;
+    const replace = (put, start, end) => { // letters start to end, put in place of, the cursor after them
+      const room = most - (letters.length - (end - start));
+      const kept = put.slice(0, Math.max(0, room));
+      letters.splice(start, end - start, ...kept);
+      this.edited(label, letters.join(""), start + kept.length, start + kept.length, box);
+    };
     if (event === "type") {
-      for (const c of show(inputs[0])) if (c >= " " && c !== "\x7f" && letters.length < most) letters.push(c);
-      this.typed(this.focus, letters.join(""));
-    } else if (inputs[0] === "backspace") this.typed(this.focus, letters.slice(0, -1).join(""));
-    else if (inputs[0] === "enter") {
-      if (focused.kind === "box") return ["enter", this.focus, [letters.join("")]];
-      if (letters.length < most) this.typed(this.focus, `${letters.join("")}\n`);
+      const typed = [...show(inputs[0])].filter((c) => (c >= " " && c !== "\x7f") || (c === "\n" && box.kind === "area"));
+      if (typed.length) replace(typed, from, to);
+      return null;
+    }
+    const { ctrl, shift, key } = keyParts(inputs[0]);
+    const move = (place) => this.edited(label, letters.join(""), place, shift ? anchor : place, box);
+    const [line, col] = placeOf(letters, cursor);
+    if (ctrl) {
+      if (key === "a") this.edited(label, letters.join(""), letters.length, 0, box);
+      else if (key === "x" && from !== to) replace([], from, to);
+    } else if (key === "left") move(from !== to && !shift ? from : Math.max(0, cursor - 1));
+    else if (key === "right") move(from !== to && !shift ? to : Math.min(letters.length, cursor + 1));
+    else if (key === "home") move(cursor - col);
+    else if (key === "end") move(placeAt(letters, line, Infinity));
+    else if ((key === "up" || key === "down") && box.kind === "area") {
+      const next = line + (key === "up" ? -1 : 1);
+      move(next < 0 ? 0 : next > placeOf(letters, letters.length)[0] ? letters.length : placeAt(letters, next, col));
+    } else if (key === "backspace" || key === "delete") {
+      if (from !== to) replace([], from, to);
+      else if (key === "backspace" && cursor > 0) replace([], cursor - 1, cursor);
+      else if (key === "delete" && cursor < letters.length) replace([], cursor, cursor + 1);
+    } else if (key === "enter") {
+      if (box.kind === "box") return ["enter", label, [letters.join("")]];
+      replace(["\n"], from, to);
     }
     return null;
+  }
+
+  // where the cursor is in the box with this label, by its place among the letters, from 0; the other end of
+  // what's selected (where the cursor is when nothing is); and the first column and line in view. A box no
+  // one has clicked in yet has its cursor at its end.
+  editOf(label) {
+    if (!this.edits.has(label)) {
+      const end = [...(this.texts.get(label) ?? "")].length;
+      this.edits.set(label, { cursor: end, anchor: end, left: 0, top: 0 });
+    }
+    return this.edits.get(label);
+  }
+
+  // what a box with this label shows: { text, focused, cursor, anchor, left, top }
+  boxState(label) {
+    const { cursor, anchor, left, top } = this.editOf(label);
+    return { text: this.texts.get(label) ?? "", focused: this.focus === label, cursor, anchor, left, top };
+  }
+
+  // the box with this label, its text and cursor changed: the cursor kept in view in `box` (the box drawn, or
+  // null to show it from its start), and the box drawn again if anything about it changed
+  edited(label, text, cursor, anchor, box) {
+    const before = JSON.stringify(this.boxState(label));
+    const edit = this.editOf(label);
+    Object.assign(edit, { cursor, anchor });
+    this.texts.set(label, text);
+    if (box) {
+      const [line, col] = placeOf([...text], cursor);
+      const cols = Math.max(1, Math.floor((box.width - 16) / LETTER_WIDE));
+      if (col < edit.left) edit.left = col;
+      else if (col > edit.left + cols) edit.left = col - cols;
+      if (box.kind === "area") {
+        const rows = Math.max(1, Math.floor((box.height - 8) / AREA_LINE));
+        if (line < edit.top) edit.top = line;
+        else if (line >= edit.top + rows) edit.top = line - rows + 1;
+      }
+    } else Object.assign(edit, { left: 0, top: 0 });
+    if (JSON.stringify(this.boxState(label)) !== before) this.draw({ textbox: label, ...this.boxState(label) });
+  }
+
+  // the place in the text of `box` nearest the point (x, y): a letter every LETTER_WIDE from 8 in, a line every
+  // AREA_LINE from 4 below the top, from the first column and line in view, and no further than the text goes
+  placeIn(box, x, y) {
+    const letters = [...(this.texts.get(box.label) ?? "")];
+    const { left, top } = this.editOf(box.label);
+    const last = placeOf(letters, letters.length)[0];
+    const line = box.kind === "area" ? Math.min(last, Math.max(0, top + Math.floor((box.y + box.height - 4 - y) / AREA_LINE))) : 0;
+    return placeAt(letters, line, left + Math.floor((x - box.x - 8) / LETTER_WIDE + 0.5));
   }
 
   // the checkbox with this label, ticked or not: drawn again
@@ -1312,23 +1441,18 @@ export class Turtle {
     for (const box of [before, label]) {
       if (box === null) continue;
       if (this.widgets.findLast((w) => w.label === box && FOCUSABLE.has(w.kind))?.kind === "list") this.listChanged(box);
-      else this.draw({ textbox: box, text: this.texts.get(box) ?? "", focused: box === label });
+      else this.draw({ textbox: box, ...this.boxState(box) });
     }
-  }
-
-  // the text in the box with this label, changed: drawn again
-  typed(label, text) {
-    if ((this.texts.get(label) ?? "") === text) return;
-    this.texts.set(label, text);
-    this.draw({ textbox: label, text, focused: this.focus === label });
   }
 
   // Besides lines, the turtle reports { clear: true } when the picture is wiped, and filled shapes:
   // { shape: "box", x, y, width, height, color } (x, y its bottom left corner), { shape: "circle", x, y,
   // radius, color } and { shape: "text", text, x, y, size, color }; pictures from files, { shape: "picture", x,
   // y, width, height, image }, where the image is what decodePicture gives; and { shape: "button", text, x, y,
-  // width, height, color }, { shape: "textbox", label, text, focused, x, y, width, height, color }, and
-  // { textbox: label, text, focused } when what a text box shows changes without it being drawn again; and
+  // width, height, color }, { shape: "textbox", label, text, focused, cursor, anchor, left, top, x, y, width,
+  // height, color }, and { textbox: label, text, focused, cursor, anchor, left, top } when what a text box shows
+  // changes without it being drawn again (see editOf: the cursor, the other end of what's selected, and the
+  // first column and line in view); and
   // { shape: "checkbox", label, ticked, x, y, width, height, color }, { shape: "textarea", label, text,
   // focused, x, y, width, height, color }, { shape: "list", label, items, chosen, top, focused, x, y, width,
   // height, color }, items as `say` shows them and chosen -1 for none, with { checkbox: label, ticked } and
@@ -1366,10 +1490,10 @@ export class Turtle {
         this.draw({ shape: "button", text: label, x, y, width, height: 30, color: this.color });
       } else {
         this.widgets.push({ kind: "box", label, x, y, width: 200, height: 30 });
-        this.draw({ shape: "textbox", label, text: this.texts.get(label) ?? "", focused: this.focus === label, x, y, width: 200, height: 30, color: this.color });
+        this.draw({ shape: "textbox", label, ...this.boxState(label), x, y, width: 200, height: 30, color: this.color });
       }
     } else if (name === "clear text box") {
-      this.typed(show(value), "");
+      this.edited(show(value), "", 0, 0, null);
     } else if (name === "checkbox") { // [label, x, y]: a box 20 by 20 with its label after it
       const [x, y] = numbers("'draw checkbox'", value.slice(1));
       const label = show(value[0]);
@@ -1388,7 +1512,7 @@ export class Turtle {
       for (const n of [width, height]) if (n <= 0) error(`a ${name}'s size is a number above 0, not ${show(n)}`);
       if (name === "text area") {
         this.widgets.push({ kind: "area", label, x, y, width, height });
-        this.draw({ shape: "textarea", label, text: this.texts.get(label) ?? "", focused: this.focus === label, x, y, width, height, color: this.color });
+        this.draw({ shape: "textarea", label, ...this.boxState(label), x, y, width, height, color: this.color });
       } else {
         this.items.set(label, items.slice());
         this.widgets.push({ kind: "list", label, x, y, width, height });
