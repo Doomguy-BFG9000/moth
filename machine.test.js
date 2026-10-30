@@ -757,6 +757,33 @@ draw box at -20, -20 size 40 by 40`);
   assert.equal(at(-40, -40), BACKGROUND); // the red box was cleared
 });
 
+// rgb(), rgba(), hsl() and hsla(), as a canvas reads them: each drawn as a box over one of #123456, so a colour
+// it doesn't read keeps that one, and one that's partly see-through shows it under. [colour, red, green, blue,
+// alpha], or [colour] for one it doesn't read.
+const FUNCTION_COLOURS = [
+  ["rgb(255, 0, 0)", 255, 0, 0], ["RGB(0,128,0)", 0, 128, 0], ["rgb(100%, 50%, 0%)", 255, 128, 0], ["rgb(10% 20 none)", 26, 20, 0],
+  ["rgb(300, -20, 127.6)", 255, 0, 128], ["  rgb(1e2, 0.5e2, .5)  ", 100, 50, 1], ["hsl(120, 100%, 50%)", 0, 255, 0],
+  ["hsl(240deg, 100%, 25%)", 0, 0, 128], ["hsl(0.5turn 100% 50%)", 0, 255, 255], ["HSL(-120, 100%, 50%)", 0, 0, 255],
+  ["hsl(210, 60%, 70%)", 133, 179, 224], ["hsl(30 50 50)", 191, 128, 64], ["rgba(255, 0, 0, 0.5)", 255, 0, 0, 0.5],
+  ["hsla(240 100% 50% / 25%)", 0, 0, 255, 0.25], ["rgb(255, 0, 0"], ["rgb(255 0, 0)"], ["rgb(100%, 0, 0)"], ["hsl(120, 100, 50)"],
+  ["rgb(1px 2 3)"], ["rgb(none, 0, 0)"], ["rgb(1 2 3) x"], ["rgba(1 2 3 / 4deg)"],
+];
+
+test("colours as rgb(), rgba(), hsl() and hsla() are read as a canvas reads them", { skip: onWindows }, () => {
+  const place = (i) => [-240 + (i % 10) * 45, 200 - Math.floor(i / 10) * 45];
+  const { at } = picture(FUNCTION_COLOURS.map(([colour], i) => {
+    const [x, y] = place(i);
+    return `pen color "#123456"\ndraw box at ${x}, ${y} size 30 by 30\npen color ${JSON.stringify(colour)}\ndraw box at ${x}, ${y} size 30 by 30`;
+  }).join("\n"));
+  const under = [0x12, 0x34, 0x56];
+  FUNCTION_COLOURS.forEach(([colour, ...rgba], i) => {
+    const [x, y] = place(i);
+    const want = rgba.length ? rgba.slice(0, 3).map((c, k) => c * (rgba[3] ?? 1) + under[k] * (1 - (rgba[3] ?? 1))) : under;
+    const got = at(x + 15, y + 15).slice(1).match(/../g).map((h) => parseInt(h, 16));
+    assert.ok(got.every((c, k) => Math.abs(c - want[k]) <= 1), `${colour}: ${got} rather than ${want}`);
+  });
+});
+
 test("a chart is the bars, values and labels the playground draws", { skip: onWindows }, () => {
   const { at, stdout } = picture(`pen color "red"
 draw chart of (list of 1, 2, nothing, -1)
