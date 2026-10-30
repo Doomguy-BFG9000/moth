@@ -296,6 +296,10 @@ set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of 
 set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
+# Each function the parser makes gets the next number (`order`), so the functions are numbered in the order
+# they're written, in the files the program uses too: see made_order.
+set functions_made to 0
+
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
 # `reading` is shared with the files the program uses: `files` (a list of records with a name and a text),
 # `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
@@ -860,13 +864,15 @@ to parse with tokens, reading
     end
 
     to func with fn_name, params, t
+        add 1 to functions_made
+        set order to functions_made
         set outside_loops to loop_depth
         set fn_depth to fn_depth + 1
         set loop_depth to 0
         set body to block_end(t)
         set fn_depth to fn_depth - 1
         set loop_depth to outside_loops
-        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t
+        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t, order order
     end
 
     to if_rest with t
@@ -1238,9 +1244,10 @@ end
 
 set statement_words to list of "set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect", "when", "every"
 
-# Names each function sets. Inputs and functions made with `to` always belong to the function itself; a
-# name it sets (or loops over) belongs to the outermost enclosing function, or the top level, that also sets it.
-to declarations with body, own, shared
+# Names each function changes. Inputs and functions made with `to` always belong to the function itself; a
+# name it sets (or loops over, or adds to) belongs to the function too, unless a variable of that name is made
+# above its `to` line, in the code around it (see new_scope).
+to declarations with body, own, shared, adds
     for each s in body
         set what to kind of s
         if what is "define"
@@ -1249,146 +1256,147 @@ to declarations with body, own, shared
         if what is "set" or what is "count" or what is "each" or (what is "try" and name of s is not nothing)
             add name of s to shared
         end
+        if what is "add"
+            add name of s to adds
+        end
         if what is "if"
-            declarations(then of s, own, shared)
-            declarations(otherwise of s, own, shared)
+            declarations(then of s, own, shared, adds)
+            declarations(otherwise of s, own, shared, adds)
         end
         if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "try"
-            declarations(body of s, own, shared)
+            declarations(body of s, own, shared, adds)
         end
         if what is "try"
-            declarations(handler of s, own, shared)
+            declarations(handler of s, own, shared, adds)
         end
     end
 end
 
-# `use "math.moth" as math`: each name the file's top level makes becomes `math's pi`, `math's sine`, which
-# no name in the program can be, so the two can't clash. A name is renamed only where it means the top
-# level's: not where an input of a function, or a function that a function makes, has the same name.
+# `use "math.moth" as math`: each name in the file becomes `math's pi`, `math's sine`, which no name in the
+# program can be, so the file keeps its own top level, as if it ran alone. A function's inputs, and the
+# functions a function makes, are left alone, since nothing outside the function can reach them; every
+# other name is renamed, so a variable only a function in the file sets stays that function's own, and a
+# name the file never makes isn't the program's.
 set named_kinds to list of "set", "add", "count", "each", "define", "call", "name", "try" # their `name` is a variable
 
 to prefixed with body, alias
-    set own to empty list
-    set shared to empty list
-    declarations(body, own, shared)
-    set top to empty list
-    for each n in own
-        add n to top
-    end
-    for each n in shared
-        add n to top
-    end
-    rename_all(body, alias, top, empty list)
+    rename_all(body, alias, empty list)
     return body
 end
 
-to rename_all with nodes, alias, top, hidden
+to rename_all with nodes, alias, hidden
     for each node in nodes
-        rename(node, alias, top, hidden)
+        rename(node, alias, hidden)
     end
 end
 
+# a function's code, where its inputs and the functions it makes hide the names around them
+to rename_inside with d, alias, hidden
+    set inside to empty list
+    for each n in hidden
+        add n to inside
+    end
+    for each p in params of d
+        add p to inside
+    end
+    set own to empty list
+    set shared to empty list
+    set adds to empty list
+    declarations(body of d, own, shared, adds)
+    for each n in own
+        add n to inside
+    end
+    rename_all(body of d, alias, inside)
+end
+
 # a node, and the nodes in it
-to rename with node, alias, top, hidden
+to rename with node, alias, hidden
     if node is nothing
         return nothing
     end
     set what to kind of node
     if contains(named_kinds, what)
-        if contains(top, name of node) and not contains(hidden, name of node)
+        if name of node is not nothing and not contains(hidden, name of node)
             set name of node to alias + "'s " + name of node
         end
     end
     if what is "define"
-        set inside to empty list
-        for each n in hidden
-            add n to inside
-        end
-        for each p in params of node
-            add p to inside
-        end
-        set own to empty list
-        set shared to empty list
-        declarations(body of node, own, shared)
-        for each n in own
-            add n to inside
-        end
-        rename_all(body of node, alias, top, inside)
+        rename_inside(node, alias, hidden)
     end
     if what is "set" or what is "add" or what is "return" or what is "fail" or what is "turtle"
-        rename(value of node, alias, top, hidden)
+        rename(value of node, alias, hidden)
     end
     if what is "setItem" or what is "setField" or what is "write"
-        rename(target of node, alias, top, hidden)
-        rename(value of node, alias, top, hidden)
+        rename(target of node, alias, hidden)
+        rename(value of node, alias, hidden)
     end
     if what is "remove"
-        rename(key of node, alias, top, hidden)
-        rename(target of node, alias, top, hidden)
+        rename(key of node, alias, hidden)
+        rename(target of node, alias, hidden)
     end
     if what is "say"
-        rename_all(parts of node, alias, top, hidden)
+        rename_all(parts of node, alias, hidden)
     end
     if what is "if"
-        rename(cond of node, alias, top, hidden)
-        rename_all(then of node, alias, top, hidden)
-        rename_all(otherwise of node, alias, top, hidden)
+        rename(cond of node, alias, hidden)
+        rename_all(then of node, alias, hidden)
+        rename_all(otherwise of node, alias, hidden)
     end
     if what is "expect"
-        rename(cond of node, alias, top, hidden)
+        rename(cond of node, alias, hidden)
     end
-    if what is "when" or what is "every"
-        rename(fn of node, alias, top, hidden)
+    if what is "when" or what is "every" # a handler's name isn't a variable
+        rename_inside(fn of node, alias, hidden)
     end
     if what is "every"
-        rename(interval of node, alias, top, hidden)
+        rename(interval of node, alias, hidden)
     end
     if what is "while"
-        rename(cond of node, alias, top, hidden)
-        rename_all(body of node, alias, top, hidden)
+        rename(cond of node, alias, hidden)
+        rename_all(body of node, alias, hidden)
     end
     if what is "repeat"
-        rename(count of node, alias, top, hidden)
-        rename_all(body of node, alias, top, hidden)
+        rename(count of node, alias, hidden)
+        rename_all(body of node, alias, hidden)
     end
     if what is "count"
-        rename(start of node, alias, top, hidden)
-        rename(limit of node, alias, top, hidden)
-        rename_all(body of node, alias, top, hidden)
+        rename(start of node, alias, hidden)
+        rename(limit of node, alias, hidden)
+        rename_all(body of node, alias, hidden)
     end
     if what is "each"
-        rename(over of node, alias, top, hidden)
-        rename_all(body of node, alias, top, hidden)
+        rename(over of node, alias, hidden)
+        rename_all(body of node, alias, hidden)
     end
     if what is "try"
-        rename_all(body of node, alias, top, hidden)
-        rename_all(handler of node, alias, top, hidden)
+        rename_all(body of node, alias, hidden)
+        rename_all(handler of node, alias, hidden)
     end
     if what is "call" or what is "builtin"
-        rename_all(args of node, alias, top, hidden)
+        rename_all(args of node, alias, hidden)
     end
     if what is "math" or what is "compare" or what is "or" or what is "and" or what is "random"
-        rename(left of node, alias, top, hidden)
-        rename(right of node, alias, top, hidden)
+        rename(left of node, alias, hidden)
+        rename(right of node, alias, hidden)
     end
     if what is "not" or what is "negate"
-        rename(operand of node, alias, top, hidden)
+        rename(operand of node, alias, hidden)
     end
     if what is "list" or what is "dictionary"
-        rename_all(items of node, alias, top, hidden)
+        rename_all(items of node, alias, hidden)
     end
     if what is "record"
-        rename_all(values of node, alias, top, hidden)
+        rename_all(values of node, alias, hidden)
     end
     if what is "length" or what is "field" or what is "read"
-        rename(subject of node, alias, top, hidden)
+        rename(subject of node, alias, hidden)
     end
     if what is "item"
-        rename(index of node, alias, top, hidden)
-        rename(subject of node, alias, top, hidden)
+        rename(index of node, alias, hidden)
+        rename(subject of node, alias, hidden)
     end
     if what is "ask"
-        rename(question of node, alias, top, hidden)
+        rename(question of node, alias, hidden)
     end
 end
 
@@ -1406,21 +1414,72 @@ to slot_of with names, wanted
     return found
 end
 
-to new_scope with parent, params, body
+# Where things are in one function's code (or the program's), in the order they're written: for each name
+# it makes, the number of the last function made before that (0 if none), or a function's own number for
+# its name (see func). So a name is made above a function when its number is less than the function's. A
+# try's `with` name is made at its `if it fails`, after the try's code. Gives back the last function's number.
+to made_order with body, made, last
+    for each s in body
+        set what to kind of s
+        if what is "define"
+            set last to order of s
+        else if what is "when" or what is "every"
+            set last to order of fn of s
+        end
+        if what is "define" or what is "set" or what is "count" or what is "each"
+            first_made(made, name of s, last)
+        end
+        if what is "if"
+            set last to made_order(then of s, made, last)
+            set last to made_order(otherwise of s, made, last)
+        end
+        if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "try"
+            set last to made_order(body of s, made, last)
+        end
+        if what is "try"
+            if name of s is not nothing
+                first_made(made, name of s, last)
+            end
+            set last to made_order(handler of s, made, last)
+        end
+    end
+    return last
+end
+
+to first_made with made, wanted, last
+    if not (wanted is in made)
+        set item wanted of made to last
+    end
+end
+
+# `place` is the function's number (0 for the program). A name the function changes means a variable outside
+# it only if the nearest function around it with a variable of that name (or the top level) makes it above
+# the function's `to` line; otherwise the function gets a variable of its own.
+to new_scope with parent, params, body, place
     set names to empty list
+    set made to empty dictionary # see made_order: the inputs are made above everything
     for each p in params
         add p to names
+        set item p of made to 0
     end
+    made_order(body, made, 0)
     set own to empty list
     set shared to empty list
-    declarations(body, own, shared)
+    set adds to empty list
+    declarations(body, own, shared, adds)
     for each n in own
         if slot_of(names, n) is 0
             add n to names
         end
     end
     for each n in shared
-        if slot_of(names, n) is 0 and (parent is nothing or resolve(parent, n) is nothing)
+        if slot_of(names, n) is 0 and not reaches(parent, place, n)
+            add n to names
+        end
+    end
+    # `add 1 to n` with no n anywhere is a name nothing sets; with one made below, it's this function's own
+    for each n in adds
+        if slot_of(names, n) is 0 and not reaches(parent, place, n) and parent is not nothing and resolve(parent, n) is not nothing
             add n to names
         end
     end
@@ -1428,7 +1487,22 @@ to new_scope with parent, params, body
     if parent is not nothing
         set level to level of parent + 1
     end
-    return record with parent parent, names names, level level, temps 0
+    return record with parent parent, names names, level level, temps 0, made made, place place
+end
+
+# whether a name the function numbered `place` changes means a variable in `outer`, or further out
+to reaches with outer, place, wanted
+    set here to outer
+    set before to place
+    repeat while here is not nothing
+        if slot_of(names of here, wanted) is not 0
+            set known to made of here
+            return wanted is in known and item wanted of known is less than before
+        end
+        set before to place of here
+        set here to parent of here
+    end
+    return no
 end
 
 # how many functions out a name lives, and which of that function's slots it is; nothing if it isn't anywhere
@@ -1757,7 +1831,7 @@ end
 
 # a Moth function, made from `to` (or a handler's `when`): a JavaScript function, and its name and inputs
 to closure_code with scope, d
-    set inner to function_code(scope, params of d, body of d)
+    set inner to function_code(scope, params of d, body of d, order of d)
     set inputs to empty list
     for each n from 1 to length of params of d
         add v(n, level of scope of inner) to inputs
@@ -1883,8 +1957,8 @@ end
 
 # One function (or the whole program) as the body of a JavaScript function: its variables, the
 # temporaries `and` and `or` used, then its statements.
-to function_code with parent, params, body
-    set scope to new_scope(parent, params, body)
+to function_code with parent, params, body, place
+    set scope to new_scope(parent, params, body, place)
     set statements to js_block(scope, body)
     set locals to empty list
     for each slot from length of params + 1 to length of names of scope # the inputs are the parameters
@@ -1905,7 +1979,7 @@ end
 to compile with source, files
     set ats to empty list
     set reading to record with files files, loaded empty list, open empty list, within ""
-    set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading))
+    set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading), 0)
     set slots to empty list
     for each slot from 1 to length of names of scope of main
         add v(slot, 0) to slots
@@ -1979,12 +2053,12 @@ set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
 # where each instruction came from, the loops around the code being compiled (innermost first), and the
 # `try`s around it in this function.
-to bytecode_function with outer, name, params, kinds, body
+to bytecode_function with outer, name, params, kinds, body, place
     set parent_scope to nothing
     if outer is not nothing
         set parent_scope to scope of outer
     end
-    set fc to record with scope new_scope(parent_scope, params, body), name name, params params, kinds kinds, code empty list, consts empty list, places empty list, loops nothing, tries 0
+    set fc to record with scope new_scope(parent_scope, params, body, place), name name, params params, kinds kinds, code empty list, consts empty list, places empty list, loops nothing, tries 0
     for each s in body
         bytecode_statement(fc, s)
     end
@@ -2094,7 +2168,7 @@ to bytecode_call with fc, e, statement
 end
 
 to bytecode_child with fc, d
-    set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d)
+    set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d, order of d)
     return constant(fc, record with what "function", value made)
 end
 
@@ -2164,7 +2238,7 @@ to bytecode_statement with fc, s
         emit(fc, at of s, list of op_handle, slot_of(event_names, event of s) - 1)
     else if what is "every"
         set d to fn of s
-        set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d)
+        set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d, order of d)
         bytecode_expr(fc, interval of s)
         emit(fc, at of s, list of op_make_fn, constant(fc, record with what "function", value made))
         emit(fc, at of s, list of op_every, unit of s)
@@ -2408,7 +2482,7 @@ end
 # Moth source, and the files it may use (records with a name and a text); out comes its bytecode, as text
 to compile_bytecode with source, files
     set reading to record with files files, loaded empty list, open empty list, within ""
-    set main to bytecode_function(nothing, "main", empty list, empty list, parse(tokenize(source, ""), reading))
+    set main to bytecode_function(nothing, "main", empty list, empty list, parse(tokenize(source, ""), reading), 0)
     set lines to list of "moth bytecode 2"
     function_lines(main, lines)
     return joined(lines, "\n") + "\n"

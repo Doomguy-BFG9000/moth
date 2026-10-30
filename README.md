@@ -485,9 +485,11 @@ end
   `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
   `or`, `not`.
 - **Maths:** `+ - * /`. Adding text to anything joins them into text.
-- **Variables:** inside a function, `set` changes a variable the top level (or
-  an enclosing function) also sets; otherwise it stays inside the function.
-  Functions remember the variables around them.
+- **Variables:** inside a function, `set` (or `add`, `for each`) changes a
+  variable the top level, or an enclosing function, made above the function's
+  `to` line; otherwise the variable is the function's own. A name a function
+  only reads can be set anywhere around it, even below. Functions remember the
+  variables around them.
 - **Text:** any character but control characters; write `\n` for a new line and
   `\t` for a tab. Upper or lower case doesn't matter in names and words.
 
@@ -717,8 +719,10 @@ unboxed numbers were all caught, some only by the fuzzer.
 - A table's cells are numbers, text or nothing: dates stay text.
 - An app runs in the playground, and can't `ask` once it's running.
 - `use` without `as` puts a file's names in with the program's, where they can
-  collide; `use ... as` keeps them apart. It only reads files in the program's
-  folder, or folders inside it: not `../lib.moth`, and not through a link out.
+  collide; `use ... as` keeps the file to itself, as if it ran alone, so its
+  functions' variables are theirs and the program reaches it only through
+  `math's ...`. It only reads files in the program's folder, or folders inside
+  it: not `../lib.moth`, and not through a link out.
 - The handwriting reader learned from shapes, not people, so unusual ways of
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,

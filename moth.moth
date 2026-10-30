@@ -8,8 +8,8 @@
 #
 #     moth build moth.moth --allow-read --allow-write
 #
-# A file used `as` a name shares its functions' variables with the program's top level, so every name made
-# here starts with cli_, which machine.moth and compiler.moth never use.
+# Every name made here starts with cli_, from when a file used `as` a name shared its functions' variables
+# with the program's top level (DESIGN.md, section 27).
 
 use "machine.moth" as machine
 
@@ -200,9 +200,7 @@ to cli_allow_flag with cli_flag
     return no
 end
 
-# the arguments: `build`, the file, maybe --target, and any --allow flags. In a function, as anything a
-# function sets that the top level sets too is the top level's, and the other functions here count with
-# cli_k as well.
+# the arguments: `build`, the file, maybe --target, and any --allow flags
 to cli_main
     set cli_given to arguments
     set cli_target to nothing
