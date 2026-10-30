@@ -448,6 +448,25 @@ draw chart of (dictionary where "Mon" is 5, "Tue" is 7)     # the keys label the
 set prices to read table "https://example.com/prices.csv"   # read can go online too
 ```
 
+Time, order and saving:
+
+```
+say the time " on " the date                # 14:05:09 on 2026-10-30, where it runs
+say the weekday                             # also: the year, the month, the day, the hour, the minute, the second
+set start to the clock                      # seconds since the program started
+wait 2 seconds                              # or: wait 500 milliseconds, wait n minutes
+say the clock - start                       # about 2
+
+say scores in order                         # a new list, smallest first; the old one stays as it was
+say scores in reverse order                 # largest first
+for each p in people in order by age        # records, by a field
+    say name of p
+end
+
+save scores to "scores.txt"                 # any number, text, list, record or dictionary
+set scores to load "scores.txt"             # and back again, as it was
+```
+
 Apps: pictures that answer keys, clicks and time.
 [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines, and
 [`apps/paint.moth`](apps/paint.moth) a paint program in 54.
@@ -780,11 +799,18 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 ## Limits
 
-- No clock: a program learns about the world through `ask`, its files, the
-  sites it reads, its arguments, and in an app, keys, clicks and timers. In the
-  playground, files last for one run, and only sites that let any page read
-  them can be read. On Linux a program goes online through `curl`, so where
-  curl isn't installed it can't.
+- A program learns about the world through `ask`, its files, the sites it
+  reads, its arguments, the clock, and in an app, keys, clicks and timers. In
+  the playground, files last for one run, only sites that let any page read
+  them can be read, and answering a question runs the program again from the
+  start, so a `wait` before it waits again. On Linux a program goes online
+  through `curl`, so where curl isn't installed it can't.
+- `the time` and the rest are the time where the program runs. A program built
+  for Linux reads its time zone from /etc/localtime when it starts (not TZ);
+  for years past the last change that file lists, it keeps the last one, which
+  can be an hour out in summer.
+- `save` can't save functions, bytes or amounts with units, and numbers come
+  back to 15 digits, as Moth shows and compares them.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
@@ -802,10 +828,7 @@ unboxed numbers were all caught, some only by the fuzzer.
   dictionaries JavaScript's engine, which has years of tuning behind it, is
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
-- `moth build` doesn't take Moth's newest phrases yet: `the time` and the rest
-  of the clock, `wait`, `in order`, `save` and `load`. A program that uses one
-  stops with a mistake that says it can't become machine code yet. It makes
-  programs for x86-64 Windows and Linux, not for Macs.
+- `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
   showing its picture, and an app's handlers never run. The window knows CSS's
   colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but not

@@ -1454,3 +1454,51 @@ hold them to agreeing.
   go with curl, not with WinHTTP. A move with `../` in it is followed as it is
   on Windows, while curl works the `..` out first. A program can only fetch a
   page, with no headers of its own.
+
+## 34. The time, waiting, putting things in order, saving and loading
+
+- **Words that were names stay names.** `the time`, `wait 2 seconds`,
+  `scores in order`, `save x to "f"` and `load "f"` are each a phrase only in
+  the one shape they have: `the` followed by `time`, `date`, `year`, `month`,
+  `day`, `hour`, `minute`, `second`, `weekday` or `clock`; `wait` followed by an
+  amount of time; `in order` after a value; `save` with a `to` after its
+  value; `load` followed by a file's name. Anywhere else each word is a name as
+  it was, and a line that only looks like a phrase (`wait 5`, `save 5`) is a
+  call again. With no function of that name, its mistake says what the phrase
+  needs (`to wait, say how long: 'wait 2 seconds'`), instead of guessing at a
+  Moth word that's spelled alike.
+- **The clock comes from outside, like random numbers.** A run is given a
+  clock: what time it is where the program runs, the milliseconds since it
+  started, and a way to wait. Unless it's given a real one, a run gets one that
+  starts at Friday 2 January 2026, 03:04:05.678, whose waits take no time but
+  move it on, so every engine and every test says the same times. The
+  playground gives the real one, and shows what was said and drawn before each
+  wait; run() keeps what the clock said, so a run handed over to the VM gets
+  the same times and doesn't wait again. In machine code, MOTH_NOW (milliseconds
+  since 1970, as the local time) does what the made-up clock does, and is how
+  the tests hold machine code to the engines.
+- **The time where it runs.** The JavaScript engines take the local time from
+  the browser or Node.js. On Windows, machine code asks the system for the time
+  and turns it into local time with FileTimeToLocalFileTime. On Linux a program
+  has no library to ask, so it reads /etc/localtime (a TZif file) once when it
+  starts, and takes the offset in force then; checked against `date` in six
+  zones, summer time and quarter-hour zones included. The date comes from the
+  days since 1970 with Howard Hinnant's civil_from_days, in whole numbers.
+- **In order is a new list.** Sorting the list in place would make `say scores
+  in order` change `scores`, which a beginner wouldn't expect. Numbers go by
+  size, as `is less than` compares them (equal to 15 digits is equal), and text
+  by each character's number in turn: the same on every engine and in machine
+  code, where it's the order of the text's bytes, and the same whatever the
+  computer's language is, unlike `localeCompare`. Equal ones keep their order,
+  which machine code gets with a merge sort; `in reverse order` keeps it too.
+  A list that mixes numbers and text is a mistake, not a guess.
+- **Saving writes a value as Moth shows it.** `save` writes what `say` would
+  show for the value inside a list (text in quotes, records as `(record with
+  ...)`), and `load` reads exactly that back, with spaces and new lines allowed
+  between parts. So a saved file is readable, the format needs no explaining,
+  and `save` is `write` of that text: the same permissions and the same
+  mistakes when the file can't be written. Functions, bytes, amounts with units
+  and a list that holds itself can't be saved, and say so. A record read back
+  uses the program's own text for each field's name, since machine code finds a
+  field by which text its name is, so `name of person` works on a record that
+  `load` made.

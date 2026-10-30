@@ -5,7 +5,7 @@ import { run, test as testMoth, format, suggestedFix, debug, timeline, check, co
 import { Machine } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
-import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
+import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
 
 const ENGINES = ["jit", "wasm", "vm"];
 
@@ -356,6 +356,23 @@ test("the compiler written in Moth writes the JIT's JavaScript, byte for byte, a
   const deep = `say ${"(".repeat(3000)}1${")".repeat(3000)}`; // too deep for both
   for (const source of [...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s), deep, COMPILER])
     assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+});
+
+test("save, load, the clock and in order say the same on all three engines, and compile as the JIT compiles them", () => {
+  const moth = mothCompiler(COMPILER);
+  for (const [source, expected] of SAVING) {
+    for (const engine of ENGINES) {
+      let said = "";
+      try {
+        run(source, (line) => (said += `${line}\n`), { engine, disk: memoryDisk() });
+      } catch (err) {
+        if (!(err instanceof MothError)) throw err;
+        said += `${err.message}\n`;
+      }
+      assert.equal(said.replace(/\n$/, ""), expected, `${engine}: ${source}`);
+    }
+    assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+  }
 });
 
 // The one known difference: Moth sees text as whole characters, so it can't tell half of an emoji (a lone

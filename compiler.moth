@@ -415,7 +415,7 @@ to parse with tokens, reading
 
     # A phrase that starts with a word that could be a name: `wait 2 seconds`, `save x to "f"`. It gives the
     # node, or nothing if this isn't the phrase after all, which makes the line a call again.
-    to phrase with which, t
+    to try_phrase with which, t
         set start to pos
         set node to nothing
         try
@@ -955,13 +955,13 @@ to parse with tokens, reading
             fail with problem(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'")
         end
         if is_word("wait") and not nl of item (pos + 1) of tokens # `wait 2 seconds`: `wait` alone is still a name
-            set waiting to phrase("wait", t)
+            set waiting to try_phrase("wait", t)
             if waiting is not nothing
                 return waiting
             end
         end
         if is_word("save") and not nl of item (pos + 1) of tokens # `save scores to "scores.txt"`
-            set saving to phrase("save", t)
+            set saving to try_phrase("save", t)
             if saving is not nothing
                 return saving
             end

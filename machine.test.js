@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk } from "./moth.js";
 import examples from "./examples.js";
-import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
+import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
+import { FAKE_NOW } from "./vm.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
 
 const here = (file) => readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
@@ -73,8 +74,8 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
       const exe = executable(dir, `p${i}`);
       writeFileSync(exe, bytes);
       if (target === "linux") chmodSync(exe, 0o755);
-      // random numbers from the seed the JavaScript engine uses when it isn't given real ones
-      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MOTH_SEED: "1" } });
+      // random numbers from the seed, and the clock from the moment, the JavaScript engine uses when it isn't given real ones
+      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MOTH_SEED: "1", MOTH_NOW: String(FAKE_NOW) } });
       assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, want, `${name}:\n${source}`);
       made++;
     });
@@ -1113,6 +1114,54 @@ test("a question that asks for a drawing, asked away from a terminal, is answere
     if (target === "linux") chmodSync(exe, 0o755);
     const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "10,20 30,40;50,60\n" });
     assert.deepEqual({ stdout: got.stdout, status: got.status }, { stdout: "Draw a digit 10,20 30,40;50,60\ngot 10,20 30,40;50,60\n", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Saving and loading, the clock and waiting, and putting things in order, with files allowed: machine code, with
+// the JavaScript engine's moment as MOTH_NOW (so a wait takes no time), says and fails as that engine does
+test("machine code saves, loads, waits and puts things in order as the JavaScript engine does", { skip }, () => {
+  for (const [source] of SAVING) {
+    let stdout = "";
+    let stderr = "";
+    let status = 0;
+    try {
+      run(source, (line) => (stdout += `${line}\n`), { file: "p.moth", disk: memoryDisk() });
+    } catch (err) {
+      if (!(err instanceof MothError)) throw err;
+      stderr = `p.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;
+      status = 1;
+    }
+    const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+    try {
+      const exe = executable(dir, "p");
+      writeFileSync(exe, machine(source, { target, name: "p.moth", allow: ["--allow-read", "--allow-write"] }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_NOW: String(FAKE_NOW), MOTH_SEED: "1" } });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout, stderr, status }, source);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+// The real clock: the time of day, as the system says it, and a wait that really waits
+test("machine code reads the real clock, and really waits", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "clock");
+    writeFileSync(exe, machine('say the date " " the time\nsay the clock\nwait 300 milliseconds\nsay the clock', { target, name: "clock.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const before = Date.now();
+    const got = spawnSync(exe, [], { encoding: "utf8" });
+    const took = Date.now() - before;
+    const [when, start, after] = got.stdout.trim().split("\n");
+    const local = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 19).replace("T", " ");
+    assert.ok(when >= local(before - 1000) && when <= local(Date.now() + 1000), `${when} isn't now`);
+    assert.ok(Number(start) < 0.1, start);
+    assert.ok(Number(after) >= 0.29 && Number(after) < 5, after);
+    assert.ok(took >= 290, `it took ${took} ms`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
