@@ -33,6 +33,8 @@ set xmm1 to 1
 set xmm2 to 2
 set xmm3 to 3
 set xmm4 to 4
+set xmm5 to 5
+set xmm6 to 6
 # the conditions a jump can test, as x86 numbers them
 set cc_b to 2
 set cc_ae to 3
@@ -225,7 +227,7 @@ end
 to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
-        absolutes empty list, text_objects empty dictionary
+        absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no
     set code of made to hot of made
     return made
 end
@@ -8517,6 +8519,2450 @@ to case_ranges with a, label, ranges
     pop_r(a, rsi)
 end
 
+# ---------- the runtime: drawing ----------
+# The turtle, as vm.js's Turtle has it: where it is, which way it faces (90, up, to start), whether its pen
+# is down, and the pen's colour (text, as the program gave it) and width. What it draws goes into a list in
+# memory, each thing 64 bytes: what it is (1 a line, 2 a box, 3 a circle, 4 text), then four numbers (a
+# line's ends; a box's corner, width and height; a circle's middle and radius; text's place and size), a
+# line's width, its colour and, for text, the text. `clear` empties it, as the playground only shows what
+# came after the last `clear`. On Windows a window shows it when the program ends (see the window, below).
+
+set turtle_moves to list of "'move forward'", "'move back'", "'turn left'", "'turn right'"
+
+# a 4-byte number, signed, into a register
+# xmm x rounded down to a whole number (SSE4.1's roundsd)
+to floor_sd with a, x, y
+    enc(a, (list of 0x66), no, (list of 0x0F, 0x3A, 0x0B), x, reg_at(y), imm8(9))
+end
+
+to emit_turtle with a
+    # rt_turtle_init: the turtle as it starts, before the program runs
+    mark(a, "rt_turtle_init")
+    load_bits(a, xmm0, double_bytes(90))
+    movsd_store(a, rip("t_heading"), xmm0)
+    load_bits(a, xmm0, double_bytes(2))
+    movsd_store(a, rip("t_width"), xmm0)
+    storei(a, rip("t_pen"), 1)
+    lea(a, rax, rip(text_object(a, "#4f8ff7")))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, rip("t_color"), rax)
+    ret(a)
+
+    # rt_round2: xmm0 to hundredths, as the engines put a drawn thing's numbers: Math.round(n * 100) / 100,
+    # and 0 rather than -0. Uses xmm1 and xmm2.
+    set not_up to new_label(a)
+    mark(a, "rt_round2")
+    load_bits(a, xmm1, double_bytes(100))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    floor_sd(a, xmm1, xmm0)
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    load_bits(a, xmm0, double_bytes(0.5))
+    ucomisd(a, xmm2, reg_at(xmm0))
+    jcc(a, cc_b, not_up)
+    load_bits(a, xmm0, double_bytes(1))
+    sse_math(a, "+", xmm1, reg_at(xmm0))
+    mark(a, not_up)
+    load_bits(a, xmm0, double_bytes(100))
+    sse_math(a, "/", xmm1, reg_at(xmm0))
+    load_bits(a, xmm0, double_bytes(0))
+    sse_math(a, "+", xmm1, reg_at(xmm0)) # -0 + 0 is 0
+    movapd(a, xmm0, xmm1)
+    ret(a)
+
+    # rt_pic_add: a thing drawn, from pi_kind, pi_a to pi_d, pi_w and pi_text, in the turtle's colour, goes at
+    # the end of the picture's list, which grows as it needs to. Keeps every register but rax.
+    set room to new_label(a)
+    set some to new_label(a)
+    mark(a, "rt_pic_add")
+    for each r in list of rcx, rdx, rsi, rdi
+        push_r(a, r)
+    end
+    load(a, rax, rip("pic_n"))
+    alu_load(a, "cmp", rax, rip("pic_cap"))
+    jcc(a, cc_b, room)
+    load(a, rcx, rip("pic_cap"))
+    alu(a, "add", rcx, rcx)
+    jcc(a, cc_ne, some)
+    movi(a, rcx, 64)
+    mark(a, some)
+    store(a, rip("pic_cap"), rcx)
+    shifti(a, "shl", rcx, 6)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("pic_items"))
+    load(a, rcx, rip("pic_n"))
+    shifti(a, "shl", rcx, 3)
+    rep_movsq(a)
+    store(a, rip("pic_items"), rax)
+    mark(a, room)
+    load(a, rdi, rip("pic_n"))
+    shifti(a, "shl", rdi, 6)
+    alu_load(a, "add", rdi, rip("pic_items"))
+    for each field in list of (list of "pi_kind", 0), (list of "pi_a", 8), (list of "pi_b", 16), (list of "pi_c", 24),
+        (list of "pi_d", 32), (list of "pi_w", 40), (list of "t_color", 48), (list of "pi_text", 56)
+        load(a, rax, rip(item 1 of field))
+        store(a, mem(rdi, item 2 of field), rax)
+    end
+    alu_at(a, "add", rip("pic_n"), 1)
+    for each r in list of rdi, rsi, rdx, rcx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_pic_line: a line from (t_x, t_y) to (t_nx, t_ny), its ends to hundredths, if the pen is down
+    set pen_up to new_label(a)
+    mark(a, "rt_pic_line")
+    load(a, rax, rip("t_pen"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, pen_up)
+    for each pair in list of (list of "t_x", "pi_a"), (list of "t_y", "pi_b"), (list of "t_nx", "pi_c"), (list of "t_ny", "pi_d")
+        movsd_load(a, xmm0, rip(item 1 of pair))
+        call_to(a, "rt_round2")
+        movsd_store(a, rip(item 2 of pair), xmm0)
+    end
+    load(a, rax, rip("t_width"))
+    store(a, rip("pi_w"), rax)
+    storei(a, rip("pi_kind"), 1)
+    storei(a, rip("pi_text"), 0)
+    call_to(a, "rt_pic_add")
+    mark(a, pen_up)
+    ret(a)
+
+    # rt_turtle_numbers: rax a list, untagged, of rcx numbers, the one at place rdx (from 0) nothing for 16:
+    # each, to hundredths, from tn0 on; rax 0, or 1 with err_a the first that isn't a number. The list is one
+    # the program's own code made, so it has as many as that.
+    set each_one to new_label(a)
+    set fine to new_label(a)
+    set not_number to new_label(a)
+    set given to new_label(a)
+    set numbers_done to new_label(a)
+    mark(a, "rt_turtle_numbers")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    load(a, rbx, mem(rax, 16))
+    mov_rr(a, r12, rcx)
+    mov_rr(a, r13, rdx)
+    movi(a, r14, 0)
+    mark(a, each_one)
+    alu(a, "cmp", r14, r12)
+    jcc(a, cc_ae, numbers_done)
+    mov_rr(a, rax, r14)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, rbx)
+    movsd_load(a, xmm0, mem(rax, 0))
+    alu(a, "cmp", r14, r13)
+    jcc(a, cc_ne, given)
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_ne, given)
+    load_bits(a, xmm0, double_bytes(16))
+    mark(a, given)
+    odd_jump(a, xmm0, not_number)
+    call_to(a, "rt_round2")
+    lea(a, rax, rip("tn0"))
+    mov_rr(a, rcx, r14)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    movsd_store(a, mem(rax, 0), xmm0)
+    inc_r(a, r14)
+    jmp_to(a, each_one)
+    mark(a, not_number)
+    movsd_store(a, rip("err_a"), xmm0)
+    movi(a, rax, 1)
+    jmp_to(a, fine)
+    mark(a, numbers_done)
+    movi(a, rax, 0)
+    mark(a, fine)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_turtle: rcx what to do, in vm.js's TURTLE_ACTIONS order (forward, back, left, right, up, down, color,
+    # width, to, clear, box, circle, text), xmm0 what with: rax 0, or 2 with err_why for rt_why_turtle
+    set acts to empty list
+    for each k from 0 to 12
+        add new_label(a) to acts
+    end
+    set wrong_kind to new_label(a)
+    set wrong_numbers to new_label(a)
+    set done_ok to new_label(a)
+    set move_back to new_label(a)
+    set turn_right to new_label(a)
+    mark(a, "rt_turtle")
+    for each k from 0 to 12
+        alui(a, "cmp", rcx, k)
+        jcc(a, cc_e, item (k + 1) of acts)
+    end
+    jmp_to(a, done_ok)
+    for each k from 0 to 3 # forward, back, left, right: a number
+        mark(a, item (k + 1) of acts)
+        lea(a, rax, rip(text_object(a, item (k + 1) of turtle_moves)))
+        store(a, rip("err_what"), rax)
+        odd_jump(a, xmm0, wrong_kind)
+        if k is 0 or k is 1
+            if k is 1
+                movq_rx(a, rax, xmm0)
+                bit_op(a, "btc", rax, 63)
+                movq_xr(a, xmm0, rax)
+            end
+            jmp_to(a, move_back)
+        else
+            if k is 3
+                movq_rx(a, rax, xmm0)
+                bit_op(a, "btc", rax, 63)
+                movq_xr(a, xmm0, rax)
+            end
+            jmp_to(a, turn_right)
+        end
+    end
+    mark(a, move_back) # steps from where it is, the way it faces
+    movsd_store(a, rip("t_steps"), xmm0)
+    movsd_load(a, xmm1, rip("t_heading"))
+    load_bits(a, xmm2, double_bytes(3.141592653589793))
+    sse_math(a, "*", xmm1, reg_at(xmm2))
+    load_bits(a, xmm2, double_bytes(180))
+    sse_math(a, "/", xmm1, reg_at(xmm2))
+    movsd_store(a, rip("t_angle"), xmm1)
+    enc(a, empty list, no, (list of 0xDD), 0, rip("t_angle"), empty list) # fld the angle
+    raw(a, list of 0xD9, 0xFB) # fsincos: its cosine, then its sine
+    enc(a, empty list, no, (list of 0xDD), 3, rip("t_cos"), empty list)
+    enc(a, empty list, no, (list of 0xDD), 3, rip("t_sin"), empty list)
+    movsd_load(a, xmm2, rip("t_steps"))
+    sse_math(a, "*", xmm2, rip("t_cos"))
+    movsd_load(a, xmm1, rip("t_x"))
+    sse_math(a, "+", xmm1, reg_at(xmm2))
+    movsd_store(a, rip("t_nx"), xmm1)
+    movsd_load(a, xmm2, rip("t_steps"))
+    sse_math(a, "*", xmm2, rip("t_sin"))
+    movsd_load(a, xmm1, rip("t_y"))
+    sse_math(a, "+", xmm1, reg_at(xmm2))
+    movsd_store(a, rip("t_ny"), xmm1)
+    call_to(a, "rt_pic_line")
+    load(a, rax, rip("t_nx"))
+    store(a, rip("t_x"), rax)
+    load(a, rax, rip("t_ny"))
+    store(a, rip("t_y"), rax)
+    jmp_to(a, done_ok)
+    mark(a, turn_right)
+    movsd_load(a, xmm1, rip("t_heading"))
+    sse_math(a, "+", xmm1, reg_at(xmm0))
+    movsd_store(a, rip("t_heading"), xmm1)
+    jmp_to(a, done_ok)
+    mark(a, item 5 of acts) # up
+    storei(a, rip("t_pen"), 0)
+    jmp_to(a, done_ok)
+    mark(a, item 6 of acts) # down
+    storei(a, rip("t_pen"), 1)
+    jmp_to(a, done_ok)
+    mark(a, item 7 of acts) # color: any text
+    movsd_store(a, rip("err_a"), xmm0)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    set colour_fine to new_label(a)
+    jcc(a, cc_e, colour_fine)
+    storei(a, rip("err_why"), 72)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, colour_fine)
+    movsd_store(a, rip("t_color"), xmm0)
+    jmp_to(a, done_ok)
+    mark(a, item 8 of acts) # width: a number above 0
+    movsd_store(a, rip("err_a"), xmm0)
+    set width_wrong to new_label(a)
+    odd_jump(a, xmm0, width_wrong)
+    load_bits(a, xmm1, double_bytes(0))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_be, width_wrong)
+    movsd_store(a, rip("t_width"), xmm0)
+    jmp_to(a, done_ok)
+    mark(a, width_wrong)
+    storei(a, rip("err_why"), 73)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, item 9 of acts) # to x, y
+    lea(a, rax, rip(text_object(a, "'move to'")))
+    store(a, rip("err_what"), rax)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    movi(a, rcx, 2)
+    movi(a, rdx, -1)
+    call_to(a, "rt_turtle_numbers")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, wrong_numbers)
+    load(a, rax, rip("tn0"))
+    store(a, rip("t_nx"), rax)
+    load(a, rax, rip("tn1"))
+    store(a, rip("t_ny"), rax)
+    call_to(a, "rt_pic_line")
+    load(a, rax, rip("tn0"))
+    store(a, rip("t_x"), rax)
+    load(a, rax, rip("tn1"))
+    store(a, rip("t_y"), rax)
+    jmp_to(a, done_ok)
+    mark(a, item 10 of acts) # clear
+    storei(a, rip("pic_n"), 0)
+    jmp_to(a, done_ok)
+    for each shape in list of (list of 11, "'draw box'", 4, 2), (list of 12, "'draw circle'", 3, 3)
+        mark(a, item (item 1 of shape) of acts)
+        lea(a, rax, rip(text_object(a, item 2 of shape)))
+        store(a, rip("err_what"), rax)
+        movq_rx(a, rax, xmm0)
+        untag(a, rax)
+        movi(a, rcx, item 3 of shape)
+        movi(a, rdx, -1)
+        call_to(a, "rt_turtle_numbers")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, wrong_numbers)
+        if item 4 of shape is 3 # a circle's size is 0 or more
+            set round_fine to new_label(a)
+            movsd_load(a, xmm0, rip("tn2"))
+            load_bits(a, xmm1, double_bytes(0))
+            ucomisd(a, xmm0, reg_at(xmm1))
+            jcc(a, cc_ae, round_fine)
+            movsd_store(a, rip("err_a"), xmm0)
+            storei(a, rip("err_why"), 74)
+            movi(a, rax, 2)
+            ret(a)
+            mark(a, round_fine)
+        end
+        for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b"), (list of "tn2", "pi_c"), (list of "tn3", "pi_d")
+            load(a, rax, rip(item 1 of pair))
+            store(a, rip(item 2 of pair), rax)
+        end
+        storei(a, rip("pi_kind"), item 4 of shape)
+        storei(a, rip("pi_w"), 0)
+        storei(a, rip("pi_text"), 0)
+        call_to(a, "rt_pic_add")
+        jmp_to(a, done_ok)
+    end
+    mark(a, item 13 of acts) # text at x, y, size (16 if none): text as `say` shows it
+    lea(a, rax, rip(text_object(a, "'draw ... at'")))
+    store(a, rip("err_what"), rax)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    push_r(a, rax)
+    # the text is first: the numbers after it
+    load(a, rcx, mem(rax, 16))
+    alui(a, "add", rcx, 8)
+    store(a, rip("t_list"), rcx) # a list's items from the second on, as rt_turtle_numbers reads them
+    lea(a, rax, rip("t_list"))
+    alui(a, "sub", rax, 16)
+    movi(a, rcx, 3)
+    movi(a, rdx, 2)
+    call_to(a, "rt_turtle_numbers")
+    pop_r(a, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, wrong_numbers)
+    set size_fine to new_label(a)
+    movsd_load(a, xmm0, rip("tn2"))
+    load_bits(a, xmm1, double_bytes(0))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_a, size_fine)
+    movsd_store(a, rip("err_a"), xmm0)
+    storei(a, rip("err_why"), 75)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, size_fine)
+    load(a, rcx, mem(rcx, 16)) # the text, shown
+    load(a, rax, mem(rcx, 0))
+    push_r(a, rax)
+    call_to(a, "rt_b_reset")
+    pop_r(a, rax)
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    call_to(a, "rt_b_text")
+    store(a, rip("pi_text"), rax)
+    for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b"), (list of "tn2", "pi_c")
+        load(a, rax, rip(item 1 of pair))
+        store(a, rip(item 2 of pair), rax)
+    end
+    storei(a, rip("pi_d"), 0)
+    storei(a, rip("pi_w"), 0)
+    storei(a, rip("pi_kind"), 4)
+    call_to(a, "rt_pic_add")
+    jmp_to(a, done_ok)
+    mark(a, wrong_kind)
+    movsd_store(a, rip("err_a"), xmm0)
+    storei(a, rip("err_why"), 70)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, wrong_numbers)
+    storei(a, rip("err_why"), 71)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, done_ok)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_why_turtle: what was wrong, into the builder, as vm.js's Turtle says it
+    set w71 to new_label(a)
+    set w72 to new_label(a)
+    set w73 to new_label(a)
+    set w74 to new_label(a)
+    set w75 to new_label(a)
+    set w77 to new_label(a)
+    mark(a, "rt_why_turtle")
+    load(a, rax, rip("err_why"))
+    for each pair in list of (list of 71, w71), (list of 72, w72), (list of 73, w73), (list of 74, w74), (list of 75, w75), (list of 77, w77)
+        alui(a, "cmp", rax, item 1 of pair)
+        jcc(a, cc_e, item 2 of pair)
+    end
+    what_name(a) # 70
+    b_text(a, " needs a number, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w71)
+    what_name(a)
+    b_text(a, " needs numbers, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w72)
+    b_text(a, "'pen color' needs text like \"red\", not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w73)
+    b_text(a, "'pen width' needs a number above 0, not ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 1)
+    jmp_to(a, "rt_b_value")
+    mark(a, w74)
+    b_text(a, "a circle's size is 0 or more, not ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 0)
+    jmp_to(a, "rt_b_value")
+    mark(a, w75)
+    b_text(a, "text's size is a number above 0, not ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 0)
+    jmp_to(a, "rt_b_value")
+    mark(a, w77)
+    b_text(a, "'every' needs a number above 0, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_described")
+end
+
+# ---------- the runtime: apps ----------
+# `when a key is pressed`, `when the mouse is clicked` or dragged, and `every 2 seconds`: each handler, in
+# the order the program made them, 32 bytes: what it waits for (0 a key, 1 a click, 2 a drag, 3 a timer),
+# the function, how many inputs it takes, and for a timer how many milliseconds apart.
+
+to emit_app_setup with a
+    # rt_on: rcx what it waits for, rax the function, rdx how many inputs it takes; rt_every: the same for a
+    # timer, xmm0 how often, in units of rcx milliseconds: rax 0, or 2 (err_why 77) for a time that isn't a
+    # number above 0
+    set room to new_label(a)
+    set some to new_label(a)
+    set every_wrong to new_label(a)
+    set put to new_label(a)
+    mark(a, "rt_every")
+    mov_rr(a, r10, rax) # the function and the unit, kept from odd_jump
+    mov_rr(a, r11, rcx)
+    movsd_store(a, rip("err_a"), xmm0)
+    odd_jump(a, xmm0, every_wrong)
+    load_bits(a, xmm1, double_bytes(0))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_be, every_wrong)
+    movq_rx(a, r8, xmm0)
+    movi64(a, r9, list of 0, 0, 0, 0, 0, 0, 0xF0, 0x7F) # infinity
+    alu(a, "cmp", r8, r9)
+    jcc(a, cc_e, every_wrong)
+    cvtsi2sd(a, xmm1, r11)
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("ev_ms"), xmm0)
+    mov_rr(a, rax, r10)
+    movi(a, rcx, 3)
+    jmp_to(a, put)
+    mark(a, every_wrong)
+    storei(a, rip("err_why"), 77)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, "rt_on")
+    storei(a, rip("ev_ms"), 0)
+    mark(a, put)
+    push_r(a, rax)
+    push_r(a, rcx)
+    push_r(a, rdx)
+    load(a, rax, rip("app_n"))
+    alu_load(a, "cmp", rax, rip("app_cap"))
+    jcc(a, cc_b, room)
+    load(a, rcx, rip("app_cap"))
+    alu(a, "add", rcx, rcx)
+    jcc(a, cc_ne, some)
+    movi(a, rcx, 8)
+    mark(a, some)
+    store(a, rip("app_cap"), rcx)
+    shifti(a, "shl", rcx, 5)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("app_items"))
+    load(a, rcx, rip("app_n"))
+    shifti(a, "shl", rcx, 2)
+    rep_movsq(a)
+    store(a, rip("app_items"), rax)
+    mark(a, room)
+    load(a, rdi, rip("app_n"))
+    shifti(a, "shl", rdi, 5)
+    alu_load(a, "add", rdi, rip("app_items"))
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    pop_r(a, rax)
+    store(a, mem(rdi, 0), rcx)
+    store(a, mem(rdi, 8), rax)
+    store(a, mem(rdi, 16), rdx)
+    load(a, rax, rip("ev_ms"))
+    store(a, mem(rdi, 24), rax)
+    alu_at(a, "add", rip("app_n"), 1)
+    movi(a, rax, 0)
+    ret(a)
+end
+
+# ---------- the runtime: a window, on Windows ----------
+# When a program that drew something, or set up an app, ends at a terminal, a window shows the picture as
+# the playground does: 500 by 500, (0, 0) in the middle and y going up, smoothed by GDI+, and a drawing
+# made smaller if it reaches past the edge (an app's never is: it's where its clicks land). An app runs in
+# it: keys, clicks, drags and timers go to its handlers, and the picture is drawn again after each. A
+# question that starts with "Draw", asked at a terminal, opens a pad to draw the answer on, which comes
+# back the way the playground's pad gives it. Away from a terminal none of this opens, so a program runs
+# as it does anywhere else; MOTH_PICTURE=file.bmp instead draws the picture into that file, after the
+# events in MOTH_EVENTS ("key left;click 10 20;drag 11 21;tick 0"), which is how the tests see it.
+
+set gui_imports to list of (list of "USER32.dll", (list of "RegisterClassExW", "CreateWindowExW", "DefWindowProcW",
+    "GetMessageW", "TranslateMessage", "DispatchMessageW", "PostQuitMessage", "InvalidateRect", "BeginPaint", "EndPaint",
+    "LoadCursorW", "SetTimer", "SetCapture", "ReleaseCapture", "AdjustWindowRect", "DestroyWindow", "CharLowerW",
+    "GetKeyState", "SetForegroundWindow")),
+    (list of "GDI32.dll", (list of "CreateCompatibleDC", "CreateCompatibleBitmap", "SelectObject", "DeleteObject",
+    "DeleteDC", "BitBlt", "CreateDIBSection", "GdiFlush")),
+    (list of "gdiplus.dll", (list of "GdiplusStartup", "GdipCreateFromHDC", "GdipDeleteGraphics", "GdipSetSmoothingMode",
+    "GdipSetTextRenderingHint", "GdipGraphicsClear", "GdipCreatePen1", "GdipSetPenStartCap", "GdipSetPenEndCap",
+    "GdipSetPenLineJoin", "GdipDeletePen", "GdipDrawLine", "GdipCreateSolidFill", "GdipDeleteBrush", "GdipFillRectangle",
+    "GdipFillEllipse", "GdipCreateFontFamilyFromName", "GdipGetCellAscent", "GdipGetEmHeight", "GdipCreateFont",
+    "GdipDeleteFont", "GdipDrawString", "GdipStringFormatGetGenericTypographic")),
+    (list of "KERNEL32.dll", (list of "GetModuleHandleW", "GetEnvironmentVariableW"))
+
+# CSS's named colours, as a browser's canvas knows them, each with its red, green and blue
+set css_colors to list of "aliceblue", 0xF0F8FF, "antiquewhite", 0xFAEBD7, "aqua", 0x00FFFF, "aquamarine", 0x7FFFD4,
+    "azure", 0xF0FFFF, "beige", 0xF5F5DC, "bisque", 0xFFE4C4, "black", 0x000000, "blanchedalmond", 0xFFEBCD,
+    "blue", 0x0000FF, "blueviolet", 0x8A2BE2, "brown", 0xA52A2A, "burlywood", 0xDEB887, "cadetblue", 0x5F9EA0,
+    "chartreuse", 0x7FFF00, "chocolate", 0xD2691E, "coral", 0xFF7F50, "cornflowerblue", 0x6495ED, "cornsilk", 0xFFF8DC,
+    "crimson", 0xDC143C, "cyan", 0x00FFFF, "darkblue", 0x00008B, "darkcyan", 0x008B8B, "darkgoldenrod", 0xB8860B,
+    "darkgray", 0xA9A9A9, "darkgreen", 0x006400, "darkgrey", 0xA9A9A9, "darkkhaki", 0xBDB76B, "darkmagenta", 0x8B008B,
+    "darkolivegreen", 0x556B2F, "darkorange", 0xFF8C00, "darkorchid", 0x9932CC, "darkred", 0x8B0000,
+    "darksalmon", 0xE9967A, "darkseagreen", 0x8FBC8F, "darkslateblue", 0x483D8B, "darkslategray", 0x2F4F4F,
+    "darkslategrey", 0x2F4F4F, "darkturquoise", 0x00CED1, "darkviolet", 0x9400D3, "deeppink", 0xFF1493,
+    "deepskyblue", 0x00BFFF, "dimgray", 0x696969, "dimgrey", 0x696969, "dodgerblue", 0x1E90FF, "firebrick", 0xB22222,
+    "floralwhite", 0xFFFAF0, "forestgreen", 0x228B22, "fuchsia", 0xFF00FF, "gainsboro", 0xDCDCDC,
+    "ghostwhite", 0xF8F8FF, "gold", 0xFFD700, "goldenrod", 0xDAA520, "gray", 0x808080, "green", 0x008000,
+    "greenyellow", 0xADFF2F, "grey", 0x808080, "honeydew", 0xF0FFF0, "hotpink", 0xFF69B4, "indianred", 0xCD5C5C,
+    "indigo", 0x4B0082, "ivory", 0xFFFFF0, "khaki", 0xF0E68C, "lavender", 0xE6E6FA, "lavenderblush", 0xFFF0F5,
+    "lawngreen", 0x7CFC00, "lemonchiffon", 0xFFFACD, "lightblue", 0xADD8E6, "lightcoral", 0xF08080,
+    "lightcyan", 0xE0FFFF, "lightgoldenrodyellow", 0xFAFAD2, "lightgray", 0xD3D3D3, "lightgreen", 0x90EE90,
+    "lightgrey", 0xD3D3D3, "lightpink", 0xFFB6C1, "lightsalmon", 0xFFA07A, "lightseagreen", 0x20B2AA,
+    "lightskyblue", 0x87CEFA, "lightslategray", 0x778899, "lightslategrey", 0x778899, "lightsteelblue", 0xB0C4DE,
+    "lightyellow", 0xFFFFE0, "lime", 0x00FF00, "limegreen", 0x32CD32, "linen", 0xFAF0E6, "magenta", 0xFF00FF,
+    "maroon", 0x800000, "mediumaquamarine", 0x66CDAA, "mediumblue", 0x0000CD, "mediumorchid", 0xBA55D3,
+    "mediumpurple", 0x9370DB, "mediumseagreen", 0x3CB371, "mediumslateblue", 0x7B68EE, "mediumspringgreen", 0x00FA9A,
+    "mediumturquoise", 0x48D1CC, "mediumvioletred", 0xC71585, "midnightblue", 0x191970, "mintcream", 0xF5FFFA,
+    "mistyrose", 0xFFE4E1, "moccasin", 0xFFE4B5, "navajowhite", 0xFFDEAD, "navy", 0x000080, "oldlace", 0xFDF5E6,
+    "olive", 0x808000, "olivedrab", 0x6B8E23, "orange", 0xFFA500, "orangered", 0xFF4500, "orchid", 0xDA70D6,
+    "palegoldenrod", 0xEEE8AA, "palegreen", 0x98FB98, "paleturquoise", 0xAFEEEE, "palevioletred", 0xDB7093,
+    "papayawhip", 0xFFEFD5, "peachpuff", 0xFFDAB9, "peru", 0xCD853F, "pink", 0xFFC0CB, "plum", 0xDDA0DD,
+    "powderblue", 0xB0E0E6, "purple", 0x800080, "rebeccapurple", 0x663399, "red", 0xFF0000, "rosybrown", 0xBC8F8F,
+    "royalblue", 0x4169E1, "saddlebrown", 0x8B4513, "salmon", 0xFA8072, "sandybrown", 0xF4A460, "seagreen", 0x2E8B57,
+    "seashell", 0xFFF5EE, "sienna", 0xA0522D, "silver", 0xC0C0C0, "skyblue", 0x87CEEB, "slateblue", 0x6A5ACD,
+    "slategray", 0x708090, "slategrey", 0x708090, "snow", 0xFFFAFA, "springgreen", 0x00FF7F, "steelblue", 0x4682B4,
+    "tan", 0xD2B48C, "teal", 0x008080, "thistle", 0xD8BFD8, "tomato", 0xFF6347, "turquoise", 0x40E0D0,
+    "violet", 0xEE82EE, "wheat", 0xF5DEB3, "white", 0xFFFFFF, "whitesmoke", 0xF5F5F5, "yellow", 0xFFFF00,
+    "yellowgreen", 0x9ACD32
+
+# the names keys have, as the playground gives them, by their Windows key codes
+set gui_key_names to list of 0x25, "left", 0x26, "up", 0x27, "right", 0x28, "down", 0x20, "space", 0x0D, "enter",
+    0x1B, "escape", 0x08, "backspace", 0x10, "shift", 0x14, "capslock", 0x2E, "delete", 0x24, "home", 0x23, "end",
+    0x21, "pageup", 0x22, "pagedown", 0x2D, "insert", 0x70, "f1", 0x71, "f2", 0x72, "f3", 0x73, "f4", 0x74, "f5",
+    0x75, "f6", 0x76, "f7", 0x77, "f8", 0x78, "f9", 0x79, "f10", 0x7A, "f11", 0x7B, "f12"
+
+to w_call with a, fn_name
+    call_import(a, "imp_" + fn_name)
+end
+
+# where the k-th input of a Windows function (from the 5th on) goes, inside win_enter
+to arg_at with k
+    return mem(rsp, 32 + 8 * (k - 5))
+end
+
+to cvtsd2ss with a, x, y
+    sse(a, 0xF2, 0x5A, x, reg_at(y))
+end
+
+to movss_store with a, at, x
+    sse(a, 0xF3, 0x11, x, at)
+end
+
+to minsd with a, x, y
+    sse(a, 0xF2, 0x5D, x, reg_at(y))
+end
+
+to movdqu_store with a, at, x
+    enc(a, (list of 0xF3), no, (list of 0x0F, 0x7F), x, at, empty list)
+end
+
+to movdqu_load with a, x, at
+    enc(a, (list of 0xF3), no, (list of 0x0F, 0x6F), x, at, empty list)
+end
+
+# 16 bits of register src, signed, into dst
+to movsx16 with a, dst, src
+    enc(a, empty list, yes, (list of 0x0F, 0xBF), dst, reg_at(src), empty list)
+end
+
+# xmm x without its sign; uses rax
+to abs_sd with a, x
+    movq_rx(a, rax, x)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, x, rax)
+end
+
+# xmm dst: where x in the picture goes across, 250 + x times the scale; uses xmm5
+to picture_x with a, dst, at
+    movsd_load(a, dst, at)
+    sse_math(a, "*", dst, rip("gui_scale"))
+    load_bits(a, xmm5, double_bytes(250))
+    sse_math(a, "+", dst, reg_at(xmm5))
+end
+
+# xmm dst: where y goes down, 250 - y times the scale; uses xmm5
+to picture_y with a, dst, at
+    movsd_load(a, xmm5, at)
+    sse_math(a, "*", xmm5, rip("gui_scale"))
+    load_bits(a, dst, double_bytes(250))
+    sse_math(a, "-", dst, reg_at(xmm5))
+end
+
+# a text's UTF-16, ending in 0, in the read-only data: its label
+to wide_place with a, t
+    set ro to rodata of a
+    pad_to(ro, 2)
+    set label to "W" + length of ro
+    rodata_here(a, label)
+    for each c in t
+        set code to code_point(c)
+        if code is less than 65536
+            put16(ro, code)
+        else
+            set code to code - 65536
+            put16(ro, 0xD800 + shift code right by 10)
+            put16(ro, 0xDC00 + (code bit and 1023))
+        end
+    end
+    put16(ro, 0)
+    return label
+end
+
+to emit_gui with a, title
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "css_names") # 32 bytes each: the name's length, then the name
+    set colour_count to 0
+    set k to 1
+    repeat while k is at most length of css_colors
+        set named to (item k of css_colors) as bytes
+        put64(ro, length of named)
+        put_all(ro, named)
+        repeat 24 - length of named times
+            add 0 to ro
+        end
+        add 1 to colour_count
+        set k to k + 2
+    end
+    rodata_here(a, "css_argb")
+    set k to 2
+    repeat while k is at most length of css_colors
+        put32(ro, 0xFF000000 + item k of css_colors)
+        set k to k + 2
+    end
+    set class_name to wide_place(a, "MothWindow")
+    set font_name to wide_place(a, "Segoe UI")
+    set picture_title to wide_place(a, title + " - Moth")
+    set picture_env to wide_place(a, "MOTH_PICTURE")
+    set events_env to wide_place(a, "MOTH_EVENTS")
+    set pad_hint to wide_place(a, "Enter answers, Esc clears, closing ends the program")
+
+    # rt_css_argb: rax a colour as text: its ARGB in rax, or -1 for one a canvas wouldn't know. #rgb, #rgba,
+    # #rrggbb, #rrggbbaa, a CSS name in any case, or transparent.
+    set hex_loop to new_label(a)
+    set hex_done to new_label(a)
+    set not_hex to new_label(a)
+    set unknown to new_label(a)
+    set names_loop to new_label(a)
+    set name_next to new_label(a)
+    set name_chars to new_label(a)
+    set name_found to new_label(a)
+    set digit_ok to new_label(a)
+    set lower_ok to new_label(a)
+    set short_form to new_label(a)
+    set has_alpha to new_label(a)
+    set argb_back to new_label(a)
+    set a_text_colour to new_label(a)
+    mark(a, "rt_css_argb")
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_e, a_text_colour)
+    movi(a, rax, -1)
+    ret(a)
+    mark(a, a_text_colour)
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    untag(a, rax)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, unknown)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 35) # #
+    jcc(a, cc_ne, not_hex)
+    movi(a, rbx, 0) # the hex digits, 4 bits each
+    lea(a, r12, mem(rcx, -1)) # how many
+    movi(a, r13, 1)
+    mark(a, hex_loop)
+    alu(a, "cmp", r13, rcx)
+    jcc(a, cc_ae, hex_done)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r13)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "or", rax, 32) # lower case
+    alui(a, "sub", rax, 48)
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_be, digit_ok)
+    alui(a, "sub", rax, 49) # 'a' - '0'
+    alui(a, "cmp", rax, 5)
+    jcc(a, cc_a, unknown)
+    alui(a, "add", rax, 10)
+    mark(a, digit_ok)
+    shifti(a, "shl", rbx, 4)
+    alu(a, "or", rbx, rax)
+    inc_r(a, r13)
+    jmp_to(a, hex_loop)
+    mark(a, hex_done)
+    alui(a, "cmp", r12, 3)
+    jcc(a, cc_e, short_form)
+    alui(a, "cmp", r12, 4)
+    jcc(a, cc_e, short_form)
+    alui(a, "cmp", r12, 6)
+    jcc(a, cc_e, argb_back)
+    alui(a, "cmp", r12, 8)
+    jcc(a, cc_ne, unknown)
+    mov_rr(a, rax, rbx) # rrggbbaa: the alpha to the top
+    alui(a, "and", rax, 255)
+    shifti(a, "shl", rax, 24)
+    shifti(a, "shr", rbx, 8)
+    alu(a, "or", rbx, rax)
+    mov_rr(a, rax, rbx)
+    jmp_to(a, has_alpha)
+    mark(a, short_form) # each digit twice
+    movi(a, rax, 0)
+    movi(a, r13, 0)
+    set doubling to new_label(a)
+    set doubled to new_label(a)
+    mov_rr(a, rdx, r12)
+    mark(a, doubling)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, doubled)
+    dec_r(a, rdx)
+    mov_rr(a, rcx, rdx)
+    shifti(a, "shl", rcx, 2)
+    mov_rr(a, r8, rbx)
+    shift_cl(a, "shr", r8)
+    alui(a, "and", r8, 15)
+    mov_rr(a, r9, r8)
+    shifti(a, "shl", r9, 4)
+    alu(a, "or", r8, r9)
+    shifti(a, "shl", rax, 8)
+    alu(a, "or", rax, r8)
+    jmp_to(a, doubling)
+    mark(a, doubled)
+    mov_rr(a, rbx, rax)
+    alui(a, "cmp", r12, 4)
+    jcc(a, cc_ne, argb_back)
+    mov_rr(a, rax, rbx)
+    alui(a, "and", rax, 255)
+    shifti(a, "shl", rax, 24)
+    shifti(a, "shr", rbx, 8)
+    alu(a, "or", rbx, rax)
+    mov_rr(a, rax, rbx)
+    jmp_to(a, has_alpha)
+    mark(a, argb_back)
+    mov_rr(a, rax, rbx)
+    alui(a, "or", rax, -16777216) # opaque
+    shifti(a, "shl", rax, 32)
+    shifti(a, "shr", rax, 32)
+    mark(a, has_alpha)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, not_hex) # a name
+    lea(a, rbx, rip("css_names"))
+    movi(a, r12, 0)
+    mark(a, names_loop)
+    alui(a, "cmp", r12, colour_count)
+    jcc(a, cc_ae, unknown)
+    alu_load(a, "cmp", rcx, mem(rbx, 0))
+    jcc(a, cc_ne, name_next)
+    movi(a, r13, 0)
+    mark(a, name_chars)
+    alu(a, "cmp", r13, rcx)
+    jcc(a, cc_ae, name_found)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r13)
+    load8(a, rax, mem(rax, 0))
+    lea(a, rdx, mem(rax, -65)) # A to Z, lower case
+    alui(a, "cmp", rdx, 25)
+    jcc(a, cc_a, lower_ok)
+    alui(a, "add", rax, 32)
+    mark(a, lower_ok)
+    mov_rr(a, rdx, rbx)
+    alu(a, "add", rdx, r13)
+    load8(a, rdx, mem(rdx, 8))
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_ne, name_next)
+    inc_r(a, r13)
+    jmp_to(a, name_chars)
+    mark(a, name_next)
+    alui(a, "add", rbx, 32)
+    inc_r(a, r12)
+    jmp_to(a, names_loop)
+    mark(a, name_found)
+    lea(a, rax, rip("css_argb"))
+    shifti(a, "shl", r12, 2)
+    alu(a, "add", rax, r12)
+    load32(a, rax, mem(rax, 0))
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, unknown) # transparent, or one it doesn't know
+    set not_clear to new_label(a)
+    alui(a, "cmp", rcx, 11)
+    jcc(a, cc_ne, not_clear)
+    lea(a, rdi, rip(label of text_place(a, "transparent")))
+    movi(a, r13, 0)
+    set clear_chars to new_label(a)
+    mark(a, clear_chars)
+    alui(a, "cmp", r13, 11)
+    set is_clear to new_label(a)
+    jcc(a, cc_ae, is_clear)
+    mov_rr(a, rax, rsi)
+    alu(a, "add", rax, r13)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "or", rax, 32)
+    mov_rr(a, rdx, rdi)
+    alu(a, "add", rdx, r13)
+    load8(a, rdx, mem(rdx, 0))
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_ne, not_clear)
+    inc_r(a, r13)
+    jmp_to(a, clear_chars)
+    mark(a, is_clear)
+    movi(a, rax, 0)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, not_clear)
+    movi(a, rax, -1)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_pic_scale: how much smaller to draw it: 1 for an app, else at most what fits it in, 240 from the middle
+    set reach_loop to new_label(a)
+    set reach_done to new_label(a)
+    set not_line to new_label(a)
+    set not_box to new_label(a)
+    set not_round to new_label(a)
+    set reached to new_label(a)
+    set app_scale to new_label(a)
+    mark(a, "rt_pic_scale")
+    load(a, rax, rip("app_n"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, app_scale)
+    load_bits(a, xmm6, double_bytes(0)) # the reach
+    load(a, rsi, rip("pic_items"))
+    load(a, rcx, rip("pic_n"))
+    mark(a, reach_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, reach_done)
+    load(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_ne, not_line)
+    for each off in list of 8, 16, 24, 32
+        movsd_load(a, xmm0, mem(rsi, off))
+        abs_sd(a, xmm0)
+        sse_math(a, "max", xmm6, reg_at(xmm0))
+    end
+    jmp_to(a, reached)
+    mark(a, not_line)
+    alui(a, "cmp", rdx, 2)
+    jcc(a, cc_ne, not_box)
+    for each pair in list of (list of 8, 0), (list of 16, 0), (list of 8, 24), (list of 16, 32)
+        movsd_load(a, xmm0, mem(rsi, item 1 of pair))
+        if item 2 of pair is not 0
+            sse_math(a, "+", xmm0, mem(rsi, item 2 of pair))
+        end
+        abs_sd(a, xmm0)
+        sse_math(a, "max", xmm6, reg_at(xmm0))
+    end
+    jmp_to(a, reached)
+    mark(a, not_box)
+    alui(a, "cmp", rdx, 3)
+    jcc(a, cc_ne, not_round)
+    movsd_load(a, xmm0, mem(rsi, 8)) # a circle: the farther of x and y, and its radius
+    abs_sd(a, xmm0)
+    movsd_load(a, xmm1, mem(rsi, 16))
+    abs_sd(a, xmm1)
+    sse_math(a, "max", xmm0, reg_at(xmm1))
+    sse_math(a, "+", xmm0, mem(rsi, 24))
+    sse_math(a, "max", xmm6, reg_at(xmm0))
+    jmp_to(a, reached)
+    mark(a, not_round) # text: its x, and its y and size
+    movsd_load(a, xmm0, mem(rsi, 8))
+    abs_sd(a, xmm0)
+    sse_math(a, "max", xmm6, reg_at(xmm0))
+    movsd_load(a, xmm0, mem(rsi, 16))
+    abs_sd(a, xmm0)
+    sse_math(a, "+", xmm0, mem(rsi, 24))
+    sse_math(a, "max", xmm6, reg_at(xmm0))
+    mark(a, reached)
+    alui(a, "add", rsi, 64)
+    dec_r(a, rcx)
+    jmp_to(a, reach_loop)
+    mark(a, reach_done)
+    load_bits(a, xmm0, double_bytes(240))
+    sse_math(a, "/", xmm0, reg_at(xmm6))
+    load_bits(a, xmm1, double_bytes(1))
+    minsd(a, xmm1, xmm0)
+    movsd_store(a, rip("gui_scale"), xmm1)
+    ret(a)
+    mark(a, app_scale)
+    load_bits(a, xmm0, double_bytes(1))
+    movsd_store(a, rip("gui_scale"), xmm0)
+    ret(a)
+
+    # rt_render_picture: rcx a GDI+ graphics: the picture on it, from the last `clear` on
+    set item_loop to new_label(a)
+    set items_done to new_label(a)
+    set colour_known to new_label(a)
+    set colour_kept to new_label(a)
+    set a_box to new_label(a)
+    set a_circle to new_label(a)
+    set a_text to new_label(a)
+    set item_next to new_label(a)
+    set not_dot to new_label(a)
+    mark(a, "rt_render_picture")
+    for each r in list of rbx, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    mov_rr(a, r14, rcx)
+    win_enter(a)
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 4) # smoothed
+    w_call(a, "GdipSetSmoothingMode")
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 4)
+    w_call(a, "GdipSetTextRenderingHint")
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 0xFF0B1122) # the playground's dark blue
+    w_call(a, "GdipGraphicsClear")
+    call_to(a, "rt_pic_scale")
+    movi(a, rax, 0xFF000000) # a colour a canvas doesn't know keeps the one before, black to start
+    store(a, rip("gui_argb"), rax)
+    storei(a, rip("gui_last"), 0)
+    load(a, r12, rip("pic_items"))
+    load(a, r13, rip("pic_n"))
+    movi(a, r15, 0)
+    mark(a, item_loop)
+    alu(a, "cmp", r15, r13)
+    jcc(a, cc_ae, items_done)
+    mov_rr(a, rbx, r15)
+    shifti(a, "shl", rbx, 6)
+    alu(a, "add", rbx, r12)
+    load(a, rax, mem(rbx, 48))
+    alu_load(a, "cmp", rax, rip("gui_last"))
+    jcc(a, cc_e, colour_known)
+    store(a, rip("gui_last"), rax)
+    call_to(a, "rt_css_argb")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, colour_known)
+    store(a, rip("gui_argb"), rax)
+    mark(a, colour_known)
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, a_box)
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_e, a_circle)
+    alui(a, "cmp", rax, 4)
+    jcc(a, cc_e, a_text)
+    # a line, with round ends; one that goes nowhere is a dot, as on a canvas
+    movsd_load(a, xmm0, mem(rbx, 8))
+    ucomisd(a, xmm0, mem(rbx, 24))
+    jcc(a, cc_ne, not_dot)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    ucomisd(a, xmm0, mem(rbx, 32))
+    jcc(a, cc_ne, not_dot)
+    load32(a, rcx, rip("gui_argb"))
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    movsd_load(a, xmm0, mem(rbx, 40)) # the width, scaled: a circle that wide
+    sse_math(a, "*", xmm0, rip("gui_scale"))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(5), xmm4)
+    movss_store(a, arg_at(6), xmm4)
+    load_bits(a, xmm1, double_bytes(0.5))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_half"), xmm0)
+    picture_x(a, xmm2, mem(rbx, 8))
+    sse_math(a, "-", xmm2, rip("gui_half"))
+    cvtsd2ss(a, xmm2, xmm2)
+    picture_y(a, xmm3, mem(rbx, 16))
+    sse_math(a, "-", xmm3, rip("gui_half"))
+    cvtsd2ss(a, xmm3, xmm3)
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipFillEllipse")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    jmp_to(a, item_next)
+    mark(a, not_dot)
+    movsd_load(a, xmm0, mem(rbx, 40))
+    sse_math(a, "*", xmm0, rip("gui_scale"))
+    cvtsd2ss(a, xmm1, xmm0)
+    load32(a, rcx, rip("gui_argb"))
+    movi(a, r8, 2) # in pixels
+    lea(a, r9, rip("gui_pen"))
+    w_call(a, "GdipCreatePen1")
+    for each fn_name in list of "GdipSetPenStartCap", "GdipSetPenEndCap"
+        load(a, rcx, rip("gui_pen"))
+        movi(a, rdx, 2) # round
+        w_call(a, fn_name)
+    end
+    picture_x(a, xmm0, mem(rbx, 24))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(5), xmm4)
+    picture_y(a, xmm0, mem(rbx, 32))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(6), xmm4)
+    picture_x(a, xmm2, mem(rbx, 8))
+    cvtsd2ss(a, xmm2, xmm2)
+    picture_y(a, xmm3, mem(rbx, 16))
+    cvtsd2ss(a, xmm3, xmm3)
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_pen"))
+    w_call(a, "GdipDrawLine")
+    load(a, rcx, rip("gui_pen"))
+    w_call(a, "GdipDeletePen")
+    jmp_to(a, item_next)
+    mark(a, a_box) # from its corner nearest the top left
+    load32(a, rcx, rip("gui_argb"))
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    movsd_load(a, xmm0, mem(rbx, 8))
+    movapd(a, xmm1, xmm0)
+    sse_math(a, "+", xmm1, mem(rbx, 24))
+    minsd(a, xmm0, xmm1)
+    movsd_store(a, rip("gui_t0"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    movapd(a, xmm1, xmm0)
+    sse_math(a, "+", xmm1, mem(rbx, 32))
+    sse_math(a, "max", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    for each pair in list of (list of 24, 5), (list of 32, 6)
+        movsd_load(a, xmm0, mem(rbx, item 1 of pair))
+        abs_sd(a, xmm0)
+        sse_math(a, "*", xmm0, rip("gui_scale"))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, arg_at(item 2 of pair), xmm4)
+    end
+    picture_x(a, xmm2, rip("gui_t0"))
+    cvtsd2ss(a, xmm2, xmm2)
+    picture_y(a, xmm3, rip("gui_t1"))
+    cvtsd2ss(a, xmm3, xmm3)
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipFillRectangle")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    jmp_to(a, item_next)
+    mark(a, a_circle) # in the square around it
+    load32(a, rcx, rip("gui_argb"))
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    movsd_load(a, xmm0, mem(rbx, 8))
+    sse_math(a, "-", xmm0, mem(rbx, 24))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    sse_math(a, "+", xmm0, mem(rbx, 24))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 24))
+    sse_math(a, "+", xmm0, reg_at(xmm0))
+    sse_math(a, "*", xmm0, rip("gui_scale"))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(5), xmm4)
+    movss_store(a, arg_at(6), xmm4)
+    picture_x(a, xmm2, rip("gui_t0"))
+    cvtsd2ss(a, xmm2, xmm2)
+    picture_y(a, xmm3, rip("gui_t1"))
+    cvtsd2ss(a, xmm3, xmm3)
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipFillEllipse")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    jmp_to(a, item_next)
+    mark(a, a_text) # its baseline at y, as a canvas puts it
+    load32(a, rcx, rip("gui_argb"))
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    load(a, rcx, rip("gui_family"))
+    movsd_load(a, xmm0, mem(rbx, 24))
+    sse_math(a, "*", xmm0, rip("gui_scale"))
+    cvtsd2ss(a, xmm1, xmm0)
+    movi(a, r8, 0)
+    movi(a, r9, 2)
+    lea(a, rax, rip("gui_font"))
+    store(a, arg_at(5), rax)
+    w_call(a, "GdipCreateFont")
+    load(a, rax, mem(rbx, 56)) # the text, as UTF-16
+    untag(a, rax)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    load(a, r8, mem(rax, 16))
+    load32(a, r9, mem(rax, 0))
+    lea(a, rax, rip("wbuf"))
+    store(a, arg_at(5), rax)
+    storei(a, arg_at(6), wide_cap)
+    w_call(a, "MultiByteToWideChar")
+    store(a, rip("gui_units"), rax)
+    picture_x(a, xmm0, mem(rbx, 8))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip("gui_rectf"), xmm4)
+    picture_y(a, xmm0, mem(rbx, 16))
+    movsd_load(a, xmm1, mem(rbx, 24))
+    sse_math(a, "*", xmm1, rip("gui_scale"))
+    sse_math(a, "*", xmm1, rip("gui_ascent"))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip_plus("gui_rectf", 4), xmm4)
+    load_bits(a, xmm0, double_bytes(100000))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip_plus("gui_rectf", 8), xmm4)
+    movss_store(a, rip_plus("gui_rectf", 12), xmm4)
+    mov_rr(a, rcx, r14)
+    lea(a, rdx, rip("wbuf"))
+    load32(a, r8, rip("gui_units"))
+    load(a, r9, rip("gui_font"))
+    lea(a, rax, rip("gui_rectf"))
+    store(a, arg_at(5), rax)
+    load(a, rax, rip("gui_format"))
+    store(a, arg_at(6), rax)
+    load(a, rax, rip("gui_brush"))
+    store(a, arg_at(7), rax)
+    w_call(a, "GdipDrawString")
+    load(a, rcx, rip("gui_font"))
+    w_call(a, "GdipDeleteFont")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    mark(a, item_next)
+    inc_r(a, r15)
+    jmp_to(a, item_loop)
+    mark(a, items_done)
+    win_leave(a)
+    for each r in list of r15, r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_render_pad: rcx a GDI+ graphics: the drawing pad, its strokes 26 wide and nearly white, as the
+    # playground's pad draws them, and how to use it
+    set point_loop to new_label(a)
+    set points_done to new_label(a)
+    set stroke_start to new_label(a)
+    set point_next to new_label(a)
+    mark(a, "rt_render_pad")
+    for each r in list of rbx, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    mov_rr(a, r14, rcx)
+    win_enter(a)
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 4)
+    w_call(a, "GdipSetSmoothingMode")
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 4)
+    w_call(a, "GdipSetTextRenderingHint")
+    mov_rr(a, rcx, r14)
+    movi(a, rdx, 0xFF080C18)
+    w_call(a, "GdipGraphicsClear")
+    movi(a, rcx, 0xFFF5F5F5)
+    load_bits(a, xmm0, double_bytes(26))
+    cvtsd2ss(a, xmm1, xmm0)
+    movi(a, r8, 2)
+    lea(a, r9, rip("gui_pen"))
+    w_call(a, "GdipCreatePen1")
+    for each fn_name in list of "GdipSetPenStartCap", "GdipSetPenEndCap", "GdipSetPenLineJoin"
+        load(a, rcx, rip("gui_pen"))
+        movi(a, rdx, 2)
+        w_call(a, fn_name)
+    end
+    movi(a, rcx, 0xFFF5F5F5)
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    load(a, r12, rip("pad_pts"))
+    load(a, r13, rip("pad_n"))
+    movi(a, r15, 0)
+    mark(a, point_loop)
+    alu(a, "cmp", r15, r13)
+    jcc(a, cc_ae, points_done)
+    imul_ri(a, rbx, r15, 24)
+    alu(a, "add", rbx, r12)
+    load(a, rax, mem(rbx, 16))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, stroke_start)
+    for each pair in list of (list of 0, 5), (list of 8, 6) # from the point before to this one
+        load(a, rax, mem(rbx, item 1 of pair))
+        cvtsi2sd(a, xmm0, rax)
+        load_bits(a, xmm1, double_bytes(4.4))
+        sse_math(a, "*", xmm0, reg_at(xmm1))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, arg_at(item 2 of pair), xmm4)
+    end
+    for each pair in list of (list of -24, xmm2), (list of -16, xmm3)
+        load(a, rax, mem(rbx, item 1 of pair))
+        cvtsi2sd(a, item 2 of pair, rax)
+        load_bits(a, xmm1, double_bytes(4.4))
+        sse_math(a, "*", item 2 of pair, reg_at(xmm1))
+        cvtsd2ss(a, item 2 of pair, item 2 of pair)
+    end
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_pen"))
+    w_call(a, "GdipDrawLine")
+    jmp_to(a, point_next)
+    mark(a, stroke_start) # a dot where a stroke starts
+    load_bits(a, xmm0, double_bytes(26))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(5), xmm4)
+    movss_store(a, arg_at(6), xmm4)
+    for each pair in list of (list of 0, xmm2), (list of 8, xmm3)
+        load(a, rax, mem(rbx, item 1 of pair))
+        cvtsi2sd(a, item 2 of pair, rax)
+        load_bits(a, xmm1, double_bytes(4.4))
+        sse_math(a, "*", item 2 of pair, reg_at(xmm1))
+        load_bits(a, xmm1, double_bytes(13))
+        sse_math(a, "-", item 2 of pair, reg_at(xmm1))
+        cvtsd2ss(a, item 2 of pair, item 2 of pair)
+    end
+    mov_rr(a, rcx, r14)
+    load(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipFillEllipse")
+    mark(a, point_next)
+    inc_r(a, r15)
+    jmp_to(a, point_loop)
+    mark(a, points_done)
+    load(a, rcx, rip("gui_pen"))
+    w_call(a, "GdipDeletePen")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    movi(a, rcx, 0xFF5A6488) # how to use it, small and dim, at the bottom
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    load(a, rcx, rip("gui_family"))
+    load_bits(a, xmm0, double_bytes(13))
+    cvtsd2ss(a, xmm1, xmm0)
+    movi(a, r8, 0)
+    movi(a, r9, 2)
+    lea(a, rax, rip("gui_font"))
+    store(a, arg_at(5), rax)
+    w_call(a, "GdipCreateFont")
+    for each pair in list of (list of 0, 10), (list of 4, 418), (list of 8, 420), (list of 12, 30)
+        load_bits(a, xmm0, double_bytes(item 2 of pair))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, rip_plus("gui_rectf", item 1 of pair), xmm4)
+    end
+    mov_rr(a, rcx, r14)
+    lea(a, rdx, rip(pad_hint))
+    movi(a, r8, -1)
+    load(a, r9, rip("gui_font"))
+    lea(a, rax, rip("gui_rectf"))
+    store(a, arg_at(5), rax)
+    load(a, rax, rip("gui_format"))
+    store(a, arg_at(6), rax)
+    load(a, rax, rip("gui_brush"))
+    store(a, arg_at(7), rax)
+    w_call(a, "GdipDrawString")
+    load(a, rcx, rip("gui_font"))
+    w_call(a, "GdipDeleteFont")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    win_leave(a)
+    for each r in list of r15, r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gui_start: GDI+, the font, and the window's class, once
+    set started to new_label(a)
+    mark(a, "rt_gui_start")
+    load(a, rax, rip("gui_started"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, started)
+    storei(a, rip("gui_started"), 1)
+    win_enter(a)
+    storei(a, rip("gui_input"), 1)
+    lea(a, rcx, rip("gui_token"))
+    lea(a, rdx, rip("gui_input"))
+    movi(a, r8, 0)
+    w_call(a, "GdiplusStartup")
+    lea(a, rcx, rip(font_name))
+    movi(a, rdx, 0)
+    lea(a, r8, rip("gui_family"))
+    w_call(a, "GdipCreateFontFamilyFromName")
+    load(a, rcx, rip("gui_family"))
+    movi(a, rdx, 0)
+    lea(a, r8, rip("gui_t0"))
+    w_call(a, "GdipGetCellAscent")
+    load(a, rcx, rip("gui_family"))
+    movi(a, rdx, 0)
+    lea(a, r8, rip("gui_t1"))
+    w_call(a, "GdipGetEmHeight")
+    load16(a, rax, rip("gui_t0")) # how far above the baseline the font goes, for its size
+    cvtsi2sd(a, xmm0, rax)
+    load16(a, rax, rip("gui_t1"))
+    cvtsi2sd(a, xmm1, rax)
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_ascent"), xmm0)
+    lea(a, rcx, rip("gui_format"))
+    w_call(a, "GdipStringFormatGetGenericTypographic")
+    movi(a, rcx, 0)
+    w_call(a, "GetModuleHandleW")
+    store(a, rip("gui_hinst"), rax)
+    movi(a, rcx, 0)
+    movi(a, rdx, 32512) # the arrow
+    w_call(a, "LoadCursorW")
+    storei(a, rip("gui_wc"), 80)
+    lea(a, rcx, rip("rt_wndproc"))
+    store(a, rip_plus("gui_wc", 8), rcx)
+    load(a, rcx, rip("gui_hinst"))
+    store(a, rip_plus("gui_wc", 24), rcx)
+    store(a, rip_plus("gui_wc", 40), rax)
+    lea(a, rcx, rip(class_name))
+    store(a, rip_plus("gui_wc", 64), rcx)
+    lea(a, rcx, rip("gui_wc"))
+    w_call(a, "RegisterClassExW")
+    win_leave(a)
+    mark(a, started)
+    ret(a)
+
+    # rt_window_open: rcx 0 for the picture or 1 for the pad, rdx how many pixels across and down, r8 the
+    # title: a window, shown
+    mark(a, "rt_window_open")
+    store(a, rip("gui_mode"), rcx)
+    store(a, rip("gui_size"), rdx)
+    storei(a, rip("gui_done"), 0)
+    push_r(a, rbx)
+    mov_rr(a, rbx, r8)
+    call_to(a, "rt_gui_start")
+    win_enter(a)
+    storei(a, rip("gui_rect"), 0)
+    load(a, rax, rip("gui_size"))
+    store32(a, rip_plus("gui_rect", 8), rax)
+    store32(a, rip_plus("gui_rect", 12), rax)
+    lea(a, rcx, rip("gui_rect"))
+    movi(a, rdx, 0x00CA0000) # a caption, a close box and a minimise box
+    movi(a, r8, 0)
+    w_call(a, "AdjustWindowRect")
+    movi(a, rcx, 0)
+    lea(a, rdx, rip(class_name))
+    mov_rr(a, r8, rbx)
+    movi(a, r9, 0x10CA0000) # and visible
+    storei(a, arg_at(5), -2147483648)
+    storei(a, arg_at(6), -2147483648)
+    load32s(a, rax, rip_plus("gui_rect", 8))
+    load32s(a, r10, rip("gui_rect"))
+    alu(a, "sub", rax, r10)
+    store(a, arg_at(7), rax)
+    load32s(a, rax, rip_plus("gui_rect", 12))
+    load32s(a, r10, rip_plus("gui_rect", 4))
+    alu(a, "sub", rax, r10)
+    store(a, arg_at(8), rax)
+    storei(a, arg_at(9), 0)
+    storei(a, arg_at(10), 0)
+    load(a, rax, rip("gui_hinst"))
+    store(a, arg_at(11), rax)
+    storei(a, arg_at(12), 0)
+    w_call(a, "CreateWindowExW")
+    store(a, rip("gui_hwnd"), rax)
+    mov_rr(a, rcx, rax)
+    w_call(a, "SetForegroundWindow")
+    win_leave(a)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_gui_loop: messages to the window until it's done with
+    set loop_top to new_label(a)
+    set loop_out to new_label(a)
+    mark(a, "rt_gui_loop")
+    win_enter(a)
+    mark(a, loop_top)
+    load(a, rax, rip("gui_done"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, loop_out)
+    lea(a, rcx, rip("gui_msg"))
+    movi(a, rdx, 0)
+    movi(a, r8, 0)
+    movi(a, r9, 0)
+    w_call(a, "GetMessageW")
+    load32s(a, rax, reg_at(rax))
+    alui(a, "cmp", rax, 0)
+    jcc(a, cc_le, loop_out)
+    lea(a, rcx, rip("gui_msg"))
+    w_call(a, "TranslateMessage")
+    lea(a, rcx, rip("gui_msg"))
+    w_call(a, "DispatchMessageW")
+    jmp_to(a, loop_top)
+    mark(a, loop_out)
+    win_leave(a)
+    ret(a)
+
+    # rt_paint: rcx the window: drawn again, into a picture of its own first, then all at once
+    set as_pad to new_label(a)
+    set drawn to new_label(a)
+    mark(a, "rt_paint")
+    for each r in list of rbx, r12, r13, r14
+        push_r(a, r)
+    end
+    mov_rr(a, rbx, rcx)
+    win_enter(a)
+    mov_rr(a, rcx, rbx)
+    lea(a, rdx, rip("gui_ps"))
+    w_call(a, "BeginPaint")
+    mov_rr(a, r12, rax)
+    mov_rr(a, rcx, r12)
+    w_call(a, "CreateCompatibleDC")
+    mov_rr(a, r13, rax)
+    mov_rr(a, rcx, r12)
+    load(a, rdx, rip("gui_size"))
+    mov_rr(a, r8, rdx)
+    w_call(a, "CreateCompatibleBitmap")
+    mov_rr(a, r14, rax)
+    mov_rr(a, rcx, r13)
+    mov_rr(a, rdx, r14)
+    w_call(a, "SelectObject")
+    store(a, rip("gui_old"), rax)
+    mov_rr(a, rcx, r13)
+    lea(a, rdx, rip("gui_graphics"))
+    w_call(a, "GdipCreateFromHDC")
+    load(a, rcx, rip("gui_graphics"))
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, as_pad)
+    call_to(a, "rt_render_picture")
+    jmp_to(a, drawn)
+    mark(a, as_pad)
+    call_to(a, "rt_render_pad")
+    mark(a, drawn)
+    load(a, rcx, rip("gui_graphics"))
+    w_call(a, "GdipDeleteGraphics")
+    mov_rr(a, rcx, r12)
+    movi(a, rdx, 0)
+    movi(a, r8, 0)
+    load(a, r9, rip("gui_size"))
+    store(a, arg_at(5), r9)
+    store(a, arg_at(6), r13)
+    storei(a, arg_at(7), 0)
+    storei(a, arg_at(8), 0)
+    storei(a, arg_at(9), 0x00CC0020) # copied as it is
+    w_call(a, "BitBlt")
+    mov_rr(a, rcx, r13)
+    load(a, rdx, rip("gui_old"))
+    w_call(a, "SelectObject")
+    mov_rr(a, rcx, r14)
+    w_call(a, "DeleteObject")
+    mov_rr(a, rcx, r13)
+    w_call(a, "DeleteDC")
+    mov_rr(a, rcx, rbx)
+    lea(a, rdx, rip("gui_ps"))
+    w_call(a, "EndPaint")
+    win_leave(a)
+    for each r in list of r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_app_call: rbx a handler: its function, called with ev_a and ev_b, as many as it takes. It's the
+    # first call in progress, so a mistake in it lists only the calls under it.
+    set no_inputs to new_label(a)
+    mark(a, "rt_app_call")
+    for each r in list of rbx, rbp, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rsp)
+    load(a, rax, mem(rbx, 8))
+    push_r(a, rax)
+    load(a, rcx, mem(rbx, 16))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, no_inputs)
+    load(a, rax, rip("ev_a"))
+    push_r(a, rax)
+    alui(a, "cmp", rcx, 2)
+    jcc(a, cc_b, no_inputs)
+    load(a, rax, rip("ev_b"))
+    push_r(a, rax)
+    mark(a, no_inputs)
+    storei(a, rip("try_top"), 0)
+    movi(a, r15, 1)
+    load(a, rax, mem(rbx, 8))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    movi(a, rax, -1)
+    call_r(a, rcx)
+    mov_rr(a, rsp, r12)
+    call_to(a, "rt_flush_out") # what it said, shown now
+    for each r in list of r15, r14, r13, r12, rbp, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_app_send: rcx what happened (0 a key, 1 a click, 2 a drag): each handler of it, in order
+    set send_loop to new_label(a)
+    set send_next to new_label(a)
+    set sent to new_label(a)
+    mark(a, "rt_app_send")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rcx)
+    movi(a, r13, 0)
+    mark(a, send_loop)
+    alu_load(a, "cmp", r13, rip("app_n"))
+    jcc(a, cc_ae, sent)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, 5)
+    alu_load(a, "add", rbx, rip("app_items"))
+    alu_load(a, "cmp", r12, mem(rbx, 0))
+    jcc(a, cc_ne, send_next)
+    call_to(a, "rt_app_call")
+    mark(a, send_next)
+    inc_r(a, r13)
+    jmp_to(a, send_loop)
+    mark(a, sent)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_app_tick: rcx which timer, from 0 in the order the program made them: its handler
+    set tick_loop to new_label(a)
+    set tick_next to new_label(a)
+    set ticked to new_label(a)
+    mark(a, "rt_app_tick")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rcx)
+    movi(a, r13, 0)
+    mark(a, tick_loop)
+    alu_load(a, "cmp", r13, rip("app_n"))
+    jcc(a, cc_ae, ticked)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, 5)
+    alu_load(a, "add", rbx, rip("app_items"))
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_ne, tick_next)
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, tick_next)
+    call_to(a, "rt_app_call")
+    jmp_to(a, ticked)
+    mark(a, tick_next)
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 3)
+    set not_timer to new_label(a)
+    jcc(a, cc_ne, not_timer)
+    dec_r(a, r12)
+    mark(a, not_timer)
+    inc_r(a, r13)
+    jmp_to(a, tick_loop)
+    mark(a, ticked)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_ev_spot: rcx and rdx a point in the window: as the picture's own numbers, (0, 0) in the middle and y
+    # going up, in ev_a and ev_b
+    mark(a, "rt_ev_spot")
+    alui(a, "sub", rcx, 250)
+    cvtsi2sd(a, xmm0, rcx)
+    movsd_store(a, rip("ev_a"), xmm0)
+    movi(a, rax, 250)
+    alu(a, "sub", rax, rdx)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("ev_b"), xmm0)
+    ret(a)
+
+    # rt_math_round: xmm0 as Math.round has it, into rax
+    set rounded_down to new_label(a)
+    mark(a, "rt_math_round")
+    floor_sd(a, xmm1, xmm0)
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    cvttsd2si(a, rax, xmm1)
+    load_bits(a, xmm3, double_bytes(0.5))
+    ucomisd(a, xmm2, reg_at(xmm3))
+    jcc(a, cc_b, rounded_down)
+    inc_r(a, rax)
+    mark(a, rounded_down)
+    ret(a)
+
+    # rt_pad_point: rcx and rdx a point on the pad, in its pixels, r8 1 if a stroke starts there: added, as
+    # the playground's pad has it, from 0 to 100 across and down, unless it's less than 1.5 from the last
+    set pad_room to new_label(a)
+    set pad_some to new_label(a)
+    set pad_add to new_label(a)
+    set pad_skip to new_label(a)
+    mark(a, "rt_pad_point")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r13, r8)
+    for each pair in list of (list of rcx, rbx), (list of rdx, r12)
+        cvtsi2sd(a, xmm0, item 1 of pair)
+        load_bits(a, xmm1, double_bytes(440))
+        sse_math(a, "/", xmm0, reg_at(xmm1))
+        load_bits(a, xmm1, double_bytes(100))
+        sse_math(a, "*", xmm0, reg_at(xmm1))
+        call_to(a, "rt_math_round")
+        mov_rr(a, item 2 of pair, rax)
+    end
+    set pad_has to new_label(a)
+    load(a, rax, rip("pad_n"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, pad_has)
+    movi(a, r13, 1) # the first point always starts a stroke
+    jmp_to(a, pad_add)
+    mark(a, pad_has)
+    test_rr(a, r13, r13)
+    jcc(a, cc_ne, pad_add)
+    imul_ri(a, rax, rax, 24)
+    alu_load(a, "add", rax, rip("pad_pts"))
+    mov_rr(a, rcx, rbx)
+    alu_load(a, "sub", rcx, mem(rax, -24))
+    imul_rr(a, rcx, rcx)
+    mov_rr(a, rdx, r12)
+    alu_load(a, "sub", rdx, mem(rax, -16))
+    imul_rr(a, rdx, rdx)
+    alu(a, "add", rcx, rdx)
+    cvtsi2sd(a, xmm0, rcx)
+    load_bits(a, xmm1, double_bytes(2.25))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_b, pad_skip)
+    mark(a, pad_add)
+    load(a, rax, rip("pad_n"))
+    alu_load(a, "cmp", rax, rip("pad_cap"))
+    jcc(a, cc_b, pad_room)
+    load(a, rcx, rip("pad_cap"))
+    alu(a, "add", rcx, rcx)
+    jcc(a, cc_ne, pad_some)
+    movi(a, rcx, 256)
+    mark(a, pad_some)
+    store(a, rip("pad_cap"), rcx)
+    imul_ri(a, rcx, rcx, 24)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("pad_pts"))
+    load(a, rcx, rip("pad_n"))
+    imul_ri(a, rcx, rcx, 3)
+    rep_movsq(a)
+    store(a, rip("pad_pts"), rax)
+    mark(a, pad_room)
+    load(a, rax, rip("pad_n"))
+    imul_ri(a, rax, rax, 24)
+    alu_load(a, "add", rax, rip("pad_pts"))
+    store(a, mem(rax, 0), rbx)
+    store(a, mem(rax, 8), r12)
+    store(a, mem(rax, 16), r13)
+    alu_at(a, "add", rip("pad_n"), 1)
+    mark(a, pad_skip)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_b_int: rax a whole number, maybe below 0, its digits into the builder
+    set positive to new_label(a)
+    set digit_loop to new_label(a)
+    set digits_out to new_label(a)
+    mark(a, "rt_b_int")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_ns, positive)
+    movi(a, rax, 45)
+    call_to(a, "rt_b_byte")
+    unary(a, "neg", rbx)
+    mark(a, positive)
+    lea(a, rdi, rip_plus("dbuf", 32))
+    mov_rr(a, rax, rbx)
+    movi(a, rcx, 10)
+    mark(a, digit_loop)
+    movi(a, rdx, 0)
+    unary(a, "div", rcx)
+    alui(a, "add", rdx, 48)
+    dec_r(a, rdi)
+    store8(a, mem(rdi, 0), rdx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, digit_loop)
+    mov_rr(a, rsi, rdi)
+    lea(a, rcx, rip_plus("dbuf", 32))
+    alu(a, "sub", rcx, rdi)
+    call_to(a, "rt_b_bytes")
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_pad_text: the strokes as text, the playground's pad's way: points "x,y" split by spaces, strokes by ";"
+    set text_loop to new_label(a)
+    set text_done to new_label(a)
+    set not_first to new_label(a)
+    set put_point to new_label(a)
+    mark(a, "rt_pad_text")
+    push_r(a, rbx)
+    push_r(a, r12)
+    call_to(a, "rt_b_reset")
+    movi(a, r12, 0)
+    mark(a, text_loop)
+    alu_load(a, "cmp", r12, rip("pad_n"))
+    jcc(a, cc_ae, text_done)
+    imul_ri(a, rbx, r12, 24)
+    alu_load(a, "add", rbx, rip("pad_pts"))
+    test_rr(a, r12, r12)
+    jcc(a, cc_e, put_point)
+    movi(a, rax, 32)
+    load(a, rcx, mem(rbx, 16))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, not_first)
+    movi(a, rax, 59)
+    mark(a, not_first)
+    call_to(a, "rt_b_byte")
+    mark(a, put_point)
+    load(a, rax, mem(rbx, 0))
+    call_to(a, "rt_b_int")
+    movi(a, rax, 44)
+    call_to(a, "rt_b_byte")
+    load(a, rax, mem(rbx, 8))
+    call_to(a, "rt_b_int")
+    inc_r(a, r12)
+    jmp_to(a, text_loop)
+    mark(a, text_done)
+    call_to(a, "rt_b_text")
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_wndproc: what Windows calls with what happened to the window: rcx the window, rdx what, r8 and r9
+    # more about it. It keeps what Windows needs kept, the xmm registers from 6 on included.
+    set w_paint to new_label(a)
+    set w_erase to new_label(a)
+    set w_close to new_label(a)
+    set w_destroy to new_label(a)
+    set w_timer to new_label(a)
+    set w_key to new_label(a)
+    set w_char to new_label(a)
+    set w_down to new_label(a)
+    set w_move to new_label(a)
+    set w_up to new_label(a)
+    set w_zero to new_label(a)
+    set w_back to new_label(a)
+    set w_redraw to new_label(a)
+    mark(a, "rt_wndproc")
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    for each r in list of rbx, rsi, rdi, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    alui(a, "sub", rsp, 168)
+    for each k from 6 to 15
+        movdqu_store(a, mem(rsp, 16 * (k - 6)), k)
+    end
+    mov_rr(a, rbx, rcx)
+    mov_rr(a, r12, rdx)
+    mov_rr(a, r13, r8)
+    mov_rr(a, r14, r9)
+    for each pair in list of (list of 0x000F, w_paint), (list of 0x0014, w_erase), (list of 0x0010, w_close),
+        (list of 0x0002, w_destroy), (list of 0x0113, w_timer), (list of 0x0100, w_key), (list of 0x0102, w_char),
+        (list of 0x0201, w_down), (list of 0x0200, w_move), (list of 0x0202, w_up)
+        alui(a, "cmp", r12, item 1 of pair)
+        jcc(a, cc_e, item 2 of pair)
+    end
+    win_enter(a) # anything else, as Windows does it
+    mov_rr(a, rcx, rbx)
+    mov_rr(a, rdx, r12)
+    mov_rr(a, r8, r13)
+    mov_rr(a, r9, r14)
+    w_call(a, "DefWindowProcW")
+    win_leave(a)
+    jmp_to(a, w_back)
+    mark(a, w_paint)
+    mov_rr(a, rcx, rbx)
+    call_to(a, "rt_paint")
+    jmp_to(a, w_zero)
+    mark(a, w_erase) # never wiped first: it's drawn whole
+    movi(a, rax, 1)
+    jmp_to(a, w_back)
+    mark(a, w_close) # the pad, closed: no answer; the picture, closed: gone
+    set close_picture to new_label(a)
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, close_picture)
+    storei(a, rip("gui_done"), 2)
+    jmp_to(a, w_zero)
+    mark(a, close_picture)
+    win_enter(a)
+    mov_rr(a, rcx, rbx)
+    w_call(a, "DestroyWindow")
+    win_leave(a)
+    jmp_to(a, w_zero)
+    mark(a, w_destroy)
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, w_zero)
+    storei(a, rip("gui_done"), 1)
+    win_enter(a)
+    movi(a, rcx, 0)
+    w_call(a, "PostQuitMessage")
+    win_leave(a)
+    jmp_to(a, w_zero)
+    mark(a, w_timer) # its handler: the timer's number is one more than its place
+    mov_rr(a, r12, rbx)
+    mov_rr(a, rbx, r13)
+    dec_r(a, rbx)
+    shifti(a, "shl", rbx, 5)
+    alu_load(a, "add", rbx, rip("app_items"))
+    call_to(a, "rt_app_call")
+    mov_rr(a, rbx, r12)
+    jmp_to(a, w_redraw)
+    mark(a, w_key)
+    set key_app to new_label(a)
+    set key_found to new_label(a)
+    set key_none to new_label(a)
+    set key_names_loop to new_label(a)
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, key_app)
+    alui(a, "cmp", r13, 0x0D) # the pad: Enter answers, Escape wipes it
+    set pad_not_enter to new_label(a)
+    jcc(a, cc_ne, pad_not_enter)
+    storei(a, rip("gui_done"), 1)
+    jmp_to(a, w_zero)
+    mark(a, pad_not_enter)
+    alui(a, "cmp", r13, 0x1B)
+    jcc(a, cc_ne, w_zero)
+    storei(a, rip("pad_n"), 0)
+    storei(a, rip("pad_down"), 0) # and a stroke going on stops, as the playground's does
+    jmp_to(a, w_redraw)
+    mark(a, key_app)
+    win_enter(a) # not with Ctrl or Alt, as the playground has it
+    movi(a, rcx, 0x11)
+    w_call(a, "GetKeyState")
+    win_leave(a)
+    alui(a, "and", rax, 0x8000)
+    jcc(a, cc_ne, w_zero)
+    lea(a, rsi, rip("gui_keys"))
+    movi(a, rcx, length of gui_key_names / 2)
+    mark(a, key_names_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, key_none)
+    alu_load(a, "cmp", r13, mem(rsi, 0))
+    jcc(a, cc_e, key_found)
+    alui(a, "add", rsi, 16)
+    dec_r(a, rcx)
+    jmp_to(a, key_names_loop)
+    mark(a, key_found)
+    load(a, rax, rip("app_n"))
+    test_rr(a, rax, rax)
+    set key_send to new_label(a)
+    jcc(a, cc_ne, key_send)
+    alui(a, "cmp", r13, 0x1B) # a picture, not an app: Escape closes it
+    jcc(a, cc_ne, w_zero)
+    jmp_to(a, close_picture)
+    mark(a, key_send)
+    load(a, rax, mem(rsi, 8))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, rip("ev_a"), rax)
+    movi(a, rcx, 0)
+    call_to(a, "rt_app_send")
+    jmp_to(a, w_redraw)
+    mark(a, key_none)
+    jmp_to(a, w_zero)
+    mark(a, w_char) # a character: lower case, unless it's one of those above, or with Ctrl
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, w_zero)
+    alui(a, "cmp", r13, 0x20)
+    jcc(a, cc_be, w_zero)
+    alui(a, "cmp", r13, 0x7F)
+    jcc(a, cc_e, w_zero)
+    mov_rr(a, rax, r13)
+    alui(a, "and", rax, 0xF800)
+    alui(a, "cmp", rax, 0xD800)
+    jcc(a, cc_e, w_zero)
+    win_enter(a)
+    movi(a, rcx, 0x11)
+    w_call(a, "GetKeyState")
+    win_leave(a)
+    alui(a, "and", rax, 0x8000)
+    jcc(a, cc_ne, w_zero)
+    win_enter(a)
+    mov_rr(a, rcx, r13)
+    w_call(a, "CharLowerW")
+    win_leave(a)
+    alui(a, "and", rax, 0xFFFF)
+    call_to(a, "rt_b_reset")
+    call_to(a, "rt_b_code")
+    call_to(a, "rt_b_text")
+    store(a, rip("ev_a"), rax)
+    movi(a, rcx, 0)
+    call_to(a, "rt_app_send")
+    jmp_to(a, w_redraw)
+    mark(a, w_down)
+    win_enter(a)
+    mov_rr(a, rcx, rbx)
+    w_call(a, "SetCapture")
+    win_leave(a)
+    movsx16(a, rcx, r14)
+    mov_rr(a, rdx, r14)
+    shifti(a, "shr", rdx, 16)
+    movsx16(a, rdx, rdx)
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    set down_app to new_label(a)
+    jcc(a, cc_e, down_app)
+    storei(a, rip("pad_down"), 1)
+    movi(a, r8, 1)
+    call_to(a, "rt_pad_point")
+    jmp_to(a, w_redraw)
+    mark(a, down_app)
+    call_to(a, "rt_ev_spot")
+    movi(a, rcx, 1)
+    call_to(a, "rt_app_send")
+    jmp_to(a, w_redraw)
+    mark(a, w_move) # with the button down: a drag, or more of a stroke
+    mov_rr(a, rax, r13)
+    alui(a, "and", rax, 1)
+    jcc(a, cc_e, w_zero)
+    movsx16(a, rcx, r14)
+    mov_rr(a, rdx, r14)
+    shifti(a, "shr", rdx, 16)
+    movsx16(a, rdx, rdx)
+    load(a, rax, rip("gui_mode"))
+    test_rr(a, rax, rax)
+    set move_app to new_label(a)
+    jcc(a, cc_e, move_app)
+    load(a, rax, rip("pad_down"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, w_zero)
+    movi(a, r8, 0)
+    call_to(a, "rt_pad_point")
+    jmp_to(a, w_redraw)
+    mark(a, move_app)
+    call_to(a, "rt_ev_spot")
+    movi(a, rcx, 2)
+    call_to(a, "rt_app_send")
+    jmp_to(a, w_redraw)
+    mark(a, w_up)
+    storei(a, rip("pad_down"), 0)
+    win_enter(a)
+    w_call(a, "ReleaseCapture")
+    win_leave(a)
+    jmp_to(a, w_zero)
+    mark(a, w_redraw) # what happened may have drawn something: the window, drawn again
+    win_enter(a)
+    mov_rr(a, rcx, rbx)
+    movi(a, rdx, 0)
+    movi(a, r8, 0)
+    w_call(a, "InvalidateRect")
+    win_leave(a)
+    mark(a, w_zero)
+    movi(a, rax, 0)
+    mark(a, w_back)
+    for each k from 6 to 15
+        movdqu_load(a, k, mem(rsp, 16 * (k - 6)))
+    end
+    alui(a, "add", rsp, 168)
+    for each r in list of r15, r14, r13, r12, rdi, rsi, rbx
+        pop_r(a, r)
+    end
+    pop_r(a, rbp)
+    ret(a)
+
+    # rt_headless: MOTH_PICTURE named a file: the events MOTH_EVENTS lists, then the picture, into that file
+    # as a BMP, 500 by 500
+    set ev_loop to new_label(a)
+    set ev_done to new_label(a)
+    set ev_click to new_label(a)
+    set ev_drag to new_label(a)
+    set ev_tick to new_label(a)
+    set ev_key to new_label(a)
+    set ev_skip to new_label(a)
+    mark(a, "rt_headless")
+    for each r in list of rbx, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    call_to(a, "rt_gui_start")
+    win_enter(a)
+    lea(a, rcx, rip(events_env))
+    lea(a, rdx, rip("gui_events"))
+    movi(a, r8, 4096)
+    w_call(a, "GetEnvironmentVariableW")
+    win_leave(a)
+    mov32_rr(a, r13, rax) # how many UTF-16 units: each, taken as a byte; none if too many to fit
+    set events_fit to new_label(a)
+    alui(a, "cmp", r13, 4096)
+    jcc(a, cc_b, events_fit)
+    movi(a, r13, 0)
+    mark(a, events_fit)
+    lea(a, r12, rip("gui_events"))
+    alu(a, "add", r13, r13)
+    alu(a, "add", r13, r12)
+    mark(a, ev_loop)
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, ev_done)
+    load16(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 32)
+    jcc(a, cc_e, ev_skip)
+    alui(a, "cmp", rax, 59)
+    jcc(a, cc_e, ev_skip)
+    mov_rr(a, r15, rax) # what it is, by its first letter: k, c, d or t
+    mark(a, "rt_ev_word")
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, ev_done)
+    load16(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 32)
+    set word_over to new_label(a)
+    jcc(a, cc_e, word_over)
+    alui(a, "add", r12, 2)
+    jmp_to(a, "rt_ev_word")
+    mark(a, word_over)
+    alui(a, "add", r12, 2)
+    alui(a, "cmp", r15, 107) # k
+    jcc(a, cc_e, ev_key)
+    call_to(a, "rt_ev_int")
+    mov_rr(a, r14, rax)
+    alui(a, "cmp", r15, 116) # t
+    jcc(a, cc_e, ev_tick)
+    call_to(a, "rt_ev_int")
+    mov_rr(a, rdx, rax)
+    mov_rr(a, rcx, r14)
+    alui(a, "add", rcx, 250) # the numbers are the picture's own: as a point in the window
+    movi(a, rax, 250)
+    alu(a, "sub", rax, rdx)
+    mov_rr(a, rdx, rax)
+    call_to(a, "rt_ev_spot")
+    movi(a, rcx, 1)
+    alui(a, "cmp", r15, 99) # c
+    jcc(a, cc_e, ev_click)
+    movi(a, rcx, 2)
+    mark(a, ev_click)
+    call_to(a, "rt_app_send")
+    jmp_to(a, ev_loop)
+    mark(a, ev_tick)
+    mov_rr(a, rcx, r14)
+    call_to(a, "rt_app_tick")
+    jmp_to(a, ev_loop)
+    mark(a, ev_key) # the key's name, up to the next ;
+    call_to(a, "rt_b_reset")
+    set key_chars to new_label(a)
+    set key_over to new_label(a)
+    mark(a, key_chars)
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, key_over)
+    load16(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 59)
+    jcc(a, cc_e, key_over)
+    call_to(a, "rt_b_byte")
+    alui(a, "add", r12, 2)
+    jmp_to(a, key_chars)
+    mark(a, key_over)
+    call_to(a, "rt_b_text")
+    store(a, rip("ev_a"), rax)
+    movi(a, rcx, 0)
+    call_to(a, "rt_app_send")
+    jmp_to(a, ev_loop)
+    mark(a, ev_skip)
+    alui(a, "add", r12, 2)
+    jmp_to(a, ev_loop)
+    mark(a, ev_done)
+    win_enter(a) # the picture, drawn into memory
+    movi(a, rcx, 0)
+    w_call(a, "CreateCompatibleDC")
+    mov_rr(a, r12, rax)
+    storei(a, rip("gui_bmi"), 40)
+    movi(a, rax, 500)
+    store32(a, rip_plus("gui_bmi", 4), rax)
+    movi(a, rax, -500) # from the top down
+    store32(a, rip_plus("gui_bmi", 8), rax)
+    movi(a, rax, 0x00200001) # one plane, 32 bits a pixel
+    store32(a, rip_plus("gui_bmi", 12), rax)
+    mov_rr(a, rcx, r12)
+    lea(a, rdx, rip("gui_bmi"))
+    movi(a, r8, 0)
+    lea(a, r9, rip("gui_bits"))
+    storei(a, arg_at(5), 0)
+    storei(a, arg_at(6), 0)
+    w_call(a, "CreateDIBSection")
+    mov_rr(a, r13, rax)
+    mov_rr(a, rcx, r12)
+    mov_rr(a, rdx, r13)
+    w_call(a, "SelectObject")
+    mov_rr(a, rcx, r12)
+    lea(a, rdx, rip("gui_graphics"))
+    w_call(a, "GdipCreateFromHDC")
+    storei(a, rip("gui_mode"), 0)
+    storei(a, rip("gui_size"), 500)
+    load(a, rcx, rip("gui_graphics"))
+    call_to(a, "rt_render_picture")
+    load(a, rcx, rip("gui_graphics"))
+    w_call(a, "GdipDeleteGraphics")
+    w_call(a, "GdiFlush")
+    lea(a, rcx, rip("gui_path")) # and into the file
+    movi(a, rdx, 0x40000000)
+    movi(a, r8, 0)
+    movi(a, r9, 0)
+    storei(a, arg_at(5), 2)
+    storei(a, arg_at(6), 0x80)
+    storei(a, arg_at(7), 0)
+    w_call(a, "CreateFileW")
+    mov_rr(a, r14, rax)
+    movi(a, rax, 0x4D42) # BM, its size, and where the pixels start
+    store(a, rip("gui_head"), rax)
+    movi(a, rax, 54 + 1000000)
+    store32(a, rip_plus("gui_head", 2), rax)
+    storei(a, rip_plus("gui_head", 6), 0)
+    movi(a, rax, 54)
+    store32(a, rip_plus("gui_head", 10), rax)
+    for each part in list of (list of "gui_head", 14), (list of "gui_bmi", 40), (list of "", 1000000)
+        mov_rr(a, rcx, r14)
+        if item 1 of part is ""
+            load(a, rdx, rip("gui_bits"))
+        else
+            lea(a, rdx, rip(item 1 of part))
+        end
+        movi(a, r8, item 2 of part)
+        lea(a, r9, rip("gui_t0"))
+        storei(a, arg_at(5), 0)
+        w_call(a, "WriteFile")
+    end
+    mov_rr(a, rcx, r14)
+    w_call(a, "CloseHandle")
+    win_leave(a)
+    for each r in list of r15, r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_ev_int: a whole number, maybe with a minus, from r12 (UTF-16) on, up to a space or ;: in rax
+    set int_loop to new_label(a)
+    set int_done to new_label(a)
+    set int_plus to new_label(a)
+    mark(a, "rt_ev_int")
+    movi(a, rax, 0)
+    movi(a, rcx, 0)
+    load16(a, rdx, mem(r12, 0))
+    alui(a, "cmp", rdx, 45)
+    jcc(a, cc_ne, int_loop)
+    movi(a, rcx, 1)
+    alui(a, "add", r12, 2)
+    mark(a, int_loop)
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, int_done)
+    load16(a, rdx, mem(r12, 0))
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_a, int_done)
+    imul_ri(a, rax, rax, 10)
+    alu(a, "add", rax, rdx)
+    alui(a, "add", r12, 2)
+    jmp_to(a, int_loop)
+    mark(a, int_done)
+    alui(a, "add", r12, 2)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, int_plus)
+    unary(a, "neg", rax)
+    mark(a, int_plus)
+    ret(a)
+
+    # rt_gui_finish: the program has ended: MOTH_PICTURE, or at a terminal a window for what it drew or the
+    # app it set up, until it's closed
+    set finished to new_label(a)
+    set timers_loop to new_label(a)
+    set timers_next to new_label(a)
+    set timers_done to new_label(a)
+    set faster to new_label(a)
+    mark(a, "rt_gui_finish")
+    for each r in list of rbx, r12
+        push_r(a, r)
+    end
+    win_enter(a)
+    lea(a, rcx, rip(picture_env))
+    lea(a, rdx, rip("gui_path"))
+    movi(a, r8, 1024)
+    w_call(a, "GetEnvironmentVariableW")
+    win_leave(a)
+    mov32_rr(a, rax, rax)
+    test_rr(a, rax, rax)
+    set no_file to new_label(a)
+    jcc(a, cc_e, no_file)
+    alui(a, "cmp", rax, 1024)
+    jcc(a, cc_ae, no_file)
+    call_to(a, "rt_headless")
+    jmp_to(a, finished)
+    mark(a, no_file)
+    load32(a, rax, rip("out_tty"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, finished)
+    load(a, rax, rip("pic_n"))
+    alu_load(a, "or", rax, rip("app_n"))
+    jcc(a, cc_e, finished)
+    movi(a, rcx, 0)
+    movi(a, rdx, 500)
+    lea(a, r8, rip(picture_title))
+    call_to(a, "rt_window_open")
+    movi(a, r12, 0) # each timer, every so many milliseconds, 10 at the fastest
+    mark(a, timers_loop)
+    alu_load(a, "cmp", r12, rip("app_n"))
+    jcc(a, cc_ae, timers_done)
+    mov_rr(a, rbx, r12)
+    shifti(a, "shl", rbx, 5)
+    alu_load(a, "add", rbx, rip("app_items"))
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_ne, timers_next)
+    movsd_load(a, xmm0, mem(rbx, 24))
+    cvttsd2si(a, r8, xmm0)
+    alui(a, "cmp", r8, 10)
+    jcc(a, cc_ge, faster)
+    movi(a, r8, 10)
+    mark(a, faster)
+    win_enter(a)
+    load(a, rcx, rip("gui_hwnd"))
+    lea(a, rdx, mem(r12, 1))
+    movi(a, r9, 0)
+    w_call(a, "SetTimer")
+    win_leave(a)
+    mark(a, timers_next)
+    inc_r(a, r12)
+    jmp_to(a, timers_loop)
+    mark(a, timers_done)
+    call_to(a, "rt_gui_loop")
+    mark(a, finished)
+    for each r in list of r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_pad_hook: xmm0 a question: if it starts with "Draw" and a person at a terminal is asked, the pad,
+    # with rax 1 and the drawing in xmm0, as text; else rax 0 and nothing changes
+    set not_pad to new_label(a)
+    set skip_spaces to new_label(a)
+    set spaced to new_label(a)
+    set word_end to new_label(a)
+    set is_pad to new_label(a)
+    mark(a, "rt_pad_hook")
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_ne, not_pad)
+    untag(a, rax)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    mark(a, skip_spaces)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, not_pad)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 32)
+    jcc(a, cc_e, spaced)
+    alui(a, "sub", rax, 9) # a tab to a carriage return
+    alui(a, "cmp", rax, 4)
+    jcc(a, cc_a, word_end)
+    mark(a, spaced)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, skip_spaces)
+    mark(a, word_end) # "draw", in any case, then not a letter, a digit or _
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_b, not_pad)
+    for each k from 0 to 3
+        load8(a, rax, mem(rsi, k))
+        alui(a, "or", rax, 32)
+        alui(a, "cmp", rax, item (k + 1) of (list of 100, 114, 97, 119))
+        jcc(a, cc_ne, not_pad)
+    end
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_e, is_pad)
+    load8(a, rax, mem(rsi, 4))
+    alui(a, "cmp", rax, 95)
+    jcc(a, cc_e, not_pad)
+    alui(a, "cmp", rax, 128)
+    jcc(a, cc_ae, is_pad)
+    set letter_test to new_label(a)
+    mov_rr(a, rdx, rax)
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_be, not_pad)
+    alui(a, "or", rax, 32)
+    alui(a, "sub", rax, 97)
+    alui(a, "cmp", rax, 25)
+    jcc(a, cc_be, not_pad)
+    mark(a, is_pad)
+    movsd_store(a, rip("pad_q"), xmm0)
+    call_to(a, "rt_in_setup")
+    set no_person to new_label(a)
+    load(a, rax, rip("in_tty"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_person)
+    push_r(a, rbx)
+    call_to(a, "rt_b_reset") # the question, and a space, as asking shows it
+    load(a, rax, rip("pad_q"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    movi(a, rax, 32)
+    call_to(a, "rt_b_byte")
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_flush_out")
+    win_enter(a) # the question, without the space, as the pad's title
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    load(a, r8, rip("b_ptr"))
+    load(a, r9, rip("b_len"))
+    dec_r(a, r9)
+    lea(a, rax, rip("gui_title"))
+    store(a, arg_at(5), rax)
+    storei(a, arg_at(6), 1023)
+    w_call(a, "MultiByteToWideChar")
+    win_leave(a)
+    lea(a, rcx, rip("gui_title"))
+    mov32_rr(a, rax, rax)
+    alu(a, "add", rax, rax)
+    alu(a, "add", rcx, rax)
+    storei(a, mem(rcx, 0), 0)
+    storei(a, rip("pad_n"), 0)
+    storei(a, rip("pad_down"), 0)
+    movi(a, rcx, 1)
+    movi(a, rdx, 440)
+    lea(a, r8, rip("gui_title"))
+    call_to(a, "rt_window_open")
+    call_to(a, "rt_gui_loop")
+    load(a, rax, rip("gui_done"))
+    alui(a, "cmp", rax, 1)
+    set pad_answered to new_label(a)
+    jcc(a, cc_e, pad_answered)
+    call_to(a, "rt_out_line") # closed: the program ends
+    call_to(a, "rt_flush_out")
+    movi(a, rcx, 0)
+    jmp_to(a, "rt_exit")
+    mark(a, pad_answered)
+    call_to(a, "rt_pad_text")
+    mov_rr(a, rbx, rax)
+    win_enter(a)
+    load(a, rcx, rip("gui_hwnd"))
+    w_call(a, "DestroyWindow")
+    win_leave(a)
+    point_at_text(a, "(a drawing)")
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_out_line")
+    movq_xr(a, xmm0, rbx)
+    pop_r(a, rbx)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, no_person) # input from a file or a pipe: asked as any question is
+    movsd_load(a, xmm0, rip("pad_q"))
+    mark(a, not_pad)
+    movi(a, rax, 0)
+    ret(a)
+end
+
+# the names keys have, by their codes, as a table: each code, then its name as a value
+to emit_gui_keys with a
+    set ro to rodata of a
+    set labels to empty list
+    set k to 2
+    repeat while k is at most length of gui_key_names
+        add text_object(a, item k of gui_key_names) to labels
+        set k to k + 2
+    end
+    pad_to(ro, 8)
+    rodata_here(a, "gui_keys")
+    set k to 1
+    set j to 1
+    repeat while k is at most length of gui_key_names
+        put64(ro, item k of gui_key_names)
+        absolute(a, "rodata", length of ro, item j of labels, 0)
+        put64(ro, 0)
+        set k to k + 2
+        add 1 to j
+    end
+end
+
+# whether a question asks for a drawing, as the playground decides it: "draw" first, after any spaces, in any
+# case, and as a word of its own
+to asks_drawing with question
+    set k to 1
+    repeat while k is at most length of question
+        set c to code_point(item k of question)
+        if c is not 32 and (c is less than 9 or c is greater than 13)
+            stop
+        end
+        set k to k + 1
+    end
+    for each wanted in list of 100, 114, 97, 119
+        if k is greater than length of question
+            return no
+        end
+        set c to code_point(item k of question)
+        if c is at least 65 and c is at most 90
+            set c to c + 32
+        end
+        if c is not wanted
+            return no
+        end
+        set k to k + 1
+    end
+    if k is greater than length of question
+        return yes
+    end
+    set c to code_point(item k of question)
+    if c is 95 or (c is at least 48 and c is at most 57)
+        return no
+    end
+    if (c is at least 97 and c is at most 122) or (c is at least 65 and c is at most 90)
+        return no
+    end
+    return yes
+end
+
 # ---------- the runtime: the system ----------
 # rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
 # code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
@@ -8714,13 +11160,28 @@ end
 
 to emit_runtime with st
     set a to a of st
+    set windowed to no
+    if target of st is "windows"
+        set windowed to uses_drawing of st or uses_app of st or uses_pad of st
+    end
+    set pad of a to windowed and uses_pad of st
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
+    if uses_drawing of st or uses_app of st
+        call_to(a, "rt_turtle_init")
+    end
     store(a, rip("stack_top"), rsp)
     movi(a, r15, 0)
     call_to(a, "moth_main")
-    call_to(a, "rt_flush_out")
     movi(a, rcx, 0)
+    mark(a, "rt_finish") # rcx: the number the program ends with, once what it said and drew has gone out
+    push_r(a, rcx)
+    call_to(a, "rt_flush_out")
+    if windowed
+        call_to(a, "rt_gui_finish")
+        call_to(a, "rt_flush_out")
+    end
+    pop_r(a, rcx)
     jmp_to(a, "rt_exit")
     emit_output(a)
     emit_numbers(a)
@@ -8735,8 +11196,19 @@ to emit_runtime with st
     emit_functions(a)
     emit_files(a, target of st, allowed of st)
     emit_gc_tables(a)
-    if uses_case of st
+    if uses_case of st or windowed
         emit_cases(a)
+    end
+    if uses_drawing of st or uses_app of st
+        emit_turtle(a)
+    end
+    if uses_app of st
+        emit_app_setup(a)
+    end
+    if windowed
+        emit_gui(a, name of st)
+        emit_gui_keys(a)
+        set more_imports of a to gui_imports
     end
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
     pad_to(ro, 8)
@@ -8759,7 +11231,30 @@ to emit_runtime with st
         reserve(a, name, 8, 8)
     end
     reserve(a, "gc_free", 16 * length of gc_sizes, 8)
+    if windowed # the window's own, which are never values
+        for each name in list of "gui_scale", "gui_argb", "gui_last", "gui_brush", "gui_pen", "gui_half", "gui_t0",
+            "gui_t1", "gui_font", "gui_family", "gui_units", "gui_ascent", "gui_format", "gui_started", "gui_token",
+            "gui_hinst", "gui_mode", "gui_size", "gui_done", "gui_hwnd", "gui_old", "gui_graphics", "gui_bits",
+            "pad_n", "pad_cap", "pad_down"
+            reserve(a, name, 8, 8)
+        end
+        for each pair in list of (list of "gui_input", 24), (list of "gui_rectf", 16), (list of "gui_wc", 80),
+            (list of "gui_rect", 16), (list of "gui_msg", 48), (list of "gui_ps", 72), (list of "gui_bmi", 48),
+            (list of "gui_head", 16), (list of "gui_events", 8200), (list of "gui_path", 2056), (list of "gui_title", 2056)
+            reserve(a, item 1 of pair, item 2 of pair, 16)
+        end
+    end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
+    for each name in list of "t_x", "t_y", "t_nx", "t_ny", "t_heading", "t_pen", "t_color", "t_width", "t_steps", "t_angle",
+        "t_cos", "t_sin", "t_list", "tn0", "tn1", "tn2", "tn3", "pi_kind", "pi_a", "pi_b", "pi_c", "pi_d", "pi_w", "pi_text",
+        "pic_items", "pic_n", "pic_cap", "app_items", "app_n", "app_cap", "ev_ms"
+        reserve(a, name, 8, 8)
+    end
+    if windowed
+        for each name in list of "ev_a", "ev_b", "pad_q", "pad_pts"
+            reserve(a, name, 8, 8)
+        end
+    end
     for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
         "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev",
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
@@ -9398,6 +11893,15 @@ to emit_input with a, target
     set answered to new_label(a)
     set typed to new_label(a)
     mark(a, "rt_ask")
+    if pad of a
+        set not_drawn to new_label(a)
+        call_to(a, "rt_pad_hook")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, not_drawn)
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, not_drawn)
+    end
     push_r(a, rbx)
     call_to(a, "rt_b_reset")
     movq_rx(a, rax, xmm0)
@@ -11418,10 +13922,77 @@ to gen_outside with fc, e
         end
         call_to(a, "rt_read")
     else
-        gen_expr(fc, question of e)
+        set question to question of e
+        if kind of question is not "value" or type of question is not "string"
+            set uses_pad of st of fc to yes
+        else if asks_drawing(value of question)
+            set uses_pad of st of fc to yes
+        end
+        gen_expr(fc, question)
         call_to(a, "rt_ask")
     end
     why_stub(fc, at of e, "rt_why_file")
+end
+
+# `move forward 10`, `pen color "red"`, `draw box at x, y size w by h` and the rest: the value, if there is
+# one, then what to do with it, as vm.js's TURTLE_ACTIONS counts them
+to gen_turtle with fc, s
+    set a to a of fc
+    if action of s is "chart"
+        not_yet(at of s, "'draw chart of'")
+    end
+    set uses_drawing of st of fc to yes
+    if value of s is nothing
+        load_bits(a, xmm0, bits_nothing)
+    else
+        gen_expr(fc, value of s)
+    end
+    movi(a, rcx, slot_of_word(front's turtle_actions, action of s) - 1)
+    call_to(a, "rt_turtle")
+    why_stub(fc, at of s, "rt_why_turtle")
+end
+
+# `when a key is pressed with key` and the rest, and `every 2 seconds`: the handler is a function of its own,
+# made here and handed to the runtime, which calls it when that happens
+to gen_handler with fc, s
+    set a to a of fc
+    set uses_app of st of fc to yes
+    set handler to new_function(st of fc, fn of s, scope of fc, level of fc + 1)
+    set waiting to pending of st of fc
+    add handler to waiting
+    if kind of s is "every"
+        gen_expr(fc, interval of s)
+        push_value(fc)
+    end
+    lea(a, rcx, rip(label of handler))
+    movi(a, rdx, 0)
+    lea(a, r8, rip(info of handler))
+    call_to(a, "rt_closure")
+    if kind of s is "every"
+        mov_rr(a, r9, rax)
+        pop_value(fc, xmm0)
+        mov_rr(a, rax, r9)
+        movi(a, rcx, unit of s)
+        movi(a, rdx, 0)
+        call_to(a, "rt_every")
+        why_stub(fc, at of s, "rt_why_turtle")
+    else
+        movi(a, rcx, slot_of_word(front's event_names, event of s) - 1)
+        movi(a, rdx, length of params of fn of s)
+        call_to(a, "rt_on")
+    end
+end
+
+# where `w` is in `words`, from 1
+to slot_of_word with words, w
+    set at_slot to 0
+    for each candidate in words
+        add 1 to at_slot
+        if candidate is w
+            return at_slot
+        end
+    end
+    return 0
 end
 
 # `write value to name`
@@ -12164,7 +14735,7 @@ to new_state with a, program_name, files, source, target
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
-        line_entries empty dictionary, uses_case no, allowed nothing
+        line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -12460,9 +15031,10 @@ to read_program with source, files
     return front's parse(front's tokenize(source, ""), reading)
 end
 
-# which variable each name means in one function, or in the whole program (`parent` nothing)
-to read_scope with parent, params, body
-    return front's new_scope(parent, params, body)
+# Which variable each name means in one function, or in the whole program (`parent` nothing). `place` is
+# the function's own number, as the parser gave it, or 0 for the whole program (see new_scope).
+to read_scope with parent, params, body, place
+    return front's new_scope(parent, params, body, place)
 end
 
 # how many functions out a name lives and which slot it is, or nothing if nothing sets it anywhere
@@ -12504,13 +15076,15 @@ to new_function with st, s, parent, level
     set all_made to all_fns of st
     set id to length of all_made
     set made to record with name name of s, label "F" + id, id id, info "I" + id, params params of s, kinds kinds of s,
-        body body of s, at at of s, parent parent, level level
+        body body of s, at at of s, parent parent, level level, order order of s
     add made to all_made
     return made
 end
 
+# the function's number from the parser, which no other function has: a file used as two names makes two
+# functions on the same line of the same file
 to define_key with s
-    return "" + line of at of s + ":" + col of at of s + ":" + file of at of s
+    return "" + order of s
 end
 
 # the functions made at the top level, and which of them are only ever that function
@@ -12593,7 +15167,7 @@ end
 
 to gen_program with st, body
     set a to a of st
-    set scope to front's new_scope(nothing, empty list, body)
+    set scope to front's new_scope(nothing, empty list, body, 0)
     set main_scope of st to scope
     set made_count to empty dictionary
     collect_functions(st, body, made_count)
@@ -12637,7 +15211,7 @@ end
 # environment of its own. A function made inside another gets the environment it was made in in rdx.
 to gen_function with st, f
     set a to a of st
-    set scope to front's new_scope(parent of f, params of f, body of f)
+    set scope to front's new_scope(parent of f, params of f, body of f, order of f)
     set n to length of params of f
     set total to length of names of scope
     set with_env to makes_functions(body of f)
@@ -12826,6 +15400,10 @@ to gen_statement with fc, s
         why_stub(fc, at of s, "rt_why_file")
     else if what is "exit"
         gen_exit(fc, s)
+    else if what is "turtle"
+        gen_turtle(fc, s)
+    else if what is "when" or what is "every"
+        gen_handler(fc, s)
     else
         not_yet_node(s)
     end
@@ -12853,10 +15431,7 @@ to gen_exit with fc, s
         jmp_to(a, "rt_e_end")
         leave_cold(a, was)
     end
-    push_r(a, rcx)
-    call_to(a, "rt_flush_out")
-    pop_r(a, rcx)
-    jmp_to(a, "rt_exit")
+    jmp_to(a, "rt_finish")
 end
 
 to gen_loop_body with fc, body, exit
@@ -13775,50 +16350,95 @@ to windows_file with a
     for each fn_name in file_imports
         add fn_name to names
     end
+    set others to empty list
+    for each group in more_imports of a
+        if item 1 of group is "KERNEL32.dll"
+            for each fn_name in item 2 of group
+                add fn_name to names
+            end
+        else
+            add group to others
+        end
+    end
+    set groups to empty list
+    add (list of "KERNEL32.dll", names) to groups
+    for each group in others
+        add group to groups
+    end
+    set slot_count to 0
+    for each group in groups
+        set slot_count to slot_count + length of item 2 of group + 1
+    end
     set text_size to length of hot of a + length of cold of a
     set text_rva to 4096
     set rdata_rva to align_up(text_rva + text_size, 4096)
     set data_rva to align_up(rdata_rva + length of rodata of a, 4096)
-    # kernel32.dll's functions, at the end of the data: what to look up, and where the loader puts each one
+    # the DLLs' functions, at the end of the data: for each DLL, what to look up and where the loader puts each
+    # one, then each function's name and each DLL's
     set dat to data of a
     pad_to(dat, 8)
     set descriptors to length of dat
-    set lookups to descriptors + 40
-    set slots to lookups + 8 * (length of names + 1)
-    set hints to slots + 8 * (length of names + 1)
+    set lookups to align_up(descriptors + 20 * (length of groups + 1), 8)
+    set slots to lookups + 8 * slot_count
+    set hints to slots + 8 * slot_count
     set hint_at to empty list
     set spot to hints
-    for each fn_name in names
-        add spot to hint_at
-        set spot to align_up(spot + 2 + length of fn_name + 1, 2)
+    for each group in groups
+        for each fn_name in item 2 of group
+            add spot to hint_at
+            set spot to align_up(spot + 2 + length of fn_name + 1, 2)
+        end
     end
-    set dll_at to spot
-    put32(dat, data_rva + lookups)
-    put32(dat, 0)
-    put32(dat, 0)
-    put32(dat, data_rva + dll_at)
-    put32(dat, data_rva + slots)
+    set dll_at to empty list
+    for each group in groups
+        add spot to dll_at
+        set spot to spot + length of item 1 of group + 1
+    end
+    set first to 0
+    set g to 0
+    for each group in groups
+        add 1 to g
+        put32(dat, data_rva + lookups + 8 * first)
+        put32(dat, 0)
+        put32(dat, 0)
+        put32(dat, data_rva + item g of dll_at)
+        put32(dat, data_rva + slots + 8 * first)
+        set first to first + length of item 2 of group + 1
+    end
     repeat 20 times
         add 0 to dat
     end
+    set gap to lookups - length of dat
+    repeat gap times
+        add 0 to dat
+    end
     repeat 2 times
-        for each spot_at in hint_at
-            put64(dat, data_rva + spot_at)
+        set k to 0
+        for each group in groups
+            for each fn_name in item 2 of group
+                add 1 to k
+                put64(dat, data_rva + item k of hint_at)
+            end
+            put64(dat, 0)
         end
-        put64(dat, 0)
     end
     set table to labels of a
     set k to 0
-    for each fn_name in names
-        set item ("imp_" + fn_name) of table to record with section "data", at slots + 8 * k
+    for each group in groups
+        for each fn_name in item 2 of group
+            set item ("imp_" + fn_name) of table to record with section "data", at slots + 8 * k
+            add 1 to k
+            put16(dat, 0)
+            put_all(dat, fn_name as bytes)
+            add 0 to dat
+            pad_to(dat, 2)
+        end
         add 1 to k
-        put16(dat, 0)
-        put_all(dat, fn_name as bytes)
-        add 0 to dat
-        pad_to(dat, 2)
     end
-    put_all(dat, "KERNEL32.dll" as bytes)
-    add 0 to dat
+    for each group in groups
+        put_all(dat, item 1 of group as bytes)
+        add 0 to dat
+    end
     pad_to(dat, 16)
     set bss_rva to data_rva + length of dat
     set data_virtual to length of dat + bss of a
@@ -13874,10 +16494,10 @@ to windows_file with a
     for each n from 0 to 15
         if n is 1 # the imports
             put32(out, data_rva + descriptors)
-            put32(out, 40)
+            put32(out, 20 * (length of groups + 1))
         else if n is 12 # the import address table
             put32(out, data_rva + slots)
-            put32(out, 8 * (length of names + 1))
+            put32(out, 8 * slot_count)
         else
             put32(out, 0)
             put32(out, 0)

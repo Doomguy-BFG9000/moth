@@ -11,8 +11,8 @@
 #
 #     moth build moth.moth --allow-read --allow-write --allow-run
 #
-# A file used `as` a name shares its functions' variables with the program's top level, so every name made
-# here starts with cli_, which machine.moth and compiler.moth never use.
+# Every name made here starts with cli_, from when a file used `as` a name shared its functions' variables
+# with the program's top level (DESIGN.md, section 27).
 
 use "machine.moth" as machine
 
@@ -762,7 +762,7 @@ end
 # a function the program makes, in a scope of its own
 to cli_check_function with cli_state, cli_frame, cli_d
     set scopes of cli_state to scopes of cli_state + 1
-    set cli_inner to record with scope machine's read_scope(scope of cli_frame, params of cli_d, body of cli_d),
+    set cli_inner to record with scope machine's read_scope(scope of cli_frame, params of cli_d, body of cli_d, order of cli_d),
         id scopes of cli_state, outer cli_frame
     cli_check_block(cli_state, cli_inner, body of cli_d)
 end
@@ -884,7 +884,7 @@ end
 to cli_problems_of with cli_source, cli_names, cli_texts
     set cli_body to machine's read_program(cli_source, cli_files_of(cli_names, cli_texts))
     set cli_state to record with found empty list, made empty dictionary, used empty dictionary, scopes 1, skipped 0
-    set cli_frame to record with scope machine's read_scope(nothing, empty list, cli_body), id 1, outer nothing
+    set cli_frame to record with scope machine's read_scope(nothing, empty list, cli_body, 0), id 1, outer nothing
     cli_check_block(cli_state, cli_frame, cli_body)
     for each cli_key in made of cli_state
         if not (cli_key is in used of cli_state)
@@ -940,9 +940,7 @@ to cli_check_file with cli_path
 end
 
 # the arguments: `build`, `run`, `tidy` or `check`, the file, any --allow flags, --target for a build, and
-# for a run
-# whatever comes after the file, which is the program's own. In a function, as anything a function sets
-# that the top level sets too is the top level's, and the other functions here count with cli_k as well.
+# for a run whatever comes after the file, which is the program's own
 to cli_main
     set cli_given to arguments
     set cli_target to nothing

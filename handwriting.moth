@@ -6,7 +6,7 @@ use "digits-model.moth"
 to read_digit with drawing
     set strokes to strokes_of(drawing)
     if length of strokes is 0
-        say "That's empty: draw a digit with the mouse, then press Answer."
+        say "That's empty: draw a digit first."
         return
     end
     set chances to chances_for(picture_of(strokes, 1.4), model)

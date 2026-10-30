@@ -83,7 +83,7 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
   not("say 5 km", /^line 1: 'unit' can't become machine code yet/);
-  not("move forward 10", /^line 1: drawing can't become machine code yet/);
+  not("draw chart of (list of 1, 2)", /^line 1: 'draw chart of' can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
 });
 
@@ -136,24 +136,25 @@ test("a long line with thousands of places a mistake can happen stays small", { 
 });
 
 // machine.moth, made into machine code, compiling itself: the bytes must be the ones it makes on Node.js. The
-// driver's own names start with zz_, as a file used `as` a name shares its functions' variables with the
-// program's top level.
+// driver counts with `total` and `k`, made before it uses machine.moth, as machine.moth's own functions do: a
+// file used `as` a name keeps its own top level, so its functions' variables are theirs, not the driver's.
 test("machine.moth in machine code compiles itself into the same bytes", { skip }, () => {
   const sources = { "machine.moth": here("machine.moth").replace(/\r/g, ""), "compiler.moth": here("compiler.moth").replace(/\r/g, "") };
   const want = machine(sources["machine.moth"], { files: { "compiler.moth": sources["compiler.moth"] }, target, name: "machine.moth" });
   let sum = 0, mix = 0;
   want.forEach((x, i) => { sum += x; mix += x * ((i + 1) & 1023); });
-  const driver = `use "machine.moth" as m
-set zz_bytes to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
-say length of zz_bytes
-set zz_sum to 0
-set zz_mix to 0
-for each zz_i from 1 to length of zz_bytes
-    add item zz_i of zz_bytes to zz_sum
-    add item zz_i of zz_bytes * (zz_i bit and 1023) to zz_mix
+  const driver = `set total to 0
+set k to 0
+use "machine.moth" as m
+set made to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
+say length of made
+set mix to 0
+for each k from 1 to length of made
+    add item k of made to total
+    add item k of made * (k bit and 1023) to mix
 end
-say zz_sum
-say zz_mix
+say total
+say mix
 `;
   const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
   try {
@@ -167,16 +168,39 @@ say zz_mix
   }
 });
 
-// A `set` in a function changes a variable of the same name at the top level, and a file used `as` a name
-// shares its functions' variables with the program's top level: names that clash there change each other.
-test("machine.moth's functions never set a name its top level or compiler.moth's functions use", () => {
-  const top = new Set([...here("machine.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
-  const set = (source) => [...source.matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]);
-  assert.deepEqual(set(here("machine.moth")).filter((n) => top.has(n)), []);
-  assert.deepEqual([...new Set(set(here("compiler.moth")))].filter((n) => top.has(n)), []);
-  // moth.moth uses machine.moth as a name, so no function in any of the three may set what its top level makes
-  const mothTop = new Set([...here("moth.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
-  for (const file of ["moth.moth", "machine.moth", "compiler.moth"]) assert.deepEqual([...new Set(set(here(file)))].filter((n) => mothTop.has(n)), [], file);
+// A `set` in a function changes a variable of the same name its top level made above the function, which in
+// these two files would only ever be a mistake: none of their functions sets a name its own top level makes.
+// (A file used `as` a name keeps its own top level, so names in different files can't clash.)
+test("machine.moth's and moth.moth's functions never set a name their own top level makes", () => {
+  for (const file of ["machine.moth", "moth.moth"]) {
+    const top = new Set([...here(file).matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
+    const set = [...new Set([...here(file).matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]))];
+    assert.deepEqual(set.filter((n) => top.has(n)), [], file);
+  }
+});
+
+// A file used `as` a name keeps its own top level, and one used as two names is two copies, in machine code as
+// on the JavaScript engine: the program's `total` and `k` are made before it uses the file whose function
+// counts with names of its own, and each copy of the counter counts for itself.
+test("a file used as two names is two copies in machine code, each keeping its own top level", { skip }, () => {
+  const files = {
+    "counter.moth": "set count to 0\nto bump\n    add 1 to count\n    return count\nend",
+    "tally.moth": "to tally with things\n    set total to 0\n    for each k in things\n        add k to total\n    end\n    return total\nend",
+  };
+  const source = 'set total to 100\nset k to "mine"\nuse "counter.moth" as a\nuse "counter.moth" as b\nuse "tally.moth" as t\nsay a\'s bump() " " a\'s bump() " " b\'s bump()\nsay t\'s tally((list of 1, 2, 3)) " " total " " k\n';
+  let want = "";
+  run(source, (line) => (want += `${line}\n`), { files: (name) => files[name] });
+  assert.equal(want, "1 2 1\n6 100 mine\n");
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "copies");
+    writeFileSync(exe, machine(source, { files, target, name: "copies.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { encoding: "utf8" });
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: want, stderr: "", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a program becomes the same bytes each time, as a PE file for Windows and an ELF file for Linux", () => {
@@ -523,5 +547,162 @@ test("moth.exe builds --allow flags in, and its program reads, writes, asks and 
     }
   } finally {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A program's picture as its window shows it, drawn into a file instead (MOTH_PICTURE) after the events
+// MOTH_EVENTS lists, and what it printed; and the colour, as "#rrggbb", at a place in the picture's own
+// numbers: (0, 0) in the middle, y going up, unless it stopped at a mistake. Windows only, where the window is.
+const onWindows = target === "windows" ? false : "the window is Windows only";
+function picture(source, events = "") {
+  const dir = mkdtempSync(join(tmpdir(), "moth-picture-"));
+  try {
+    const exe = join(dir, "p.exe");
+    writeFileSync(exe, machine(source, { target, name: "p.moth" }));
+    const file = join(dir, "p.bmp");
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: file, MOTH_EVENTS: events } });
+    if (!existsSync(file)) return { at: null, stdout: ran.stdout, stderr: ran.stderr, status: ran.status }; // it stopped at a mistake
+    const bmp = readFileSync(file);
+    assert.deepEqual([bmp.toString("latin1", 0, 2), bmp.readInt32LE(18), bmp.readInt32LE(22), bmp.length], ["BM", 500, -500, 54 + 500 * 500 * 4]);
+    const at = (x, y) => {
+      const p = 54 + ((250 - y) * 500 + 250 + x) * 4;
+      return "#" + [bmp[p + 2], bmp[p + 1], bmp[p]].map((b) => b.toString(16).padStart(2, "0")).join("");
+    };
+    return { at, stdout: ran.stdout, stderr: ran.stderr, status: ran.status };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const BACKGROUND = "#0b1122";
+
+test("a drawing becomes a picture as the playground draws it: lines, boxes, circles, text and colours", { skip: onWindows }, () => {
+  const { at, stdout } = picture(`pen color "red"
+draw box at -100, -100 size 50 by 50
+pen color "#00F"
+draw circle at 100, 100 size 30
+pen color "no such colour"
+draw box at 100, -100 size 20 by -20
+pen color "Lime"
+pen width 10
+move forward 200
+pen color "white"
+draw "Moth" at -200, 150 size 40
+say "drawn"`);
+  assert.equal(stdout, "drawn\n");
+  assert.equal(at(-75, -75), "#ff0000"); // the box
+  assert.equal(at(-110, -110), BACKGROUND);
+  assert.equal(at(100, 100), "#0000ff"); // the circle
+  assert.equal(at(100, 125), "#0000ff");
+  assert.equal(at(100, 135), BACKGROUND);
+  assert.equal(at(110, -110), "#0000ff"); // a colour it doesn't know keeps the one before
+  assert.equal(at(0, 100), "#00ff00"); // the line, 10 wide
+  assert.equal(at(3, 100), "#00ff00");
+  assert.equal(at(8, 100), BACKGROUND);
+  let white = 0;
+  for (let x = -200; x < -100; x++) for (let y = 150; y < 190; y++) if (at(x, y) === "#ffffff") white++;
+  assert.ok(white > 100, `the text has ${white} white pixels`); // above its baseline
+  assert.equal(at(-150, 140), BACKGROUND);
+  assert.equal(at(-240, 240), BACKGROUND);
+});
+
+test("a picture shows what was drawn since the last clear, made smaller to fit if it reaches past the edge", { skip: onWindows }, () => {
+  const { at } = picture(`pen color "red"
+draw box at -50, -50 size 100 by 100
+clear
+pen color "gold"
+draw box at 400, 400 size 80 by 80
+pen color "blue"
+draw box at -20, -20 size 40 by 40`);
+  assert.equal(at(0, 0), "#0000ff"); // made half the size: 480 from the middle fits in 240
+  assert.equal(at(15, 15), BACKGROUND);
+  assert.equal(at(220, 220), "#ffd700");
+  assert.equal(at(-40, -40), BACKGROUND); // the red box was cleared
+});
+
+// Apps: keys, clicks, drags and timers (by their place among the timers) sent to the handlers in order
+const APP_EVENTS = [
+  [`set n to 0
+to helper with v
+    return v / "x"
+end
+when a key is pressed with k
+    add 1 to n
+    say "key " + k + " " + n
+    if k is "z"
+        say helper(1)
+    end
+end
+when the mouse is clicked with x and y
+    say "clicked " + x + " " + y
+end
+when the mouse is clicked
+    say "clicked, no numbers"
+end
+when the mouse is dragged with x and y
+    say "dragged " + x + ", " + y
+end
+every 2 seconds
+    say "tick " + n
+end
+every 5 milliseconds
+    say "fast"
+end
+say "set up"`, "key a;click 3 -4;tick 0;drag -250 250;tick 1;key space;key z;key b"],
+  [`set total to 0
+set seen to empty list
+when a key is pressed with key
+    add key to seen
+    say seen
+end
+every 1 second
+    set total to total + 1
+    move forward total * 10
+    turn left 90
+    say "at " + total
+end
+when the mouse is clicked with x and y
+    draw circle at x, y size total
+    say "circle " + x + " " + y + " " + total
+end`, "tick 0;tick 0;key left;key enter;click 0 0;key escape;tick 0;click -10 20"],
+];
+
+test("an app's handlers get keys, clicks, drags and timers, and say and fail as on the JavaScript engine", { skip: onWindows }, () => {
+  for (const [source, events] of APP_EVENTS) {
+    let stdout = "";
+    let stderr = "";
+    let status = 0;
+    try {
+      const app = run(source, (line) => (stdout += `${line}\n`), { file: "p.moth" });
+      const timers = app.waits.flatMap((wait, i) => (wait.event === "every" ? [i] : []));
+      for (const event of events.split(";")) {
+        const [what, ...rest] = event.split(" ");
+        if (what === "key") app.send("key", [rest.join(" ")]);
+        else if (what === "tick") app.handle(timers[Number(rest[0])]);
+        else app.send(what, rest.map(Number));
+      }
+    } catch (err) {
+      if (!(err instanceof MothError)) throw err;
+      stderr = `p.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;
+      status = 1;
+    }
+    const got = picture(source, events);
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout, stderr, status }, events);
+  }
+  const { at } = picture(APP_EVENTS[1][0], APP_EVENTS[1][1]); // and what they drew
+  assert.equal(at(0, 0), "#4f8ff7");
+  assert.equal(at(-10, 22), "#4f8ff7");
+  assert.equal(at(-10, 25), BACKGROUND);
+});
+
+test("a question that asks for a drawing, asked away from a terminal, is answered as any question is", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "pad");
+    writeFileSync(exe, machine(`set answer to ask "Draw a digit"\nsay "got " + answer\nmove forward 5`, { target, name: "pad.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "10,20 30,40;50,60\n" });
+    assert.deepEqual({ stdout: got.stdout, status: got.status }, { stdout: "Draw a digit 10,20 30,40;50,60\ngot 10,20 30,40;50,60\n", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

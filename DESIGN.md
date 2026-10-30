@@ -32,18 +32,22 @@ Why Moth is built the way it is, what each choice costs, and what I measured.
 A name inside a function means:
 
 1. its own input, or a function it made with `to`; otherwise
-2. a variable of the outermost enclosing function (or the top level) that also
-   `set`s that name; otherwise
-3. its own local variable.
+2. for a name it sets, the variable of that name around it (in an enclosing
+   function, or the top level) if that one is made above the function's `to`
+   line, and otherwise its own local variable;
+3. for a name it only reads, the variable of that name around it, wherever
+   that one is set.
 
 This gives closures for free (a counter's inner function can `add 1 to count`)
 without a `global` or `nonlocal` keyword. Because it is decided at compile time,
 each variable becomes a fixed (depth, slot) pair, and looking it up at run time is
-an array index instead of a search by name.
+an array index instead of a search by name. Until section 27, rule 2 didn't ask
+where the variable was made, which was a trap.
 
 **The one change from v1.** v1 decided this while the program ran, so the result
 depended on whether a variable happened to exist yet. In this program, v1 said
-`x` had no value, and v2 prints `1`:
+`x` had no value, and v2 printed `1`; since section 27 it stops at `say x`
+again, but now because f's `x` is f's own:
 
 ```
 to f
@@ -1048,3 +1052,106 @@ hold them to agreeing.
   the JavaScript engine, the same bytes moth.exe makes of itself; the release
   starter-1 has one for Windows and one for Linux.
 
+## 27. The naming trap, fixed
+
+- **The trap.** A `set` in a function changed a top-level variable of the same
+  name, even one the top level only set further down the file, and a file used
+  `as` a name shared its functions' variables with the program's top level. It
+  bit four times (sections 22 and 25): machine.moth's `here`, overwritten by
+  compiler.moth's `set here to scope`; a test driver whose `total` and `k` made
+  machine.moth's loops count forever; and moth.moth's `cli_k`, which a function
+  that reads files counted up to 400,000. Each time the fix was a new name, and
+  a test that looked for clashes.
+- **A function changes only what's made above it.** When a function sets a name,
+  adds to it, loops over it or catches a mistake with it, the name means a
+  variable outside the function only if that variable is made above the
+  function's `to` line: by the top level earlier in the file, or by an enclosing
+  function earlier in its code, or as one of its inputs. Otherwise the function
+  gets a variable of its own. Names it only reads are found as before, wherever
+  they're set, so a function at the top can still read a setting made at the
+  bottom; calls are reads. A counter (`set total to 0`, then `to bump` with `add
+  5 to total`) still counts, and so does a closure's `add 1 to count`.
+- **A file used `as` a name keeps its own top level.** Every name in it becomes
+  `math's x`, not only the ones its top level makes. A function's inputs, and the
+  functions a function makes, stay as they are, since nothing outside the
+  function can reach them. So the file's names work out as if it ran alone: a
+  variable only its functions set is theirs, and a name it never makes isn't the
+  program's, which reaches the file only through `math's ...`. The same file
+  used as two names is still two copies, and `use` without `as` still puts a
+  file in with the program, on purpose.
+- **Still decided when the program is read.** "Above" is a matter of the text.
+  Each function's code is walked once, in order, counting the functions it
+  makes: a name is made above a function when fewer functions come before it
+  than before the function. A function's own name counts from its `to` line,
+  and a try's `with` name from its `if it fails`. The JavaScript side finds a
+  function by its code; compiler.moth, which can't tell two equal lists apart,
+  numbers each function as it parses it. Both give every variable the same slot,
+  and the tests hold compiler.moth to the JIT, byte for byte, as before.
+- **Two copies in machine code.** machine.moth found each top-level function by
+  the line and column of its `to`, which two copies of one file share, so a file
+  used as two names lost one copy's functions and the build stopped. It goes by
+  the parser's number for each function now, and a test builds two copies.
+- **What changed.** One test program said `1` and now stops: f sets `x`, the top
+  level calls f, says `x`, and only then sets it. f's `x` is its own, so `say x`
+  finds the top level's, which has no value yet. Of everything written in Moth
+  here, only tools/picture.moth had functions (`whole` and `escape`) that set a
+  name the top level makes below them, its loop's `n`; nothing relied on it, and
+  the picture is the same. Of the 1,500 programs the tests generate, 255 now
+  give a function a variable of its own where it used to change the top
+  level's, as their functions come before most of the top level's code; the
+  engines and compiler.moth agree on every one, and machine code on the 10 of
+  its own 400 that changed. The self-compiling test's driver counts with `total`
+  and `k` again, made before it uses machine.moth, and the test that looked for
+  clashes between files now only looks inside machine.moth and moth.moth, where
+  a function setting a top-level name would still be a mistake.
+- **What it costs.** A variable of a function in a file used as `math` shows as
+  `math's x` in a mistake, as the file's own top-level names already did. A hint
+  in the checker for each function that changes a top-level variable was weighed
+  and left out: snake.moth alone would get 16, for game state that's meant to
+  change, and neural.moth and json.moth 8 each.
+
+## 28. Drawing, apps and the pad in machine code: a window on Windows
+
+- **The same picture as the playground's.** The turtle and its shapes run in
+  machine code as Turtle in vm.js runs them, numbers to hundredths and mistakes
+  word for word, so the list of things drawn is the same on every engine. At
+  the end of a program that drew something, the window draws that list as the
+  playground's canvas does: 500 by 500, (0, 0) in the middle and y going up,
+  made smaller when a drawing reaches past 240 from the middle but never for an
+  app, lines with round ends, text with its baseline on the point. GDI+ draws
+  it, smoothed, because it ships with every Windows and needs no font or image
+  code of Moth's own; text is Segoe UI, which is what the playground's
+  system-ui is on Windows.
+- **Colours as a canvas reads them.** The CSS names, all 148, are a table in
+  the program, and `#rgb`, `#rgba`, `#rrggbb` and `#rrggbbaa` are read in the
+  runtime. A colour a canvas wouldn't know keeps the one before, as the canvas
+  does. `rgb(...)` and `hsl(...)` aren't read yet.
+- **Apps call their handlers from the window.** Windows calls the window's
+  procedure with each key, click, drag and timer, and the procedure calls the
+  handlers waiting for it, in the order the program set them up. A handler's
+  call is the first in progress, so a mistake in it lists only the calls under
+  it, as on the JavaScript engine. Keys get the playground's names: arrows,
+  space, enter and the rest by key code, other keys as the character typed, in
+  lower case, and none while Ctrl or Alt is down. Timers go off every so many
+  milliseconds, 10 at the fastest, as the playground's do.
+- **The pad.** `ask` with a question that starts with "Draw", as the
+  playground decides it, opens a 440 by 440 pad at a terminal. Each stroke
+  comes back as the playground's pad gives it: points from 0 to 100, y going
+  down, none closer than 1.5 to the one before, so handwriting.moth reads the
+  same text from both. Enter answers, Escape wipes the pad, and closing it ends
+  the program. Away from a terminal, the question is asked as any other is.
+  Only a program that may ask for a drawing gets the pad: one whose questions
+  are all texts that don't start with "Draw" doesn't.
+- **Only a program that needs it pays.** The window's code, GDI+ and the
+  colour table go into a Windows program that draws, sets up an app, or may
+  ask for a drawing. Any other is the same bytes as before.
+- **How it's tested.** With `MOTH_PICTURE=file.bmp`, the window isn't opened:
+  the program draws into that file instead, after the events `MOTH_EVENTS`
+  lists (`key left;click 10 20;drag 11 21;tick 0`). The tests check the colour
+  of the picture at chosen points, and that an app given the same events says
+  and fails exactly as the JavaScript engine's `app.send` makes it. The window
+  itself was tried by sending it Windows' own mouse and key messages and
+  reading back what it showed: the paint app, a timer, and handwriting.moth,
+  which read a drawn 1 and a drawn 2.
+- **Linux has no window yet.** A program there draws into the list and shows
+  nothing, and an app sets up and ends.
