@@ -908,8 +908,8 @@ test("only a program that reads can go online, and only it imports WinHTTP", () 
 
 // A program's picture as its window shows it, drawn into a file instead (MOTH_PICTURE) after the events
 // MOTH_EVENTS lists, and what it printed; and the colour, as "#rrggbb", at a place in the picture's own
-// numbers: (0, 0) in the middle, y going up, unless it stopped at a mistake. Windows only, where the window is.
-const onWindows = target === "windows" ? false : "the window is Windows only";
+// numbers: (0, 0) in the middle, y going up, unless it stopped at a mistake.
+const onlyWindows = target === "windows" ? false : "Windows only";
 function picture(source, events = "") {
   const dir = mkdtempSync(join(tmpdir(), "moth-picture-"));
   try {
@@ -931,7 +931,7 @@ function picture(source, events = "") {
 }
 const BACKGROUND = "#0b1122";
 
-test("a drawing becomes a picture as the playground draws it: lines, boxes, circles, text and colours", { skip: onWindows }, () => {
+test("a drawing becomes a picture as the playground draws it: lines, boxes, circles, text and colours", { skip }, () => {
   const { at, stdout } = picture(`pen color "red"
 draw box at -100, -100 size 50 by 50
 pen color "#00F"
@@ -961,7 +961,7 @@ say "drawn"`);
   assert.equal(at(-240, 240), BACKGROUND);
 });
 
-test("a picture shows what was drawn since the last clear, made smaller to fit if it reaches past the edge", { skip: onWindows }, () => {
+test("a picture shows what was drawn since the last clear, made smaller to fit if it reaches past the edge", { skip }, () => {
   const { at } = picture(`pen color "red"
 draw box at -50, -50 size 100 by 100
 clear
@@ -987,7 +987,7 @@ const FUNCTION_COLOURS = [
   ["rgb(1px 2 3)"], ["rgb(none, 0, 0)"], ["rgb(1 2 3) x"], ["rgba(1 2 3 / 4deg)"],
 ];
 
-test("colours as rgb(), rgba(), hsl() and hsla() are read as a canvas reads them", { skip: onWindows }, () => {
+test("colours as rgb(), rgba(), hsl() and hsla() are read as a canvas reads them", { skip }, () => {
   const place = (i) => [-240 + (i % 10) * 45, 200 - Math.floor(i / 10) * 45];
   const { at } = picture(FUNCTION_COLOURS.map(([colour], i) => {
     const [x, y] = place(i);
@@ -1002,7 +1002,7 @@ test("colours as rgb(), rgba(), hsl() and hsla() are read as a canvas reads them
   });
 });
 
-test("a chart is the bars, values and labels the playground draws", { skip: onWindows }, () => {
+test("a chart is the bars, values and labels the playground draws", { skip }, () => {
   const { at, stdout } = picture(`pen color "red"
 draw chart of (list of 1, 2, nothing, -1)
 say "charted"`);
@@ -1020,7 +1020,7 @@ say "charted"`);
   const amounts = picture(`draw chart of (dictionary where "a" is 3 km, "b" is 1500 m)`).at;
   assert.equal(amounts(15, 190), "#4f8ff7"); // 3 km is the longest, 200
   assert.equal(amounts(55, 90), "#4f8ff7"); // 1500 m is half of it
-  assert.equal(amounts(55, 110), BACKGROUND);
+  assert.equal(amounts(55, 103), BACKGROUND); // and not past it, below its label
 });
 
 // Apps: keys, clicks, drags and timers (by their place among the timers) sent to the handlers in order
@@ -1078,7 +1078,7 @@ when a key is pressed with key
 end`, "key a;key q;key b"], // the program ends there, as in the playground
 ];
 
-test("an app's handlers get keys, clicks, drags and timers, and say and fail as on the JavaScript engine", { skip: onWindows }, () => {
+test("an app's handlers get keys, clicks, drags and timers, and say and fail as on the JavaScript engine", { skip }, () => {
   for (const [source, events] of APP_EVENTS) {
     let stdout = "";
     let stderr = "";
@@ -1200,7 +1200,7 @@ test("machine code reads pictures, and stops at a broken one as the JavaScript e
 });
 
 // and the window draws each one's pixels as they are, over the background where they can be seen through
-test("a picture from a file is drawn pixel for pixel, blended where it's see-through", { skip: onWindows }, () => {
+test("a picture from a file is drawn pixel for pixel, blended where it's see-through", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "moth-picture-"));
   try {
     const exe = join(dir, "p.exe");
@@ -1296,17 +1296,30 @@ end`, "click 5 5;type ok;key enter;type more;click 105 105;click -95 -95;click 5
 when the button "z" is clicked
     say 1 / 0
 end`, "click 1 1;click 2 2"], // a mistake in a button's handler ends the app, as on the JavaScript engine
+  [`draw button "Go" at 0, 0
+when the button "Go" is clicked
+    say "clicked"
+end
+every 1 second
+    say "tick"
+end
+when the button "Stop" is clicked
+    say "stopped"
+end
+every 2 seconds
+    say "tock"
+end`, "tick 0;click 5 5;tick 1;tick 0"], // each tick its own timer's, never a button's
   [here("apps/todo.moth"), "click -100 210;type Buy milk;key enter;type Call Sam;click 20 210;type x;key backspace;click 0 0;type nope;click 100 210;click -100 210;type Walk;key enter;key enter"],
 ];
 
-test("buttons and text boxes in the window take clicks and typing as app.send does on the JavaScript engine", { skip: onWindows }, () => {
+test("buttons and text boxes in the window take clicks and typing as app.send does on the JavaScript engine", { skip }, () => {
   for (const [source, events] of WIDGET_EVENTS) {
     const got = picture(source, events);
     assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(source, events), events);
   }
 });
 
-test("buttons and text boxes are drawn as the playground draws them", { skip: onWindows }, () => {
+test("buttons and text boxes are drawn as the playground draws them", { skip }, () => {
   const { at } = picture(`pen color "red"
 draw button "Go" at -100, 100
 pen color "lime"
@@ -1335,7 +1348,7 @@ end`, "click 0 10;type WWWW;click 0 -50");
   assert.equal(count(-32, -20, 6, 24, (c) => c !== "#ffffff"), 0); // the box that lost it has none after its text
 });
 
-test("apps/todo.moth builds, adds what's typed to its list, and draws it", { skip: onWindows }, () => {
+test("apps/todo.moth builds, adds what's typed to its list, and draws it", { skip }, () => {
   const events = "click -100 210;type Buy milk;key enter;type Call Sam;click 20 210";
   const { at, stdout } = picture(here("apps/todo.moth"), events);
   assert.equal(stdout, "To do: Buy milk\nTo do: Call Sam\n");
@@ -1365,14 +1378,14 @@ const CONTROL_EVENTS = [
   [CONTROLS_MORE, "click -150 160;click -150 140;key down;key enter;key escape;key space;scroll -150 100 3;click -150 10;click -150 160;click 0 0;click 0 0;click -100 60;drag -10 60;drag 300 60;key left;key home;key end;key right;key x;key shift+left;click 110 160;click 110 110;key left;click 110 160;click -150 160;key up;key up;click -150 175;key down;click 0 -200;key down"],
 ];
 
-test("checkboxes, text areas and lists in the window take clicks, keys and the wheel as app.send does on the JavaScript engine", { skip: onWindows }, () => {
+test("checkboxes, text areas and lists in the window take clicks, keys and the wheel as app.send does on the JavaScript engine", { skip }, () => {
   for (const [source, events] of CONTROL_EVENTS) {
     const got = picture(source, events);
     assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(source, events), events);
   }
 });
 
-test("checkboxes, text areas and lists are drawn as the playground draws them", { skip: onWindows }, () => {
+test("checkboxes, text areas and lists are drawn as the playground draws them", { skip }, () => {
   const BLUE = "#4f8ff7";
   const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
   const dark = (c) => rgb(c).every((v) => v < 64);
@@ -1404,7 +1417,7 @@ test("checkboxes, text areas and lists are drawn as the playground draws them", 
 const EDITOR = "draw text box \"Name\" at -200, 100\ndraw text area \"Notes\" at -200, -100 size 200 by 68\ndraw button \"Show\" at 100, 100\ndraw button \"Deep\" at 100, 50\nto deep with n\n    if n is 0\n        return the text in the text area \"Notes\"\n    end\n    return deep(n - 1)\nend\nwhen the button \"Show\" is clicked\n    say \"[\" + the text in the text box \"Name\" + \"] [\" + the text in the text area \"Notes\" + \"]\"\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" + deep(5000)\nend\nwhen a key is pressed with key\n    say \"key \" + key\nend\nwhen enter is pressed in the text box \"Name\" with words\n    say \"enter \" + words\nend";
 const EDIT_EVENTS = "key shift+left;key ctrl+a;click -150 110;type Hello world;key left;key left;key left;key left;key left;key shift+left;key shift+left;key shift+left;key shift+left;key shift+left;key shift+left;type Big ;click 100 110;key home;key shift+end;key ctrl+x;type abcdefghijklmnopqrstuvwxyz;click -162 110;type _;key delete;click 100 110;key ctrl+a;key backspace;type xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;key enter;key right;key shift+home;key ctrl+c;key ctrl+v;type ab;click 100 110;click -190 -40;type one\ntwo\nthree\nfour;key up;key up;key shift+up;type !;click 100 110;key enter;key end;key shift+right;key shift+down;type ?;click 100 110;click -170 -60;drag -140 -80;drag -120 -80;type <>;click 100 110;click 105 60;key down;key down;key end;type Z;key up;key up;key up;key up;key home;key delete;click 100 110;click 0 -200;key shift+down;key ctrl+z;key up;click -190 -40;key ctrl+a;type 1\n2\n3\n4\n5;key up;key up;key up;click 100 110";
 
-test("the cursor, selecting and editing in the window are as app.send has them on the JavaScript engine", { skip: onWindows }, () => {
+test("the cursor, selecting and editing in the window are as app.send has them on the JavaScript engine", { skip }, () => {
   const got = picture(EDITOR, EDIT_EVENTS);
   assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(EDITOR, EDIT_EVENTS));
   // a letter every 10 from 8 in, what's selected behind its letters in light blue, and the cursor between two
@@ -1502,7 +1515,7 @@ test("machine code makes the sounds the JavaScript engine makes: MOTH_SOUND gets
 
 // An app's handlers, sent MOTH_EVENTS with MOTH_PICTURE as the picture tests do, make their sounds as each
 // event comes, into MOTH_SOUND's file; one that stops the program ends its sounds there too.
-test("an app's handlers make their sounds as its events come, and only a program that makes a sound has it in it", { skip: onWindows }, () => {
+test("an app's handlers make their sounds as its events come, and only a program that makes a sound has it in it", { skip }, () => {
   const source = 'set n to 0\nwhen a key is pressed with key\n    add 1 to n\n    play note key for n * 100 milliseconds\n    if key is "c"\n        stop the program with 2\n    end\nend\nevery 1 second\n    play a beep\nend\nplay note "rest" for 1 second';
   const events = "key e;tick 0;key g;key c;key d";
   const played = [];
@@ -1521,10 +1534,11 @@ test("an app's handlers make their sounds as its events come, and only a program
     const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: join(dir, "app.bmp"), MOTH_EVENTS: events, MOTH_SOUND: "app.wav" } });
     assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["", "", 2]);
     assert.ok(Buffer.from(soundWav(played)).equals(readFileSync(join(dir, "app.wav"))));
-    // winmm.dll, which plays sounds, only goes into a program that makes one
-    const imports = (b) => Buffer.from(b).includes("WINMM.dll");
-    assert.ok(imports(bytes));
-    assert.ok(!imports(machine('say "quiet"\nmove forward 10', { target, name: "q.moth" })));
+    if (target === "windows") { // winmm.dll, which plays sounds, only goes into a program that makes one
+      const imports = (b) => Buffer.from(b).includes("WINMM.dll");
+      assert.ok(imports(bytes));
+      assert.ok(!imports(machine('say "quiet"\nmove forward 10', { target, name: "q.moth" })));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1534,7 +1548,7 @@ test("an app's handlers make their sounds as its events come, and only a program
 // and PATH, never from beside the program, where a file of the same name could be put to run in their place;
 // an empty folder in PATH isn't the one the program runs in; and a .bat or .cmd file, which cmd.exe runs, gets
 // no argument that cmd.exe would read as part of a command
-test("on Windows a program takes its DLLs and the programs it starts only from where the system keeps them", { skip: onWindows }, () => {
+test("on Windows a program takes its DLLs and the programs it starts only from where the system keeps them", { skip: onlyWindows }, () => {
   const dir = mkdtempSync(join(tmpdir(), "moth-places-"));
   try {
     writeFileSync(join(dir, "whoami.exe"), machine('say "not the real whoami"', { target, name: "w.moth" }));

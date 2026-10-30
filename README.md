@@ -227,7 +227,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (15,068,672 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (16,418,304 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -243,10 +243,11 @@ byte for byte too. The first one comes from Node.js
 (`node bootstrap.mjs`) or from
 [the releases](https://github.com/samyyy2423/moth/releases); after that, each
 builds the next. It takes nearly all of Moth, units, tables, charts, drawing and
-apps included. On Windows, a program that draws shows its picture in a window
-when it ends, an app runs in one, and a question that starts with "Draw" opens a
-pad to draw the answer on, so `moth build handwriting.moth` makes the
-handwriting demo a program of its own.
+apps included. A program that draws shows its picture in a window when it ends,
+and an app runs in one, on Windows and on Linux, where the program speaks X11
+itself; on Windows a question that starts with "Draw" opens a pad to draw the
+answer on, so `moth build handwriting.moth` makes the handwriting demo a program
+of its own.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -739,10 +740,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (15,068,672 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (16,418,304 bytes)
 ```
 
-That's the same 15,068,672 bytes Node.js made of it, and the moth.exe they make
+That's the same 16,418,304 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -849,6 +850,10 @@ calls that led there.
   and lines typed on all three engines and through a move to the VM, and in
   machine code's window, which must say, fail and draw as the JavaScript engine
   does
+- the window on Linux: every test of the window's, there as on Windows, with
+  what Linux draws in memory instead of GDI+; and a real window on an X server,
+  sent clicks, keys, drags and the wheel, which said and showed, pixel for
+  pixel, what the same events from `MOTH_EVENTS` did
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
@@ -941,14 +946,15 @@ unboxed numbers were all caught, some only by the fuzzer.
   program's time. It has no limit on its steps, so a loop that never ends runs
   until it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
-- The window is Windows only. On Linux a program that draws runs without
-  showing its picture, and an app's handlers never run: its buttons, boxes,
-  checkboxes, lists, dropdowns and sliders are only drawn, nothing can be typed
-  into them, and choosing a file is asking for its name. The window knows
-  CSS's colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but
-  not `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
-  when started from Explorer: with its output going to a file or another
-  program, a program runs as it would on Linux.
+- The window only opens at a terminal, or on Windows when started from
+  Explorer: with its output going to a file or another program, a program that
+  draws ends without showing it. On Linux it needs an X server (Xwayland's
+  will do) at `DISPLAY`, on this computer, and draws its text in DejaVu Sans,
+  not Segoe UI. It has no clipboard there, so Ctrl+C, Ctrl+X and Ctrl+V do
+  nothing; no pad, so a question that starts with "Draw" is asked as any other;
+  and no box for choosing a file, which is asking for its name. The window
+  knows CSS's colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and
+  `hsla()`, but not `hwb()`, `lab()` or the other newer ones.
 - `say ... to the error output`, `stop the program`, `run program` (with or
   without `keeping its output`) and `remove the file` only work in a program
   `moth build` makes: in the playground and the tests, the error output is
@@ -1013,4 +1019,4 @@ python -m http.server        # then open http://localhost:8000 for the playgroun
 
 <br>
 
-<p align="center"><sub>MIT licensed · made by <a href="https://github.com/samyyy2423">Samyak Pudke</a></sub></p>
+<p align="center"><sub>MIT licensed · made by <a href="https://github.com/samyyy2423">Samyak Pudke</a> · the letters a Linux window draws are DejaVu's (<a href="LICENSE-DejaVu">licence</a>)</sub></p>

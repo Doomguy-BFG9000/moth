@@ -1949,3 +1949,62 @@ hold them to agreeing.
   of the repo's and run each once or twice first, and the bench has a row for a
   program that only starts, to read the rest against. Every compiled language
   in `versus` got quicker for it, Moth's machine code with them.
+
+## 44. A window on Linux
+
+- **What it lacked.** On Linux a program that drew showed nothing, and an app
+  set up and ended: the window was GDI+ and Windows' own, and Linux has neither
+  in every program's reach. Its X server is in reach, by a socket, and nothing
+  else is needed to speak to it, so the program speaks X11 itself, as it speaks
+  HTTP and WAV: no Xlib, no library at all, and still nothing to install.
+- **Drawing.** What's drawn is drawn by the runtime, into 500 by 500 pixels in
+  memory, as a canvas draws it: a pixel's middle half a pixel in, and each
+  shape's edge smoothed by how much of each pixel it covers. A line is every
+  pixel within half its width of the line between its ends, so its ends are
+  round; a circle, a disc smoothed at its edge; a dropdown's arrow, a triangle,
+  16 points tried in each pixel; a picture, the nearest of its pixels, as a
+  canvas with smoothing off. GDI+ puts a pixel's middle on the corner, so the
+  two systems' edges can differ by half a pixel; the tests ask about places
+  away from edges.
+- **Letters.** There's no font to ask for either, so the letters come with the
+  program: DejaVu Sans, drawn by FreeType at 16 pixels to the em and at 24, and
+  DejaVu Sans Mono at 16, 4 bits of ink a pixel, made into machine.moth's
+  tables by `tools/glyph-tables.py`. Text 16 high, which is every button's,
+  box's and list's, is drawn from the table at 16 with each letter on a whole
+  pixel, as hinting puts it, which keeps its lines sharp; any other size is
+  read from the one at 24 between its pixels. Latin-1 is there, and any other
+  character is U+FFFD. The tables make a Linux program that draws 45 KB
+  bigger, 59 KB with boxes to type in, and carry the fonts' licence, as it
+  asks ([`LICENSE-DejaVu`](LICENSE-DejaVu)).
+- **The window.** `DISPLAY` names the server: `:0` is its socket in
+  /tmp/.X11-unix, or the same name in the abstract namespace, and `localhost:0`
+  is TCP. A cookie from `XAUTHORITY`, or ~/.Xauthority, goes with the hello if
+  there's one for that display. The window is 500 by 500, a size its window
+  manager is asked to keep, named as on Windows, and closes as a message, not
+  by the connection going. What's drawn goes to it 100 rows to a request, its
+  pixels as they are, so a server whose pixels aren't 32 bits, the low byte
+  first, gets no window, as one that isn't there doesn't.
+- **What happens to it** is what Windows' window does, event for event: a key
+  with a name by its name, a letter in lower case and then, for a box, as
+  typed; Shift with the keys that move the cursor; Ctrl with a letter, for a
+  box; the wheel, 3 rows a notch; Escape closing a picture. Keys come as X's
+  keysyms, read from the server once, the keypad's digits with Num Lock
+  included. Timers are the program's own, waited for between the server's
+  messages, and the window is drawn again once nothing's left to do.
+- **Timers aren't buttons.** Building it found that a timer and a button's
+  handler had the same number for what they wait for, 3, so a button's handler
+  was taken for a timer: in Windows' window it ran every 10 milliseconds, and
+  `tick 0` in `MOTH_EVENTS` could reach it. A timer has a number of its own
+  now, after the events', on both systems.
+- **Tested.** The thirteen tests of the window's, on Linux as on Windows,
+  through `MOTH_PICTURE` and `MOTH_EVENTS`, which go through the same drawing
+  and the same handling; and a real window, on WSLg's X server, sent the
+  tests' clicks, keys, drags and turns of the wheel by another X client, and
+  read back by it: for the to-do app, the checkboxes and lists, the dropdown
+  and slider, and editing, it said and showed, pixel for pixel, what the same
+  events did through `MOTH_EVENTS`. And DISPLAY by TCP, a cookie sent for its
+  display and not another's, no server, no terminal, Escape, stopping from a
+  handler, and a title cut at 200 bytes between characters.
+- **Not yet.** The clipboard, which X keeps by messages between programs; the
+  pad; boxes for choosing a file; keysyms of the old kinds past Latin-1, such
+  as Cyrillic's, which give nothing; and a Mac's window.
