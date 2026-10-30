@@ -95,6 +95,11 @@ const AS_WORDS = ["bytes", "text", "hex", "binary"];
 // what `when` can wait for, and how many values each gives its handler
 const EVENT_PHRASES = new Map([["a key is pressed", { event: "key", gives: 1 }], ["the mouse is clicked", { event: "click", gives: 2 }],
   ["the mouse is dragged", { event: "drag", gives: 2 }]]);
+// buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
+// "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
+const ENTER_PHRASE = ["enter", "is", "pressed", "in", "the", "text", "box"];
+const TEXT_IN_BOX = ["the", "text", "in", "the", "text", "box"];
+const AFTER_A_VALUE = ["at", "of", "bytes", "as", "in", "bit", "is", "and", "or"];
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
 
@@ -120,6 +125,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const wordAt = (i, w) => tokens[i].type === "word" && tokens[i].value === w;
   // `run program "git" with (list of "status")`: `run` alone is still a name
   const runsProgram = () => wordAt(pos + 1, "program") && !tokens[pos + 1].nl;
+  // these words from token i on, on the line before them
+  const wordsAt = (i, words) => words.every((w, k) => wordAt(i + k, w) && !tokens[i + k].nl);
+  // a button's label can start at token i: a value there on the same line, where today `button` would end one
+  const labelAt = (i) => !tokens[i].nl && (tokens[i].type === "string" || tokens[i].type === "number"
+    || (tokens[i].type === "word" && !AFTER_A_VALUE.includes(tokens[i].value)));
 
   function name(what) {
     const t = peek();
@@ -270,20 +280,36 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("when")) { // `when a key is pressed with key`, `when the mouse is clicked with x and y`
       const start = pos;
-      const words = [];
-      while (check("word") && !isWord("with") && !peek().nl) words.push(tokens[pos++].value);
-      const phrase = words.join(" ");
-      const known = EVENT_PHRASES.get(phrase);
+      let phrase;
+      let known;
+      let label; // the button or text box it waits for, worked out once, when it's set up
+      if (wordsAt(pos, ["the", "button"])) { // `when the button "Start" is clicked`
+        pos += 2;
+        label = additive();
+        expectWord("is");
+        expectWord("clicked");
+        [phrase, known] = ["the button is clicked", { event: "button", gives: 0 }];
+      } else if (wordsAt(pos, ENTER_PHRASE)) { // `when enter is pressed in the text box "Name" with words`
+        pos += ENTER_PHRASE.length;
+        label = additive();
+        [phrase, known] = ["enter is pressed in the text box", { event: "enter", gives: 1 }];
+      } else {
+        const words = [];
+        while (check("word") && !isWord("with") && !peek().nl) words.push(tokens[pos++].value);
+        phrase = words.join(" ");
+        known = EVENT_PHRASES.get(phrase);
+      }
       if (!known) {
         pos = start;
-        expected("'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged'");
+        expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked' or 'enter is pressed in the text box ...'");
       }
       const params = [];
-      if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
+      if (known.gives && word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
       if (params.length && params.length !== known.gives) {
         fail(t, `'when ${phrase}' gives ${known.gives === 1 ? "1 value" : `${known.gives} values`}, so name ${known.gives === 1 ? "one input" : `${known.gives} inputs`} or none, not ${params.length}`);
       }
       if (!atTop) fail(t, "'when' only works at the top level of a program");
+      if (label) return { kind: "when", event: known.event, label, fn: func(`when ${phrase}`, params, t), at: t };
       return { kind: "when", event: known.event, fn: func(`when ${phrase}`, params, t), at: t };
     }
     if (word("every")) { // `every 100 milliseconds`, `every 2 seconds`
@@ -349,11 +375,27 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (action === "to") return { kind: "turtle", action, value: several(2, t), at: t }; // `move to x, y`
       return { kind: "turtle", action, value: action === "up" || action === "down" ? null : expression(), at: t };
     }
-    if (word("clear")) return { kind: "turtle", action: "clear", value: null, at: t }; // wipe the picture
+    if (word("clear")) {
+      if (wordsAt(pos, ["the", "text", "box"])) { // `clear the text box "Name"`: empties it
+        pos += 3;
+        return { kind: "turtle", action: "clear text box", value: additive(), at: t };
+      }
+      return { kind: "turtle", action: "clear", value: null, at: t }; // wipe the picture
+    }
     if (word("draw")) { // `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
       if (isWord("chart") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") { // `draw chart of sales`
         pos += 2;
         return { kind: "turtle", action: "chart", value: column(expression), at: t };
+      }
+      // `draw button "Start" at x, y`, `draw text box "Name" at x, y`: a value straight after `button` (which
+      // a name couldn't have) or `text box`
+      const widget = isWord("button") && labelAt(pos + 1) ? "button" : wordsAt(pos, ["text", "box"]) ? "text box" : null;
+      if (widget) {
+        pos += widget === "button" ? 1 : 2;
+        const label = additive();
+        expectWord("at");
+        const place = several(2, t);
+        return { kind: "turtle", action: widget, value: { ...place, items: [label, ...place.items] }, at: t };
       }
       const shape = ["box", "circle"].find((w) => isWord(w) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "at");
       if (shape) {
@@ -551,6 +593,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "read", bytes, of: additive(), at: t };
     }
     if (word("arguments")) return { kind: "arguments", at: t };
+    if (wordsAt(pos, TEXT_IN_BOX)) { // `the text in the text box "Name"`: what's typed in it
+      pos += TEXT_IN_BOX.length;
+      return { kind: "builtin", name: "text in box", args: [unary()], at: t };
+    }
     // `total of prices`, `average of price in sales`, `largest of`, `smallest of`
     if (t.type === "word" && AGGREGATES.includes(t.value) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") {
       pos += 2;
@@ -826,10 +872,13 @@ class Compiler extends Scope {
         this.store(s.name, s.at);
         return;
       }
-      case "when": // a handler is a function of its own, made and handed over, not kept in a variable
-        this.emit(s.at, MAKE_FN, this.constant(new Compiler(this, s.fn.name, s.fn.params, s.fn.body).fn));
+      case "when": { // a handler is a function of its own, made and handed over, not kept in a variable
+        const fn = new Compiler(this, s.fn.name, s.fn.params, s.fn.body).fn;
+        if (s.label) this.expr(s.label); // the button or text box it waits for, under it
+        this.emit(s.at, MAKE_FN, this.constant(fn));
         this.emit(s.at, HANDLE, EVENTS.indexOf(s.event));
         return;
+      }
       case "every": {
         const fn = new Compiler(this, s.fn.name, s.fn.params, s.fn.body).fn;
         this.expr(s.interval);
@@ -1214,7 +1263,9 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   let said = 0;
   let complained = 0; // lines said to the error output
   let drawn = 0;
-  const sent = []; // each event an app has handled so far, as [handler, inputs]: a run on the VM handles them again
+  // each handler an app has called so far, as [handler, inputs], and each event its picture's buttons and text
+  // boxes have seen, as [event, inputs]: a run on the VM does them all again, in order
+  const sent = [];
 
   // The program on the VM. `again`: run from the start once more, as the JIT or WebAssembly engine handed it
   // over, getting everything from outside that the first run got, and passing on only what it hadn't said or
@@ -1233,8 +1284,8 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
     };
     new Machine(compile(source, reading), say, options).run();
-    const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options) };
-    for (const [i, inputs] of sent) host.call(host.handlers[i], inputs);
+    const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options), turtle: options.turtle };
+    for (const [i, inputs] of sent) typeof i === "string" ? host.turtle.route(i, inputs) : host.call(host.handlers[i], inputs);
     return host;
   }
 
@@ -1246,7 +1297,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     if (!(err instanceof Ended)) throw err;
     exit?.(err.code);
   };
-  let host = { handlers: [] }; // the engine running the program, which fills in its handlers and how to call one
+  let host = { handlers: [] }; // the engine running the program, which fills in its handlers, how to call one, and its turtle
   try {
     if (!program) host = onVm(false);
     else {
@@ -1269,7 +1320,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   // its own, and a mistake in one throws, which ends the app. A handler that stops the program ends it too:
   // `stopped` is then the number it ended with, and events after it do nothing.
   const app = {
-    waits: host.handlers.map(({ event, interval }) => (interval === undefined ? { event } : { event, interval })),
+    waits: host.handlers.map(({ event, interval, label }) => (interval !== undefined ? { event, interval } : label !== undefined ? { event, label } : { event })),
     stopped: undefined,
     handle(i, inputs = []) {
       if (app.stopped !== undefined) return;
@@ -1289,9 +1340,13 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       sent.push([i, inputs]);
     },
     // every handler of this event, in the order the program made them: "key" with the key's name, "click"
-    // and "drag" with x and y
+    // and "drag" with x and y, and "type" with the text typed. The picture's buttons and text boxes see it
+    // first (see route() in vm.js), and may take it: a click on a button goes to that button's handlers.
     send(event, inputs = []) {
-      app.waits.forEach((wait, i) => wait.event === event && app.handle(i, inputs));
+      if (app.stopped !== undefined) return;
+      const [to, label, given] = host.turtle.route(event, inputs) ?? [];
+      sent.push([event, inputs]);
+      app.waits.forEach((wait, i) => wait.event === to && wait.label === label && app.handle(i, given));
     },
   };
   return app;

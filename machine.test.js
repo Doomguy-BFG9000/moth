@@ -809,3 +809,128 @@ test("a question that asks for a drawing, asked away from a terminal, is answere
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------- buttons and text boxes ----------
+
+// What an app says, fails and exits with on the JavaScript engine, given events as MOTH_EVENTS lists them:
+// "type hello" types into a text box, as app.send("type", ["hello"]) does.
+function appOnEngine(source, events) {
+  let [stdout, stderr, status] = ["", "", 0];
+  try {
+    const app = run(source, (line) => (stdout += `${line}\n`), { file: "p.moth" });
+    const timers = app.waits.flatMap((wait, i) => (wait.event === "every" ? [i] : []));
+    for (const event of events.split(";")) {
+      const [what, ...rest] = event.split(" ");
+      if (what === "key" || what === "type") app.send(what, [rest.join(" ")]);
+      else if (what === "tick") app.handle(timers[Number(rest[0])]);
+      else app.send(what, rest.map(Number));
+    }
+    status = app.stopped ?? 0;
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    stderr = `p.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;
+    status = 1;
+  }
+  return { stdout, stderr, status };
+}
+
+const GREETER = `draw text box "Name" at -100, 50
+draw button "Greet" at 110, 50
+draw button "Quit" at 110, 0
+to greet with who
+    if who is "z"
+        say who / 2
+    end
+    say "Hello, " + who + "!"
+end
+when the button "Greet" is clicked
+    greet(the text in the text box "Name")
+end
+when enter is pressed in the text box "Name" with words
+    say "enter: " + words
+    clear the text box "Name"
+end
+when the mouse is clicked with x and y
+    say "clicked " + x + " " + y
+end
+when a key is pressed with key
+    say "key " + key
+end
+when the button "Quit" is clicked
+    stop the program with 4
+end`;
+const WIDGET_EVENTS = [
+  [GREETER, "key a;type ignored;click 0 60;type Sam;key s;key enter;type Ana Lee;key backspace;click 120 60;click 160 80;type !;click 0 0;key b;click 110 30;key x"],
+  [GREETER, "click 0 60;type z;click 120 60;key q"], // a mistake in a function a button's handler calls, and the trail to it
+  [`draw button "A" at 0, 0
+draw text box 7 at 0, 0
+when the button "A" is clicked
+    say "A"
+end
+when enter is pressed in the text box 3 + 4
+    say "entered " + the text in the text box "7"
+    clear
+    draw button "A" at 100, 100
+    draw button "A" at -100, -100
+end
+when the button "z" is clicked
+    say 1 / 0
+end`, "click 5 5;type ok;key enter;type more;click 105 105;click -95 -95;click 5 5"],
+  [`draw button "z" at 0, 0
+when the button "z" is clicked
+    say 1 / 0
+end`, "click 1 1;click 2 2"], // a mistake in a button's handler ends the app, as on the JavaScript engine
+  [here("apps/todo.moth"), "click -100 210;type Buy milk;key enter;type Call Sam;click 20 210;type x;key backspace;click 0 0;type nope;click 100 210;click -100 210;type Walk;key enter;key enter"],
+];
+
+test("buttons and text boxes in the window take clicks and typing as app.send does on the JavaScript engine", { skip: onWindows }, () => {
+  for (const [source, events] of WIDGET_EVENTS) {
+    const got = picture(source, events);
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(source, events), events);
+  }
+});
+
+test("buttons and text boxes are drawn as the playground draws them", { skip: onWindows }, () => {
+  const { at } = picture(`pen color "red"
+draw button "Go" at -100, 100
+pen color "lime"
+draw text box "Name" at -100, 0
+draw text box "Empty" at -100, -60
+when the button "Go" is clicked
+    say "go"
+end`, "click 0 10;type WWWW;click 0 -50");
+  const count = (x0, x1, y0, y1, test) => {
+    let n = 0;
+    for (let x = x0; x < x1; x++) for (let y = y0; y < y1; y++) if (test(at(x, y))) n++;
+    return n;
+  };
+  const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  assert.equal(at(-97, 103), "#ff0000"); // the button, 40 wide for its 2 letters
+  assert.equal(at(-62, 127), "#ff0000");
+  assert.equal(at(-58, 115), BACKGROUND);
+  assert.ok(count(-100, -60, 100, 130, (c) => c === "#ffffff") > 10, "the button's label is white");
+  assert.equal(at(-99, 15), "#00ff00"); // a text box's border, 2 wide
+  assert.equal(at(99, 29), "#00ff00");
+  assert.equal(at(95, 25), "#ffffff"); // and white inside
+  assert.equal(at(101, 15), BACKGROUND);
+  assert.ok(count(-92, 20, 4, 26, (c) => rgb(c).every((v) => v < 64)) > 20, "the text typed into it is black");
+  assert.ok(count(-92, 20, -56, -34, (c) => rgb(c).every((v) => v > 100 && v < 200)) > 10, "an empty one shows its label in grey");
+  assert.equal(at(-90, -45), "#000000"); // and the cursor, 1 after where its text starts, while it has the focus
+  assert.equal(count(-32, -20, 6, 24, (c) => c !== "#ffffff"), 0); // the box that lost it has none after its text
+});
+
+test("apps/todo.moth builds, adds what's typed to its list, and draws it", { skip: onWindows }, () => {
+  const events = "click -100 210;type Buy milk;key enter;type Call Sam;click 20 210";
+  const { at, stdout } = picture(here("apps/todo.moth"), events);
+  assert.equal(stdout, "To do: Buy milk\nTo do: Call Sam\n");
+  const blue = (y0, y1) => {
+    let n = 0;
+    for (let x = -200; x < -100; x++) for (let y = y0; y < y1; y++) if (at(x, y) === "#4f8ff7") n++;
+    return n;
+  };
+  assert.ok(blue(155, 172) > 20, "the first thing to do is drawn");
+  assert.ok(blue(130, 147) > 20, "and the second");
+  assert.equal(blue(105, 122), 0);
+  assert.equal(at(-5, 225), "#ffffff"); // the box, empty again
+  assert.equal(at(12, 202), "#4f8ff7"); // and the Add button
+});

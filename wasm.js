@@ -85,6 +85,7 @@ const IMPORTS = {
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
   handle: [[I32, EQ, I32], []], // which event (EVENTS), its handler, a position
+  handleLabel: [[I32, EQ, I32, EQ], []], // the same, and the button or text box it waits for
   every: [[EQ, F64, EQ, I32], []], // how often, 1 or 1000 (for seconds), the handler, a position
   expect: [[I32, I32, EQ, EQ, I32], []], // which comparison, 1 for `is not`, its two sides, and a position
   expectYes: [[EQ, I32], []],
@@ -544,6 +545,7 @@ function findCaptured(program) {
       const made = s.kind === "define" ? s : s.fn; // `when` and `every` make a function too
       if (made) {
         if (s.interval) expr(s.interval);
+        if (s.label) expr(s.label);
         const inner = new Scope(scope, made.name, made.params, made.body);
         inner.body = made.body;
         return visit(inner, made.body);
@@ -899,7 +901,11 @@ class WasmCompiler extends Scope {
         const make = this.closure(s.fn);
         this.e("i32.const", EVENTS.indexOf(s.event));
         make();
-        this.e("i32.const", this.pos(s.at)).e("call", im.handle);
+        this.e("i32.const", this.pos(s.at));
+        if (s.label) {
+          this.expr(s.label);
+          this.e("call", im.handleLabel);
+        } else this.e("call", im.handle);
         return;
       }
       case "every": {
@@ -1309,6 +1315,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     throwing(err);
   });
   const turtle = new Turtle(draw);
+  host.turtle = turtle;
   let x = null; // the module's exports, once it exists
 
   function toJs(v, seen = new Map()) {
@@ -1457,7 +1464,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       return catchable(caughtError) ? 1 : 0;
     },
     caughtValue: () => (caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError))),
-    builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k])),
+    builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k], turtle)),
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
@@ -1465,6 +1472,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
     handle: (event, closure) => void host.handlers.push({ event: EVENTS[event], closure }),
+    handleLabel: (event, closure, k, label) => void host.handlers.push({ event: EVENTS[event], label: show(toJs(label)), closure }),
     every: (interval, unit, closure, k) => void host.handlers.push({ event: "every", interval: everyInterval(toJs(interval), unit, errors[k]), closure }),
     expect: (op, negate, a, b, k) => expectThat(COMPARE_OPS[op], negate === 1, toJs(a), toJs(b), errors[k]),
     expectYes: (value, k) => expectYes(toJs(value), errors[k]),

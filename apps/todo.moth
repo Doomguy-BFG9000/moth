@@ -1,0 +1,38 @@
+# To-do: click the box, type something to do, and press Enter or click Add. Clear starts again.
+
+set todo to empty list
+
+to show
+    clear
+    draw text box "Something to do" at -200, 200
+    draw button "Add" at 10, 200
+    draw button "Clear" at 70, 200
+    for each i from 1 to length of todo
+        draw item i of todo at -200, 180 - 25 * i
+    end
+end
+
+to add_it
+    set thing to the text in the text box "Something to do"
+    if thing is not ""
+        add thing to todo
+        say "To do: " thing
+    end
+    clear the text box "Something to do"
+    show()
+end
+
+when enter is pressed in the text box "Something to do"
+    add_it()
+end
+
+when the button "Add" is clicked
+    add_it()
+end
+
+when the button "Clear" is clicked
+    set todo to empty list
+    show()
+end
+
+show()

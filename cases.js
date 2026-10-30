@@ -130,6 +130,10 @@ export const PROGRAMS = [
   ["to random\n    return 4\nend\nsay random() \" \" random number from 1 to 1", "4 1"],
   // when and every: the program sets them up, and run() returns an app that waits for them
   ["say \"set up\"\nwhen a key is pressed\n    say \"never, until a key comes\"\nend\nevery 1 second\n    say \"nor this\"\nend\nsay \"done\"", "set up\ndone"],
+  // buttons and text boxes: drawn, and their handlers set up; `button`, `text`, `box`, `the` and `enter` are still names
+  ["draw button \"Go\" at 0, 0\ndraw text box \"Name\" at 0, 40\nsay \"[\" the text in the text box \"Name\" \"]\"\nclear the text box \"Name\"\nsay length of the text in the text box \"Name\"", "[]\n0"],
+  ["set button to \"hi\"\ndraw button at 0, 0\nsay button\nset text to 1\nset box to 2\nset the to 3\nset enter to 4\nsay text + box + the + enter", "hi\n10"],
+  ["set name to \"Start\"\nwhen the button name is clicked\n    say \"never\"\nend\nwhen enter is pressed in the text box \"Name\" with words\n    say words\nend\nwhen the button 5 is clicked\n    say 5\nend\nsay \"set up\"", "set up"],
 ];
 
 export const ERRORS = [
@@ -306,7 +310,19 @@ export const ERRORS = [
   ["say random number from 6 to 1", "line 1: there is no number from 6 to 1"],
   ["say random number 1 to 6", "line 1: expected 'of' but found '1'"],
   // when and every: the program sets them up, and run() returns an app that waits for them
-  ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged' but found 'the'"],
+  ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked' or 'enter is pressed in the text box ...' but found 'the'"],
+  // buttons and text boxes
+  ["draw button \"x\" at \"a\", 1", "line 1: 'draw button' needs numbers, not text"],
+  ["draw text box \"x\" at 1, nothing", "line 1: 'draw text box' needs numbers, not nothing"],
+  ["draw button \"x\" at 0", "line 1: expected ',' but found the end of the code"],
+  ["draw button 1 / 0 at 0, 0", "line 1: can't divide by zero"],
+  ["when the button nope is clicked\n    say 1\nend", "line 1: 'nope' has no value yet (give it one with 'set nope to ...')"],
+  ["when the button \"a\" is clicked with x\n    say 1\nend", "line 1: expected a new line but found 'with'"],
+  ["when the button \"Go\" is pressed\n    say 1\nend", "line 1: expected 'clicked' but found 'pressed'"],
+  ["when enter is pressed in the text box \"a\" with x and y\n    say 1\nend", "line 1: 'when enter is pressed in the text box' gives 1 value, so name one input or none, not 2"],
+  ["if yes\n    when the button \"a\" is clicked\n        say 1\n    end\nend", "line 2: 'when' only works at the top level of a program"],
+  ["say the text in the text box nope", "line 1: 'nope' has no value yet (give it one with 'set nope to ...')"],
+  ["clear the text box (list of 1) + 1", "line 1: can't use '+' on a list and a number"],
   ["when a key is pressed with a and b\n    say 1\nend", "line 1: 'when a key is pressed' gives 1 value, so name one input or none, not 2"],
   ["when the mouse is clicked with x\n    say 1\nend", "line 1: 'when the mouse is clicked' gives 2 values, so name 2 inputs or none, not 1"],
   ["if yes\n    when a key is pressed\n        say 1\n    end\nend", "line 2: 'when' only works at the top level of a program"],

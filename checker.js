@@ -243,6 +243,7 @@ class Checker extends Scope {
         return;
       }
       case "when":
+        if (s.label) this.expr(s.label); // the button or text box it waits for
         new Checker(this, s.fn.name, s.fn.params, s.fn.body, this.all);
         return;
       case "return":

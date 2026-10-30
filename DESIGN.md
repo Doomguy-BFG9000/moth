@@ -1296,3 +1296,64 @@ hold them to agreeing.
   import it needs to read `MOTH_SEED`, go only into programs with a
   `random number`. With it, apps/snake.moth builds into a program of its own
   and plays in the window.
+
+## 36. Buttons and text boxes
+
+- **Six phrases, no new reserved words.** `draw button "Start" at 0, 0` and
+  `when the button "Start" is clicked` are the owner's own. A text box follows
+  them: `draw text box "Name" at 0, 50`, `when enter is pressed in the text box
+  "Name" with words`, `the text in the text box "Name"`, and `clear the text box
+  "Name"`, which empties it. Every one starts with a word Moth already keeps
+  (`draw`, `when`, `clear`) or is a run of words that meant nothing before:
+  `draw button "Start"` was a mistake (a value can't follow `button`), and so
+  were `draw text box`, `clear the` and `the text in the text box`. So `button`,
+  `text`, `box`, `the` and `enter` are still names, and `draw button at 0, 0`
+  still draws what a variable called `button` holds.
+- **A button or a box is its label.** The label is shown as `say` shows it, and
+  two with the same label are one: a click on either runs the same handlers,
+  and two boxes called "Name" hold the same text. A handler's label is worked
+  out once, when the program sets it up, as `every`'s time is.
+- **Sizes come from the label, not the font.** A button is 30 high and 20 wide
+  plus 10 for each letter of its label; a text box is 200 by 30. A click has to
+  land in the same place on every engine and in machine code, and the
+  playground's font and Windows' measure text a little differently, so neither
+  is asked. `at x, y` is the bottom left corner, as for `draw box`.
+- **Clicks.** A click inside a button runs that button's handlers and nothing
+  else: `when the mouse is clicked` doesn't get it, so a paint program's
+  "Clear" button doesn't also paint a dot. A click inside a text box gives it
+  the focus, and doesn't reach `when the mouse is clicked` either. Where they
+  overlap, the one drawn last wins, as it's the one on top. A click anywhere
+  else takes the focus away and goes to `when the mouse is clicked`, as before.
+  A click on a button leaves the focus where it was, so you can type, click
+  "Add", and go on typing. Drags are as before.
+- **Typing.** While a box has the focus, every key goes to it, and none to
+  `when a key is pressed`. Backspace takes off the last letter, Enter runs the
+  box's `when enter is pressed` handlers with its text, and other keys do
+  nothing more. The letters themselves come from a new kind of event, `type`,
+  which hosts send for each character typed, as it was typed (`A`, not `a`),
+  after the key's own event: `app.send("type", ["A"])` in JavaScript, WM_CHAR
+  in the window, `type hello` in MOTH_EVENTS. A box holds up to 40 letters;
+  more are dropped, and so are control characters. The cursor is always at the
+  end: there are no arrow keys inside a box, which keeps it to one rule.
+- **The text outlives the picture.** Apps draw their picture again after each
+  event, starting with `clear`. If `clear` emptied the boxes, nothing typed
+  would survive the next key, so a box's text is kept by its label, and a box
+  drawn again shows it again. The focus goes when its box isn't on the picture
+  any more. `clear the text box "Name"` empties one on purpose.
+- **Where the rules live.** One place for the JavaScript engines: the Turtle in
+  vm.js, which already sees everything drawn, keeps the buttons and boxes since
+  the last `clear`, the texts and the focus, and `route()` decides where each
+  event goes; moth.js's `app.send` asks it first. machine.moth does the same
+  in its runtime. A JavaScript run handed over to the VM in the middle of an
+  app replays the events, not only the handlers they ran, so the VM's turtle
+  gets the same texts.
+- **What's drawn.** A button is a box in the pen's colour with its label in
+  white, in the middle. A text box is white with a border in the pen's colour,
+  its text in black, its label in grey while it's empty, and a cursor while it
+  has the focus; a text too long to fit shows its end. Typing changes a box
+  without the program drawing anything, so the turtle tells the host with an
+  item of its own in the list of things drawn: `{ textbox: "Name", text,
+  focused }`. The playground draws each box with the last of those for its
+  label; machine code draws from the texts themselves.
+- **Linux.** There's no window, so buttons and text boxes are only drawn
+  things, nothing types into a box, and handlers don't run, as for any app.
