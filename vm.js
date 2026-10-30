@@ -163,7 +163,8 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart", "picture", // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
-  "button", "text box", "clear text box"]; // `draw button "Start" at ...`, `draw text box "Name" at ...`, `clear the text box "Name"`
+  "button", "text box", "clear text box", // `draw button "Start" at ...`, `draw text box "Name" at ...`, `clear the text box "Name"`
+  "checkbox", "tick", "untick", "text area", "list"]; // `draw checkbox "Done" at ...`, `tick the checkbox "Done"`, `untick ...`, `draw text area ...`, `draw list ...`
 // the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
 export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
@@ -749,6 +750,15 @@ export const BUILTINS = [
   ...[["read with headers", false, "text"], ["read bytes with headers", true, "bytes"]].map(([name, asBytes, gives]) => ({
     name, needs: [["text"], ["dictionary"]], gives, run: ([address, headers], error, turtle, disk) => readFile(address, asBytes, disk, error, headers),
   })),
+  // `the checkbox "Done" is ticked`, and `the choice in the list "Fruits"`: the item chosen, or nothing
+  { name: "ticked", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "yes/no", run: ([label], error, turtle) => turtle?.ticks.get(show(label)) ?? false },
+  {
+    name: "choice in list", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: null,
+    run: ([label], error, turtle) => {
+      const [items, chosen] = [turtle?.items.get(show(label)), turtle?.choices.get(show(label))];
+      return items && chosen !== undefined && chosen < items.length ? items[chosen] : null;
+    },
+  },
   // `the text in the text box "Name"`: what's typed in it so far (see Turtle). The checker has no turtle.
   { name: "text in box", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "text", run: ([label], error, turtle) => turtle?.texts.get(show(label)) ?? "" },
 ];
@@ -1080,8 +1090,8 @@ export function askFor(question, answer, error) {
 // `when the button "Start" is clicked` and `when enter is pressed in the text box "Name"`. A handler is
 // { event, closure }, with the label it waits for as `label` for the last two, or for `every`, { event:
 // "every", interval (in milliseconds), closure }.
-export const EVENTS = ["key", "click", "drag", "button", "enter"];
-export const LABELLED = new Set([EVENTS.indexOf("button"), EVENTS.indexOf("enter")]);
+export const EVENTS = ["key", "click", "drag", "button", "enter", "checkbox", "choice"];
+export const LABELLED = new Set(["button", "enter", "checkbox", "choice"].map((event) => EVENTS.indexOf(event)));
 
 // `every 100 milliseconds`: how often, in milliseconds (`unit` is 1000 for seconds)
 export function everyInterval(interval, unit, error) {
@@ -1185,8 +1195,13 @@ export function failWith(value, error) {
   error(show(value), value);
 }
 
-// how many letters a text box holds
+// how many letters a text box holds, and a text area
 export const BOX_LETTERS = 40;
+export const AREA_LETTERS = 2000;
+// how high a line of a list is, and of a text area; and what can have the focus (DESIGN §40)
+export const LIST_ROW = 24;
+export const AREA_LINE = 18;
+const FOCUSABLE = new Set(["box", "area", "list"]);
 
 // The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`
 // as { x1, y1, x2, y2, color, width }, with y going up.
@@ -1197,6 +1212,10 @@ export class Turtle {
     // as { kind: "button" or "box", label, x, y, width, height }; what's typed in each box, by its label,
     // kept through `clear`; and the label of the box that has the focus, or null
     Object.assign(this, { widgets: [], texts: new Map(), focus: null });
+    // checkboxes, text areas and lists (DESIGN §40): whether each checkbox is ticked, by its label, kept
+    // through `clear` as what's typed is; and for each list, by its label, the items it shows, which of them
+    // is chosen (by its place, from 0), and the first one in view
+    Object.assign(this, { ticks: new Map(), items: new Map(), choices: new Map(), tops: new Map() });
   }
 
   // Where an event goes once the picture's buttons and text boxes have seen it: [the event the handlers wait
@@ -1204,24 +1223,85 @@ export class Turtle {
   // its own, one inside a text box gives it the focus, and one anywhere else takes the focus away. While a box
   // has the focus, every key is its: Backspace takes off the last letter and Enter is the box's; and "type"
   // (the text typed, as it was typed) goes into it, up to BOX_LETTERS letters.
+  // A click on a checkbox ticks it or unticks it, then goes to its handlers; one on a list gives it the focus
+  // and chooses the item there. "scroll" ([x, y, lines], from a mouse wheel) scrolls the list under it. While a
+  // text area has the focus, Enter starts a new line in it, up to AREA_LETTERS letters; while a list has it,
+  // the up and down arrows choose the item before or after, and no key goes anywhere else.
   route(event, inputs) {
-    if (this.focus !== null && !this.widgets.some((w) => w.kind === "box" && w.label === this.focus)) this.focus = null; // its box is gone
+    const focused = this.focus === null ? null : this.widgets.findLast((w) => w.label === this.focus && FOCUSABLE.has(w.kind));
+    if (this.focus !== null && !focused) this.focus = null; // its box is gone
+    const at = (x, y) => this.widgets.findLast((w) => x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height);
+    if (event === "scroll") {
+      const hit = at(inputs[0], inputs[1]);
+      if (hit?.kind === "list") this.scrollTo(hit, (this.tops.get(hit.label) ?? 0) + inputs[2]);
+      return null;
+    }
     if (event === "click") {
       const [x, y] = inputs;
-      const hit = this.widgets.findLast((w) => x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height);
+      const hit = at(x, y);
       if (hit?.kind === "button") return ["button", hit.label, []];
+      if (hit?.kind === "checkbox") {
+        this.tick(hit.label, !this.ticks.get(hit.label));
+        return ["checkbox", hit.label, []];
+      }
       this.focusOn(hit ? hit.label : null);
+      if (hit?.kind === "list") {
+        const row = (this.tops.get(hit.label) ?? 0) + Math.floor((hit.y + hit.height - y) / LIST_ROW);
+        return row < this.items.get(hit.label).length ? this.choose(hit, row) : null;
+      }
       return hit ? null : [event, undefined, inputs];
     }
-    if (this.focus === null) return event === "type" ? null : [event, undefined, inputs];
+    if (!focused) return event === "type" ? null : [event, undefined, inputs];
+    if (event !== "key" && event !== "type") return [event, undefined, inputs];
+    if (focused.kind === "list") {
+      const count = this.items.get(focused.label).length;
+      const now = this.choices.get(focused.label) ?? -1;
+      if (event === "key" && (inputs[0] === "up" || inputs[0] === "down") && count) {
+        const next = Math.max(0, Math.min(count - 1, inputs[0] === "up" ? now - 1 : now + 1));
+        if (next !== now) return this.choose(focused, next);
+      }
+      return null;
+    }
     const letters = [...(this.texts.get(this.focus) ?? "")];
+    const most = focused.kind === "area" ? AREA_LETTERS : BOX_LETTERS;
     if (event === "type") {
-      for (const c of show(inputs[0])) if (c >= " " && c !== "\x7f" && letters.length < BOX_LETTERS) letters.push(c);
+      for (const c of show(inputs[0])) if (c >= " " && c !== "\x7f" && letters.length < most) letters.push(c);
       this.typed(this.focus, letters.join(""));
-    } else if (event === "key" && inputs[0] === "backspace") this.typed(this.focus, letters.slice(0, -1).join(""));
-    else if (event === "key" && inputs[0] === "enter") return ["enter", this.focus, [letters.join("")]];
-    else if (event !== "key") return [event, undefined, inputs];
+    } else if (inputs[0] === "backspace") this.typed(this.focus, letters.slice(0, -1).join(""));
+    else if (inputs[0] === "enter") {
+      if (focused.kind === "box") return ["enter", this.focus, [letters.join("")]];
+      if (letters.length < most) this.typed(this.focus, `${letters.join("")}\n`);
+    }
     return null;
+  }
+
+  // the checkbox with this label, ticked or not: drawn again
+  tick(label, ticked) {
+    this.ticks.set(label, ticked);
+    this.draw({ checkbox: label, ticked });
+  }
+
+  // the item at `row` of this list chosen, and in view: its handlers' event, with the item
+  choose(list, row) {
+    this.choices.set(list.label, row);
+    const top = this.tops.get(list.label) ?? 0;
+    const rows = Math.max(1, Math.floor(list.height / LIST_ROW));
+    this.scrollTo(list, row < top ? row : row >= top + rows ? row - rows + 1 : top, true);
+    return ["choice", list.label, [this.items.get(list.label)[row]]];
+  }
+
+  // the first item in view of this list, as near to `top` as its items allow: drawn again
+  scrollTo(list, top, always = false) {
+    const rows = Math.max(1, Math.floor(list.height / LIST_ROW));
+    const first = Math.max(0, Math.min(top, this.items.get(list.label).length - rows));
+    if (first === (this.tops.get(list.label) ?? 0) && !always) return;
+    this.tops.set(list.label, first);
+    this.listChanged(list.label);
+  }
+
+  // what a list shows changed without it being drawn again: which item is chosen, which is first, its focus
+  listChanged(label) {
+    this.draw({ list: label, chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0, focused: this.focus === label });
   }
 
   // the focus, to the box with this label (or none): each box whose focus changed is drawn again
@@ -1229,7 +1309,11 @@ export class Turtle {
     const before = this.focus;
     if (label === before) return;
     this.focus = label;
-    for (const box of [before, label]) if (box !== null) this.draw({ textbox: box, text: this.texts.get(box) ?? "", focused: box === label });
+    for (const box of [before, label]) {
+      if (box === null) continue;
+      if (this.widgets.findLast((w) => w.label === box && FOCUSABLE.has(w.kind))?.kind === "list") this.listChanged(box);
+      else this.draw({ textbox: box, text: this.texts.get(box) ?? "", focused: box === label });
+    }
   }
 
   // the text in the box with this label, changed: drawn again
@@ -1244,7 +1328,11 @@ export class Turtle {
   // radius, color } and { shape: "text", text, x, y, size, color }; pictures from files, { shape: "picture", x,
   // y, width, height, image }, where the image is what decodePicture gives; and { shape: "button", text, x, y,
   // width, height, color }, { shape: "textbox", label, text, focused, x, y, width, height, color }, and
-  // { textbox: label, text, focused } when what a text box shows changes without it being drawn again. `disk`
+  // { textbox: label, text, focused } when what a text box shows changes without it being drawn again; and
+  // { shape: "checkbox", label, ticked, x, y, width, height, color }, { shape: "textarea", label, text,
+  // focused, x, y, width, height, color }, { shape: "list", label, items, chosen, top, focused, x, y, width,
+  // height, color }, items as `say` shows them and chosen -1 for none, with { checkbox: label, ticked } and
+  // { list: label, chosen, top, focused } when they change, and a text area's text as a text box's. `disk`
   // has the files `draw picture` reads, as for readFile.
   act(action, value, error = oops, disk = null) {
     const name = TURTLE_ACTIONS[action];
@@ -1282,6 +1370,33 @@ export class Turtle {
       }
     } else if (name === "clear text box") {
       this.typed(show(value), "");
+    } else if (name === "checkbox") { // [label, x, y]: a box 20 by 20 with its label after it
+      const [x, y] = numbers("'draw checkbox'", value.slice(1));
+      const label = show(value[0]);
+      const width = 28 + 10 * [...label].length;
+      this.widgets.push({ kind: "checkbox", label, x, y, width, height: 20 });
+      this.draw({ shape: "checkbox", label, ticked: this.ticks.get(label) ?? false, x, y, width, height: 20, color: this.color });
+    } else if (name === "tick" || name === "untick") {
+      this.tick(show(value), name === "tick");
+    } else if (name === "text area" || name === "list") { // [label, (items,) x, y, width or nothing, height or nothing]
+      const label = show(value[0]);
+      const items = name === "list" ? value[1] : null;
+      if (name === "list" && !isList(items)) error(`'draw list ... showing' needs a list, not ${kindOf(items)}`);
+      const rest = value.slice(name === "list" ? 2 : 1);
+      const sized = rest[2] !== null || rest[3] !== null;
+      const [x, y, width, height] = numbers(`'draw ${name}'`, sized ? rest : [...rest.slice(0, 2), ...(name === "list" ? [200, 144] : [300, 120])]);
+      for (const n of [width, height]) if (n <= 0) error(`a ${name}'s size is a number above 0, not ${show(n)}`);
+      if (name === "text area") {
+        this.widgets.push({ kind: "area", label, x, y, width, height });
+        this.draw({ shape: "textarea", label, text: this.texts.get(label) ?? "", focused: this.focus === label, x, y, width, height, color: this.color });
+      } else {
+        this.items.set(label, items.slice());
+        this.widgets.push({ kind: "list", label, x, y, width, height });
+        const list = this.widgets.at(-1);
+        this.scrollTo(list, this.tops.get(label) ?? 0); // as near to where it was as its items allow now
+        this.draw({ shape: "list", label, items: items.map((item) => show(item)), chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0,
+          focused: this.focus === label, x, y, width, height, color: this.color });
+      }
     } else if (name === "box") {
       const [x, y, width, height] = numbers("'draw box'", value);
       this.draw({ shape: "box", x, y, width, height, color: this.color });

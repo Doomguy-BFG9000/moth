@@ -24825,8 +24825,14 @@ end
 
 # `move forward 10`, `pen color "red"`, `draw box at x, y size w by h` and the rest: the value, if there is
 # one, then what to do with it, as vm.js's TURTLE_ACTIONS counts them
+# the controls DESIGN §40 has, which machine code doesn't draw yet
+set later_widgets to dictionary where "checkbox" is yes, "tick" is yes, "untick" is yes, "text area" is yes, "list" is yes
+
 to gen_turtle with fc, s
     set a to a of fc
+    if action of s is in later_widgets
+        not_yet(at of s, "a checkbox, a text area or a list")
+    end
     if action of s is "chart"
         set charts of a to yes
     end
@@ -27497,6 +27503,8 @@ to gen_statement with fc, s
         gen_exit(fc, s)
     else if what is "turtle"
         gen_turtle(fc, s)
+    else if what is "when" and (event of s is "checkbox" or event of s is "choice")
+        not_yet(at of s, "a checkbox, a text area or a list")
     else if what is "when" or what is "every"
         gen_handler(fc, s)
     else if what is "wait"

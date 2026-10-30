@@ -417,7 +417,7 @@ export const ERRORS = [
   ["say (list of 1, 2) in order by age", "line 1: 'in order by age' needs a list of records, not one with a number in it"],
   ["say (list of 2, 1) in order by \"x\"", "line 1: expected a field name but found \"x\""],
   // when and every: the program sets them up, and run() returns an app that waits for them
-  ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked' or 'enter is pressed in the text box ...' but found 'the'"],
+  ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked' or 'an item is chosen in the list ...' but found 'the'"],
   // buttons and text boxes
   ["draw button \"x\" at \"a\", 1", "line 1: 'draw button' needs numbers, not text"],
   ["draw text box \"x\" at 1, nothing", "line 1: 'draw text box' needs numbers, not nothing"],

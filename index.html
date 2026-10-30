@@ -398,7 +398,7 @@ Did you mean 'total'?</pre></div>
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
       + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle button random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width "
-      + "table total average largest smallest chart picture play note beep send json headers").split(" "));
+      + "table total average largest smallest chart picture play note beep send json headers checkbox tick untick area showing choice ticked").split(" "));
     // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -503,10 +503,10 @@ Did you mean 'total'?</pre></div>
     // Draws what the program drew (lines, filled shapes and text: see Turtle in vm.js) from its last `clear`
     // on, with Moth's (0, 0) in the middle and y going up, zoomed out if `fitTo` reaches past the edge.
     const sinceClear = (items) => items.slice(items.findLastIndex((d) => d.clear) + 1);
-    const reachOf = (d) => (["box", "picture", "button", "textbox"].includes(d.shape) ? Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.x + d.width), Math.abs(d.y + d.height))
+    const reachOf = (d) => (["box", "picture", "button", "textbox", "checkbox", "textarea", "list"].includes(d.shape) ? Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.x + d.width), Math.abs(d.y + d.height))
       : d.shape === "circle" ? Math.max(Math.abs(d.x), Math.abs(d.y)) + d.radius
       : d.shape === "text" ? Math.max(Math.abs(d.x), Math.abs(d.y) + d.size)
-      : d.clear || d.textbox !== undefined ? 0 : Math.max(Math.abs(d.x1), Math.abs(d.y1), Math.abs(d.x2), Math.abs(d.y2)));
+      : d.clear || d.textbox !== undefined || d.checkbox !== undefined || d.list !== undefined ? 0 : Math.max(Math.abs(d.x1), Math.abs(d.y1), Math.abs(d.x2), Math.abs(d.y2)));
     function render(items = drawing, fitTo = items) {
       const canvas = $("canvas");
       const pen = canvas.getContext("2d");
@@ -521,7 +521,14 @@ Did you mean 'total'?</pre></div>
       const shown = sinceClear(items);
       // a text box shows what the last word on it says: its own, or a change to its text or focus (DESIGN §36)
       const boxes = new Map();
-      for (const d of shown) if (d.shape === "textbox" || d.textbox !== undefined) boxes.set(d.label ?? d.textbox, d);
+      for (const d of shown) if (d.shape === "textbox" || d.shape === "textarea" || d.textbox !== undefined) boxes.set(d.label ?? d.textbox, d);
+      // and so does a checkbox, and a list, whose items are the ones it was drawn with (DESIGN §40)
+      const ticks = new Map();
+      const lists = new Map();
+      for (const d of shown) {
+        if (d.shape === "checkbox" || d.checkbox !== undefined) ticks.set(d.label ?? d.checkbox, d.ticked);
+        if (d.shape === "list" || d.list !== undefined) lists.set(d.label ?? d.list, d);
+      }
       // text the right way up, in a picture whose y goes up, its baseline at (x, y)
       const write = (text, x, y, size, align = "left") => {
         pen.save();
@@ -533,7 +540,7 @@ Did you mean 'total'?</pre></div>
         pen.restore();
       };
       for (const d of shown) {
-        if (d.textbox !== undefined) continue; // drawn with its box
+        if (d.textbox !== undefined || d.checkbox !== undefined || d.list !== undefined) continue; // drawn with its box
         pen.strokeStyle = pen.fillStyle = d.color; // a color name the browser doesn't know keeps the previous one
         if (d.shape === "box") pen.fillRect(d.x, d.y, d.width, d.height);
         else if (d.shape === "button") { // in the pen's colour, its label in white in the middle
@@ -558,6 +565,60 @@ Did you mean 'total'?</pre></div>
           write(text || d.label, text ? left : d.x + 8, d.y + 10, 16);
           pen.fillStyle = "#000000";
           if (focused) pen.fillRect((text ? left + wide : d.x + 8) + 1, d.y + 6, 2, 18); // the cursor, at the end
+          pen.restore();
+        } else if (d.shape === "checkbox") { // a box in the pen's colour, white inside, ticked with a box of the pen's colour
+          pen.fillRect(d.x, d.y, 20, 20);
+          pen.save();
+          pen.fillStyle = "#ffffff";
+          pen.fillRect(d.x + 2, d.y + 2, 16, 16);
+          pen.restore();
+          if (ticks.get(d.label)) pen.fillRect(d.x + 5, d.y + 5, 10, 10);
+          write(d.label, d.x + 28, d.y + 4, 16);
+        } else if (d.shape === "textarea") { // as a text box, a line every 18, showing its last lines
+          const { text, focused } = boxes.get(d.label);
+          pen.fillRect(d.x, d.y, d.width, d.height);
+          pen.save();
+          pen.fillStyle = "#ffffff";
+          pen.fillRect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
+          pen.beginPath();
+          pen.rect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
+          pen.clip();
+          const rows = Math.max(1, Math.floor((d.height - 8) / 18));
+          const lines = (text || d.label).split("\n").slice(-rows);
+          pen.fillStyle = text ? "#000000" : "#888888"; // its label in grey while it's empty
+          lines.forEach((line, i) => write(line, d.x + 8, d.y + d.height - 18 - 18 * i, 14));
+          if (focused) { // the cursor, after the last letter
+            pen.font = "14px system-ui, sans-serif";
+            const last = text ? lines.at(-1) : "";
+            pen.fillStyle = "#000000";
+            pen.fillRect(d.x + 9 + pen.measureText(last).width, d.y + d.height - 22 - 18 * (text ? lines.length - 1 : 0), 2, 16);
+          }
+          pen.restore();
+        } else if (d.shape === "list") { // a row every 24 from the top, the chosen one in the pen's colour
+          const { chosen, top, focused } = lists.get(d.label);
+          const rows = Math.max(1, Math.floor(d.height / 24));
+          pen.fillRect(d.x, d.y, d.width, d.height);
+          pen.save();
+          pen.fillStyle = "#ffffff";
+          const edge = focused ? 3 : 2; // a thicker border while it has the focus
+          pen.fillRect(d.x + edge, d.y + edge, d.width - 2 * edge, d.height - 2 * edge);
+          pen.beginPath();
+          pen.rect(d.x + edge, d.y + edge, d.width - 2 * edge, d.height - 2 * edge);
+          pen.clip();
+          for (let row = 0; row < rows && top + row < d.items.length; row++) {
+            const low = d.y + d.height - 24 * (row + 1);
+            if (top + row === chosen) {
+              pen.fillStyle = d.color;
+              pen.fillRect(d.x, low, d.width, 24);
+            }
+            pen.fillStyle = top + row === chosen ? "#ffffff" : "#000000";
+            write(d.items[top + row], d.x + 8, low + 7, 16);
+          }
+          if (d.items.length > rows) { // where the rows in view are, among them all
+            pen.fillStyle = d.color;
+            const length = (d.height * rows) / d.items.length;
+            pen.fillRect(d.x + d.width - 6, d.y + d.height - (d.height * top) / d.items.length - length, 3, length);
+          }
           pen.restore();
         } else if (d.shape === "circle") {
           pen.beginPath();
@@ -862,6 +923,13 @@ Did you mean 'total'?</pre></div>
       sendEvent("click", spot(e));
     };
     $("canvas").onpointermove = (e) => e.buttons && sendEvent("drag", spot(e));
+    // a mouse wheel scrolls the list under it (DESIGN §40): a line for each 24 pixels it would have scrolled
+    $("canvas").addEventListener("wheel", (e) => {
+      if (!appRunning) return;
+      e.preventDefault();
+      const lines = e.deltaMode === 0 ? Math.round(e.deltaY / 24) || Math.sign(e.deltaY) : Math.sign(e.deltaY) * 3;
+      sendEvent("scroll", [...spot(e), lines]);
+    }, { passive: false });
 
     // A box to type the answer in, or, for a question that starts with "Draw", a pad to draw it on. Each
     // answer is { text, shown }: what the program gets, and what the output shows after the question.

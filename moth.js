@@ -99,6 +99,10 @@ const EVENT_PHRASES = new Map([["a key is pressed", { event: "key", gives: 1 }],
 // "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 const ENTER_PHRASE = ["enter", "is", "pressed", "in", "the", "text", "box"];
 const TEXT_IN_BOX = ["the", "text", "in", "the", "text", "box"];
+// checkboxes, text areas and lists (DESIGN §40)
+const CHOSEN_PHRASE = ["an", "item", "is", "chosen", "in", "the", "list"];
+const TEXT_IN_AREA = ["the", "text", "in", "the", "text", "area"];
+const CHOICE_IN_LIST = ["the", "choice", "in", "the", "list"];
 const AFTER_A_VALUE = ["at", "of", "bytes", "as", "in", "bit", "is", "and", "or"];
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
@@ -330,6 +334,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         pos += ENTER_PHRASE.length;
         label = additive();
         [phrase, known] = ["enter is pressed in the text box", { event: "enter", gives: 1 }];
+      } else if (wordsAt(pos, ["the", "checkbox"])) { // `when the checkbox "Done" is clicked`
+        pos += 2;
+        label = additive();
+        expectWord("is");
+        expectWord("clicked");
+        [phrase, known] = ["the checkbox is clicked", { event: "checkbox", gives: 0 }];
+      } else if (wordsAt(pos, CHOSEN_PHRASE)) { // `when an item is chosen in the list "Fruits" with item`
+        pos += CHOSEN_PHRASE.length;
+        label = additive();
+        [phrase, known] = ["an item is chosen in the list", { event: "choice", gives: 1 }];
       } else {
         const words = [];
         while (check("word") && !isWord("with") && !peek().nl) words.push(tokens[pos++].value);
@@ -338,7 +352,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       }
       if (!known) {
         pos = start;
-        expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked' or 'enter is pressed in the text box ...'");
+        expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked' or 'an item is chosen in the list ...'");
       }
       const params = [];
       if (known.gives && word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
@@ -432,7 +446,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "turtle", action, value: action === "up" || action === "down" ? null : expression(), at: t };
     }
     if (word("clear")) {
-      if (wordsAt(pos, ["the", "text", "box"])) { // `clear the text box "Name"`: empties it
+      if (wordsAt(pos, ["the", "text", "box"]) || wordsAt(pos, ["the", "text", "area"])) { // `clear the text box "Name"`: empties it
         pos += 3;
         return { kind: "turtle", action: "clear text box", value: additive(), at: t };
       }
@@ -456,9 +470,22 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       }
       // `draw button "Start" at x, y`, `draw text box "Name" at x, y`: a value straight after `button` (which
       // a name couldn't have) or `text box`
-      const widget = isWord("button") && labelAt(pos + 1) ? "button" : wordsAt(pos, ["text", "box"]) ? "text box" : null;
+      const widget = isWord("button") && labelAt(pos + 1) ? "button" : wordsAt(pos, ["text", "box"]) ? "text box"
+        : isWord("checkbox") && labelAt(pos + 1) ? "checkbox" : null;
+      // `draw text area "Notes" at x, y size w by h`, `draw list "Fruits" showing fruits at x, y size w by h`
+      const tall = wordsAt(pos, ["text", "area"]) ? "text area" : isWord("list") && labelAt(pos + 1) ? "list" : null;
+      if (tall) {
+        pos += tall === "list" ? 1 : 2;
+        const label = additive();
+        const items = tall === "list" ? [(expectWord("showing"), additive())] : [];
+        expectWord("at");
+        const place = several(2, t);
+        const none = { kind: "value", value: null, at: t }; // no size: the usual one
+        const size = word("size") ? [additive(), (expectWord("by"), expression())] : [none, none];
+        return { kind: "turtle", action: tall, value: { ...place, items: [label, ...items, ...place.items, ...size] }, at: t };
+      }
       if (widget) {
-        pos += widget === "button" ? 1 : 2;
+        pos += widget === "text box" ? 2 : 1;
         const label = additive();
         expectWord("at");
         const place = several(2, t);
@@ -479,6 +506,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "turtle", action: "text", value: { ...place, items: [text, ...place.items, size] }, at: t };
     }
     if (isWord("run") && runsProgram()) fail(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'");
+    const ticking = ["tick", "untick"].find((w) => isWord(w) && wordsAt(pos + 1, ["the", "checkbox"])); // `tick the checkbox "Done"`
+    if (ticking) {
+      pos += 3;
+      return { kind: "turtle", action: ticking, value: additive(), at: t };
+    }
     if (isWord("send") && sendsData()) fail(t, "'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'");
     if (isWord("wait") && !tokens[pos + 1].nl) { // `wait 2 seconds`, `wait n milliseconds`: `wait` alone is still a name
       const waiting = phrase(() => {
@@ -704,9 +736,21 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "read", bytes, of, at: t };
     }
     if (word("arguments")) return { kind: "arguments", at: t };
-    if (wordsAt(pos, TEXT_IN_BOX)) { // `the text in the text box "Name"`: what's typed in it
+    if (wordsAt(pos, TEXT_IN_BOX) || wordsAt(pos, TEXT_IN_AREA)) { // `the text in the text box "Name"`: what's typed in it
       pos += TEXT_IN_BOX.length;
       return { kind: "builtin", name: "text in box", args: [unary()], at: t };
+    }
+    if (wordsAt(pos, CHOICE_IN_LIST)) { // `the choice in the list "Fruits"`: the item chosen, or nothing
+      pos += CHOICE_IN_LIST.length;
+      return { kind: "builtin", name: "choice in list", args: [unary()], at: t };
+    }
+    if (wordsAt(pos, ["the", "checkbox"])) { // `the checkbox "Done" is ticked`, or `is not ticked`
+      pos += 2;
+      const ticked = { kind: "builtin", name: "ticked", args: [additive()], at: t };
+      expectWord("is");
+      const not = word("not");
+      expectWord("ticked");
+      return not ? { kind: "not", operand: ticked, at: not } : ticked;
     }
     // `total of prices`, `average of price in sales`, `largest of`, `smallest of`
     if (t.type === "word" && AGGREGATES.includes(t.value) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") {

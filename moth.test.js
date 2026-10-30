@@ -1592,3 +1592,45 @@ test("send and read with headers go through the disk on every engine, and a hand
     ], engine);
   }
 });
+
+// Checkboxes, text areas and lists (DESIGN §40): a click ticks a checkbox or chooses a list's item and goes to
+// their handlers, a text area takes lines, the arrows move a list's choice and keep it in view, a wheel scrolls
+// the list under it, and all of it comes through a move to the VM, the same on all three engines
+const CONTROLS = "set fruits to list of \"apple\", \"banana\", \"cherry\", \"date\", \"elderberry\", \"fig\", \"grape\", \"kiwi\"\nto show\n    clear\n    draw checkbox \"Dark\" at -200, 200\n    draw text area \"Notes\" at -200, 50 size 250 by 100\n    draw list \"Fruits\" showing fruits at 100, 0 size 150 by 96\n    draw button \"Save\" at -200, 0\n    draw button \"Deep\" at -100, 0\nend\nto deep with n\n    if n is 0\n        return 0\n    end\n    return deep(n - 1)\nend\nshow()\ntick the checkbox \"Dark\"\nsay \"at the start \" the checkbox \"Dark\" is ticked \" \" the choice in the list \"Fruits\"\nwhen the checkbox \"Dark\" is clicked\n    say \"dark \" the checkbox \"Dark\" is ticked \" \" the checkbox \"Dark\" is not ticked\n    show()\nend\nwhen an item is chosen in the list \"Fruits\" with fruit\n    say \"chose \" fruit \" \" the choice in the list \"Fruits\"\n    show()\nend\nwhen the button \"Save\" is clicked\n    say \"notes [\" the text in the text area \"Notes\" \"]\"\n    clear the text area \"Notes\"\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" deep(5000)\nend\nwhen the mouse is clicked with x and y\n    say \"click \" x \" \" y\nend\nwhen a key is pressed with key\n    say \"key \" key\nend";
+const CONTROL_EVENTS = [["click",[-195,205]],["click",[-150,100]],["type",["Hello"]],["key",["enter"]],["type",["world"]],["key",["backspace"]],["click",[110,90]],["key",["down"]],["click",[-95,15]],["key",["down"]],["key",["down"]],["key",["down"]],["scroll",[110,50,10]],["scroll",[0,-200,3]],["key",["up"]],["key",["x"]],["click",[-195,15]],["click",[110,2]],["click",[0,-200]],["key",["y"]],["click",[-150,100]],["key",["enter"]],["key",["enter"]],["type",["z"]]];
+
+test("checkboxes, text areas and lists take their clicks, keys and wheel, through a move to the VM, on all three engines", () => {
+  const drawings = [];
+  for (const engine of ENGINES) {
+    const said = [];
+    const drawn = [];
+    const app = run(CONTROLS, (line) => said.push(line), { engine, draw: (d) => drawn.push(d) });
+    assert.deepEqual(app.waits.slice(0, 2), [{ event: "checkbox", label: "Dark" }, { event: "choice", label: "Fruits" }], engine);
+    for (const [event, inputs] of CONTROL_EVENTS) app.send(event, inputs);
+    assert.deepEqual(said, ["at the start yes nothing","dark no yes","chose apple apple","chose banana banana","deep 0","chose cherry cherry","chose date date","chose elderberry elderberry","chose date date","notes [Hello\nworl]","chose grape grape","click 0 -200","key y"], engine);
+    drawings.push(drawn);
+  }
+  assert.deepEqual(drawings[1], drawings[0]);
+  assert.deepEqual(drawings[2], drawings[0]);
+  assert.deepEqual(drawings[0].filter((d) => d.shape === "list" || d.shape === "checkbox" || d.shape === "textarea").slice(0, 3), [
+    { shape: "checkbox", label: "Dark", ticked: false, x: -200, y: 200, width: 68, height: 20, color: "#4f8ff7" },
+    { shape: "textarea", label: "Notes", text: "", focused: false, x: -200, y: 50, width: 250, height: 100, color: "#4f8ff7" },
+    { shape: "list", label: "Fruits", items: ["apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "kiwi"], chosen: -1, top: 0, focused: false,
+      x: 100, y: 0, width: 150, height: 96, color: "#4f8ff7" },
+  ]);
+});
+
+test("a list's and a text area's sizes, and what they need", () => {
+  const drawn = [];
+  run('draw list "L" showing (list of 1, "two", yes) at 0, 0\ndraw text area "T" at 0, 0', () => {}, { draw: (d) => drawn.push(d) });
+  assert.deepEqual(drawn.map((d) => [d.shape, d.items, d.width, d.height]), [["list", ["1", "two", "yes"], 200, 144], ["textarea", undefined, 300, 120]]);
+  for (const [source, message] of [
+    ['draw list "L" showing 5 at 0, 0', "line 1: 'draw list ... showing' needs a list, not a number"],
+    ['draw list "L" showing (list of 1) at 0, 0 size 0 by 10', "line 1: a list's size is a number above 0, not 0"],
+    ['draw text area "T" at 0, "x"', "line 1: 'draw text area' needs numbers, not text"],
+    ['say the checkbox "x"', "line 1: expected 'is' but found the end of the code"],
+  ]) {
+    for (const engine of ENGINES) assert.throws(() => run(source, () => {}, { engine }), { message }, `${engine}: ${source}`);
+  }
+});
+
