@@ -611,8 +611,44 @@ test("moth.exe runs a file's tests, each in a run of its own, and says what test
   assert.equal(several.stdout.split("\n").at(-2), "5 passed, 1 failed");
   const missing = testing(["nowhere.test.moth"]);
   assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "0 passed, 1 failed\n", "moth: there is no file called 'nowhere.test.moth'\n"]);
-  const nothing = spawnSync(exe, ["test"], { cwd: sub, encoding: "utf8" });
-  assert.deepEqual([nothing.status, nothing.stdout], [2, ""]);
+});
+
+// `moth test` with no file named finds them as the Node.js command line did (cli.js at 1.5.1, findTests below):
+// every file ending in .test.moth here and in the folders inside, but not hidden ones or node_modules, sorted
+// by localeCompare and joined with the system's separator. A failing test's mistake names its file's path.
+test("moth.exe test with no file named finds every .test.moth file, as the Node.js command line did", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const tree = join(dir, "finding");
+  const pass = "to test_one\n    expect 1 is 1\nend\n";
+  const files = { "b.test.moth": pass, "A.test.moth": pass, "1.test.moth": pass, "_u.test.moth": "expect yes\n", "x.moth": "say 1\n",
+    "sub/c.test.moth": pass, "sub/a_b.test.moth": "to test_wrong\n    expect 1 is 2\nend\n", "sub/deeper/d-1.test.moth": pass,
+    "sub/deeper/d.test.moth": pass, "Zeta/z.test.moth": pass, ".hidden/x.test.moth": pass, "node_modules/y.test.moth": pass };
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(join(tree, ...name.split("/").slice(0, -1)), { recursive: true });
+    writeFileSync(join(tree, ...name.split("/")), text);
+  }
+  const findTests = (folder) => {
+    const found = [];
+    for (const entry of readdirSync(join(tree, folder), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) found.push(...findTests(path));
+      else if (entry.name.endsWith(".test.moth")) found.push(path);
+    }
+    return found;
+  };
+  const wanted = findTests(".");
+  assert.equal(wanted.length, 9);
+  const ran = spawnSync(exe, ["test"], { cwd: tree, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual(ran.stdout.split("\n").filter((line) => line.endsWith(".test.moth") && !/^[✓✗ ]/.test(line)), wanted); // each file's name, then its tests
+  const wrong = join("sub", "a_b.test.moth");
+  assert.ok(ran.stdout.includes(`${wrong}\n✗ test_wrong\n    ${wrong}:2:5: expected 1 to be 2\n`), ran.stdout);
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.split("\n").at(-2)], [1, "", "8 passed, 1 failed"]);
+  const empty = join(dir, "no-tests");
+  mkdirSync(join(empty, "sub"), { recursive: true });
+  writeFileSync(join(empty, "sub", "plain.moth"), "say 1\n");
+  const none = spawnSync(exe, ["test"], { cwd: empty, encoding: "utf8" });
+  assert.deepEqual([none.status, none.stdout, none.stderr], [1, "", "moth: no tests found: name a file, or put tests in files ending in .test.moth\n"]);
 });
 
 // `run program ... keeping its output`: what the program said instead of letting it through, however much
