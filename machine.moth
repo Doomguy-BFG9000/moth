@@ -718,6 +718,28 @@ to load_bits with a, x, eight
     movsd_load(a, x, rip(number_place(a, eight)))
 end
 
+to andpd with a, x, at
+    sse(a, 0x66, 0x54, x, at)
+end
+
+# 16 bytes in the read-only data, on a 16-byte boundary as andpd needs: every bit but the sign of each half;
+# once
+to abs_mask with a
+    set known to numbers of a
+    if "abs" is in known
+        return item "abs" of known
+    end
+    set ro to rodata of a
+    pad_to(ro, 16)
+    set name to "N" + length of ro
+    rodata_here(a, name)
+    repeat 2 times
+        put_all(ro, list of 255, 255, 255, 255, 255, 255, 255, 127)
+    end
+    set item "abs" of known to name
+    return name
+end
+
 # ---------- the runtime: output ----------
 # Every program carries these. Output collects in out_buf and is written when it fills, at the end, before a
 # mistake, and after every line when it goes to a terminal, so each line shows as it is said.
@@ -13958,6 +13980,7 @@ to gen_outside with fc, e
         end
         gen_expr(fc, question)
         call_to(a, "rt_ask")
+        forget_main(fc) # a drawing pad's window might run an app's handlers
     end
     why_stub(fc, at of e, "rt_why_file")
 end
@@ -15095,13 +15118,14 @@ to new_state with a, program_name, files, source, target
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
-        line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no
+        line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
+        literal_kinds empty dictionary
 end
 
 to new_fc with st, scope, main, name, inputs, own
     return record with st st, a a of st, scope scope, main main, name name, inputs inputs, own own, hidden 0,
         most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing, tries 0, saved_try nothing, level 0,
-        env_slot nothing, outer_slot nothing
+        env_slot nothing, outer_slot nothing, facts empty dictionary, cache empty dictionary, next_reg 8, open no, fn nothing
 end
 
 # where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
@@ -15593,6 +15617,16 @@ to gen_function with st, f
     end
     set fc to new_fc(st, scope, no, name of f, n, own)
     set level of fc to level of f
+    set fn of fc to f
+    if not with_env # its inputs have values, and one that must be a number is one
+        for each i from 1 to n
+            set what to "value"
+            if i is at most length of kinds of f and item i of kinds of f is 0
+                set what to "number"
+            end
+            set_fact(fc, 0 - i, what)
+        end
+    end
     set done of fc to new_label(a)
     if level of f is at least 2
         set outer_slot of fc to hidden_place(fc)
@@ -15639,33 +15673,52 @@ to gen_block with fc, body
     end
 end
 
+# the statements whose code keeps the facts right (see the facts, below): any other forgets them all
+set known_statements to dictionary where "say" is yes, "set" is yes, "add" is yes, "if" is yes, "while" is yes,
+    "repeat" is yes, "count" is yes, "define" is yes, "return" is yes, "stop" is yes, "call" is yes, "setItem" is yes,
+    "each" is yes, "try" is yes, "setField" is yes, "remove" is yes, "fail" is yes, "write" is yes, "removeFile" is yes,
+    "expect" is yes, "exit" is yes, "turtle" is yes
+
 to gen_statement with fc, s
     set a to a of fc
     set what to kind of s
     if what is "say"
         gen_say(fc, s)
     else if what is "set"
-        gen_expr(fc, value of s)
+        set made to gen_expr(fc, value of s)
         store_var(fc, name of s, at of s)
+        set_fact(fc, name_key(fc, name of s), made)
     else if what is "add"
         gen_add(fc, s)
     else if what is "if"
         set otherwise_at to new_label(a)
         set end_at to new_label(a)
         gen_cond(fc, cond of s, otherwise_at, no)
+        set before to facts_copy(facts of fc)
         gen_block(fc, then of s)
+        set after_then to facts of fc
         jmp_to(a, end_at)
         mark(a, otherwise_at)
+        set facts of fc to before
         gen_block(fc, otherwise of s)
         mark(a, end_at)
+        set facts of fc to facts_meet(after_then, facts of fc)
     else if what is "while"
         set top to new_label(a)
         set exit to new_label(a)
+        set info to new_region()
+        scan_expr(fc, info, cond of s, 8)
+        scan_block(fc, info, body of s, 8)
+        set stable to region_facts(fc, facts of fc, info)
+        set facts of fc to facts_copy(stable)
+        set was to cache_enter(fc, info, 0)
         mark(a, top)
         gen_cond(fc, cond of s, exit, no)
         gen_loop_body(fc, body of s, exit)
         jmp_to(a, top)
         mark(a, exit)
+        cache_leave(fc, was)
+        set facts of fc to stable
     else if what is "repeat"
         gen_repeat(fc, s)
     else if what is "count"
@@ -15687,7 +15740,9 @@ to gen_statement with fc, s
         lea(a, r8, rip(info of f))
         call_to(a, "rt_closure")
         movq_xr(a, xmm0, rax)
-        movsd_store(a, place_of(fc, front's resolve(scope of fc, name of s)), xmm0)
+        set found to front's resolve(scope of fc, name of s)
+        var_store(fc, found, xmm0)
+        set_fact(fc, fact_key(fc, found), "value")
     else if what is "return"
         if value of s is nothing
             load_bits(a, xmm0, bits_nothing)
@@ -15768,6 +15823,9 @@ to gen_statement with fc, s
         gen_handler(fc, s)
     else
         not_yet_node(s)
+    end
+    if not (what is in known_statements) # it may have changed any variable (see the facts)
+        set facts of fc to empty dictionary
     end
 end
 
@@ -15876,9 +15934,11 @@ to gen_loop_body with fc, body, exit
     set loops of fc to outer of loops of fc
 end
 
+# the variable gets xmm0; what was known about it is forgotten, for the code that stored it to say again
 to store_var with fc, wanted, at
     set found to front's resolve(scope of fc, wanted)
-    movsd_store(a of fc, place_of(fc, found), xmm0)
+    var_store(fc, found, xmm0)
+    set_fact(fc, fact_key(fc, found), nothing)
 end
 
 to gen_say with fc, s
@@ -15924,10 +15984,26 @@ end
 
 to gen_add with fc, s
     set a to a of fc
-    gen_expr(fc, value of s)
+    set added_kind to gen_expr(fc, value of s)
     set found to front's resolve(scope of fc, name of s)
     if found is nothing
         jmp_to(a, fail_stub(fc, at of s, front's undefined_message(scope of fc, name of s, no, no)))
+        return nothing
+    end
+    set key to fact_key(fc, found)
+    set had to fact_of(fc, key)
+    set_fact(fc, key, add_kind(had, added_kind))
+    set r to reg_of(fc, key)
+    if is_number_kind(had) and is_number_kind(added_kind) # a sum, and nothing to check
+        if r is nothing
+            movapd(a, xmm1, xmm0)
+            movsd_load(a, xmm0, place_of(fc, found))
+            sse_math(a, "+", xmm0, reg_at(xmm1))
+            movsd_store(a, place_of(fc, found), xmm0)
+        else
+            sse_math(a, "+", r, reg_at(xmm0))
+            movsd_store(a, place_of(fc, found), r)
+        end
         return nothing
     end
     set unset to fail_stub(fc, at of s, front's no_value(name of s))
@@ -15937,16 +16013,20 @@ to gen_add with fc, s
     set odd_before to new_label(a)
     set odd_after to new_label(a)
     movapd(a, xmm1, xmm0)
-    movsd_load(a, xmm0, place_of(fc, found))
-    ucomisd(a, xmm0, reg_at(xmm0))
-    jcc(a, cc_p, odd_before)
+    var_load(fc, found, xmm0)
+    if not is_number_kind(had) # a number added to a number needs no look first
+        ucomisd(a, xmm0, reg_at(xmm0))
+        jcc(a, cc_p, odd_before)
+    end
     mark(a, first_back)
     movapd(a, xmm2, xmm0)
     sse_math(a, "+", xmm0, reg_at(xmm1))
-    ucomisd(a, xmm0, reg_at(xmm0))
-    jcc(a, cc_p, odd_after)
+    if not is_number_kind(added_kind) # nor is a number added to a number
+        ucomisd(a, xmm0, reg_at(xmm0))
+        jcc(a, cc_p, odd_after)
+    end
     mark(a, second_back)
-    movsd_store(a, place_of(fc, found), xmm0)
+    var_store(fc, found, xmm0)
     set added to new_label(a)
     mark(a, added)
     set was to enter_cold(a)
@@ -15965,7 +16045,7 @@ to gen_add with fc, s
     alui(a, "cmp", rax, 2)
     jcc(a, cc_e, kinds)
     jcc(a, cc_a, fail_stub(fc, at of s, too_big))
-    movsd_store(a, place_of(fc, found), xmm0)
+    var_store(fc, found, xmm0)
     jmp_to(a, added)
     mark(a, odd_after) # the sum is NaN: isn't what's added a number?
     set wrong_after to new_label(a)
@@ -16000,6 +16080,9 @@ to gen_try with fc, s
         set most_pushed of fc to pushed of fc
     end
     set tries of fc to tries of fc + 1
+    set info to new_region() # the handler may start from anywhere in the body
+    scan_block(fc, info, body of s, 1)
+    set stable to region_facts(fc, facts of fc, info)
     gen_block(fc, body of s)
     set tries of fc to tries of fc - 1
     load(a, rax, mem(rsp, 24)) # over: the try further out
@@ -16007,12 +16090,16 @@ to gen_try with fc, s
     alui(a, "add", rsp, 32)
     set pushed of fc to pushed of fc - 4
     jmp_to(a, finish)
+    set after_body to facts of fc
+    set facts of fc to stable
     mark(a, handler)
     if name of s is not nothing
         store_var(fc, name of s, at of s)
+        set_fact(fc, name_key(fc, name of s), "value")
     end
     gen_block(fc, handler of s)
     mark(a, finish)
+    set facts of fc to facts_meet(after_body, facts of fc)
 end
 
 # whether a function's code has a `try` anywhere in it
@@ -16048,6 +16135,11 @@ to gen_each with fc, s
     store(a, items_at, rdx)
     store(a, count_at, rcx)
     storei(a, next_at, 0)
+    set info to new_region()
+    region_set(fc, info, name of s, "value", nothing, 8)
+    scan_block(fc, info, body of s, 8)
+    set stable to region_facts(fc, facts of fc, info)
+    set was to cache_enter(fc, info, 0)
     set top to new_label(a)
     set exit to new_label(a)
     mark(a, top)
@@ -16062,9 +16154,13 @@ to gen_each with fc, s
     inc_r(a, rax)
     store(a, next_at, rax)
     store_var(fc, name of s, at of s)
+    set facts of fc to facts_copy(stable)
+    set_fact(fc, name_key(fc, name of s), "value")
     gen_loop_body(fc, body of s, exit)
     jmp_to(a, top)
     mark(a, exit)
+    cache_leave(fc, was)
+    set facts of fc to stable
     set hidden of fc to hidden of fc - 3
 end
 
@@ -16075,20 +16171,35 @@ to gen_repeat with fc, s
     call_to(a, "rt_repeat")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, bad)
-    set left to hidden_place(fc)
-    movsd_store(a, left, xmm0)
+    set info to new_region()
+    scan_block(fc, info, body of s, 8)
+    set stable to region_facts(fc, facts of fc, info)
+    set held to cache_enter(fc, info, 1)
+    set left to new_slot(fc)
+    slot_store(a, left, xmm0)
     set top to new_label(a)
     set exit to new_label(a)
     mark(a, top)
-    movsd_load(a, xmm0, left)
-    ucomisd(a, xmm0, rip(number_place(a, double_bytes(0))))
-    jcc(a, cc_be, exit)
-    sse_math(a, "-", xmm0, rip(number_place(a, double_bytes(1))))
-    movsd_store(a, left, xmm0)
+    set zero_at to rip(number_place(a, double_bytes(0)))
+    set one_at to rip(number_place(a, double_bytes(1)))
+    if reg of left is nothing
+        movsd_load(a, xmm0, at of left)
+        ucomisd(a, xmm0, zero_at)
+        jcc(a, cc_be, exit)
+        sse_math(a, "-", xmm0, one_at)
+        movsd_store(a, at of left, xmm0)
+    else
+        ucomisd(a, reg of left, zero_at)
+        jcc(a, cc_be, exit)
+        sse_math(a, "-", reg of left, one_at)
+    end
+    set facts of fc to facts_copy(stable)
     gen_loop_body(fc, body of s, exit)
     jmp_to(a, top)
     mark(a, exit)
-    set hidden of fc to hidden of fc - 1
+    cache_leave(fc, held)
+    set facts of fc to stable
+    set hidden of fc to hidden of fc - slots_hidden(list of left)
     set was to enter_cold(a)
     mark(a, bad)
     stub_start(fc, at of s)
@@ -16102,44 +16213,67 @@ end
 
 to gen_count with fc, s
     set a to a of fc
-    gen_expr(fc, start of s)
-    push_value(fc)
-    gen_expr(fc, limit of s)
-    movapd(a, xmm1, xmm0)
-    pop_value(fc, xmm0)
+    set kinds to gen_pair(fc, start of s, limit of s)
     set odd to new_label(a)
     set back to new_label(a)
-    ucomisd(a, xmm0, reg_at(xmm1))
-    jcc(a, cc_p, odd)
+    if not (is_number_kind(item 1 of kinds) and is_number_kind(item 2 of kinds))
+        ucomisd(a, xmm0, reg_at(xmm1))
+        jcc(a, cc_p, odd)
+    end
     mark(a, back)
-    set from_place to hidden_place(fc)
-    set to_place to hidden_place(fc)
-    movsd_store(a, from_place, xmm0)
-    movsd_store(a, to_place, xmm1)
+    set counted to "number" # counting from a whole number, it stays whole
+    if item 1 of kinds is "whole"
+        set counted to "whole"
+    end
+    set info to new_region()
+    region_set(fc, info, name of s, "count", start of s, 8)
+    scan_block(fc, info, body of s, 8)
+    set stable to region_facts(fc, facts of fc, info)
+    set held to cache_enter(fc, info, 2)
+    set from_slot to new_slot(fc)
+    set to_slot to new_slot(fc)
+    slot_store(a, from_slot, xmm0)
+    slot_store(a, to_slot, xmm1)
     set top to new_label(a)
     set close to new_label(a)
     set go to new_label(a)
     set exit to new_label(a)
     mark(a, top)
-    movsd_load(a, xmm0, from_place)
-    movsd_load(a, xmm1, to_place)
-    ucomisd(a, xmm0, reg_at(xmm1))
+    if reg of from_slot is not nothing and reg of to_slot is not nothing
+        ucomisd(a, reg of from_slot, reg_at(reg of to_slot))
+    else
+        slot_load(a, xmm0, from_slot)
+        slot_load(a, xmm1, to_slot)
+        ucomisd(a, xmm0, reg_at(xmm1))
+    end
     jcc(a, cc_p, close)
-    jcc(a, cc_be, go)
-    mark(a, close) # past the limit, unless the two are the same to 15 digits
-    call_to(a, "rt_order")
-    test_rr(a, rax, rax)
-    jcc(a, cc_ne, exit)
-    movsd_load(a, xmm0, from_place)
+    jcc(a, cc_a, close)
     mark(a, go)
+    slot_load(a, xmm0, from_slot)
     store_var(fc, name of s, at of s)
-    sse_math(a, "+", xmm0, rip(number_place(a, double_bytes(1))))
-    movsd_store(a, from_place, xmm0)
+    set one_at to rip(number_place(a, double_bytes(1)))
+    if reg of from_slot is nothing
+        sse_math(a, "+", xmm0, one_at)
+        movsd_store(a, at of from_slot, xmm0)
+    else
+        sse_math(a, "+", reg of from_slot, one_at)
+    end
+    set facts of fc to facts_copy(stable)
+    set_fact(fc, name_key(fc, name of s), counted)
     gen_loop_body(fc, body of s, exit)
     jmp_to(a, top)
     mark(a, exit)
-    set hidden of fc to hidden of fc - 2
+    cache_leave(fc, held)
+    set facts of fc to stable
+    set hidden of fc to hidden of fc - slots_hidden(list of from_slot, to_slot)
     set was to enter_cold(a)
+    mark(a, close) # past the limit, unless the two are the same to 15 digits
+    slot_load(a, xmm0, from_slot)
+    slot_load(a, xmm1, to_slot)
+    call_to(a, "rt_order")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, exit)
+    jmp_to(a, go)
     mark(a, odd)
     movapd(a, xmm2, xmm0)
     call_to(a, "rt_any_odd")
@@ -16149,6 +16283,540 @@ to gen_count with fc, s
     movsd_store(a, rip("err_b"), xmm1)
     two_kinds(fc, at of s, "'from' and 'to' need numbers, not ", " and ")
     leave_cold(a, was)
+end
+
+# ---------- what the code knows about its variables ----------
+# As it writes a function's code, the compiler keeps `facts`: what some variables are sure to hold at this
+# point. "whole" is a whole number (or an infinity, or the NaN that arithmetic on them can make), "number" is
+# any number, and "value" is anything at all, which at least isn't no value yet. A variable that isn't there
+# may have no value yet. A check that can't fail is left out: a variable sure to have a value isn't checked
+# for one, a sum of two numbers isn't checked for text, and two whole numbers compare in one instruction.
+# Only main's variables and a function's own, in its frame, are known: one in an environment can be changed
+# by a function made inside at any time, and a call to any function may change any of main's.
+
+# the key for what's known about the variable resolve() found: its slot for one of main's, minus its slot
+# for a function's own; nothing for one in an environment
+to fact_key with fc, found
+    if found is nothing
+        return nothing
+    end
+    if level of fc - depth of found is 0
+        return slot of found
+    end
+    if depth of found is 0 and env_slot of fc is nothing
+        return 0 - slot of found
+    end
+    return nothing
+end
+
+to name_key with fc, wanted
+    return fact_key(fc, front's resolve(scope of fc, wanted))
+end
+
+# what's known about the variable with this key: "whole", "number", "value", or nothing
+to fact_of with fc, key
+    if key is nothing
+        return nothing
+    end
+    set known to facts of fc
+    if key is in known
+        return item key of known
+    end
+    return nothing
+end
+
+to set_fact with fc, key, what
+    if key is nothing
+        return nothing
+    end
+    set known to facts of fc
+    if what is nothing
+        if key is in known
+            remove key from known
+        end
+    else
+        set item key of known to what
+    end
+end
+
+to is_number_kind with what
+    return what is "whole" or what is "number"
+end
+
+# what two kinds have in common: what's known after code that can go either way
+to kind_meet with x, y
+    if x is nothing or y is nothing
+        return nothing
+    end
+    if x is y
+        return x
+    end
+    if x is "value" or y is "value"
+        return "value"
+    end
+    return "number"
+end
+
+# What `x op y` gives when it works: -, * and / give a number or a mistake, and so does + of two numbers,
+# but + of anything else may join text. Whole numbers stay whole, but for /.
+to math_kind with op, x, y
+    if op is "+" and not (is_number_kind(x) and is_number_kind(y))
+        return "value"
+    end
+    if op is not "/" and x is "whole" and y is "whole"
+        return "whole"
+    end
+    return "number"
+end
+
+# What a variable holds after `add` puts a value of kind `added` into it, when it held kind `had`: a number
+# stays a number (what's added must be one, or it's a mistake), and anything else may become text or a list.
+to add_kind with had, added
+    if not is_number_kind(had)
+        return "value"
+    end
+    if had is "whole" and added is "whole"
+        return "whole"
+    end
+    return "number"
+end
+
+to facts_copy with known
+    set made to empty dictionary
+    for each k in keys of known
+        set item k of made to item k of known
+    end
+    return made
+end
+
+to facts_meet with x, y
+    set made to empty dictionary
+    for each k in keys of x
+        if k is in y
+            set both to kind_meet(item k of x, item k of y)
+            if both is not nothing
+                set item k of made to both
+            end
+        end
+    end
+    return made
+end
+
+# what's known about a function's own variables alone
+to facts_own with known
+    set made to empty dictionary
+    for each k in keys of known
+        if k is less than 0
+            set item k of made to item k of known
+        end
+    end
+    return made
+end
+
+# after a call: the function may have changed any of main's variables
+to forget_main with fc
+    set facts of fc to facts_own(facts of fc)
+end
+
+# whether the double in these 8 bytes (lowest first) is whole: from 2^52 up every one is, infinities too
+to whole_bits with eight
+    set field to (item 8 of eight bit and 127) * 16 + shift (item 7 of eight) right by 4
+    if field is at least 1075
+        return yes
+    end
+    set fraction to item 7 of eight bit and 15
+    for each k from 1 to 6
+        set fraction to fraction * 256 + item (7 - k) of eight
+    end
+    if field is 0
+        return fraction is 0
+    end
+    if field is less than 1023
+        return no
+    end
+    set unit to 1
+    repeat 1075 - field times
+        set unit to unit * 2
+    end
+    return fraction is divisible by unit
+end
+
+# "whole" or "number": a number as the program wrote it, once each
+to literal_kind with st, written
+    set known to literal_kinds of st
+    if written is in known
+        return item written of known
+    end
+    set chars to front's letters(written)
+    set made to "number"
+    if length of chars is at least 2 and item 1 of chars is "0" and (item 2 of chars is "x" or item 2 of chars is "b")
+        set made to "whole"
+    else if whole_bits(double_bytes(number of written))
+        set made to "whole"
+    end
+    set item written of known to made
+    return made
+end
+
+# What kind of value `e` gives when it works, from `known` alone, without writing its code. It's no
+# better than what writing it finds (see gen_expr), so what holds by this holds there too.
+to expr_kind with fc, e, known
+    set what to kind of e
+    if what is "value"
+        if type of e is "number"
+            return literal_kind(st of fc, value of e)
+        end
+        return "value"
+    end
+    if what is "name"
+        set key to name_key(fc, name of e)
+        if key is not nothing and key is in known
+            return item key of known
+        end
+        return "value"
+    end
+    if what is "math"
+        return math_kind(op of e, expr_kind(fc, left of e, known), expr_kind(fc, right of e, known))
+    end
+    if what is "negate"
+        if expr_kind(fc, operand of e, known) is "whole"
+            return "whole"
+        end
+        return "number"
+    end
+    if what is "length"
+        return "whole"
+    end
+    return "value"
+end
+
+# What a stretch of code does with variables, found without writing its code: each place that sets one
+# (`sets`), how much each is used (`uses`, with a loop inside counting 8 times as much, and `order`, the
+# order they come in), whether there's a loop inside (`inner`), and whether it calls a function (or asks a
+# question, while which an app's handlers might run) or has a `try`, which keep what's in registers from
+# lasting through it.
+to new_region
+    return record with sets empty list, uses empty dictionary, order empty list, calls no, tries no, inner no,
+        unknown no
+end
+
+to region_use with info, key, weight
+    if key is nothing
+        return nothing
+    end
+    set used to uses of info
+    if key is in used
+        set item key of used to item key of used + weight
+    else
+        set item key of used to weight
+        set ordered to order of info
+        add key to ordered
+    end
+end
+
+to region_set with fc, info, wanted, how, value, weight
+    set key to name_key(fc, wanted)
+    if key is not nothing
+        region_use(info, key, weight)
+        set changes to sets of info
+        add record with key key, how how, value value to changes
+    end
+end
+
+to scan_expr with fc, info, e, weight
+    if e is nothing
+        return nothing
+    end
+    set what to kind of e
+    if what is "value" or what is "arguments"
+        return nothing
+    end
+    if what is "name"
+        region_use(info, name_key(fc, name of e), weight)
+    else if what is "math" or what is "compare" or what is "and" or what is "or" or what is "random"
+        scan_expr(fc, info, left of e, weight)
+        scan_expr(fc, info, right of e, weight)
+    else if what is "not" or what is "negate"
+        scan_expr(fc, info, operand of e, weight)
+    else if what is "list" or what is "dictionary"
+        for each part in items of e
+            scan_expr(fc, info, part, weight)
+        end
+    else if what is "record"
+        for each part in values of e
+            scan_expr(fc, info, part, weight)
+        end
+    else if what is "length" or what is "field" or what is "read"
+        scan_expr(fc, info, subject of e, weight)
+    else if what is "item"
+        scan_expr(fc, info, subject of e, weight)
+        scan_expr(fc, info, index of e, weight)
+    else if what is "builtin"
+        for each part in args of e
+            scan_expr(fc, info, part, weight)
+        end
+    else if what is "call" or what is "ask"
+        set calls of info to yes
+    else # anything else may do anything
+        set calls of info to yes
+        set unknown of info to yes
+    end
+end
+
+to scan_block with fc, info, body, weight
+    for each s in body
+        scan_statement(fc, info, s, weight)
+    end
+end
+
+to scan_statement with fc, info, s, weight
+    set what to kind of s
+    if what is "say"
+        for each part in parts of s
+            scan_expr(fc, info, part, weight)
+        end
+    else if what is "set" or what is "add"
+        scan_expr(fc, info, value of s, weight)
+        region_set(fc, info, name of s, what, value of s, weight)
+    else if what is "if"
+        scan_expr(fc, info, cond of s, weight)
+        scan_block(fc, info, then of s, weight)
+        scan_block(fc, info, otherwise of s, weight)
+    else if what is "while"
+        set inner of info to yes
+        scan_expr(fc, info, cond of s, weight * 8)
+        scan_block(fc, info, body of s, weight * 8)
+    else if what is "repeat"
+        set inner of info to yes
+        scan_expr(fc, info, count of s, weight)
+        scan_block(fc, info, body of s, weight * 8)
+    else if what is "count"
+        set inner of info to yes
+        scan_expr(fc, info, start of s, weight)
+        scan_expr(fc, info, limit of s, weight)
+        region_set(fc, info, name of s, "count", start of s, weight * 8)
+        scan_block(fc, info, body of s, weight * 8)
+    else if what is "each"
+        set inner of info to yes
+        scan_expr(fc, info, over of s, weight)
+        region_set(fc, info, name of s, "value", nothing, weight * 8)
+        scan_block(fc, info, body of s, weight * 8)
+    else if what is "try"
+        set tries of info to yes
+        scan_block(fc, info, body of s, weight)
+        if name of s is not nothing
+            region_set(fc, info, name of s, "value", nothing, weight)
+        end
+        scan_block(fc, info, handler of s, weight)
+    else if what is "define"
+        region_set(fc, info, name of s, "value", nothing, weight)
+    else if what is "return" or what is "fail" or what is "exit" or what is "turtle"
+        scan_expr(fc, info, value of s, weight)
+    else if what is "setItem" or what is "setField" or what is "write"
+        scan_expr(fc, info, target of s, weight)
+        scan_expr(fc, info, value of s, weight)
+    else if what is "remove"
+        scan_expr(fc, info, key of s, weight)
+        scan_expr(fc, info, target of s, weight)
+    else if what is "removeFile"
+        scan_expr(fc, info, target of s, weight)
+    else if what is "expect"
+        scan_expr(fc, info, cond of s, weight)
+    else if what is "call"
+        set calls of info to yes
+    else if what is not "stop" # anything else may do anything
+        set calls of info to yes
+        set unknown of info to yes
+    end
+end
+
+# What stays known all through a stretch of code that can run again and again, or stop anywhere in the
+# middle (a loop's, or a try's), when `known` is what's known as it starts: a variable stays known only as
+# far as everything that sets it in there gives a value of that kind, worked out from this same knowledge
+# until it settles, and a function called in there may change any of main's.
+to region_facts with fc, known, info
+    if unknown of info
+        return empty dictionary
+    end
+    set stable to facts_copy(known)
+    if calls of info
+        set stable to facts_own(stable)
+    end
+    set changed to yes
+    repeat while changed
+        set changed to no
+        for each change in sets of info
+            set key to key of change
+            if key is in stable
+                set now to item key of stable
+                set how to how of change
+                set got to "value"
+                if how is "set"
+                    set got to expr_kind(fc, value of change, stable)
+                else if how is "add"
+                    set got to add_kind(now, expr_kind(fc, value of change, stable))
+                else if how is "count"
+                    set got to "number"
+                    if expr_kind(fc, value of change, stable) is "whole"
+                        set got to "whole"
+                    end
+                end
+                set met to kind_meet(now, got)
+                if met is not now
+                    set item key of stable to met
+                    set changed to yes
+                end
+            end
+        end
+    end
+    return stable
+end
+
+# ---------- variables in registers ----------
+# All through a loop that calls no function and has no `try`, nothing but its own code changes its
+# variables, so the ones it uses most are kept in xmm8 to xmm15 as well as in memory: read from the
+# register, and written to both, so memory is always right for anything that reads it there, a mistake's
+# handler or the garbage collector (which looks at every register too). A loop's count and limit live in
+# one alone. The runtime never uses these registers, and Windows keeps them through its own functions, but
+# a function the program makes may, which is why a loop with a call keeps nothing in them.
+
+# where the variable with this key lives in memory (see place_of)
+to key_place with fc, key
+    if key is greater than 0
+        return rip_plus("globals", 8 * (key - 1))
+    end
+    set k to 0 - key
+    if k is at most inputs of fc
+        return mem(rbp, 16 + 8 * (inputs of fc - k))
+    end
+    return mem(rbp, -24 - 8 * (k - inputs of fc - 1))
+end
+
+# the xmm register the variable with this key is kept in, or nothing
+to reg_of with fc, key
+    if key is nothing
+        return nothing
+    end
+    set held to cache of fc
+    if key is in held
+        return item key of held
+    end
+    return nothing
+end
+
+# xmm x gets the variable resolve() found
+to var_load with fc, found, x
+    set r to reg_of(fc, fact_key(fc, found))
+    if r is nothing
+        movsd_load(a of fc, x, place_of(fc, found))
+    else if r is not x
+        movapd(a of fc, x, r)
+    end
+end
+
+# the variable resolve() found gets xmm x, in memory and in its register
+to var_store with fc, found, x
+    movsd_store(a of fc, place_of(fc, found), x)
+    set r to reg_of(fc, fact_key(fc, found))
+    if r is not nothing and r is not x
+        movapd(a of fc, r, x)
+    end
+end
+
+# a register of its own for the rest of the loop, or nothing if they're all taken
+to take_reg with fc
+    if next_reg of fc is at least 16
+        return nothing
+    end
+    set r to next_reg of fc
+    set next_reg of fc to r + 1
+    return r
+end
+
+# Before a loop: if it calls nothing and has no `try`, the variables it uses most go into registers, as
+# many as there are, keeping `keep` for its own count and limit, and two more for a loop inside it. Gives
+# what to go back to after it (see cache_leave). Nothing can be in registers while a function is called,
+# so a loop that calls one keeps even its count and limit in memory (`open` says whether they may be in
+# registers); a loop inside it may still use them, from where it starts.
+to cache_enter with fc, info, keep
+    set was to record with cache cache of fc, next_reg next_reg of fc, open open of fc
+    set open of fc to not (calls of info or tries of info)
+    if not open of fc
+        return was
+    end
+    set room to 16 - next_reg of fc - keep
+    if inner of info
+        set room to room - 2
+    end
+    set held to facts_copy(cache of fc)
+    set used to uses of info
+    set chosen to empty list
+    repeat while room is greater than 0
+        set best to nothing
+        for each key in order of info
+            if not (key is in held) and (best is nothing or item key of used is greater than item best of used)
+                set best to key
+            end
+        end
+        if best is nothing
+            set room to 0
+        else
+            set r to take_reg(fc)
+            set item best of held to r
+            add best to chosen
+            set room to room - 1
+        end
+    end
+    set cache of fc to held
+    for each key in chosen
+        movsd_load(a of fc, item key of held, key_place(fc, key))
+    end
+    return was
+end
+
+to cache_leave with fc, was
+    set cache of fc to cache of was
+    set next_reg of fc to next_reg of was
+    set open of fc to open of was
+end
+
+# A loop's count or limit: in a register of its own if one is free, or else in a hidden place in the frame.
+to new_slot with fc
+    set r to nothing
+    if open of fc
+        set r to take_reg(fc)
+    end
+    if r is nothing
+        return record with reg nothing, at hidden_place(fc)
+    end
+    return record with reg r, at nothing
+end
+
+to slot_load with a, x, slot
+    if reg of slot is nothing
+        movsd_load(a, x, at of slot)
+    else if reg of slot is not x
+        movapd(a, x, reg of slot)
+    end
+end
+
+to slot_store with a, slot, x
+    if reg of slot is nothing
+        movsd_store(a, at of slot, x)
+    else if reg of slot is not x
+        movapd(a, reg of slot, x)
+    end
+end
+
+# how many hidden places these slots took, to give back after the loop
+to slots_hidden with slots
+    set n to 0
+    for each slot in slots
+        if reg of slot is nothing
+            add 1 to n
+        end
+    end
+    return n
 end
 
 # ---------- conditions ----------
@@ -16161,37 +16829,28 @@ to gen_cond with fc, e, label, goal
     set a to a of fc
     set what to kind of e
     if what is "compare"
-        gen_compare(fc, e)
         set jump_true to goal
         if negate of e
             set jump_true to not goal
         end
-        test_rr(a, rax, rax)
-        if jump_true
-            jcc(a, cc_ne, label)
-        else
-            jcc(a, cc_e, label)
+        gen_compare_jump(fc, e, label, jump_true)
+    else if what is "and" or what is "or" # the right may not run, so what it finds out isn't known after
+        set skip to new_label(a)
+        set first_goal to no
+        set first_to to label
+        if what is "and" and goal
+            set first_to to skip
+        else if what is "or"
+            set first_goal to yes
+            if not goal
+                set first_to to skip
+            end
         end
-    else if what is "and"
-        if goal
-            set skip to new_label(a)
-            gen_cond(fc, left of e, skip, no)
-            gen_cond(fc, right of e, label, yes)
-            mark(a, skip)
-        else
-            gen_cond(fc, left of e, label, no)
-            gen_cond(fc, right of e, label, no)
-        end
-    else if what is "or"
-        if goal
-            gen_cond(fc, left of e, label, yes)
-            gen_cond(fc, right of e, label, yes)
-        else
-            set skip to new_label(a)
-            gen_cond(fc, left of e, skip, yes)
-            gen_cond(fc, right of e, label, no)
-            mark(a, skip)
-        end
+        gen_cond(fc, left of e, first_to, first_goal)
+        set before to facts_copy(facts of fc)
+        gen_cond(fc, right of e, label, goal)
+        set facts of fc to facts_meet(before, facts of fc)
+        mark(a, skip)
     else if what is "not"
         gen_cond(fc, operand of e, label, not goal)
     else if what is "value" and type of e is not "string"
@@ -16241,18 +16900,205 @@ to gen_compare with fc, e
     leave_cold(a, was)
 end
 
-# xmm0 gets the left value and xmm1 the right
+# what ucomisd xmm0, xmm1 leaves for each comparison of two numbers, neither NaN: the jump if it holds, and
+# the jump if it doesn't
+set holds_codes to dictionary where "lt" is cc_b, "gt" is cc_a, "le" is cc_be, "ge" is cc_ae, "is" is cc_e
+set fails_codes to dictionary where "lt" is cc_ae, "gt" is cc_be, "le" is cc_a, "ge" is cc_b, "is" is cc_ne
+
+# A comparison that jumps to `label` when whether it holds is `jump_when`. Two numbers compare right there,
+# as rt_order would: two whole ones as they are, and any others too unless they're so close that 15
+# digits might not tell them apart, which rt_order works out. Anything else, and those close ones, go to
+# rt_cmp_..., as before.
+to gen_compare_jump with fc, e, label, jump_when
+    set a to a of fc
+    set test to item (op of e) of compare_names
+    if test is "in"
+        gen_compare(fc, e)
+        test_rr(a, rax, rax)
+        if jump_when
+            jcc(a, cc_ne, label)
+        else
+            jcc(a, cc_e, label)
+        end
+        return nothing
+    end
+    set kinds to gen_pair(fc, left of e, right of e)
+    set kl to item 1 of kinds
+    set kr to item 2 of kinds
+    if test is not "is" # past this, both are numbers, or it was a mistake (see learn_numbers)
+        learn_numbers(fc, test, left of e, right of e, kl, kr)
+    end
+    set slow to new_label(a)
+    set back to new_label(a)
+    if test is "div"
+        divisible_fast(a, kl, kr, slow)
+        if jump_when
+            jcc(a, cc_e, label)
+        else
+            jcc(a, cc_ne, label)
+        end
+    else
+        ucomisd(a, xmm0, reg_at(xmm1))
+        jcc(a, cc_p, slow) # NaN, or not a number at all
+        if not (kl is "whole" and kr is "whole")
+            if kl is "whole" or kr is "whole" # is the other whole too?
+                set other to xmm0
+                if kl is "whole"
+                    set other to xmm1
+                end
+                cvttsd2si(a, rax, other)
+                cvtsi2sd(a, xmm4, rax)
+                ucomisd(a, xmm4, reg_at(other))
+                jcc(a, cc_ne, slow)
+            else
+                set equal_holds to test is "is" or test is "le" or test is "ge"
+                if equal_holds is jump_when
+                    jcc(a, cc_e, label)
+                else
+                    jcc(a, cc_e, back)
+                end
+                near_jump(a, slow)
+            end
+            ucomisd(a, xmm0, reg_at(xmm1))
+        end
+        if jump_when
+            jcc(a, item test of holds_codes, label)
+        else
+            jcc(a, item test of fails_codes, label)
+        end
+    end
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, slow)
+    call_to(a, "rt_cmp_" + test)
+    set wrong to new_label(a)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_a, wrong)
+    test_rr(a, rax, rax)
+    if jump_when
+        jcc(a, cc_ne, label)
+    else
+        jcc(a, cc_e, label)
+    end
+    jmp_to(a, back)
+    mark(a, wrong)
+    if test is "div"
+        set kinds_wrong to new_label(a)
+        load(a, rax, rip("err_why"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, kinds_wrong)
+        jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
+        mark(a, kinds_wrong)
+    end
+    two_kinds(fc, at of e, "can't check if ", " is " + op of e + " ")
+    leave_cold(a, was)
+end
+
+# After `x is divisible by y`, or `x is less than y` and the rest with one side a number, both sides are
+# numbers: anything else would have been a mistake (two texts compare by size, but a text and a number
+# can't). A variable on the right, read last, is known to be one now; one on the left too, if nothing on
+# the right could have changed it since.
+to learn_numbers with fc, test, left, right, kl, kr
+    if kind of right is "name" and (test is "div" or is_number_kind(kl))
+        learn_number(fc, name of right)
+    end
+    set plain to kind of right is "name" or (kind of right is "value" and type of right is not "string")
+    if kind of left is "name" and plain and (test is "div" or is_number_kind(kr))
+        learn_number(fc, name of left)
+    end
+end
+
+to learn_number with fc, wanted
+    set key to name_key(fc, wanted)
+    if not is_number_kind(fact_of(fc, key))
+        set_fact(fc, key, "number")
+    end
+end
+
+# a comparison as a value: rax is 1 if it holds, else 0
+to gen_compare_value with fc, e
+    set a to a of fc
+    set holds to new_label(a)
+    set done to new_label(a)
+    gen_compare_jump(fc, e, holds, yes)
+    movi(a, rax, 0)
+    jmp_to(a, done)
+    mark(a, holds)
+    movi(a, rax, 1)
+    mark(a, done)
+end
+
+# Jumps to `slow` if xmm0 and xmm1, two numbers that aren't the same, are so close that 15 digits might not
+# tell them apart: rt_order's own test, step for step. Uses xmm2 to xmm4.
+to near_jump with a, slow
+    set unsigned to rip(abs_mask(a))
+    movapd(a, xmm2, xmm0)
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    andpd(a, xmm2, unsigned)
+    movapd(a, xmm3, xmm0)
+    andpd(a, xmm3, unsigned)
+    movapd(a, xmm4, xmm1)
+    andpd(a, xmm4, unsigned)
+    sse_math(a, "max", xmm3, reg_at(xmm4))
+    sse_math(a, "*", xmm3, rip(number_place(a, double_bytes(number of "0.00000000000001"))))
+    ucomisd(a, xmm2, reg_at(xmm3))
+    jcc(a, cc_be, slow)
+end
+
+# `a is divisible by b` for two whole numbers, right there: their 64-bit remainder, as rt_cmp_div finds it
+# (exactly, below 2^63). Anything else, 0 for b, and numbers from 2^63 on go to `slow`. ZF is set if it
+# holds. Uses rax, rcx, rdx and xmm4.
+to divisible_fast with a, kl, kr, slow
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_p, slow)
+    cvttsd2si(a, rax, xmm0)
+    if kl is not "whole"
+        cvtsi2sd(a, xmm4, rax)
+        ucomisd(a, xmm4, reg_at(xmm0))
+        jcc(a, cc_ne, slow)
+    end
+    cvttsd2si(a, rcx, xmm1)
+    if kr is not "whole"
+        cvtsi2sd(a, xmm4, rcx)
+        ucomisd(a, xmm4, reg_at(xmm1))
+        jcc(a, cc_ne, slow)
+    end
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, slow)
+    movi64(a, rdx, list of 0, 0, 0, 0, 0, 0, 0, 0x80) # what cvttsd2si gives for too big
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_e, slow)
+    alu(a, "cmp", rcx, rdx)
+    jcc(a, cc_e, slow)
+    raw(a, list of 0x48, 0x99) # cqo
+    unary(a, "idiv", rcx)
+    test_rr(a, rdx, rdx)
+end
+
+# xmm0 gets the left value and xmm1 the right; gives what kind each is (see gen_expr). A number or a
+# variable on the right goes straight into xmm1; anything else is worked out after the left waits on the
+# stack.
 to gen_pair with fc, left, right
     set a to a of fc
-    gen_expr(fc, left)
-    if kind of right is "value" and type of right is not "string"
-        gen_value(fc, right, xmm1)
+    set right_number to kind of right is "value" and type of right is not "string"
+    if kind of left is "value" and type of left is not "string" and not right_number # it can wait, as it can't fail
+        set kr to gen_expr(fc, right)
+        movapd(a, xmm1, xmm0)
+        return list of gen_value(fc, left, xmm0), kr
+    end
+    set kl to gen_expr(fc, left)
+    set kr to "value"
+    if right_number
+        set kr to gen_value(fc, right, xmm1)
+    else if kind of right is "name"
+        set kr to gen_name_into(fc, right, xmm1)
     else
         push_value(fc)
-        gen_expr(fc, right)
+        set kr to gen_expr(fc, right)
         movapd(a, xmm1, xmm0)
         pop_value(fc, xmm0)
     end
+    return list of kl, kr
 end
 
 # ---------- values ----------
@@ -16264,19 +17110,22 @@ set builtin_routines to dictionary where "position" is "rt_position", "split" is
     "as bytes" is "rt_as_bytes", "as text" is "rt_as_text", "as hex" is "rt_as_hex", "as binary" is "rt_as_binary",
     "uppercase" is "rt_upper", "lowercase" is "rt_lower"
 
+# Each also gives what kind of value it is when it works: "whole", "number" or "value" (see the facts,
+# above). What a function call does to what's known happens here as well, in the order the code runs.
 to gen_expr with fc, e
     set a to a of fc
     set what to kind of e
+    set made to "value"
     if what is "value"
-        gen_value(fc, e, xmm0)
+        set made to gen_value(fc, e, xmm0)
     else if what is "name"
-        gen_name(fc, e)
+        set made to gen_name_into(fc, e, xmm0)
     else if what is "call"
         gen_call(fc, e, no)
     else if what is "math"
-        gen_math(fc, e)
+        set made to gen_math(fc, e)
     else if what is "compare"
-        gen_compare(fc, e)
+        gen_compare_value(fc, e)
         if negate of e
             alui(a, "xor", rax, 1)
         end
@@ -16292,7 +17141,9 @@ to gen_expr with fc, e
         else
             jcc(a, cc_ae, end_at)
         end
+        set before to facts_copy(facts of fc)
         gen_expr(fc, right of e)
+        set facts of fc to facts_meet(before, facts of fc)
         mark(a, end_at)
     else if what is "not"
         gen_expr(fc, operand of e)
@@ -16303,7 +17154,7 @@ to gen_expr with fc, e
         alu(a, "add", rcx, rax)
         movq_xr(a, xmm0, rcx)
     else if what is "negate"
-        gen_negate(fc, e)
+        set made to gen_negate(fc, e)
     else if what is "list"
         for each part in items of e
             gen_expr(fc, part)
@@ -16322,6 +17173,7 @@ to gen_expr with fc, e
         gen_expr(fc, subject of e)
         call_to(a, "rt_length")
         kind_stub(fc, at of e, "'length of' needs a list, text, dictionary or bytes, not ")
+        set made to "whole"
     else if what is "item"
         gen_pair(fc, subject of e, index of e)
         call_to(a, "rt_item")
@@ -16401,7 +17253,17 @@ to gen_expr with fc, e
     else
         not_yet_node(e)
     end
+    if not (what is in plain_values) # it might call a function the program made
+        forget_main(fc)
+    end
+    return made
 end
+
+# the values whose code calls no function the program made, or forgets what's known when it does
+set plain_values to dictionary where "value" is yes, "name" is yes, "call" is yes, "math" is yes, "compare" is yes,
+    "and" is yes, "or" is yes, "not" is yes, "negate" is yes, "list" is yes, "length" is yes, "item" is yes,
+    "record" is yes, "field" is yes, "dictionary" is yes, "builtin" is yes, "read" is yes, "ask" is yes,
+    "arguments" is yes, "random" is yes
 
 # after a call to the runtime: if rax isn't 0, the mistake is `message` and what kind of value err_a is
 to kind_stub with fc, at, message
@@ -16437,6 +17299,7 @@ to gen_value with fc, e, x
     set type to type of e
     if type is "number"
         load_bits(a, x, literal_bytes(value of e, at of e))
+        return literal_kind(st of fc, value of e)
     else if type is "yes"
         load_bits(a, x, bits_yes)
     else if type is "no"
@@ -16446,36 +17309,57 @@ to gen_value with fc, e, x
     else
         load_text(a, x, value of e)
     end
+    return "value"
 end
 
-to gen_name with fc, e
+# xmm x gets a variable's value, from its register if it has one, and unless it's sure to have a value
+# already, a look that it does; once it has, that's known
+to gen_name_into with fc, e, x
     set a to a of fc
     set found to front's resolve(scope of fc, name of e)
     if found is nothing
         jmp_to(a, fail_stub(fc, at of e, front's undefined_message(scope of fc, name of e, no, no)))
-        return nothing
+        return "value"
+    end
+    set key to fact_key(fc, found)
+    set known to fact_of(fc, key)
+    if known is not nothing
+        var_load(fc, found, x)
+        return known
     end
     set unset to fail_stub(fc, at of e, front's no_value(name of e))
     set odd to new_label(a)
     set back to new_label(a)
-    movsd_load(a, xmm0, place_of(fc, found))
-    ucomisd(a, xmm0, reg_at(xmm0))
+    var_load(fc, found, x)
+    ucomisd(a, x, reg_at(x))
     jcc(a, cc_p, odd)
     mark(a, back)
     set was to enter_cold(a)
     mark(a, odd)
-    movq_rx(a, rax, xmm0)
+    movq_rx(a, rax, x)
     movi64(a, rcx, bits_unset)
     alu(a, "cmp", rax, rcx)
     jcc(a, cc_e, unset)
     jmp_to(a, back)
     leave_cold(a, was)
+    set_fact(fc, key, "value")
+    return "value"
 end
 
 to gen_math with fc, e
     set a to a of fc
     set op to op of e
-    gen_pair(fc, left of e, right of e)
+    set kinds to gen_pair(fc, left of e, right of e)
+    set made to math_kind(op, item 1 of kinds, item 2 of kinds)
+    if is_number_kind(item 1 of kinds) and is_number_kind(item 2 of kinds) # two numbers: nothing to look at, but 0 to divide by
+        if op is "/"
+            movq_rx(a, rax, xmm1)
+            shifti(a, "shl", rax, 1)
+            jcc(a, cc_e, fail_stub(fc, at of e, "can't divide by zero"))
+        end
+        sse_math(a, op, xmm0, reg_at(xmm1))
+        return made
+    end
     set odd to new_label(a)
     set back to new_label(a)
     set wrong to new_label(a)
@@ -16514,14 +17398,21 @@ to gen_math with fc, e
         jmp_to(a, fail_stub(fc, at of e, "can't divide by zero"))
     end
     leave_cold(a, was)
+    return made
 end
 
 to gen_negate with fc, e
     set a to a of fc
-    gen_expr(fc, operand of e)
+    set inner to gen_expr(fc, operand of e)
     set odd to new_label(a)
     set back to new_label(a)
     set wrong to new_label(a)
+    if is_number_kind(inner)
+        movq_rx(a, rax, xmm0)
+        bit_op(a, "btc", rax, 63)
+        movq_xr(a, xmm0, rax)
+        return inner
+    end
     ucomisd(a, xmm0, reg_at(xmm0))
     jcc(a, cc_p, odd)
     mark(a, back)
@@ -16539,6 +17430,7 @@ to gen_negate with fc, e
     stub_kind(a, "err_a")
     jmp_to(a, "rt_e_end")
     leave_cold(a, was)
+    return "number"
 end
 
 to plural_of with n, word
@@ -16564,10 +17456,12 @@ to gen_call with fc, e, statement
         gen_value_call(fc, e, found)
         return nothing
     end
-    set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
-    movi64(a, rcx, bits_unset)
-    alu_load(a, "cmp", rcx, place_of(fc, found))
-    jcc(a, cc_e, made_yet)
+    if fn of fc is nothing or id of fn of fc is not id of f # a function running has been made
+        set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
+        movi64(a, rcx, bits_unset)
+        alu_load(a, "cmp", rcx, place_of(fc, found))
+        jcc(a, cc_e, made_yet)
+    end
     for each arg in args of e
         gen_expr(fc, arg)
         push_value(fc)
@@ -16591,6 +17485,7 @@ to gen_call with fc, e, statement
     movi(a, rax, call_site(fc, at of e))
     call_to(a, label of f)
     dec_r(a, r15)
+    forget_main(fc)
     if n is greater than 0
         alui(a, "add", rsp, 8 * n)
         set pushed of fc to pushed of fc - n
@@ -16714,6 +17609,7 @@ to gen_value_call with fc, e, found
     movi(a, rax, call_site(fc, at of e))
     call_r(a, rcx)
     dec_r(a, r15)
+    forget_main(fc)
     alui(a, "add", rsp, 8 * (n + 1))
     set pushed of fc to pushed of fc - n - 1
 end
