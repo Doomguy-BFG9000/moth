@@ -149,11 +149,13 @@ export const OPCODES = [
   ["SAY_ERROR", 1], // as SAY, but the line goes to the error output
   ["EXIT", 0], // `stop the program with` the number on the stack
   ["REMOVE_FILE", 0], // `remove the file` named on the stack
+  ["NOW", 1], // `the time`, `the date` and the rest: the operand is which, in NOW_WORDS
+  ["WAIT", 1], // `wait` the number on the stack, times the operand (milliseconds in each)
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
@@ -719,7 +721,191 @@ export const BUILTINS = [
       error("can't run programs here: only a program made by moth build can");
     },
   })),
+  // `scores in order`, `scores in reverse order`, `people in order by age`: a new list, sorted (see inOrder)
+  ...["order", "reverse order"].flatMap((how) => [
+    { name: how, needs: [["list"]], gives: "list", run: ([list], error) => inOrder(list, null, how !== "order", error) },
+    { name: `${how} by`, needs: [["list"], ["text"]], gives: "list", run: ([list, field], error) => inOrder(list, field, how !== "order", error) },
+  ]),
+  // `save scores to "scores.txt"` writes what this makes; `load "scores.txt"` reads it back (see savedText)
+  { name: "save", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary"]], gives: "text", run: ([value], error) => savedText(value, error) },
+  { name: "load", needs: [["text"]], gives: null, run: ([text], error) => loadedValue(text, error) },
 ];
+
+// `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
+// in turn (so "B" comes before "a", and "apple" before "apples"), records `by` a field by that field. All of
+// them must be numbers, or all text; ones that are equal keep the order they had, and `in reverse order`
+// goes from the largest, still keeping equal ones in the order they had.
+export function inOrder(list, field, reverse, error) {
+  const phrase = `'in ${reverse ? "reverse " : ""}order${field === null ? "" : ` by ${field}`}'`;
+  if (!isList(list)) error(`${phrase} needs a list, not ${kindOf(list)}`);
+  const keys = list.map((item) => {
+    if (field === null) return item;
+    if (!isRecord(item)) error(`${phrase} needs a list of records, not one with ${kindOf(item)} in it`);
+    return fieldOf(item, field, error);
+  });
+  let sort = null;
+  for (const key of keys) {
+    const what = typeof key === "number" ? "numbers" : typeof key === "string" ? "text" : null;
+    if (!what) error(`${phrase} puts numbers or text in order, not ${kindOf(key)}`);
+    if (sort && what !== sort) error(`${phrase} can't put numbers and text in order together`);
+    sort = what;
+  }
+  const by = sort === "numbers" ? (a, b) => numberOrder(a, b) || 0 : textOrder;
+  const places = keys.map((_, i) => i).sort((a, b) => (reverse ? by(keys[b], keys[a]) : by(keys[a], keys[b])));
+  return places.map((i) => list[i]);
+}
+
+// text in order by each character's number in turn (by code point, as its UTF-8 bytes would sort): -1, 0 or 1
+export function textOrder(a, b) {
+  let [i, j] = [0, 0];
+  while (i < a.length && j < b.length) {
+    const [x, y] = [a.codePointAt(i), b.codePointAt(j)];
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return (i < a.length) - (j < b.length);
+}
+
+// `save value to "file"`: the value, written as `say` shows a value inside a list, which `load` reads back:
+// numbers (to 15 digits, as Moth compares them), text in quotes, yes, no, nothing, lists, records and
+// dictionaries. Functions, bytes and amounts with units can't be saved, and nor can a list that holds itself.
+export function savedText(value, error) {
+  const inside = new Set();
+  const check = (v) => {
+    if (v instanceof Closure || isBytes(v) || isQuantity(v)) error(`'save' can't save ${kindOf(v)}`);
+    if (!isList(v) && !isRecord(v) && !isDictionary(v)) return;
+    if (inside.has(v)) error(`'save' can't save ${kindOf(v)} that holds itself`);
+    inside.add(v);
+    for (const x of isList(v) ? v : isRecord(v) ? Object.values(v) : v.values()) check(x);
+    inside.delete(v);
+  };
+  check(value);
+  return show(value, true);
+}
+
+// `load "scores.txt"`: a value `save` wrote. Spaces and new lines may come between its parts.
+export function loadedValue(text, error) {
+  let at = 0;
+  const bad = () => error("'load' can't read this: it isn't a value 'save' wrote");
+  const space = () => {
+    while (at < text.length && " \t\r\n".includes(text[at])) at++;
+  };
+  const sees = (word) => {
+    space();
+    if (!text.startsWith(word, at)) return false;
+    const next = text[at + word.length];
+    if (/^[A-Za-z]/.test(word) && next !== undefined && /[A-Za-z0-9_]/.test(next)) return false;
+    at += word.length;
+    return true;
+  };
+  const must = (word) => sees(word) || bad();
+  const value = () => {
+    space();
+    const c = text[at];
+    if (c === '"') {
+      const end = /^"(?:[^"\\\u0000-\u001f]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"/.exec(text.slice(at));
+      if (!end) bad();
+      at += end[0].length;
+      return JSON.parse(end[0]);
+    }
+    if (c === "[") {
+      at++;
+      const list = [];
+      if (sees("]")) return list;
+      do list.push(value()); while (sees(","));
+      must("]");
+      return list;
+    }
+    if (c === "(") {
+      at++;
+      if (sees("empty")) {
+        const what = sees("record") ? new Record() : sees("dictionary") ? new Map() : bad();
+        must(")");
+        return what;
+      }
+      if (sees("record")) {
+        must("with");
+        const record = new Record();
+        do {
+          space();
+          const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(at)) ?? bad();
+          at += name[0].length;
+          record[name[0]] = value();
+        } while (sees(","));
+        must(")");
+        return record;
+      }
+      must("dictionary");
+      must("where");
+      const items = [];
+      do {
+        const key = value();
+        if (typeof key !== "string" && typeof key !== "number") bad();
+        must("is");
+        items.push(key, value());
+      } while (sees(","));
+      must(")");
+      return makeDictionary(items, error);
+    }
+    for (const [word, v] of [["yes", true], ["no", false], ["nothing", null], ["Infinity", Infinity], ["-Infinity", -Infinity], ["NaN", NaN]]) {
+      if (sees(word)) return v;
+    }
+    const number = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-][0-9]+)?/.exec(text.slice(at));
+    if (!number) bad();
+    at += number[0].length;
+    return Number(number[0]);
+  };
+  if (typeof text !== "string") error(`'load' needs text, not ${kindOf(text)}`);
+  const loaded = value();
+  space();
+  if (at < text.length) bad();
+  return loaded;
+}
+
+// The clock a program reads with `the time` and `wait`s on: `now()` the time of day where it runs, in
+// milliseconds since 1970 as if that were UTC (so the UTC parts of a Date are the local ones), `since()` the
+// milliseconds since the program started, and `sleep(ms)`. A run isn't given a real one unless it asks
+// (the playground does): fakeClock() always starts at the same moment, and its waits take no time at all.
+export const FAKE_NOW = Date.UTC(2026, 0, 2, 3, 4, 5, 678); // a Friday
+export function fakeClock(start = FAKE_NOW) {
+  let slept = 0;
+  return { now: () => start + slept, since: () => slept, sleep: (ms) => void (slept += ms) };
+}
+export function realClock() {
+  const started = performance.now();
+  return {
+    now: () => Date.now() - new Date().getTimezoneOffset() * 60_000,
+    since: () => performance.now() - started,
+    sleep: (ms) => {
+      try {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); // a worker can sleep
+      } catch {
+        for (const end = performance.now() + ms; performance.now() < end; ); // a page can't, so it waits busily
+      }
+    },
+  };
+}
+
+// `the time`, `the date`, ... `the clock`
+export const NOW_WORDS = ["time", "date", "year", "month", "day", "hour", "minute", "second", "weekday", "clock"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export function nowValue(which, clock) {
+  const word = NOW_WORDS[which];
+  if (word === "clock") return Math.round(clock.since()) / 1000; // seconds since the program started, to the millisecond
+  const d = new Date(Math.floor(clock.now()));
+  const two = (n) => String(n).padStart(2, "0");
+  if (word === "time") return `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}:${two(d.getUTCSeconds())}`;
+  if (word === "date") return `${d.getUTCFullYear()}-${two(d.getUTCMonth() + 1)}-${two(d.getUTCDate())}`;
+  if (word === "weekday") return WEEKDAYS[d.getUTCDay()];
+  return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()][which - 2];
+}
+
+// `wait 2 seconds`: `unit` is the milliseconds in each
+export function waitFor(amount, unit, clock, error) {
+  if (typeof amount !== "number" || !(amount >= 0) || amount === Infinity) error(`'wait' needs a number of 0 or more, not ${described(amount)}`);
+  clock.sleep(amount * unit);
+}
 
 // `stop the program with 2`: the number a program ends with, a whole number from 0 to 255 (all Linux keeps)
 export function exitCode(v, error) {
@@ -940,8 +1126,8 @@ export class Machine {
   // `random` gives the random numbers (see randomWhole). An app's handlers go in `listeners`, and `turtle`
   // keeps one picture going from one handler to the next (see callFunction). `printError` gets each line
   // said to the error output.
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle, printError = console.error } = {}) {
-    Object.assign(this, { main, print, printError, maxSteps, ask, disk, args, random, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle, printError = console.error, clock = fakeClock() } = {}) {
+    Object.assign(this, { main, print, printError, maxSteps, ask, disk, args, random, clock, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = turtle ?? new Turtle(draw);
@@ -1232,6 +1418,12 @@ export class Machine {
             stack.push(randomWhole(stack.pop(), high, this.random, oops));
             break;
           }
+          case NOW:
+            stack.push(nowValue(code[ip++], this.clock));
+            break;
+          case WAIT:
+            waitFor(stack.pop(), code[ip++], this.clock, oops);
+            break;
           case ARGUMENTS:
             stack.push([...this.args]); // a new list each time, so changing one can't change the next
             break;

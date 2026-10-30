@@ -36,6 +36,10 @@ function madeOrder(body, made, places, count = { n: 0 }) {
 
 // One function (or the whole program). Each variable gets a numbered slot here, once, so a name resolves
 // to a (depth, slot) pair: how many functions out it lives, and which of that function's slots it is.
+// a line that starts like a phrase but isn't one, which would otherwise be a call to a function nothing made
+const PHRASE_HINTS = new Map([["wait", "to wait, say how long: 'wait 2 seconds'"],
+  ["save", "to save a value, say where: 'save scores to \"scores.txt\"'"]]);
+
 export class Scope {
   // `slots` carries a shell's earlier top-level variables; `debug` asks the compiler for pause points.
   constructor(parent, name, params, body, { slots = new Map(), debug = parent?.debug ?? false } = {}) {
@@ -78,8 +82,10 @@ export class Scope {
   }
 
   // What to say when a name nothing ever sets is used: suggest the closest name that does exist. A line
-  // that starts with an unknown name may be a misspelled Moth word instead, like `sya "hi"`.
+  // that starts with an unknown name may be a misspelled Moth word instead, like `sya "hi"`, or a phrase
+  // missing its last part, like `wait 2`.
   undefinedMessage(name, { call = false, statement = false } = {}) {
+    if (call && PHRASE_HINTS.has(name)) return `there is no function called '${name}' (${PHRASE_HINTS.get(name)})`;
     const known = [];
     for (let c = this; c; c = c.parent) known.push(...c.slots.keys());
     const guess = closest(name, statement ? [...known, ...STATEMENT_WORDS] : known);

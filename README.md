@@ -207,9 +207,9 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
 $ moth build tools/wordcount.moth --allow-read
-compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (86,016 bytes)
+compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
 290 words, 107 different ones
 the  ██████████████████████████████ 45
@@ -288,7 +288,7 @@ bytes and dictionaries:
 
   ```text
   $ moth build wordcount.moth --allow-read
-  compiled wordcount.moth to machine code for Windows -> wordcount.exe (81,408 bytes)
+  compiled wordcount.moth to machine code for Windows -> wordcount.exe (90,112 bytes)
   $ wordcount story.txt 4
   290 words, 107 different ones
   the   ██████████████████████████████ 45
@@ -609,13 +609,20 @@ folder, or folders inside it. A refusal is a mistake the program can catch with
 
 ```text
 $ moth build copy.moth
-compiled copy.moth to machine code for Windows -> copy.exe (62,976 bytes)
+compiled copy.moth to machine code for Windows -> copy.exe (71,680 bytes)
 $ copy
 moth: let this program read 'notes.txt'? (y = yes, a = yes to all, n = no) n
 copy.moth:1:20: can't read 'notes.txt': this program isn't allowed to read files (start it with --allow-read)
 write uppercase of read "notes.txt" to "loud.txt"
                    ^
 ```
+
+A program reads a site the way it reads a file, `read "https://example.com"`:
+on Windows through WinHTTP, with the system's certificates, and on Linux through
+the system's `curl`. A site that sends it on to another address is asked about
+again there, ten moves at most; any other answer from 300 up is a mistake
+(`can't read 'https://example.com/nothing': the site answered 404`), and a site
+gets 60 seconds.
 
 A mistake in a program, and what `moth` itself says went wrong, go to the error
 output, so a program's own words stay clean; `moth` ends with 1 for a mistake,
@@ -637,10 +644,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
 ```
 
-That's the same 10,662,912 bytes Node.js made of it, and the moth.exe they make
+That's the same 11,426,816 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -750,6 +757,11 @@ calls that led there.
   purpose, each tidied to exactly the bytes `format()` makes; `moth check`
   against the checker, its own problems word for word; and `moth test` on the
   tests in Moth here, said exactly as `test()` says them
+- going online in machine code, against a server of the tests' own on
+  127.0.0.1: a page's text and bytes, moves to other addresses, the answers
+  that are mistakes, a refused connection, a big page and the `--allow-net`
+  rules, in the Rust engine's words; and that a program that never reads is
+  the same bytes it was
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -762,7 +774,8 @@ unboxed numbers were all caught, some only by the fuzzer.
 - No clock: a program learns about the world through `ask`, its files, the
   sites it reads, its arguments, and in an app, keys, clicks and timers. In the
   playground, files last for one run, and only sites that let any page read
-  them can be read. A program in machine code can't go online yet.
+  them can be read. On Linux a program goes online through `curl`, so where
+  curl isn't installed it can't.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
@@ -782,9 +795,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   it's stopped.
 - `moth build` takes only part of Moth so far: no units, tables or
   `draw chart of`; anything else stops with a
-  mistake that says it can't become machine code yet. What it makes can't go
-  online either: reading a site it may read says it couldn't reach it.
-  It makes programs for x86-64 Windows and Linux, not for Macs.
+  mistake that says it can't become machine code yet. It makes programs for
+  x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
   showing its picture, and an app's handlers never run. The window knows CSS's
   colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only

@@ -130,6 +130,17 @@ export const PROGRAMS = [
   ["to random\n    return 4\nend\nsay random() \" \" random number from 1 to 1", "4 1"],
   // when and every: the program sets them up, and run() returns an app that waits for them
   ["say \"set up\"\nwhen a key is pressed\n    say \"never, until a key comes\"\nend\nevery 1 second\n    say \"nor this\"\nend\nsay \"done\"", "set up\ndone"],
+  // the time and waiting: a run that isn't given a real clock starts at Friday 2 January 2026, 03:04:05.678,
+  // and its waits take no time, but move its clock on
+  ["say the time\nsay the date\nsay the weekday\nsay list of the year, the month, the day, the hour, the minute, the second\nsay the clock", "03:04:05\n2026-01-02\nFriday\n[2026, 1, 2, 3, 4, 5]\n0"],
+  ["wait 1.5 seconds\nsay the clock \" \" the time\nset n to 250\nwait n milliseconds\nwait 0 seconds\nsay the clock\nwait 2 days\nsay the date \" \" the weekday \" \" the clock\nwait 0.0004 seconds\nsay the clock", "1.5 03:04:07\n1.75\n2026-01-04 Sunday 172801.75\n172801.75"],
+  ["to wait with n\n    say \"my wait \" n\nend\nwait 5\nwait(6)\nwait 7 seconds\nsay the clock", "my wait 5\nmy wait 6\n7"],
+  ["set the to \"the\"\nsay the\nset time to 3\nsay time \" \" the time", "the\n3 03:04:05"],
+  // in order: a new list, the old one as it was; equal ones keep their order
+  ["set scores to list of 30, 10.5, 20, -4, 10.5, 0.1 + 0.2, 0.3\nsay scores in order\nsay scores in reverse order\nsay scores\nsay (empty list) in order", "[-4, 0.3, 0.3, 10.5, 10.5, 20, 30]\n[30, 20, 10.5, 10.5, 0.3, 0.3, -4]\n[30, 10.5, 20, -4, 10.5, 0.3, 0.3]\n[]"],
+  ["say (list of \"pear\", \"Apple\", \"apple\", \"apples\", \"é\", \"z\", \"\", \"😀\", \"ﬀ\") in order", "[\"\", \"Apple\", \"apple\", \"apples\", \"pear\", \"z\", \"é\", \"ﬀ\", \"😀\"]"],
+  ["set people to list of (record with name \"Sam\", age 30), (record with name \"Ana\", age 25), (record with name \"Bo\", age 30)\nfor each p in people in order by age\n    say name of p\nend\nsay (people in reverse order by name) is list of item 1 of people, item 3 of people, item 2 of people\nfor each p in people in reverse order by age\n    say name of p\nend", "Ana\nSam\nBo\nyes\nSam\nBo\nAna"],
+  ["set order to list of 3, 1, 2\nfor each x in order in order\n    say x\nend\nsay 2 is in order\nsay position of \"b\" in \"abc\"", "1\n2\n3\nyes\n2"],
 ];
 
 export const ERRORS = [
@@ -305,6 +316,17 @@ export const ERRORS = [
   ["say random number from \"a\" to 2", "line 1: 'random number from' needs whole numbers, not text"],
   ["say random number from 6 to 1", "line 1: there is no number from 6 to 1"],
   ["say random number 1 to 6", "line 1: expected 'of' but found '1'"],
+  // waiting, and putting things in order
+  ["wait \"soon\" seconds", "line 1: 'wait' needs a number of 0 or more, not text"],
+  ["say \"before\"\nwait -1 seconds", "line 2: 'wait' needs a number of 0 or more, not -1"],
+  ["wait 5", "line 1: there is no function called 'wait' (to wait, say how long: 'wait 2 seconds')"],
+  ["save 5", "line 1: there is no function called 'save' (to save a value, say where: 'save scores to \"scores.txt\"')"],
+  ["say (list of 1, \"a\") in order", "line 1: 'in order' can't put numbers and text in order together"],
+  ["say 5 in reverse order", "line 1: 'in reverse order' needs a list, not a number"],
+  ["say (list of yes, no) in order", "line 1: 'in order' puts numbers or text in order, not yes/no"],
+  ["set people to list of (record with name \"Sam\"), (record with age 3)\nsay people in order by age", "line 2: this record has no 'age'"],
+  ["say (list of 1, 2) in order by age", "line 1: 'in order by age' needs a list of records, not one with a number in it"],
+  ["say (list of 2, 1) in order by \"x\"", "line 1: expected a field name but found \"x\""],
   // when and every: the program sets them up, and run() returns an app that waits for them
   ["when the dog barks\n    say 1\nend", "line 1: expected 'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged' but found 'the'"],
   ["when a key is pressed with a and b\n    say 1\nend", "line 1: 'when a key is pressed' gives 1 value, so name one input or none, not 2"],

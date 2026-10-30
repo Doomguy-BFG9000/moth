@@ -4,6 +4,7 @@
 // A line said to the error output goes to the page as { error: line }, among the others, and `stop the
 // program` ends the run (or the app) with the number it gave, which the page shows.
 import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./moth.js";
+import { realClock } from "./vm.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more.
 // Drawing counts from the last `clear`, so an app that draws every frame can go on for ever.
@@ -117,6 +118,7 @@ onmessage = ({ data }) => {
     throw new Waiting();
   };
   const start = performance.now();
+  const clock = realClock();
   try {
     app = run(source, say, {
       draw: (d) => {
@@ -130,6 +132,7 @@ onmessage = ({ data }) => {
       files: (name) => files[name],
       disk: pageDisk(), // a page has no files of its own: `write` makes them, for this run
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
+      clock: { ...clock, sleep: (ms) => (flush(), clock.sleep(ms)) }, // the real time; what was said and drawn shows before a wait
       printError: sayError,
       exit: (code) => (stopped = code),
     }) ?? null;
