@@ -1,11 +1,11 @@
 // Moth against C and Python: the same four programs in each, every one run as a whole process from start to
-// finish, the best of three. Moth runs as the machine code machine.moth makes, and on `moth run`. C needs cc,
+// finish, the best of three. Moth runs as the machine code machine.moth makes, and on the JavaScript engine. C needs cc,
 // gcc or clang, or MSVC's cl in a developer prompt; Python needs python3 or python. Run with `npm run versus`.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { machineCompiler } from "../moth.js";
 
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
@@ -39,7 +39,10 @@ if (target) {
   }
   ways["Moth, machine code"] = (p) => [join(dir, windows ? `${p}.exe` : p), []];
 }
-ways["moth run"] = (p) => [process.execPath, [here("../cli.js"), "run", here(`${p}.moth`)]];
+// the JavaScript engine, the playground's, which the moth command used to run programs on
+const engine = pathToFileURL(here("../moth.js")).href;
+ways["JavaScript engine"] = (p) => [process.execPath, ["--input-type=module", "-e",
+  `import { run } from ${JSON.stringify(engine)}; import { readFileSync } from "node:fs"; run(readFileSync(${JSON.stringify(here(`${p}.moth`))}, "utf8"), console.log);`]];
 const python = ["python3", "python"].find((command) => works(command, ["--version"]));
 if (python) ways.Python = (p) => [python, [here(`${p}.py`)]];
 

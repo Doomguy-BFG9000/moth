@@ -1,11 +1,11 @@
 // Times a few Moth programs. Run with `npm run bench`; pass a path to time another copy of moth.js.
-import { pathToFileURL, fileURLToPath } from "node:url";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const { run } = await import(process.argv[2] ? pathToFileURL(process.argv[2]).href : "./moth.js");
+const { run, machineCompiler } = await import(process.argv[2] ? pathToFileURL(process.argv[2]).href : "./moth.js");
 
 const PROGRAMS = {
   "fib(25), function calls": `to fib with n
@@ -95,40 +95,40 @@ function time(source, engine) {
   return { ms: best, result };
 }
 
-// the Rust engine, if it's built: it times itself, so starting it up isn't counted
-const NATIVE = new URL(`./native/target/release/moth-native${process.platform === "win32" ? ".exe" : ""}`, import.meta.url);
-function timeNative(source) {
-  if (!existsSync(NATIVE)) return null;
-  const [best, result] = spawnSync(fileURLToPath(NATIVE), ["bench"], { input: source, encoding: "utf8" }).stdout.split("\n");
-  return { ms: Number(best), result };
-}
-
-// The same programs compiled to machine code by moth-native build --exe, if rustc is here to finish the job:
-// one program holding them all, which times each as `moth-native bench` does
-function compiledTimes() {
-  if (!existsSync(NATIVE) || spawnSync("rustc", ["--version"]).status !== 0) return null;
-  const dir = mkdtempSync(join(tmpdir(), "moth-bench-"));
+// The same programs in machine code, made by machine.moth, each run as a whole program from start to finish,
+// the best of 5, so starting it up is counted too; on Windows and Linux
+const machine = machineCompiler(readFileSync(new URL("./machine.moth", import.meta.url), "utf8"), readFileSync(new URL("./compiler.moth", import.meta.url), "utf8"));
+const target = { win32: "windows", linux: "linux" }[process.platform];
+function timeMachine(source, dir, name) {
+  if (!target) return null;
+  const exe = join(dir, target === "windows" ? `${name}.exe` : name);
   try {
-    writeFileSync(join(dir, "programs.json"), JSON.stringify(Object.values(PROGRAMS).map((source) => ({ source }))));
-    const built = spawnSync(fileURLToPath(NATIVE), ["build", "--exe-conform", "programs.json", "programs"], { cwd: dir, encoding: "utf8" });
-    if (built.status !== 0) return null;
-    const harness = join(dir, `programs${process.platform === "win32" ? ".exe" : ""}`);
-    const input = Object.values(PROGRAMS).map((source) => JSON.stringify(source)).join("\n") + "\n";
-    const lines = spawnSync(harness, [], { input, encoding: "utf8", env: { ...process.env, MOTH_BENCH: "1" } }).stdout.split("\n");
-    return Object.values(PROGRAMS).map((_, i) => ({ ms: Number(lines[2 * i]), result: lines[2 * i + 1] }));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    writeFileSync(exe, machine(source, { target, name: `${name}.moth` }));
+  } catch {
+    return null; // a program it can't make machine code of yet
   }
+  if (target === "linux") chmodSync(exe, 0o755);
+  let best = Infinity;
+  let result;
+  for (let i = 0; i < 5; i++) {
+    const start = performance.now();
+    result = spawnSync(exe, [], { encoding: "utf8" }).stdout.trim().split("\n").pop();
+    best = Math.min(best, performance.now() - start);
+  }
+  return { ms: best, result };
 }
 
 const ms = (n) => `${n < 10 ? n.toFixed(1) : n.toFixed(0)} ms`.padStart(9);
-const compiled = compiledTimes();
-console.log(`${"".padEnd(32)} ${"VM".padStart(9)} ${"JIT".padStart(9)} ${"Wasm".padStart(9)} ${"Rust".padStart(9)} ${"Compiled".padStart(9)}`);
-for (const [i, [name, source]] of Object.entries(PROGRAMS).entries()) {
-  const [vm, jit, wasm] = ["vm", "jit", "wasm"].map((engine) => time(source, engine));
-  const native = timeNative(source) ?? { ms: NaN, result: vm.result };
-  const exe = compiled?.[i] ?? { ms: NaN, result: vm.result };
-  const same = [jit, wasm, native, exe].every((t) => t.result === vm.result) ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result} / ${wasm.result} / ${native.result} / ${exe.result}`;
-  const shown = (t) => (Number.isNaN(t.ms) ? "(not built)".padStart(9) : ms(t.ms));
-  console.log(`${name.padEnd(32)} ${ms(vm.ms)} ${ms(jit.ms)} ${ms(wasm.ms)} ${shown(native)} ${shown(exe)}${same}`);
+const dir = mkdtempSync(join(tmpdir(), "moth-bench-"));
+try {
+  console.log(`${"".padEnd(32)} ${"VM".padStart(9)} ${"JIT".padStart(9)} ${"Wasm".padStart(9)} ${"Machine".padStart(9)}`);
+  for (const [i, [name, source]] of Object.entries(PROGRAMS).entries()) {
+    const [vm, jit, wasm] = ["vm", "jit", "wasm"].map((engine) => time(source, engine));
+    const exe = timeMachine(source, dir, `p${i}`) ?? { ms: NaN, result: vm.result };
+    const same = [jit, wasm, exe].every((t) => t.result === vm.result) ? "" : `   DIFFERENT RESULTS: ${vm.result} / ${jit.result} / ${wasm.result} / ${exe.result}`;
+    const shown = (t) => (Number.isNaN(t.ms) ? "(can't yet)".padStart(9) : ms(t.ms));
+    console.log(`${name.padEnd(32)} ${ms(vm.ms)} ${ms(jit.ms)} ${ms(wasm.ms)} ${shown(exe)}${same}`);
+  }
+} finally {
+  rmSync(dir, { recursive: true, force: true });
 }

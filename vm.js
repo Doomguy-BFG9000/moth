@@ -1,5 +1,5 @@
-// The Moth virtual machine: runs the bytecode that moth.js compiles. It imports nothing, so `moth build`
-// can copy this file into a compiled program as its runtime.
+// The Moth virtual machine: runs the bytecode that moth.js compiles. It imports nothing, so the playground's
+// worker and a page made from an app can carry it as it is.
 
 // `value` is set by `fail with value`, so a program that called Moth code (see load()) can read it.
 // `trail` is the calls that led to the mistake (see trailOf).
@@ -162,8 +162,7 @@ export class Closure {
 
 // ---------- amounts with units: 5 km, 2 hours, 300 g ----------
 // What each unit measures, and each unit: how it is written for one and for many, what it measures, and
-// how many of that measure's base unit (a metre, a second, a gram, a litre) it is. The Rust engine has
-// the same table in the same order (native/src/value.rs).
+// how many of that measure's base unit (a metre, a second, a gram, a litre) it is.
 export const MEASURES = ["a distance", "a time", "a weight", "a volume"];
 export const UNITS = [
   ["mm", "mm", 0, 0.001], ["cm", "cm", 0, 0.01], ["m", "m", 0, 1], ["km", "km", 0, 1000],

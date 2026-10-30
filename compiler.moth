@@ -1915,10 +1915,9 @@ end
 
 # ---------- bytecode ----------
 
-# The other back end: the bytecode moth.js's compiler makes for its virtual machine, which the Rust engine
-# (native/) runs too, as text (native/src/bytecode.rs shows the shape). Instruction for instruction and
-# constant for constant it is what both of those compilers make, so the Rust engine can run Moth's compiler
-# compiling itself, with no JavaScript anywhere.
+# The other back end: the bytecode moth.js's compiler makes for its virtual machine, as text. Instruction
+# for instruction and constant for constant it is what that compiler makes; the Rust engine Moth had until
+# 1.5 ran it too, so it could run Moth's compiler compiling itself, with no JavaScript anywhere.
 
 # each instruction's number, in the order of OPCODES in vm.js
 set op_get to 0

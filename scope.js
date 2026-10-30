@@ -25,7 +25,7 @@ export class Scope {
     this.debug = debug;
     this.fn = { name, params, nslots: slots.size, names: [] };
     for (const [n, slot] of slots) this.fn.names[slot] = n; // each slot's name, for the debugger and disassembler
-    Object.defineProperty(this.fn, "parent", { value: parent?.fn }); // for the debugger; not enumerable, so `moth build`'s JSON skips it
+    Object.defineProperty(this.fn, "parent", { value: parent?.fn }); // for the debugger; not enumerable, so the bytecode's JSON skips it
     for (const p of params) this.declare(p);
     const { own, shared } = declarations(body);
     for (const n of own) if (!this.slots.has(n)) this.declare(n);

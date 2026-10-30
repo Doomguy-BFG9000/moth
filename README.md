@@ -137,38 +137,28 @@ a distance and a time
 </tr>
 </table>
 
-**Four engines that agree.** Every program can run on a bytecode virtual
-machine, on a JIT that compiles it to JavaScript, as WebAssembly that Moth
-writes byte by byte, or on [the Rust engine](#without-javascript), which has no
-JavaScript at all. All four must say, draw and fail exactly alike, and
-thousands of randomly broken programs check that they do on every push. And
-`moth-native build --exe` turns a program into
-[machine code](#in-machine-code): a program of its own, the fastest of all at
-working with numbers, and well ahead of the Rust engine everywhere else:
+**Engines that agree.** Every program can run on a bytecode virtual machine, on
+a JIT that compiles it to JavaScript, or as WebAssembly that Moth writes byte by
+byte, and [`moth build`](#command-line) turns it into machine code: a program of
+its own. All of them must say, draw and fail exactly alike, and thousands of
+randomly broken programs check that they do on every push:
 
-| `npm run bench` | VM | JIT | WebAssembly | Rust | Machine code |
-|:--|--:|--:|--:|--:|--:|
-| fib(25), function calls | 68 ms | 9.8 ms | **8.5 ms** | 31 ms | 16 ms |
-| a million-round loop | 73 ms | 11 ms | 6.5 ms | 33 ms | **2.5 ms** |
-| primes up to 5,000 | 119 ms | 19 ms | **15 ms** | 110 ms | 45 ms |
-| 200,000 records | 93 ms | 15 ms | **10 ms** | 66 ms | 48 ms |
-| a million bytes, filled and summed | 397 ms | 94 ms | **43 ms** | 186 ms | 90 ms |
-| 200,000 words counted in a dictionary | 104 ms | 28 ms | **26 ms** | 80 ms | 53 ms |
+| `npm run bench` | VM | JIT | WebAssembly | Machine code |
+|:--|--:|--:|--:|--:|
+| fib(25), function calls | 64 ms | 11 ms | **6.1 ms** | 16 ms |
+| a million-round loop | 60 ms | 8.1 ms | **5.4 ms** | 18 ms |
+| primes up to 5,000 | 139 ms | 18 ms | **14 ms** | 36 ms |
+| 200,000 records | 102 ms | 17 ms | **8.2 ms** | 32 ms |
+| a million bytes, filled and summed | 422 ms | 90 ms | **40 ms** | 47 ms |
+| 200,000 words counted in a dictionary | 102 ms | 32 ms | **23 ms** | 28 ms |
+
+Machine code is timed from start to finish, starting up included; the others
+inside a program that's already running.
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 2,400
 lines of Moth that compile any Moth program, itself included, to exactly the
-JavaScript the JIT writes, byte for byte, or to exactly the bytecode the Rust
-engine runs. Compiled by itself, it compiles itself again, and again, to the
-same result:
-
-```text
-$ moth bootstrap
-compiler.moth: 2381 lines of Moth, which the JIT compiles to 230735 characters of JavaScript
-stage 1, made by the JIT, compiles compiler.moth: the same JavaScript (212 ms)
-stage 2, made by stage 1, compiles compiler.moth: the same JavaScript (183 ms)
-stage 3, made by stage 2, compiles compiler.moth: the same JavaScript (207 ms)
-fixed point: the compiler written in Moth compiles itself to exactly what the JIT makes of it
-```
+JavaScript the JIT writes, byte for byte. Compiled by itself, it compiles itself
+again, and again, to the same result, which `npm test` checks three stages deep.
 
 **Machine code, from Moth alone.** [`machine.moth`](machine.moth) is a third
 back end, written in Moth: it turns a program into a Windows `.exe` or a Linux
@@ -178,13 +168,13 @@ yes, no and nothing, text, lists, records, dictionaries, bytes, variables,
 `say`, `if`, the loops, functions (made inside functions and passed around as
 values too), `try`, `read` and `write`, `ask`, `arguments`, and the helpers,
 which is enough for [`math.moth`](math.moth) and the handwriting network. What
-it makes does exactly what `moth run` does, down to how a number is shown, how
+it makes does exactly what the JavaScript engine does, down to how a number is shown, how
 two numbers compare to 15 digits, how text sorts, the calls a mistake lists,
-and asking before it reads or writes a file, unless `--allow` flags after the
-file in `moth build --exe` let it:
+and asking before it reads or writes a file, unless `--allow` flags given to
+`moth build` let it:
 
 ```text
-$ moth build --exe fib.moth
+$ moth build fib.moth
 compiled fib.moth to machine code for Windows -> fib.exe (50,176 bytes)
 $ ./fib.exe
 832040
@@ -194,7 +184,7 @@ Against C and Python, with the same four programs written in each
 ([`versus/`](versus)), every one timed from start to finish, it's 9 to 32 times
 as fast as Python, and 2.3 to 8 times as slow as C:
 
-| `npm run versus` | C | Moth, machine code | `moth run` | Python |
+| `npm run versus` | C | Moth, machine code | JavaScript engine | Python |
 |:--|--:|--:|--:|--:|
 | fib(32): 7 million calls | 25 ms | 58 ms | 272 ms | 508 ms |
 | adding 1 to 100,000,000 | 42 ms | 341 ms | 703 ms | 9.5 s |
@@ -230,7 +220,7 @@ it   ███████ 11
 It builds for the system it runs on, or the other one with `--target windows`
 or `--target linux`, and a Linux moth.exe and a Windows one build each other
 byte for byte too. The first one comes from Node.js
-(`node cli.js build --exe moth.moth --allow-read --allow-write`) or from
+(`node bootstrap.mjs`) or from
 [the releases](https://github.com/samyyy2423/moth/releases); after that, each
 builds the next. It takes the part of Moth machine.moth takes; the playground,
 drawing and apps still run on the JavaScript engine.
@@ -275,11 +265,12 @@ from digits Moth drew itself: there's no dataset.
 [`digit-shapes.moth`](digit-shapes.moth) holds each digit as pen strokes and
 bends them at random, [`digits.moth`](digits.moth) turns strokes into 16×16
 pictures and runs the network, and [`digits-train.moth`](digits-train.moth)
-trains it on 3,000 pictures in about 7 seconds, then writes what it learned as a
+trains it on 3,000 pictures in about 5 seconds, then writes what it learned as a
 Moth file: 99% right on drawings it hadn't seen.
 
 ```bash
-moth run digits-train.moth --engine wasm > digits-model.moth
+moth build digits-train.moth
+digits-train > digits-model.moth
 ```
 
 **Real tools.** [`tools/`](tools) holds programs that do real work with files,
@@ -293,7 +284,9 @@ bytes and dictionaries:
 - [`wordcount.moth`](tools/wordcount.moth) counts the words in any file:
 
   ```text
-  $ moth run wordcount.moth --allow-read story.txt 4
+  $ moth build wordcount.moth --allow-read
+  compiled wordcount.moth to machine code for Windows -> wordcount.exe (81,408 bytes)
+  $ wordcount story.txt 4
   290 words, 107 different ones
   the   ██████████████████████████████ 45
   and   █████████████ 20
@@ -302,7 +295,7 @@ bytes and dictionaries:
   ```
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
-  tests it with `moth test`.
+  tests it, with Moth's own test runner, on every push.
 
 ## The language
 
@@ -405,7 +398,7 @@ say math's sqrt(2)
 
 set notes to read "notes.txt"               # files: read, read bytes, write ... to
 write uppercase of notes to "loud.txt"
-for each word in arguments                  # moth run tool.moth a b c
+for each word in arguments                  # tool a b c, once moth build made tool
     say word
 end
 
@@ -416,7 +409,7 @@ say "hi" as bytes                           # (2 bytes: 104, 105); back again wi
 say 12 bit and 10 " " shift 1 left by 4     # 8 16; also bit or, bit xor, shift right
 say 255 as hex " " 5 as binary              # ff 101
 
-to test_area                                # moth test runs every function named test_...
+to test_area                                # the test runner runs every function named test_...
     expect area(3, 4) is 12                 # and if it isn't so: expected 13 to be 12
 end
 ```
@@ -520,7 +513,7 @@ say area(3, "4")
 <img src="docs/spiral.svg" height="230" alt="A colour spiral drawn by Moth">
 &nbsp;&nbsp;
 <img src="docs/tree.svg" height="230" alt="A tree drawn by a Moth function that calls itself">
-<br><sub>Drawn by the Spiral and Tree examples, saved with <code>moth run</code>.</sub>
+<br><sub>Drawn by the Spiral and Tree examples, in the playground.</sub>
 </p>
 
 ## The playground
@@ -548,188 +541,69 @@ nothing to install.
 
 ## Command line
 
-```bash
-npm install -g github:samyyy2423/moth
-```
+`moth` is standalone Moth: a program of its own, with nothing else to install.
+Get `moth-windows.exe` (save it as `moth.exe`) or `moth-linux` (save it as
+`moth`, then `chmod +x moth`) from
+[the releases](https://github.com/samyyy2423/moth/releases), or make it from the
+source with Node.js: `node bootstrap.mjs`.
 
 ```text
-moth                               start the Moth shell
-moth run hello.moth                run it, saving any drawing as hello.svg
-moth run hello.moth --engine wasm  the same, on WebAssembly (or vm)
-moth run tool.moth a b c           run it with arguments; it asks before it reads or writes a file here, or goes online
-moth run tool.moth --allow-read    let it read files without asking (also --allow-write, --allow-net, --allow-all)
-moth run tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
-moth test                          run every test_ function in every .test.moth file here
-moth fmt hello.moth                tidy it (--check only says whether it's tidy)
-moth check hello.moth              find mistakes without running it
-moth build hello.moth              compile it to hello.mjs, which runs with plain node
-moth build --web snake.moth        make it into snake.html: one web page, apps and all
-moth build --exe fib.moth          compile it to machine code with Moth alone: fib.exe, or fib on Linux
-moth bytecode hello.moth           show the bytecode the VM runs
-moth js hello.moth                 show the JavaScript the JIT makes
-moth wasm hello.moth               show the WebAssembly module, as text
-moth bootstrap                     compile Moth's compiler with itself, three times over
+moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
+moth build hello.moth --target linux     for the other system: --target linux or --target windows
+moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-all)
+moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
+moth build moth.moth --allow-read --allow-write    moth, built by itself
 ```
 
-A program run with `moth run` or `moth test`, or made by `moth build`, asks
-before it reads a file, writes one, or goes online, the way Deno does: at a
-terminal you're asked, once for each file or site (or `a` for all of them);
-anywhere else, such as in a script, the answer is no unless moth was started
-with `--allow-read`, `--allow-write`, `--allow-net` or `--allow-all` (for `moth
-build`, after the file: they're built into the program). The first three can
-name what they allow: `--allow-read=data,notes.txt` lets it read those files and
-everything in those folders, wherever their links lead; `--allow-net=example.com`
-that site. A site that sends the program on to another address is asked about
-again, there. `use` only reads files in the program's own folder, or folders
-inside it. A refusal is a mistake the program can catch with `try`:
+A program moth makes asks before it reads a file, writes one, or goes online,
+the way Deno does: at a terminal you're asked, once for each file or site (or
+`a` for all of them); anywhere else, such as in a script, the answer is no
+unless it was built with `--allow-read`, `--allow-write`, `--allow-net` or
+`--allow-all`. The first three can name what they allow:
+`--allow-read=data,notes.txt` lets it read those files and everything in those
+folders, wherever their links lead; `--allow-net=example.com` that site. `use`
+only reads files in the program's own folder, or folders inside it. A refusal
+is a mistake the program can catch with `try`:
 
 ```text
-$ moth run copy.moth
+$ moth build copy.moth
+compiled copy.moth to machine code for Windows -> copy.exe (62,976 bytes)
+$ copy
 moth: let this program read 'notes.txt'? (y = yes, a = yes to all, n = no) n
 copy.moth:1:20: can't read 'notes.txt': this program isn't allowed to read files (start it with --allow-read)
 write uppercase of read "notes.txt" to "loud.txt"
                    ^
 ```
 
-<details>
-<summary>What they look like</summary>
-
-`moth test` runs each test on its own, in a fresh run of the file:
-
-```text
-$ moth test shapes.test.moth
-✓ test_area
-✗ test_average
-    shapes.test.moth:17:5: expected 1.5 to be 2
-        expect average(list of 1, 2) is 2
-        ^
-    it said:
-      checking
-1 passed, 1 failed
-```
-
-`moth check` gives each problem in the same words as the error it would stop with:
-
-```text
-bad.moth:2:10: will fail: can't use '*' on text and a number
-say name * 2
-         ^
-bad.moth:5:5: never runs: this line can never run, because 'return' comes first
-    say "never"
-    ^
-bad.moth:8:1: unused: 'spare' is set but never used
-set spare to 5
-^
-```
-
-The shell remembers earlier entries and waits for a block's `end`:
-
-```text
-moth> set name to "Sam"
-moth> to greet with who
-....>     say "Hello, " who
-....> end
-moth> greet name
-Hello, Sam
-```
-
-`moth bytecode` shows what the compiler made, here the start of FizzBuzz:
-
-```text
-main:
-     0  CONST         0        ; 1
-     2  CONST         1        ; 15
-     4  CHECK_RANGE
-     5  RANGE_NEXT    66
-     7  SET           0 1
-    10  GET           0 1 2    ; n
-    14  CONST         3        ; 15
-    16  COMPARE       5        ; is divisible by
-    18  JUMP_IF_FALSE 26
-```
-
-</details>
+Until 1.5 Moth also had a command line written for Node.js, with `moth run`,
+`moth test`, `moth fmt`, a shell and builds to JavaScript and web pages. It's
+gone with the Rust engine; running a program without building it, tidying it
+and finding its problems as you type are the playground's now.
 
 ## Without JavaScript
 
-Moth's engines are written in JavaScript, so a bug in JavaScript itself could
-reach them. [`native/`](native/) is Moth written again from scratch in Rust,
-with no JavaScript anywhere: its own lexer, parser, compiler and virtual machine,
-and no libraries.
-
-```bash
-cargo install --git https://github.com/samyyy2423/moth moth-native
-```
+The playground's engines are written in JavaScript, so a bug in JavaScript
+itself could reach them. Standalone Moth has none: [`machine.moth`](machine.moth)
+writes x86-64 machine code itself, every instruction and the file around it byte
+by byte, with no assembler, linker or other compiler, and
+[`moth.moth`](moth.moth), the command line, is written in Moth too. Made into
+machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
-moth-native run hello.moth              run it, saving any drawing as hello.svg; it asks, as moth run does
-moth-native build hello.moth            compile it to hello.mothc, bytecode that runs without compiling again
-moth-native run hello.mothc             run the bytecode
-moth-native build --exe hello.moth      compile it to machine code: hello.exe (or hello), a program of its own
-moth-native test                        run every test_ function in every .test.moth file here
-moth-native bytecode hello.moth         show the bytecode, the same as moth bytecode
-moth-native bootstrap compiler.moth     build Moth's compiler with itself, with no JavaScript
+$ moth build moth.moth --allow-read --allow-write
+compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
 ```
 
-It isn't a lookalike. On every push, a test holds it up against the JavaScript
-VM on every test program, 5,000 broken and 1,500 generated ones, the neural
-network, the handwriting reader, and Moth's compiler compiling itself: the two
-must compile to the same bytecode and say, draw, write and fail exactly alike.
-To get there it prints numbers the way JavaScript does, down to which digit
-wins a tie, and works out sine and cosine with the same method as Chrome's
-engine, checked bit for bit on a million numbers.
+That's the same 7,947,264 bytes Node.js made of it, and the moth.exe they make
+makes them again. A Windows moth and a Linux one build each other byte for byte
+too. What a program in machine code does is what the JavaScript engine does: on
+every push, machine.test.js holds hundreds of programs to it, mistakes and all.
+How it was built, from the first `say` to the garbage collector: **[DESIGN.md](DESIGN.md)**, §25.
 
-**As one WebAssembly file.** The same engine builds into `moth-native.wasm`,
-which runs in any WebAssembly runtime with WASI, the standard way for
-WebAssembly to reach files and a terminal. It asks its runtime for nothing
-else, and on every push CI runs it in wasmtime, which has no JavaScript in it,
-on every test program and 1,000 broken ones, and has it build Moth's compiler
-with itself.
-
-```bash
-cd native && rustup target add wasm32-wasip1 && cargo build --release --target wasm32-wasip1
-wasmtime run --dir . target/wasm32-wasip1/release/moth-native.wasm run hello.moth
-```
-
-### In machine code
-
-`moth-native build --exe hello.moth` makes `hello.exe` (just `hello` on Mac and
-Linux): the program in machine code, which runs with nothing else installed.
-Each Moth function becomes a function of its own; a variable no inner function
-can see becomes a local; and a variable or value that can only ever be a number
-becomes a plain machine number, so a loop over numbers runs at the speed of C.
-An input that says it is a number (`to area with width as a number`) counts as
-one, so saying what inputs are makes them faster. Every check and every message
-is the Rust engine's own, so it does exactly what `moth-native run` does: on
-every push a test compiles 700 programs and holds them to the engine's output,
-drawings and mistakes. It asks before files and going online as `run` does, and
-`--allow` flags after the file are built into it:
-
-```bash
-moth-native build --exe tool.moth --allow-read=data
-```
-
-It needs Rust's compiler, `rustc` (from [rustup.rs](https://rustup.rs)), which
-turns the Rust that moth-native writes into machine code, together with the
-engine's own source, which moth-native carries inside it. A small program builds
-in about five seconds; Moth's 2,400-line compiler takes a few minutes.
-[`machine.moth`](machine.moth) needs no other tool at all, for
-the part of Moth it takes so far.
-
-**Moth builds itself, with no JavaScript.** [`compiler.moth`](compiler.moth),
-Moth's compiler written in Moth, now writes bytecode as well as JavaScript, and
-the bytecode is exactly what the Rust compiler makes, byte for byte. So the
-Rust engine can run compiler.moth compiling itself, then run what that made to
-compile it again:
-
-```text
-$ moth-native bootstrap compiler.moth
-compiler.moth: 2381 lines of Moth, which moth-native's compiler (in Rust) makes into 300408 bytes of bytecode
-stage 1, made by moth-native's compiler, compiles compiler.moth: the same bytecode (611 ms)
-stage 2, made by stage 1, compiles compiler.moth: the same bytecode (646 ms)
-stage 3, made by stage 2, compiles compiler.moth: the same bytecode (601 ms)
-fixed point: the compiler written in Moth builds itself to exactly what moth-native's compiler makes, with no JavaScript
-```
+Until 1.5 there was a second way: [`native/`](https://github.com/samyyy2423/moth/tree/v1.5.1/native),
+Moth written again from scratch in Rust, which ran programs, built them into
+machine code with `rustc`, and built compiler.moth with itself. Standalone Moth
+does all of that without Rust, so it's gone.
 
 ## How it's built
 
@@ -737,7 +611,7 @@ fixed point: the compiler written in Moth builds itself to exactly what moth-nat
                                        ┌→ bytecode     → the VM        debugger, shell
                                        ├→ JavaScript   → V8            Run
 source → tokens → syntax tree → scope ─┼→ WebAssembly  → V8            the fastest
-                                       ├→ machine code → the CPU       moth build --exe
+                                       ├→ machine code → the CPU       moth build
                                        └→ checker      → problems      as you type
 ```
 
@@ -770,16 +644,14 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests |
-| [`cli.js`](cli.js) | The `moth` command and its shell |
-| [`disk.js`](disk.js) | The files and sites a program on the command line can reach, and asking before it does |
+| [`bootstrap.mjs`](bootstrap.mjs) | Makes the first moth.exe from the source, with Node.js |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
 </details>
 
 ## Tested
 
-`npm test` runs on every push, then `moth test` and `moth fmt --check` on the
-Moth in this repository. Tables of programs and mistakes run on all three
+`npm test` runs on every push. Tables of programs and mistakes run on all three
 engines, and 5,000 randomly broken programs must make all three agree: the same
 output, the same drawing, the same error at the same spot, and the same trail of
 calls that led there.
@@ -810,31 +682,20 @@ calls that led there.
   apart even where a function's own names hide them
 - WebAssembly's own fast paths for bytes, bits and dictionaries, right at their
   edges (2^31, a shift by 21 or 22, -0, 255 and 256), against the other engines
-- `expect` and `moth test`, including that each test starts afresh; `moth fmt`
-  on every file here (already tidy) and on 2,000 broken programs (each tidied
+- `expect` and the test runner, including that each test starts afresh; tidying
+  every Moth file here (already tidy) and 2,000 broken programs (each tidied
   without changing a piece, and tidy the second time); and the three tools,
   whose pictures must match byte for byte on every engine
-- the WebAssembly encoder against the spec's examples, the playground's script,
-  and every `moth` command as a real process
-- the Rust engine against the JavaScript VM: every test program, 5,000 broken
-  and 1,500 generated ones, the bundled programs, every character's upper and
-  lower case, and its commands against `moth`'s, down to the bytes of a drawing
-- the Rust engine built as WebAssembly, run with WASI: its imports, and every
-  test program and 1,000 broken ones against the JavaScript VM
-- compiler.moth's bytecode against the Rust compiler's, byte for byte, on 630
-  programs and 1,500 broken ones, and `moth-native bootstrap` three stages deep,
-  natively and as WebAssembly
-- `moth-native build --exe` against the Rust engine: every test program, 150
-  generated and 150 broken ones compiled to machine code, which must say, draw,
-  write and fail exactly alike; and a compiled tool's files, arguments, asking
-  and mistakes against `moth-native run`'s
-- `moth build --exe` against the JavaScript engine: 400 random programs made
+- the WebAssembly encoder against the spec's examples, and the playground's script
+- machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
   what's easy to get wrong, and every test program and 300 broken ones it can
   take, each built for the system the tests run on, which must print, fail and
-  exit exactly alike; and a tool's files, arguments, answers and `--allow`
-  flags against `moth run`'s
+  exit exactly alike; machine.moth and moth.exe each building themselves into
+  the same bytes; every character's upper and lower case; programs that make
+  far more than they keep; and a tool's files, arguments, answers and `--allow`
+  flags against what `moth run` did
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -847,14 +708,11 @@ unboxed numbers were all caught, some only by the fuzzer.
 - No clock: a program learns about the world through `ask`, its files, the
   sites it reads, its arguments, and in an app, keys, clicks and timers. In the
   playground, files last for one run, and only sites that let any page read
-  them can be read. `moth-native` goes online through `curl`; as WebAssembly it
-  can't.
+  them can be read. A program in machine code can't go online yet.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
-- An app runs in the playground or as a page made by `moth build --web`; `moth
-  run` only sets it up, since a terminal has no clicks. In the playground, an
-  app can't `ask` once it's running.
+- An app runs in the playground, and can't `ask` once it's running.
 - `use` without `as` puts a file's names in with the program's, where they can
   collide; `use ... as` keeps them apart. It only reads files in the program's
   folder, or folders inside it: not `../lib.moth`, and not through a link out.
@@ -862,25 +720,20 @@ unboxed numbers were all caught, some only by the fuzzer.
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
   Safari 18.2, or later.
-- A program in machine code is fastest at work with numbers; with lists,
-  records and dictionaries it is about twice as fast as the Rust engine, but
-  JavaScript's engine, which has years of tuning behind it, is faster still.
-  Building one needs `rustc`, and a very big program takes minutes. It has no
-  limit on its steps, so a loop that never ends runs until it's stopped.
-- `moth build --exe` takes only part of Moth so far: no units, tables,
+- A program in machine code is quick with numbers, but with lists, records and
+  dictionaries JavaScript's engine, which has years of tuning behind it, is
+  faster. It has no limit on its steps, so a loop that never ends runs until
+  it's stopped.
+- `moth build` takes only part of Moth so far: no units, tables,
   `random number`, drawing, apps or `expect`; anything else stops with a
   mistake that says it can't become machine code yet. What it makes can't go
   online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
-- The engines change case with their own Unicode tables: JavaScript's are
-  Unicode 17 and Rust's 16, so `uppercase of` and `lowercase of` differ on the
-  56 letters Unicode 17 added a case to. Machine code does what JavaScript does.
-- The Rust engine runs code and values nested deeper than JavaScript's stack
-  allows (about 900 brackets, or a list held 2,000 deep): there JavaScript stops
-  with a mistake, and Rust carries on. As WebAssembly, whose stack is smaller,
-  it stops code nested past 500 levels and values past 1,000. It runs, builds
-  and tests programs; checking, tidying, apps and the playground are the
-  JavaScript side's.
+- moth.exe can't write to the error output or end with a code of its own, as
+  Moth has no way to yet, so a mistake in the program it builds is shown on the
+  normal output, and a line from moth.moth after it.
+- JavaScript stops code nested more deeply than its stack allows (about 900
+  brackets, or a list held 2,000 deep) with a mistake.
 
 <details>
 <summary>The rest</summary>
@@ -900,7 +753,6 @@ unboxed numbers were all caught, some only by the fuzzer.
   of a list, and a name used before the line that sets it.
 - The playground shows the first 10,000 lines of output, and the debugger
   records the first 10,000 steps.
-- In the shell, Ctrl+C stops a program that never ends by quitting the shell.
 - The compiler written in Moth gives up on code nested more than about 245
   brackets deep (the JIT goes to about 1,000), and on text holding half an emoji,
   which no file can hold.
@@ -910,10 +762,10 @@ unboxed numbers were all caught, some only by the fuzzer.
 ## Run it from the source
 
 ```bash
-cargo build --release --manifest-path native/Cargo.toml   # the Rust engine, which npm test checks too
-npm test                     # everything above, in about a minute
-npm run bench                # the four engines, timed
-node cli.js run hello.moth   # the moth command, without installing it
+npm test                     # everything above, in a few minutes
+npm run bench                # the engines, timed
+npm run versus               # Moth against C and Python
+node bootstrap.mjs           # moth.exe (moth on Linux), made from the source
 python -m http.server        # then open http://localhost:8000 for the playground
 ```
 

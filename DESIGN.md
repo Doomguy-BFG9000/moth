@@ -1022,3 +1022,29 @@ hold them to agreeing.
   trails and exit codes; and programs that read, write, ask and take arguments,
   built with and without `--allow` flags, against `moth run` and `moth-native
   run`, each in a folder of its own, down to the files they leave there.
+
+## 26. Standalone, and what was dropped
+
+- **Why.** Once moth.exe built itself, the Rust engine and the Node.js command
+  line were two more copies of Moth to keep in step, and neither was needed to
+  make or run a program any more. Both went in one change; the JavaScript
+  engine stayed, because the playground, its debugger, drawing, apps and the
+  handwriting demo run on it.
+- **What went.** `native/` (the Rust engine, its WebAssembly build and its
+  machine code through `rustc`), `cli.js` (`moth run`, `test`, `fmt`, `check`,
+  the shell, and builds to JavaScript and web pages), `disk.js` (its files and
+  permissions) and their tests. They're all at v1.5.1 for anyone who wants them.
+- **What the tests lean on now.** Machine code is held to the JavaScript
+  engine, as before. The two tests that ran `moth build --exe` and `moth run` as
+  processes now build moth.exe from the source, once, and have it build the
+  programs; for the program that reads, writes, asks and takes arguments under
+  six sets of `--allow` flags, what `moth run` did was written down first, on
+  Windows from `moth run` itself and on Linux from its machine code, which CI
+  had held to `moth run` there: the two were the same, so the test checks both
+  systems against one record. Tidying and Moth's own tests, which CI ran with
+  `moth fmt --check` and `moth test`, are in moth.test.js through `format()` and
+  `test()`, for every Moth file here, tools/ and apps/ included.
+- **The first moth.exe.** `node bootstrap.mjs` makes it from the source with
+  the JavaScript engine, the same bytes moth.exe makes of itself; the release
+  starter-1 has one for Windows and one for Linux.
+

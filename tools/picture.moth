@@ -1,8 +1,9 @@
 # Draws the Mandelbrot set and saves it as a picture any image viewer opens. A BMP file is a short
 # header, then the colour of every pixel, and Moth writes it byte by byte.
 #
-#   moth run picture.moth --engine wasm            makes picture.bmp, 480 by 320
-#   moth run picture.moth 1200 800 big.bmp         any size, any name
+#   moth build picture.moth --allow-write          then:
+#   picture                                        makes picture.bmp, 480 by 320
+#   picture 1200 800 big.bmp                       any size, any name
 
 set width to 480
 set height to 320

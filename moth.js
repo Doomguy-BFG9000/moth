@@ -540,7 +540,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (t.type === "word" && AGGREGATES.includes(t.value) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") {
       pos += 2;
       return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
-    } // what the program was started with: `moth run tool.moth a b`
+    } // what the program was started with: `tool a b`
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
       pos += 3;

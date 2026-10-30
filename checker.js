@@ -227,7 +227,7 @@ class Checker extends Scope {
       }
       case "define": {
         const key = this.source(s.name, () => "function");
-        const isTest = !this.parent && s.name.startsWith("test_"); // `moth test` calls it
+        const isTest = !this.parent && s.name.startsWith("test_"); // the test runner, test() in moth.js, calls it
         if (!this.all.made.has(key) && !isTest) this.all.made.set(key, { at: s.at, message: `'${s.name}' is made but never used` });
         this.all.defines.set(key, [...(this.all.defines.get(key) ?? []), { params: s.params, kinds: s.kinds }]);
         new Checker(this, s.name, s.params, s.body, this.all, s.kinds);

@@ -1,10 +1,11 @@
 # Counts the words in a file, and shows the ones used most, each with a bar.
 #
-#   moth run wordcount.moth story.txt              the top 10
-#   moth run wordcount.moth story.txt 5            the top 5
+#   moth build wordcount.moth --allow-read         then:
+#   wordcount story.txt                            the top 10
+#   wordcount story.txt 5                          the top 5
 
 if length of arguments is 0
-    fail with "which file? write: moth run wordcount.moth story.txt"
+    fail with "which file? write: wordcount story.txt"
 end
 set top to 10
 if length of arguments is at least 2

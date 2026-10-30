@@ -3,10 +3,9 @@
 #
 #     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
 #
-# The first moth.exe comes from Node.js, or from a moth.exe from GitHub's releases; after that it builds
-# itself, into the same bytes:
+# The first moth.exe comes from GitHub's releases, or from Node.js (`node bootstrap.mjs`); after that it
+# builds itself, into the same bytes:
 #
-#     node cli.js build --exe moth.moth --allow-read --allow-write
 #     moth build moth.moth --allow-read --allow-write
 #
 # A file used `as` a name shares its functions' variables with the program's top level, so every name made
@@ -102,7 +101,7 @@ to cli_three with cli_n
     return cli_left is 0
 end
 
-# file:line:col: the reason, then the line with a ^ under the spot, as moth run shows a mistake
+# file:line:col: the reason, then the line with a ^ under the spot, as Moth shows a mistake
 to cli_report with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
     set cli_at to at of cli_why
     set cli_file to file of cli_at

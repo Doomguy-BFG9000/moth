@@ -5,9 +5,6 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "bin": {
-    "moth": "cli.js"
-  },
   "scripts": {
     "test": "node --test",
     "bench": "node bench.js",

@@ -8819,7 +8819,8 @@ to table_of_texts with a, name, labels
 end
 
 # ---------- the runtime: files, arguments and asking ----------
-# `read`, `write`, `ask` and `arguments`, as a program `moth-native build --exe` makes has them. A file is read
+# `read`, `write`, `ask` and `arguments`, as a program `moth-native build --exe` made has them (moth-native was
+# Moth's Rust engine, until 1.5: what it did is kept here, down to its words). A file is read
 # or written, or a site read, only once the program may: the --allow flags it was built with say what it may
 # do without asking (allow_all: 1 to read, 2 to write and 4 to go online, added up), and otherwise a person at
 # a terminal is asked, once for each file or site, or for all of them with 'a'; anywhere else the answer is

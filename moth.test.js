@@ -753,7 +753,7 @@ test("WebAssembly's fast paths for bytes, bits and dictionaries agree with the o
   }
 });
 
-// ---------- moth test ----------
+// ---------- tests written in Moth: test() ----------
 
 // Each test_ function runs on its own, in a fresh run of the file: test_two doesn't see what test_one did.
 test("test() runs each test_ function on its own, and says why one failed, on all three engines", () => {
@@ -810,9 +810,11 @@ test("format() tidies code the one way, without changing a piece of it, and tidy
   assert.equal(format(messy), tidy);
   assert.equal(format(tidy), tidy);
   for (const source of Object.values(examples)) assert.equal(format(source), `${source}\n`); // they only lack the last new line
-  for (const file of readdirSync(new URL(".", import.meta.url)).filter((f) => f.endsWith(".moth"))) {
-    const text = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
-    assert.equal(format(text), text, file);
+  for (const folder of [".", "tools", "apps"]) { // and all the Moth here is tidy
+    for (const file of readdirSync(new URL(`./${folder}/`, import.meta.url)).filter((f) => f.endsWith(".moth"))) {
+      const text = readFileSync(new URL(`./${folder}/${file}`, import.meta.url), "utf8");
+      assert.equal(format(text), text, `${folder}/${file}`);
+    }
   }
   assert.throws(() => format("if yes\n    say 1"), MothError);
   let tidied = 0;
@@ -858,7 +860,7 @@ test("wordcount.moth counts a file's words, on all three engines", () => {
       "it   ███████ 11",
     ].join("\n"), engine);
   }
-  assert.equal(error(tool("wordcount.moth"), {}).reason, "which file? write: moth run wordcount.moth story.txt");
+  assert.equal(error(tool("wordcount.moth"), {}).reason, "which file? write: wordcount story.txt");
 });
 
 test("json.moth passes its own tests, json.test.moth, on all three engines", () => {

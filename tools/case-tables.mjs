@@ -1,6 +1,6 @@
 // Writes the tables machine.moth's `uppercase of` and `lowercase of` use, between the two lines that mark
 // them in machine.moth, from what this Node.js's toUpperCase and toLowerCase do to every character past
-// ASCII, so machine code changes case exactly as `moth run` does:
+// ASCII, so machine code changes case exactly as the JavaScript engine does:
 //
 //     node tools/case-tables.mjs
 //

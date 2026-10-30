@@ -1,6 +1,6 @@
 // The programs the tests run: each with what it should say, or the mistake it should stop at, and a fuzzer that
-// breaks them. moth.test.js runs them on the three JavaScript engines; native.test.js holds the Rust engine up
-// against the JavaScript VM on every one.
+// breaks them. moth.test.js runs them on the three JavaScript engines; machine.test.js holds the machine code
+// machine.moth makes up against the JavaScript VM on every one it takes.
 import examples from "./examples.js";
 
 export const PROGRAMS = [

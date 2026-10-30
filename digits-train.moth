@@ -1,6 +1,7 @@
 # Teaches the digit reader in digits.moth, from digits it draws itself, and says what it learned as Moth:
 #
-#     moth run digits-train.moth --engine wasm > digits-model.moth
+#     moth build digits-train.moth
+#     digits-train > digits-model.moth
 #
 # Its progress comes out as lines starting with #, so the whole output is a Moth file.
 

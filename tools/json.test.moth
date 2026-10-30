@@ -1,4 +1,4 @@
-# The JSON reader's tests: moth test json.test.moth
+# The JSON reader's tests, which moth.test.js runs with Moth's test runner, test() in moth.js
 
 use "json.moth" as json
 

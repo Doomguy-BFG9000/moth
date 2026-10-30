@@ -1,9 +1,7 @@
 # what the programs in tools/ make when they run
 tools/*.bmp
-# pages made from the apps with moth build --web
+# pages made from the apps (by moth build --web, in the Node.js command line Moth had until 1.5)
 apps/*.html
-# what cargo builds
-native/target/
 # moth.moth built into a program of its own: moth.exe on Windows, moth on Linux
 /moth.exe
 /moth
