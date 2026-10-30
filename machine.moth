@@ -15814,6 +15814,17 @@ to makes_functions with body
     return no
 end
 
+# the size of the frame, once it's known, into the sub that frame_size wrote; one of 0 needs no sub, and
+# becomes a 7-byte nop
+to patch_frame with out, at, size
+    patch32(out, at, size)
+    if size is 0
+        set item (at - 2) of out to 0x0F
+        set item (at - 1) of out to 0x1F
+        set item at of out to 0x80
+    end
+end
+
 to frame_size with a, at
     set code to code of a
     raw(a, list of 0x48, 0x81, 0xEC) # sub rsp, the size of the frame
@@ -15854,7 +15865,7 @@ to gen_program with st, body
     mov_rr(a, rsp, rbp)
     pop_r(a, rbp)
     ret(a)
-    patch32(hot of a, sized, 8 * most_hidden of fc)
+    patch_frame(hot of a, sized, 8 * most_hidden of fc)
     set waiting to pending of st
     set k to 1
     repeat while k is at most length of waiting
@@ -15934,7 +15945,7 @@ to gen_function with st, f
     mov_rr(a, rsp, rbp)
     pop_r(a, rbp)
     ret(a)
-    patch32(hot of a, sized, 8 * (own + most_hidden of fc))
+    patch_frame(hot of a, sized, 8 * (own + most_hidden of fc))
     if 8 * (4 + n + own + most_hidden of fc + most_pushed of fc) is greater than frame_limit
         not_yet(at of f, "a function this big")
     end
@@ -16033,7 +16044,13 @@ to gen_statement with fc, s
         else
             gen_expr(fc, value of s)
         end
-        jmp_to(a, done of fc)
+        if saved_try of fc is nothing # straight back, as the end of the function goes
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
+            ret(a)
+        else
+            jmp_to(a, done of fc)
+        end
     else if what is "stop" # leave the tries inside the loop, then go to its end
         set inner to tries of fc - tries of loops of fc
         if inner is greater than 0
