@@ -1179,6 +1179,10 @@ to parse with tokens, reading
             return record with kind "ask", question additive(), at t
         end
         if word("read") # `read "notes.txt"`, `read bytes "photo.png"`, `read table "sales.csv"`
+            if is_word("the") and not nl of peek() and word_at(pos + 1, "folder") # `read the folder "tests"`
+                set pos to pos + 2
+                return record with kind "readFolder", subject additive(), at t
+            end
             if word("table")
                 set read_args to list of (record with kind "read", binary no, subject additive(), at t)
                 return record with kind "builtin", name "table", args read_args, at t
@@ -1464,7 +1468,7 @@ to rename with node, alias, hidden
     if what is "record"
         rename_all(values of node, alias, hidden)
     end
-    if what is "length" or what is "field" or what is "read"
+    if what is "length" or what is "field" or what is "read" or what is "readFolder"
         rename(subject of node, alias, hidden)
     end
     if what is "item"
@@ -2040,6 +2044,9 @@ to js_expr with scope, e
         end
         return "read(" + js_expr(scope, subject of e) + ", " + flag + ", " + remember(at of e) + ")"
     end
+    if what is "readFolder"
+        return "readFolder(" + js_expr(scope, subject of e) + ", " + remember(at of e) + ")"
+    end
     if what is "arguments"
         return "args()"
     end
@@ -2147,6 +2154,7 @@ set op_every to 54
 set op_say_error to 55
 set op_exit to 56
 set op_remove_file to 57
+set op_read_folder to 58
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
@@ -2509,6 +2517,9 @@ to bytecode_expr with fc, e
             set flag to 1
         end
         emit(fc, at of e, list of op_read, flag)
+    else if what is "readFolder"
+        bytecode_expr(fc, subject of e)
+        emit(fc, at of e, list of op_read_folder)
     else if what is "arguments"
         emit(fc, at of e, list of op_arguments)
     else if what is "random"

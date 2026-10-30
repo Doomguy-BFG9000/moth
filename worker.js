@@ -52,6 +52,7 @@ function pageDisk() {
     },
     write: files.write,
     remove: files.remove,
+    folder: files.folder,
   };
 }
 

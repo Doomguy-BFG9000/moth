@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
-  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile } from "./vm.js";
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile, readFolder } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -126,6 +126,7 @@ class Checker extends Scope {
       case "read":
         return () => (e.bytes ? "bytes" : "text");
       case "arguments":
+      case "readFolder":
       case "list":
         return () => "list";
       case "record":
@@ -418,6 +419,12 @@ class Checker extends Scope {
         this.expr(e.of);
         const type = this.type(e.of);
         this.willFail(e.at, () => this.known(type()) && type() !== "text" && readFile(SAMPLES[type()], e.bytes, null, found));
+        return;
+      }
+      case "readFolder": { // as with `read`, only a name that isn't text is certain to fail
+        this.expr(e.of);
+        const type = this.type(e.of);
+        this.willFail(e.at, () => this.known(type()) && type() !== "text" && readFolder(SAMPLES[type()], null, found));
         return;
       }
       case "builtin": { // fails when an input is known to be the wrong kind; what the values are is left to run time

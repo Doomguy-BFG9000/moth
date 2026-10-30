@@ -546,6 +546,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
     if (word("read")) { // `read "notes.txt"`, `read bytes "photo.png"`: `of` is the file's name
+      if (isWord("the") && !peek().nl && wordAt(pos + 1, "folder")) { // `read the folder "tests"`
+        pos += 2;
+        return { kind: "readFolder", of: additive(), at: t };
+      }
       if (word("table")) return { kind: "builtin", name: "table", args: [{ kind: "read", bytes: false, of: additive(), at: t }], at: t };
       const bytes = Boolean(word("bytes"));
       return { kind: "read", bytes, of: additive(), at: t };
@@ -664,7 +668,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, READ_FOLDER } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -980,6 +984,10 @@ class Compiler extends Scope {
         this.expr(e.of);
         this.emit(e.at, READ, e.bytes ? 1 : 0);
         return;
+      case "readFolder":
+        this.expr(e.of);
+        this.emit(e.at, READ_FOLDER);
+        return;
       case "arguments":
         this.emit(e.at, ARGUMENTS);
         return;
@@ -1202,7 +1210,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   const answer = ask && kept(ask);
   const chance = kept(random);
   const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)),
-    remove: disk.remove && kept((name) => disk.remove(name)) };
+    remove: disk.remove && kept((name) => disk.remove(name)), folder: disk.folder && kept((name) => disk.folder(name)) };
   let program = null;
   if (engine !== "vm") {
     try {
@@ -1229,7 +1237,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     });
     const say = (line) => skipSaid-- > 0 || print(line);
     const options = {
-      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove) }, args, random: replay(chance),
+      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove), folder: replay(drive.folder) }, args, random: replay(chance),
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
     };
     new Machine(compile(source, reading), say, options).run();
@@ -1336,6 +1344,21 @@ export function memoryDisk(start = {}) {
     },
     write: (name, data) => void files.set(name, data),
     remove: (name) => files.delete(name),
+    // what is in a folder: the files and folders whose names start with its name and a /, where // is / and
+    // ./ at the start is nothing; the top is "." or ""
+    folder: (name) => {
+      const path = name.replace(/\/+/g, "/").replace(/^(\.\/)+/, "").replace(/\/$/, "");
+      const top = path === "." || path === "";
+      const start = top ? "" : `${path}/`;
+      const found = new Set();
+      for (const file of files.keys()) {
+        if (!file.startsWith(start)) continue;
+        const rest = file.slice(start.length);
+        const cut = rest.indexOf("/");
+        found.add(cut < 0 ? rest : rest.slice(0, cut + 1));
+      }
+      return found.size || top ? [...found] : null;
+    },
   };
 }
 

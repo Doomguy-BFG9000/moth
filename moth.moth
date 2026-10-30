@@ -771,7 +771,7 @@ to cli_check_expr with cli_state, cli_frame, cli_e
         cli_check_each(cli_state, cli_frame, values of cli_e)
     else if cli_what is "builtin"
         cli_check_each(cli_state, cli_frame, args of cli_e)
-    else if cli_what is "length" or cli_what is "field" or cli_what is "read"
+    else if cli_what is "length" or cli_what is "field" or cli_what is "read" or cli_what is "readFolder"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)
     else if cli_what is "item"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)

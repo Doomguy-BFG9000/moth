@@ -237,6 +237,9 @@ export const MACHINE_CASES = [
   "draw chart of (list of 1 km, 1 kg)",
   "draw chart of (dictionary where \"a\" is 1, \"b\" is yes)",
   "set week to list of (record with day \"Mon\", steps 4200), (record with day \"Tue\", steps 8100)\ndraw chart of steps in week\ndraw chart of day in week",
+  // read the folder, refused as reading a file is, and its words still names
+  "for each name in list of \"data\", 5, nothing, \"\"\n    try\n        say read the folder name\n    if it fails with why\n        say why\n    end\nend\nsay length of read the folder \".\"",
+  "set the to \"x.txt\"\nset folder to 3\nsay read the\nsay folder",
 ];
 
 export function machinePrograms(seed, count) {

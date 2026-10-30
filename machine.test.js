@@ -27,6 +27,7 @@ const NOTHING_ALLOWED = {
   read: (name) => refused(/^https?:\/\//i.test(name) ? "go online (start it with --allow-net)" : "read files (start it with --allow-read)")(),
   write: refused("write files (start it with --allow-write)"),
   remove: refused("write files (start it with --allow-write)"),
+  folder: refused("read files (start it with --allow-read)"),
 };
 
 // What the JavaScript engine prints for p.moth, writes to the error output (what it says there, then a
@@ -106,13 +107,18 @@ const TABLES = [
   ['say read table "missing.csv"', {}],
 ];
 
-test("a table read from a file is the list of records the JavaScript engine makes of it", { skip }, () => {
+// Each program, built with --allow-read, run in a folder of its own with its files, against the JavaScript
+// engine with the same files in memory
+function withFiles(cases) {
   const dirs = [];
   try {
-    TABLES.forEach(([source, files], i) => {
-      const dir = mkdtempSync(join(tmpdir(), "moth-table-"));
+    cases.forEach(([source, files], i) => {
+      const dir = mkdtempSync(join(tmpdir(), "moth-files-"));
       dirs.push(dir);
-      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+      for (const [name, text] of Object.entries(files)) {
+        mkdirSync(join(dir, ...name.split("/").slice(0, -1)), { recursive: true });
+        writeFileSync(join(dir, ...name.split("/")), text);
+      }
       let [stdout, stderr, status] = ["", "", 0];
       try {
         run(source, (line) => (stdout += `${line}\n`), { file: "t.moth", disk: memoryDisk(files) });
@@ -130,7 +136,22 @@ test("a table read from a file is the list of records the JavaScript engine make
   } finally {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
-});
+}
+
+test("a table read from a file is the list of records the JavaScript engine makes of it", { skip }, () => withFiles(TABLES));
+
+// `read the folder`: what is in a folder and the folders inside it, in Moth's order for text, a folder's name
+// with / after it; and what goes wrong. (The folder the program runs in also holds the program, so only the
+// folders inside it are compared.)
+const FOLDER_FILES = { "data/z.txt": "1", "data/a b.txt": "2", "data/sub/deep.txt": "3", "data/\u00c9.txt": "4", "data/B.txt": "5",
+  "data/sub/more/x.txt": "6", "data/.hidden": "7", "data/\ud83d\ude00.txt": "8", "data/\uff21.txt": "9", "data/_.txt": "0" };
+const FOLDERS = [
+  ['say read the folder "data"\nfor each n in read the folder "data/"\n    say n\nend\nsay read the folder "data/sub"\nsay read the folder "data/sub/more/"', FOLDER_FILES],
+  ['to walk with folder\n    for each n in read the folder folder\n        if "/" is in n\n            walk(folder + "/" + n)\n        else\n            say folder + "/" + n\n        end\n    end\nend\nwalk("data")', FOLDER_FILES],
+  ['for each name in list of "nowhere", 5, list of "data"\n    try\n        say read the folder name\n    if it fails with why\n        say why\n    end\nend\nsay read the folder "data/nowhere"', FOLDER_FILES],
+];
+
+test("a folder read in machine code holds what the JavaScript engine finds in it", { skip }, () => withFiles(FOLDERS));
 
 // Programs that make far more than they keep, so the garbage collector runs many times over: lists, text
 // that grows, records kept while others come and go, dictionaries, functions made inside functions, and
