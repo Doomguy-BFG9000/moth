@@ -203,13 +203,13 @@ line, written in Moth: it reads a program and the files it uses, compiles it
 with machine.moth and writes the program it makes. Made into machine code, it's
 `moth.exe` (`moth` on Linux), which needs neither JavaScript nor Rust, nor any
 other compiler, and builds itself into exactly the bytes Node.js built it into,
-in about 3 seconds:
+in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
 $ moth build tools/wordcount.moth --allow-read
-compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (81,408 bytes)
+compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (86,016 bytes)
 $ tools/wordcount.exe tools/story.txt 3
 290 words, 107 different ones
 the  ██████████████████████████████ 45
@@ -637,10 +637,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
 ```
 
-That's the same 7,947,264 bytes Node.js made of it, and the moth.exe they make
+That's the same 10,662,912 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
