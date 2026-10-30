@@ -207,9 +207,9 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
 $ moth build tools/wordcount.moth --allow-read
-compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (86,016 bytes)
+compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
 290 words, 107 different ones
 the  ██████████████████████████████ 45
@@ -288,7 +288,7 @@ bytes and dictionaries:
 
   ```text
   $ moth build wordcount.moth --allow-read
-  compiled wordcount.moth to machine code for Windows -> wordcount.exe (81,408 bytes)
+  compiled wordcount.moth to machine code for Windows -> wordcount.exe (90,112 bytes)
   $ wordcount story.txt 4
   290 words, 107 different ones
   the   ██████████████████████████████ 45
@@ -609,7 +609,7 @@ folder, or folders inside it. A refusal is a mistake the program can catch with
 
 ```text
 $ moth build copy.moth
-compiled copy.moth to machine code for Windows -> copy.exe (62,976 bytes)
+compiled copy.moth to machine code for Windows -> copy.exe (71,680 bytes)
 $ copy
 moth: let this program read 'notes.txt'? (y = yes, a = yes to all, n = no) n
 copy.moth:1:20: can't read 'notes.txt': this program isn't allowed to read files (start it with --allow-read)
@@ -644,10 +644,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
 ```
 
-That's the same 10,662,912 bytes Node.js made of it, and the moth.exe they make
+That's the same 11,426,816 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
