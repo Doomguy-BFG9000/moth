@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, machineCompiler, excerpt, describeTrail, format, MothError } from "./moth.js";
+import { run, machineCompiler, check, excerpt, describeTrail, format, MothError } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -396,6 +396,70 @@ test("moth.exe tidies code to the same bytes format() does, and --check only say
     const said = spawnSync(exe, bad, { cwd: sub, encoding: "utf8" });
     assert.deepEqual([said.status, said.stdout], [2, ""], bad.join(" "));
   }
+});
+
+// `moth check`: the problems checker.js finds that don't need the types it works out, in its own words and
+// its own order. Every "will fail" here is a name nothing ever sets; the checker's other ones, which come
+// from trying an operation on sample values, are left out, so what it says must be what the checker says
+// once those are taken away.
+const UNDEFINED = /has no value yet|there is no function called|has nothing called/;
+const checkedBy = (file, source, files = {}) => { // what `moth check file` must say
+  const problems = check(source, { files: (name) => files[name] }).filter((p) => p.kind !== "fails" || UNDEFINED.test(p.message));
+  if (!problems.length) return `${file}: no problems found\n`;
+  return problems.map((p) => {
+    const kind = p.kind === "fails" ? "will fail" : p.kind;
+    return `${p.file ?? file}:${p.line}:${p.col}: ${kind}: ${p.message}\n${excerpt(p.file ? files[p.file] : source, p)}\n`;
+  }).join("");
+};
+
+test("moth.exe finds the problems the checker finds without running the program", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "checking");
+  mkdirSync(sub, { recursive: true });
+  const checking = (name) => spawnSync(exe, ["check", name], { cwd: sub, encoding: "utf8", timeout: 60_000 });
+  const lib = "set lib_x to 1\nto twice with n\n    return n * 2\nend\n";
+  const cases = [
+    ["clean.moth", 'set total to 0\nfor each i from 1 to 10\n    add i to total\nend\nsay total\n', 0],
+    ["names.moth", 'say "Total: " totl\nset total to 1\nsay totl\n', 1],
+    ["after.moth", "to f\n    return 1\n    say 2\nend\nf()\nstop the program\nsay 3\n", 0],
+    ["unused.moth", 'set kept to 1\nto helper\n    set inside to 2\nend\nsay kept\n', 0],
+    ["calls.moth", 'say helper(2)\nto helper with x\n    return x\nend\nsay helpr(2)\n', 1],
+    ["caught.moth", "try\n    say nowhere\nif it fails with why\n    say why\nend\nsay yes or alsonowhere\n", 0],
+    ["tests.moth", "to test_one\n    expect 1 is 1\nend\n", 0],
+    ["module.moth", `use "lib.moth" as lib\nsay lib's twice(2)\nsay lib's thrice(2)\n`, 1],
+    ["plain.moth", 'use "lib.moth"\nsay twice(lib_x)\nsay thrice(1)\n', 1],
+  ];
+  writeFileSync(join(sub, "lib.moth"), lib);
+  for (const [name, source] of cases) writeFileSync(join(sub, name), source);
+  for (const [name, source, status] of cases) {
+    const said = checking(name);
+    assert.equal(said.stdout, checkedBy(name, source, { "lib.moth": lib }), name);
+    assert.deepEqual([said.status, said.stderr], [status, ""], name);
+  }
+  // code that can't be read at all is one problem of its own, and a file that isn't there says so
+  writeFileSync(join(sub, "wrong.moth"), "say 1 +\n");
+  const wrong = checking("wrong.moth");
+  assert.deepEqual([wrong.status, wrong.stdout, wrong.stderr], [1, "wrong.moth:2:1: error: expected a value but found the end of the code\n\n^\n", ""]);
+  const missing = checking("nowhere.moth");
+  assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
+  // and the same words as the checker on programs broken on purpose
+  let checked = 0;
+  brokenPrograms(3, 40).forEach((source, i) => {
+    const name = `b${i}.moth`;
+    writeFileSync(join(sub, name), source);
+    let want;
+    try {
+      want = checkedBy(name, source);
+    } catch (err) {
+      if (err instanceof MothError) return;
+      throw err;
+    }
+    if (/: error: /.test(want)) return; // code that can't be read: its mistake, checked above
+    const said = checking(name);
+    assert.equal(said.stdout, want, `${name}:\n${source}`);
+    checked++;
+  });
+  assert.ok(checked > 10, `only ${checked} were checked`);
 });
 
 // A program that takes arguments, asks, reads and writes, built with each set of --allow flags, each in a

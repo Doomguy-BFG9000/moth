@@ -12453,6 +12453,28 @@ to read_tokens with source
     return front's tokenize(source, "")
 end
 
+# For a command line that finds problems without running the program: its code read, with the code of
+# every file it uses in place, as compiling it would read them
+to read_program with source, files
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
+    return front's parse(front's tokenize(source, ""), reading)
+end
+
+# which variable each name means in one function, or in the whole program (`parent` nothing)
+to read_scope with parent, params, body
+    return front's new_scope(parent, params, body)
+end
+
+# how many functions out a name lives and which slot it is, or nothing if nothing sets it anywhere
+to read_resolve with scope, wanted
+    return front's resolve(scope, wanted)
+end
+
+# what to say when a name nothing ever sets is used, with the name it most likely meant
+to read_undefined with scope, wanted, call, statement
+    return front's undefined_message(scope, wanted, call, statement)
+end
+
 to compile_machine with source, file_names, file_texts, target, program_name
     return compile_allowing(source, file_names, file_texts, target, program_name, empty list)
 end
