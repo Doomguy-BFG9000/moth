@@ -300,6 +300,17 @@ export const ERRORS = [
   ["draw \"hi\" at 0, 0 size 0", "line 1: text's size is a number above 0, not 0"],
   ["draw \"hi\"", "line 1: expected 'at' but found the end of the code"],
   ["set clear to 1", "line 1: 'clear' is a Moth word, so it can't be used as a variable name"],
+  // pictures from files: what it's given is checked first, then the file, which these programs can't read
+  ["draw picture 5 at 0, 0", "line 1: 'draw picture' needs a file's name or its bytes, not a number"],
+  ["draw picture \"cat.png\" at \"a\", 0", "line 1: 'draw picture' needs numbers, not text"],
+  ["draw picture \"cat.png\" at 0, 0 size 4 by nothing", "line 1: 'draw picture' needs numbers, not nothing"],
+  ["draw picture \"cat.png\" at 0, 0 size 10 by 0", "line 1: a picture's size is a number above 0, not 0"],
+  ["draw picture \"cat.png\" at 0, 0", "line 1: this program reads a file, but there are no files here"],
+  ["draw picture \"hello\" as bytes at 0, 0", "line 1: these bytes aren't a PNG or BMP picture"],
+  ["draw picture \"BM\" as bytes at 0, 0", "line 1: these bytes are a broken BMP: it ends too soon"],
+  ["draw picture \"cat.png\" at 0, 0 size 4", "line 1: expected 'by' but found the end of the code"],
+  ["draw picture \"cat.png\"", "line 1: expected 'at' but found the end of the code"],
+  ["set picture to 7\ndraw picture at 0, 0 size 0", "line 2: text's size is a number above 0, not 0"], // still a name
   // random number from: the same numbers every run unless real ones are given
   ["say random number from 1 to 2.5", "line 1: 'random number from' needs whole numbers, not 2.5"],
   ["say random number from \"a\" to 2", "line 1: 'random number from' needs whole numbers, not text"],

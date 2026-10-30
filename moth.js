@@ -97,6 +97,10 @@ const EVENT_PHRASES = new Map([["a key is pressed", { event: "key", gives: 1 }],
   ["the mouse is dragged", { event: "drag", gives: 2 }]]);
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
+// the words that can carry a value on, as in `draw picture at 0, 0` (which draws the text `picture` holds):
+// `draw picture` followed by any other word, or by text, a number or a bracket with a space before it (one
+// with none calls `picture`), draws a picture from a file
+const CARRY_ON = ["at", "of", "bit", "is", "and", "or", "in", "as", "bytes"];
 
 // Every node keeps the token it came from (`at`), so errors can point at it. `reading` is shared with the
 // files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
@@ -354,6 +358,17 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (isWord("chart") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "of") { // `draw chart of sales`
         pos += 2;
         return { kind: "turtle", action: "chart", value: column(expression), at: t };
+      }
+      const after = isWord("picture") && tokens[pos + 1];
+      if (after && !after.nl && (after.type === "string" || after.type === "number" || (after.type === "word" && !CARRY_ON.includes(after.value))
+        || (after.type === "(" && after.col > peek().col + 7))) {
+        pos++; // `draw picture "cat.png" at x, y size w by h`: a file's name, or its bytes
+        const what = expression();
+        expectWord("at");
+        const place = several(2, t);
+        const none = { kind: "value", value: null, at: t }; // no size: as big as it is
+        const size = word("size") ? [additive(), (expectWord("by"), expression())] : [none, none];
+        return { kind: "turtle", action: "picture", value: { ...place, items: [what, ...place.items, ...size] }, at: t };
       }
       const shape = ["box", "circle"].find((w) => isWord(w) && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "at");
       if (shape) {

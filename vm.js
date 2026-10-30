@@ -1,5 +1,6 @@
-// The Moth virtual machine: runs the bytecode that moth.js compiles. It imports nothing, so the playground's
-// worker and a page made from an app can carry it as it is.
+// The Moth virtual machine: runs the bytecode that moth.js compiles. It imports only pictures.js, which
+// imports nothing, so the playground's worker and a page made from an app can carry the two as they are.
+import { decodePicture } from "./pictures.js";
 
 // `value` is set by `fail with value`, so a program that called Moth code (see load()) can read it.
 // `trail` is the calls that led to the mistake (see trailOf).
@@ -156,7 +157,7 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
-  "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
+  "to", "clear", "box", "circle", "text", "chart", "picture"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
 // the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
 export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
@@ -834,8 +835,10 @@ export class Turtle {
 
   // Besides lines, the turtle reports { clear: true } when the picture is wiped, and filled shapes:
   // { shape: "box", x, y, width, height, color } (x, y its bottom left corner), { shape: "circle", x, y,
-  // radius, color } and { shape: "text", text, x, y, size, color }.
-  act(action, value, error = oops) {
+  // radius, color } and { shape: "text", text, x, y, size, color }; and pictures from files, { shape:
+  // "picture", x, y, width, height, image }, where the image is what decodePicture gives. `disk` has the
+  // files `draw picture` reads, as for readFile.
+  act(action, value, error = oops, disk = null) {
     const name = TURTLE_ACTIONS[action];
     if (action < 4 && typeof value !== "number") error(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
     const round = (n) => Math.round(n * 100) / 100 || 0; // 0, not 6.123e-17 or -0, where a line should end at 0
@@ -894,6 +897,17 @@ export class Turtle {
         }
         this.draw({ shape: "text", text: labels[i], x, y: Math.min(height, 0) - 18, size: 12, color: this.color });
       });
+    } else if (name === "picture") {
+      // `draw picture "cat.png" at x, y size w by h`: a PNG or BMP file, or its bytes, with its bottom left
+      // corner at x, y, as a box has it, and as big as it is in pixels unless it's given a size
+      const [what, ...rest] = value;
+      if (typeof what !== "string" && !isBytes(what)) error(`'draw picture' needs a file's name or its bytes, not ${kindOf(what)}`);
+      const sized = rest[2] !== null || rest[3] !== null; // `size w by h`; with no size, both are nothing
+      const [x, y, ...size] = numbers("'draw picture'", sized ? rest : rest.slice(0, 2));
+      for (const n of size) if (n <= 0) error(`a picture's size is a number above 0, not ${show(n)}`);
+      const image = typeof what === "string" ? pictureOf(readFile(what, true, disk, error), what, error) : pictureOf(what, null, error);
+      const [width, height] = sized ? size : [image.width, image.height];
+      this.draw({ shape: "picture", x, y, width, height, image });
     } else if (name === "left" || name === "right") {
       this.heading += name === "left" ? value : -value;
     } else if (name === "color") {
@@ -906,6 +920,26 @@ export class Turtle {
       this.pen = name === "down";
     }
   }
+}
+
+// The pictures drawn lately, by what their files hold, so a game that draws the same sprite every frame
+// decodes it once, and every drawing of it is the same image (which a page can then draw from once).
+const PICTURES = new Map(); // a hash of the bytes: [[bytes, image], ...]
+let pictured = 0; // how many bytes of pixels PICTURES keeps
+function pictureOf(data, name, error) {
+  let hash = 2166136261; // FNV-1a
+  for (let i = 0; i < data.length; i++) hash = Math.imul(hash ^ data[i], 16777619);
+  const key = `${hash >>> 0}:${data.length}`;
+  const same = PICTURES.get(key)?.find(([kept]) => equal(kept, data));
+  if (same) return same[1];
+  const image = decodePicture(data, name, error);
+  if (pictured + image.pixels.length > 64 << 20) { // at most 64 MB of them
+    PICTURES.clear();
+    pictured = 0;
+  }
+  pictured += image.pixels.length;
+  PICTURES.set(key, [...(PICTURES.get(key) ?? []), [data.slice(), image]]);
+  return image;
 }
 
 // ---------- the virtual machine ----------
@@ -1264,7 +1298,7 @@ export class Machine {
             break;
           case TURTLE: {
             const action = code[ip++];
-            this.turtle.act(action, TURTLE_BARE.has(action) ? null : stack.pop());
+            this.turtle.act(action, TURTLE_BARE.has(action) ? null : stack.pop(), oops, this.disk);
             break;
           }
           case LINE:

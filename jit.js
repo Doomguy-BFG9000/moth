@@ -300,7 +300,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     checkRepeat: (n, k) => checkRepeat(n, errors[k]),
     checkRange: (from, to, k) => (checkRange(from, to, errors[k]), [from, to]),
     itemsOf: (v, k) => itemsOf(v, errors[k]),
-    turtle: (action, value, k) => turtle.act(action, value, errors[k]),
+    turtle: (action, value, k) => turtle.act(action, value, errors[k], disk),
     record: makeRecord,
     field: (r, name, k) => {
       const value = r instanceof Record ? r[name] : undefined; // no Moth value is undefined, and a record's prototype is empty

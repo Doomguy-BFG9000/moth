@@ -1442,7 +1442,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     tooDeep: () => {
       throw new TooDeep();
     },
-    turtle: (action, value, k) => turtle.act(action, toJs(value), errors[k]),
+    turtle: (action, value, k) => turtle.act(action, toJs(value), errors[k], disk),
     field: (r, name, k) => fieldOf(toJs(r), names[name], errors[k]),
     recordFor: (r, name, k) => recordFor(toJs(r), names[name], errors[k]),
     failWith: (value, k) => {
