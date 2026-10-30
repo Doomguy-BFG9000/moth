@@ -23,12 +23,21 @@ export const PROGRAMS = [
   ["set n to 2\nevery n minutes\n    say \"tick\"\nend\nevery 1 hour\n    say \"tock\"\nend\nsay \"ready\"", "ready"],
   // a unit's word is only a unit after a number, so it can still be a name
   ["set m to \"am\"\nsay position of \"m\" in m\nset day to 3\nsay \"Day \" day\nsay 2 * day", "2\nDay 3\n6"],
-  // a `set` inside a function changes a variable the top level also sets
+  // a `set` inside a function changes a variable the top level made above it
   ["set total to 0\nto bump\n    add 5 to total\nend\nbump\nbump\nsay total", "10"],
-  // this is decided when the program is read, so it holds even before the top level's own `set` runs
-  ["to f\n    set x to 1\nend\nf\nsay x\nset x to 2", "1"],
-  // ...but a variable only the function sets stays inside it, so every call starts fresh
+  // ...but one the top level only makes below the function is a different variable: the function's own
+  ["to f\n    set x to 1\n    return x\nend\nset x to 5\nsay f() \" \" x", "1 5"],
+  ["to f\n    for each k from 1 to 3\n    end\n    return k\nend\nfor each k from 10 to 11\n    say f() \" \" k\nend", "3 10\n3 11"],
+  ["to f\n    try\n        say 1 / 0\n    if it fails with why\n        return why\n    end\nend\nset why to 3\nsay f() \" \" why", "can't divide by zero 3"],
+  // a name a function only reads is the top level's wherever the top level sets it
+  ["to show\n    say setting\nend\nset setting to 5\nshow", "5"],
+  // ...and a variable only the function sets stays inside it, so every call starts fresh
   ["to f\n    set count to 0\n    add 1 to count\n    return count\nend\nsay f() f()", "11"],
+  // a function made inside another changes that one's variable if it's made above it, so closures work
+  ["to make_counter\n    set count to 0\n    to step\n        add 1 to count\n        return count\n    end\n    return step\nend\nset a to make_counter()\nset b to make_counter()\na()\nsay a() \" \" b()", "2 1"],
+  ["to outer\n    set n to 1\n    to inner\n        set n to 5\n    end\n    inner()\n    return n\nend\nsay outer()", "5"],
+  ["to outer\n    to inner\n        set n to 5\n    end\n    inner()\n    set n to 1\n    inner()\n    return n\nend\nsay outer()", "1"],
+  ["to outer with n\n    to inner\n        set n to n + 5\n    end\n    inner()\n    return n\nend\nsay outer(1)", "6"],
   // inputs and functions made with `to` always belong to their own function
   ["set n to 1\nto f with n\n    set n to 5\nend\nf(2)\nsay n", "1"],
   ['to helper\n    say "global"\nend\nto f\n    to helper\n        say "inner"\n    end\n    helper\nend\nf\nhelper', "inner\nglobal"],
@@ -149,6 +158,9 @@ export const ERRORS = [
   ["say item 1 km of (list of 1)", "line 1: item numbers must be whole numbers, not 1 km"],
   ["\n\nsay totl", "line 3: 'totl' has no value yet (give it one with 'set totl to ...')"],
   ["to f\n    set secret to 1\nend\nf\nsay secret", "line 5: 'secret' has no value yet (give it one with 'set secret to ...')"],
+  // a function's `set`, or `add`, of a name the top level makes below it is the function's own
+  ["to f\n    set x to 1\nend\nf\nsay x\nset x to 2", "line 5: 'x' has no value yet (give it one with 'set x to ...')"],
+  ["to bump\n    add 5 to total\nend\nset total to 0\nbump", "line 2: 'total' has no value yet (give it one with 'set total to ...')"],
   ["say x\nset x to 1", "line 1: 'x' has no value yet (give it one with 'set x to ...')"],
   // misspellings get the closest name that exists, including Moth's own words at the start of a line
   ["set total to 1\nsay totl", "line 2: 'totl' has no value yet. Did you mean 'total'?"],

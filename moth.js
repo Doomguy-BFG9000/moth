@@ -619,19 +619,18 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   return statements(null);
 }
 
-// `use "math.moth" as math`: each name the file's top level makes becomes `math's pi`, `math's sine`, which
-// no name in the program can be, so the two can't clash. The file's code is then the program's, as with any
-// `use`. A name is renamed only where it means the top level's: not where an input of a function, or a
-// function that a function makes, has the same name.
+// `use "math.moth" as math`: each name in the file becomes `math's pi`, `math's sine`, which no name in the
+// program can be, so the file keeps its own top level, as if it ran alone. The file's code is then the
+// program's, as with any `use`. A function's inputs, and the functions a function makes, are left alone,
+// since nothing outside the function can reach them; every other name is renamed, so a variable only a
+// function in the file sets stays that function's own, and a name the file never makes isn't the program's.
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {
-  const { own, shared } = declarations(body);
-  const top = new Set([...own, ...shared]);
-  const walk = (node, hidden) => {
-    if (NAMED.has(node.kind) && top.has(node.name) && !hidden.has(node.name)) node.name = `${alias}'s ${node.name}`;
+  const walk = (node, hidden, handler) => {
+    if (NAMED.has(node.kind) && node.name != null && !hidden.has(node.name) && !handler) node.name = `${alias}'s ${node.name}`;
     const inside = node.kind === "define" ? new Set([...hidden, ...node.params, ...declarations(node.body).own]) : hidden;
-    for (const [key, child] of Object.entries(node)) {
-      if (key !== "at") for (const c of Array.isArray(child) ? child : [child]) if (c?.kind) walk(c, key === "body" ? inside : hidden);
+    for (const [key, child] of Object.entries(node)) { // a `when` or `every`'s function (`fn`) has a name that isn't a variable
+      if (key !== "at") for (const c of Array.isArray(child) ? child : [child]) if (c?.kind) walk(c, key === "body" ? inside : hidden, key === "fn");
     }
   };
   for (const s of body) walk(s, new Set());

@@ -636,12 +636,15 @@ test("a hand-over to the VM reads the same files and writes nothing twice", () =
 
 // The file's names become shapes's sides and so on, so they can't clash with the program's; a file used as
 // two names is two separate copies; and inside the file, a function's inputs and its own functions still
-// hide the file's names, as they would anywhere.
+// hide the file's names, as they would anywhere. The file keeps its own top level: a variable only its
+// functions set is theirs, never the program's, and a name the file doesn't make isn't the program's either.
 test("use ... as keeps a file's names apart, on all three engines and in the compiler written in Moth", () => {
   const files = {
     "shapes.moth": 'set sides to 4\nto area with w, h\n    return w * h\nend\nto describe\n    return "a shape with " + sides + " sides"\nend',
     "counter.moth": "set count to 0\nto bump\n    add 1 to count\n    return count\nend",
     "hide.moth": 'set n to 10\nset helper to 1\nto plus_one with n\n    return n + 1\nend\nto grow\n    set n to n + 5\n    return n\nend\nto own_helper\n    to helper\n        return "inner"\n    end\n    return helper()\nend',
+    "isolate.moth": 'to tally with things\n    set total to 0\n    for each k in things\n        add k to total\n    end\n    return total\nend\nto first_word with text\n    set found to item 1 of (split text by " ")\n    return found\nend\nset found to "top"',
+    "leak.moth": 'to greet\n    return "hi " + who\nend',
   };
   const reading = { files: (name) => files[name] };
   const program = [
@@ -658,6 +661,12 @@ test("use ... as keeps a file's names apart, on all three engines and in the com
     "say a's count",
     'say h\'s plus_one(1) " " h\'s grow() " " h\'s n',
     'say h\'s own_helper() " " h\'s helper',
+    "set total to 100",
+    'set k to "mine"',
+    'use "isolate.moth" as iso',
+    'use "isolate.moth" as again',
+    'say iso\'s tally((list of 1, 2, 3)) " " again\'s tally((list of 4)) " " total " " k',
+    'say iso\'s first_word("hello there") " " iso\'s found " " again\'s found',
   ].join("\n");
   const mistakes = [
     ['use "shapes.moth" as shapes\nsay shapes\'s sids', "line 2: 'shapes' has nothing called 'sids'. Did you mean 'shapes's sides'?"],
@@ -665,9 +674,10 @@ test("use ... as keeps a file's names apart, on all three engines and in the com
     ["say x's y", "line 1: 'x' has nothing called 'y'"],
     ['use "shapes.moth" as list', "line 1: 'list' is a Moth word, so it can't be used as a name for the file"],
     ['use "shapes.moth" as shapes\nsay shapes\'s 5', "line 2: expected a name but found '5'"],
+    ['set who to "Sam"\nuse "leak.moth" as leak\nsay leak\'s greet()', "leak.moth, line 2: 'leak' has nothing called 'who'"],
   ];
   for (const engine of ENGINES) {
-    assert.equal(output(program, { engine, ...reading }), "4 3\n6\na shape with 4 sides\n1 2 1\n3\n2 15 15\ninner 1", engine);
+    assert.equal(output(program, { engine, ...reading }), "4 3\n6\na shape with 4 sides\n1 2 1\n3\n2 15 15\ninner 1\n6 4 100 mine\nhello top top", engine);
     for (const [source, message] of mistakes) assert.equal(error(source, { engine, ...reading }).message, message, `${engine}: ${source}`);
   }
   assert.deepEqual(check(program, reading), []);

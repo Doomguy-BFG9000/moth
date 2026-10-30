@@ -11735,7 +11735,7 @@ to new_function with st, s, parent, level
     set all_made to all_fns of st
     set id to length of all_made
     set made to record with name name of s, label "F" + id, id id, info "I" + id, params params of s, kinds kinds of s,
-        body body of s, at at of s, parent parent, level level
+        body body of s, at at of s, parent parent, level level, order order of s
     add made to all_made
     return made
 end
@@ -11824,7 +11824,7 @@ end
 
 to gen_program with st, body
     set a to a of st
-    set scope to front's new_scope(nothing, empty list, body)
+    set scope to front's new_scope(nothing, empty list, body, 0)
     set main_scope of st to scope
     set made_count to empty dictionary
     collect_functions(st, body, made_count)
@@ -11868,7 +11868,7 @@ end
 # environment of its own. A function made inside another gets the environment it was made in in rdx.
 to gen_function with st, f
     set a to a of st
-    set scope to front's new_scope(parent of f, params of f, body of f)
+    set scope to front's new_scope(parent of f, params of f, body of f, order of f)
     set n to length of params of f
     set total to length of names of scope
     set with_env to makes_functions(body of f)

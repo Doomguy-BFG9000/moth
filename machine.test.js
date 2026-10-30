@@ -133,24 +133,25 @@ test("a long line with thousands of places a mistake can happen stays small", { 
 });
 
 // machine.moth, made into machine code, compiling itself: the bytes must be the ones it makes on Node.js. The
-// driver's own names start with zz_, as a file used `as` a name shares its functions' variables with the
-// program's top level.
+// driver counts with `total` and `k`, made before it uses machine.moth, as machine.moth's own functions do: a
+// file used `as` a name keeps its own top level, so its functions' variables are theirs, not the driver's.
 test("machine.moth in machine code compiles itself into the same bytes", { skip }, () => {
   const sources = { "machine.moth": here("machine.moth").replace(/\r/g, ""), "compiler.moth": here("compiler.moth").replace(/\r/g, "") };
   const want = machine(sources["machine.moth"], { files: { "compiler.moth": sources["compiler.moth"] }, target, name: "machine.moth" });
   let sum = 0, mix = 0;
   want.forEach((x, i) => { sum += x; mix += x * ((i + 1) & 1023); });
-  const driver = `use "machine.moth" as m
-set zz_bytes to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
-say length of zz_bytes
-set zz_sum to 0
-set zz_mix to 0
-for each zz_i from 1 to length of zz_bytes
-    add item zz_i of zz_bytes to zz_sum
-    add item zz_i of zz_bytes * (zz_i bit and 1023) to zz_mix
+  const driver = `set total to 0
+set k to 0
+use "machine.moth" as m
+set made to m's compile_machine(${JSON.stringify(sources["machine.moth"])}, (list of "compiler.moth"), (list of ${JSON.stringify(sources["compiler.moth"])}), "${target}", "machine.moth")
+say length of made
+set mix to 0
+for each k from 1 to length of made
+    add item k of made to total
+    add item k of made * (k bit and 1023) to mix
 end
-say zz_sum
-say zz_mix
+say total
+say mix
 `;
   const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
   try {
@@ -164,16 +165,15 @@ say zz_mix
   }
 });
 
-// A `set` in a function changes a variable of the same name at the top level, and a file used `as` a name
-// shares its functions' variables with the program's top level: names that clash there change each other.
-test("machine.moth's functions never set a name its top level or compiler.moth's functions use", () => {
-  const top = new Set([...here("machine.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
-  const set = (source) => [...source.matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]);
-  assert.deepEqual(set(here("machine.moth")).filter((n) => top.has(n)), []);
-  assert.deepEqual([...new Set(set(here("compiler.moth")))].filter((n) => top.has(n)), []);
-  // moth.moth uses machine.moth as a name, so no function in any of the three may set what its top level makes
-  const mothTop = new Set([...here("moth.moth").matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
-  for (const file of ["moth.moth", "machine.moth", "compiler.moth"]) assert.deepEqual([...new Set(set(here(file)))].filter((n) => mothTop.has(n)), [], file);
+// A `set` in a function changes a variable of the same name its top level made above the function, which in
+// these two files would only ever be a mistake: none of their functions sets a name its own top level makes.
+// (A file used `as` a name keeps its own top level, so names in different files can't clash.)
+test("machine.moth's and moth.moth's functions never set a name their own top level makes", () => {
+  for (const file of ["machine.moth", "moth.moth"]) {
+    const top = new Set([...here(file).matchAll(/^(?:set|to) ([a-z_0-9]+)/gm)].map((m) => m[1]));
+    const set = [...new Set([...here(file).matchAll(/^[ \t]+(?:set|for each) ([a-z_0-9]+)/gm)].map((m) => m[1]))];
+    assert.deepEqual(set.filter((n) => top.has(n)), [], file);
+  }
 });
 
 test("a program becomes the same bytes each time, as a PE file for Windows and an ELF file for Linux", () => {
