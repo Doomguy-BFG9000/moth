@@ -617,6 +617,13 @@ write uppercase of read "notes.txt" to "loud.txt"
                    ^
 ```
 
+A program reads a site the way it reads a file, `read "https://example.com"`:
+on Windows through WinHTTP, with the system's certificates, and on Linux through
+the system's `curl`. A site that sends it on to another address is asked about
+again there, ten moves at most; any other answer from 300 up is a mistake
+(`can't read 'https://example.com/nothing': the site answered 404`), and a site
+gets 60 seconds.
+
 A mistake in a program, and what `moth` itself says went wrong, go to the error
 output, so a program's own words stay clean; `moth` ends with 1 for a mistake,
 2 when it doesn't understand what it was asked, and for `moth run` with
@@ -750,6 +757,11 @@ calls that led there.
   purpose, each tidied to exactly the bytes `format()` makes; `moth check`
   against the checker, its own problems word for word; and `moth test` on the
   tests in Moth here, said exactly as `test()` says them
+- going online in machine code, against a server of the tests' own on
+  127.0.0.1: a page's text and bytes, moves to other addresses, the answers
+  that are mistakes, a refused connection, a big page and the `--allow-net`
+  rules, in the Rust engine's words; and that a program that never reads is
+  the same bytes it was
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -762,7 +774,8 @@ unboxed numbers were all caught, some only by the fuzzer.
 - No clock: a program learns about the world through `ask`, its files, the
   sites it reads, its arguments, and in an app, keys, clicks and timers. In the
   playground, files last for one run, and only sites that let any page read
-  them can be read. A program in machine code can't go online yet.
+  them can be read. On Linux a program goes online through `curl`, so where
+  curl isn't installed it can't.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
@@ -782,9 +795,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   it's stopped.
 - `moth build` takes only part of Moth so far: no units, tables,
   `random number` or `draw chart of`; anything else stops with a
-  mistake that says it can't become machine code yet. What it makes can't go
-  online either: reading a site it may read says it couldn't reach it.
-  It makes programs for x86-64 Windows and Linux, not for Macs.
+  mistake that says it can't become machine code yet. It makes programs for
+  x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
   showing its picture, and an app's handlers never run. The window knows CSS's
   colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only

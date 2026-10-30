@@ -996,8 +996,9 @@ hold them to agreeing.
   program starts on, Windows' from `GetCommandLineW`, split as Rust's
   `std::env::args` splits it. File bytes come from `rt_alloc_raw`, and the
   values the runtime keeps (the file's name, why it failed, and what a person
-  answered) sit among the collector's roots. It can't go online yet, so a
-  site the program may read says it couldn't be reached.
+  answered) sit among the collector's roots. It couldn't go online at first,
+  so a site the program might read said it couldn't be reached; §33 is how it
+  goes online now.
 - **moth.exe.** moth.moth is the command line, in Moth: `moth build file.moth`,
   with `--target` and the `--allow` flags. It reads the program, then every
   file a `use` line names, and the files those use, gives them all to
@@ -1277,3 +1278,90 @@ hold them to agreeing.
   through a folder yet, so it doesn't find every `.test.moth` file itself.
   `moth check` leaves out the checker's type warnings. And `moth build` still
   turns away units, tables, `random number` and `draw chart of`.
+
+## 33. Going online in machine code
+
+- **What was missing.** A program built with `--allow-net` got past the
+  question, then said it couldn't reach the site: machine.moth had no way to
+  connect. Now `read "https://..."` and `read bytes` fetch the page, on Windows
+  and on Linux, over http and https.
+- **The same as before.** Both old command lines went online: disk.js fetched
+  the page in a second Node, and the Rust engine ran `curl`. Where they
+  differ, machine code does what the Rust engine did, since `moth run` is
+  machine code now and keeps moth-native's words:
+  - the page as the site sent it. Its text is read as a file's is, as UTF-8
+    with U+FFFD for what isn't; its bytes as they came.
+  - no move made by itself. An answer from 300 to 399 that says where to go is
+    a new address, asked about again as any site is, by its `--allow-net`
+    names or a person at a terminal. Ten moves at most, then "it moved too
+    many times". A move to something that isn't http or https: "it moved to
+    'ftp://...', which isn't a site". A move the program may not make: "it
+    moved to '...', and this program isn't allowed to go online (start it with
+    --allow-net)". The mistake names the address the program read.
+  - any other answer from 300 up is a mistake: "can't read
+    'https://example.com/nothing': the site answered 404". So is a 3xx that
+    says nowhere to go.
+  - 60 seconds for a site, in all, as `--max-time 60` gave curl. disk.js left
+    it to Node's fetch, which waits minutes.
+  - `--allow-net=example.com` allows that host exactly, with any port or only
+    the one named, as the Rust engine had it. disk.js allowed any host with the
+    name inside it, `example.com.evil.net` too. machine.moth already did this.
+  - what went wrong: "couldn't reach it (...)", with curl's words inside. The
+    Rust engine passed on whatever curl printed, which changes with curl's
+    version and holds times ("after 3 ms"), and for a bad certificate ran to
+    five lines. Now each kind of failure has one fixed phrase in curl's words,
+    the same on both systems: "Could not resolve host: nosuch.invalid",
+    "Failed to connect to 127.0.0.1 port 1: Couldn't connect to server",
+    "Operation timed out after 60000 milliseconds", "SSL connect error",
+    "Failure when receiving data from the peer", and "URL using bad/illegal
+    format or missing URL". Anything else is curl's own first line on Linux,
+    without its "curl: (N) ", and "WinHTTP error N" on Windows.
+- **Windows: WinHTTP.** It comes with Windows, does https with the system's
+  certificates and proxy, and is a DLL like any other, imported through
+  `more_imports` as the window's DLLs are. The request makes no move by itself;
+  the program reads the answer's number and its Location, then the page, into
+  memory that doubles as it fills. Before each step the request gets what's
+  left of its 60 seconds. The address goes out as curl sends it: in the path a
+  byte above 127 becomes `%xx`, the query goes as it is, and nothing else is
+  changed. A Location that isn't a whole address is made one from the address
+  it came from (`//host...`, `/path`, `?query`, or a name in the same folder),
+  as curl makes `%{redirect_url}`.
+- **Linux: curl.** A program machine.moth makes is static: it calls no
+  library, so there is no TLS library to call, and TLS written by hand is not
+  worth the risk. So it starts the system's `curl` the way `run program`
+  starts a program: found in PATH, then `fork` and `execve`, its arguments
+  given straight to it with no shell between, the page and curl's mistakes
+  read through two pipes as `keeping its output` reads them. curl gets `-q`, so
+  a `.curlrc` can't make it follow moves itself, past the questions; `-sS`;
+  `-g`, so `[` and `{` in an address are only characters; `-A moth`;
+  `--max-time 60`; `--proto =http,https`; and `-w`, which writes the answer's
+  number and where it moves to after the page. Its exit code says what went
+  wrong. With no curl: "couldn't reach it (on Linux a Moth program goes online
+  through curl, and there is no program called 'curl')".
+- **One address, read one way.** A `\` before any `?` or `#` is a `/`, as a
+  browser reads it, so the host the `--allow-net` names were checked against is
+  the host gone to. curl alone reads `http://example.com\@evil.com/` as a visit
+  to evil.com. An address with a space or a control character in it isn't one.
+  Both systems split the address the same way, for their words.
+- **Only a program that reads.** Any name a program reads might be a site's
+  address, so a program with `read` or `read bytes` in it has all of this, and
+  on Windows imports WINHTTP.dll. A program that never reads has none of it,
+  and is the same bytes as before. moth.exe reads files, so it has it too.
+- **Checked.** A test starts a server of its own on 127.0.0.1, over plain
+  http, so nothing needs the internet: text with a broken UTF-8 byte in it,
+  bytes, moves (to a path, to a name in the same folder, to another host, in a
+  loop, to ftp:), a 3xx that says nowhere, 404, 500, an empty 204, a 3.2 MB
+  page, a port nobody listens on, and two addresses that can't be, with seven
+  sets of `--allow` flags, and through `moth run`. Another test checks that a
+  program that never reads is the same bytes, and imports no WinHTTP. The same
+  program built for Linux said the same, against the same answers, in WSL. By
+  hand, on both systems: https://example.com, a 404, http://github.com moving
+  to https, a host that doesn't exist, expired and self-signed certificates,
+  Wikipedia and a Gutenberg book (about 700 KB each), an image's bytes, a site
+  that never answers, an IPv6 address, and Linux with no curl.
+- **What's left.** On Windows a site that stops answering can take a few
+  seconds more than its 60 (64 in a test), since WinHTTP's own timer runs
+  late; curl stops at 60. A name and password in an address (`user:pw@host`)
+  go with curl, not with WinHTTP. A move with `../` in it is followed as it is
+  on Windows, while curl works the `..` out first. A program can only fetch a
+  page, with no headers of its own.
