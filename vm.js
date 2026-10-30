@@ -708,17 +708,17 @@ export const BUILTINS = [
   { name: "largest", needs: [["list"]], gives: null, run: ([list], error) => extreme("largest", list, error) },
   { name: "smallest", needs: [["list"]], gives: null, run: ([list], error) => extreme("smallest", list, error) },
   // `run program "tool.exe" with (list of "a")`: starts it, waits for it, and gives the number it ended
-  // with. Only a program moth build makes can start one; anywhere else it's a mistake, once its inputs are
-  // what they must be.
-  {
-    name: "run program", needs: [["text"], ["list"]], gives: "number",
+  // with; `... keeping its output` gives a record of that number and what it said instead. Only a program
+  // moth build makes can start one; anywhere else it's a mistake, once its inputs are what they must be.
+  ...["run program", "run program keeping"].map((name) => ({
+    name, needs: [["text"], ["list"]], gives: name === "run program" ? "number" : "record",
     run: ([program, args], error) => {
       needText("'run program'", program, error);
       if (!isList(args)) error(`'run program ... with' needs a list, not ${kindOf(args)}`);
       for (const arg of args) needText("'run program ... with'", arg, error);
       error("can't run programs here: only a program made by moth build can");
     },
-  },
+  })),
 ];
 
 // `stop the program with 2`: the number a program ends with, a whole number from 0 to 255 (all Linux keeps)

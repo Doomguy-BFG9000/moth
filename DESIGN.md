@@ -1231,15 +1231,44 @@ hold them to agreeing.
   again; the playground's Problems pane has it. A call to a name nothing sets
   doesn't look at what it was given, as the checker doesn't, so the same
   "never used" warnings come out.
+- **`expect` in machine code.** It was the last thing `moth build` turned away.
+  It is the comparison the engines make, and when it doesn't hold, their
+  message, which says what each side was: both values wait on the stack, so the
+  message can show them after the comparison has used them, and the mistake
+  points at the `expect`, as the engines' does. `expect done` on its own asks
+  only whether the value counts as yes.
+- **Keeping what a program says.** `run program ... keeping its output` gives a
+  record of the number it ended with, what it said, and what it said went
+  wrong, which is what a test runner needs. Each of the program's two outputs
+  gets a pipe, and neither read waits: on Windows `PeekNamedPipe` says how much
+  is there before `ReadFile` takes it, and on Linux the read ends are
+  `O_NONBLOCK`, with a millisecond's sleep when nothing came. So a program that
+  fills one pipe while this one reads the other is never stopped by a pipe
+  nobody is emptying: 1.2 MB on one output and 600 KB on the other come back
+  whole, the same bytes on both systems. What came goes into a block of its own
+  for each output, which doubles as it fills, and both blocks are among the
+  collector's roots, since nothing else holds them.
+- **`moth test`.** The file is built once, with lines at its end that call the
+  test whose name the program is started with, and then started once for each
+  test: a run of its own, so one test can't spoil another, which is what
+  moth.js's `test()` gives by running the file again for each test. What it
+  says is kept, so a test that failed can show the mistake, the calls that led
+  there and its own output under it, indented, exactly as the Node.js command
+  line showed them. The call the runner adds comes after the file's own lines,
+  so the one trail line pointing past them is dropped, as `test()` drops it. A
+  file with no `test_` functions is one test itself, named after the file.
 - **Checked.** Every command runs as a process against what moth.js does:
   `moth tidy` on every Moth file here and on programs broken on purpose, each
   tidied to exactly the bytes `format()` makes and tidy again the second time;
   `moth check` against `check()` with its type warnings taken away, word for
   word and in order; `moth run` passing arguments, input, output and the number
-  a program ended with through, and leaving nothing behind; and a program that
-  starts another, with and without `--allow-run`. The phrases themselves are
-  held to the three JavaScript engines, the compiler written in Moth, and
-  machine code, on Windows and on Linux.
-- **What's left.** `moth test` is not back yet: the test runner needs `expect`
-  in machine code, and a way to keep what a program it started said, so each
-  test's own output can be shown under it the way moth.js's `test()` shows it.
+  a program ended with through, and leaving nothing behind; `moth test` against
+  `test()`, tick for tick and line for line, with tools/json.test.moth passing
+  under moth.exe; and a program that starts another, with and without
+  `--allow-run`. The phrases themselves are held to the three JavaScript
+  engines, the compiler written in Moth, and machine code, on Windows and on
+  Linux.
+- **What's left.** `moth test` needs its files named: machine code can't look
+  through a folder yet, so it doesn't find every `.test.moth` file itself.
+  `moth check` leaves out the checker's type warnings. And `moth build` still
+  turns away units, tables, `random number` and `draw chart of`.

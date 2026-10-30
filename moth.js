@@ -556,11 +556,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += 2;
       return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
     } // what the program was started with: `tool a b`
-    if (isWord("run") && runsProgram()) { // `run program "tool.exe" with (list of "a")`
+    if (isWord("run") && runsProgram()) { // `run program "tool.exe" with (list of "a") keeping its output`
       pos += 2;
       const program = additive();
       const inputs = !peek().nl && word("with") ? additive() : { kind: "list", items: [], at: t };
-      return { kind: "builtin", name: "run program", args: [program, inputs], at: t };
+      const keeping = !peek().nl && isWord("keeping") && wordAt(pos + 1, "its") && wordAt(pos + 2, "output");
+      if (keeping) pos += 3;
+      return { kind: "builtin", name: keeping ? "run program keeping" : "run program", args: [program, inputs], at: t };
     }
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {

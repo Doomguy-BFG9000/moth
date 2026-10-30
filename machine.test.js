@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, machineCompiler, check, excerpt, describeTrail, format, MothError } from "./moth.js";
+import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -484,6 +484,88 @@ test("moth.exe finds the problems the checker finds without running the program"
     checked++;
   });
   assert.ok(checked > 10, `only ${checked} were checked`);
+});
+
+// `moth test`: every test_ function in a file, each in a run of its own, said as test() in moth.js says it.
+const TESTS_IN_MOTH = ["set count to 0", "to average with numbers", "    return 10 / length of numbers", "end",
+  "to test_one", "    add 1 to count", "    expect count is 1", "end", "to test_two", "    add 1 to count",
+  '    say "count is " count', "    expect count is 2", "end", "to test_three", "    expect average(empty list) is 1",
+  "end", "to helper", "    expect 1 is 2", "end"].join("\n");
+
+test("moth.exe runs a file's tests, each in a run of its own, and says what test() says", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "testing");
+  mkdirSync(sub, { recursive: true });
+  const testing = (names) => spawnSync(exe, ["test", ...names], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  writeFileSync(join(sub, "sample.test.moth"), TESTS_IN_MOTH);
+  // what moth.js's test() makes of the same file, said the way the command line says it
+  const results = testMoth(TESTS_IN_MOTH);
+  const said = results.map(({ name, said: lines, error }) => {
+    if (!error) return `✓ ${name}\n`;
+    const report = [`sample.test.moth:${error.line}:${error.col}: ${error.reason}`, ...excerpt(TESTS_IN_MOTH, error).split("\n")];
+    if (error.trail.length) report.push(...describeTrail(error.trail).split("\n"));
+    if (lines.length) report.push("it said:", ...lines.map((line) => `  ${line}`));
+    return `✗ ${name}\n${report.map((line) => `    ${line}`).join("\n")}\n`;
+  }).join("");
+  const ran = testing(["sample.test.moth"]);
+  assert.equal(ran.stdout, `${said}1 passed, 2 failed\n`);
+  assert.deepEqual([ran.status, ran.stderr], [1, ""]);
+  assert.deepEqual(readdirSync(sub).filter((name) => name.includes("-test.") || name.endsWith("-test")), [], "the file it built was left behind");
+
+  // the tools' own tests, which must pass; a file with no tests, which is one test itself; a test that
+  // stops the program; a file that can't be read at all; and more than one file at once
+  for (const name of ["json.moth", "json.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  const tools = testing(["json.test.moth"]);
+  assert.equal(tools.stdout, ["test_values", "test_lists_and_objects", "test_spaces_and_lines", "test_escapes", "test_mistakes"]
+    .map((name) => `✓ ${name}\n`).join("") + "5 passed\n");
+  assert.deepEqual([tools.status, tools.stderr], [0, ""]);
+  writeFileSync(join(sub, "none.test.moth"), 'say 1\nexpect 1 is 2\n');
+  const none = testing(["none.test.moth"]);
+  assert.equal(none.stdout, "✗ none.test.moth\n    none.test.moth:2:1: expected 1 to be 2\n    expect 1 is 2\n    ^\n    it said:\n      1\n0 passed, 1 failed\n");
+  writeFileSync(join(sub, "stops.test.moth"), 'to test_a\n    say "before"\n    stop the program with 4\nend\nto test_b\n    expect yes\nend\n');
+  const stops = testing(["stops.test.moth"]);
+  assert.equal(stops.stdout, "✗ test_a\n    stopped the program with 4\n    it said:\n      before\n✓ test_b\n1 passed, 1 failed\n");
+  writeFileSync(join(sub, "broken.test.moth"), "to test_a\n    say 1\n");
+  const broken = testing(["broken.test.moth"]);
+  assert.deepEqual([broken.status, broken.stdout, broken.stderr], [1, "0 passed, 1 failed\n", "broken.test.moth:3:1: 'to' from line 1 is missing its 'end'\n\n^\n"]);
+  const several = testing(["json.test.moth", "none.test.moth"]); // each file named, then how many in all
+  assert.match(several.stdout, /^json\.test\.moth\n✓ test_values\n/);
+  assert.match(several.stdout, /none\.test\.moth\n✗ none\.test\.moth\n/);
+  assert.equal(several.stdout.split("\n").at(-2), "5 passed, 1 failed");
+  const missing = testing(["nowhere.test.moth"]);
+  assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "0 passed, 1 failed\n", "moth: there is no file called 'nowhere.test.moth'\n"]);
+  const nothing = spawnSync(exe, ["test"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([nothing.status, nothing.stdout], [2, ""]);
+});
+
+// `run program ... keeping its output`: what the program said instead of letting it through, however much
+// of it there is, from both its outputs at once.
+test("a program moth.exe builds keeps what another program said, and its number", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "keeping");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "child.moth"), ['say "out one"', 'say "err one" to the error output', 'say "out two"',
+    "for each a in arguments", '    say "[" a "]"', "end", "stop the program with 7"].join("\n"));
+  // a program that fills both its outputs: more than a pipe holds, so they must be read as it writes them
+  writeFileSync(join(sub, "loud.moth"), ["for each i from 1 to 20000", '    say "line " i " of a great many, to fill a pipe up"',
+    '    say "and the same to the other one" to the error output', "end", "stop the program with 3"].join("\n"));
+  const child = target === "windows" ? "./child.exe" : "./child";
+  writeFileSync(join(sub, "keeps.moth"), [
+    `set answer to run program "${child}" with (list of "a b") keeping its output`,
+    'say "code " code of answer',
+    'say "output: [" output of answer "]"',
+    'say "mistakes: [" mistakes of answer "]"',
+    `set loud to run program "${target === "windows" ? "./loud.exe" : "./loud"}" keeping its output`,
+    'say "loud " code of loud " " length of output of loud " " length of mistakes of loud',
+  ].join("\n"));
+  for (const name of ["child", "loud"]) assert.equal(spawnSync(exe, ["build", `${name}.moth`], { cwd: sub, encoding: "utf8" }).status, 0);
+  assert.equal(spawnSync(exe, ["build", "keeps.moth", "--allow-run"], { cwd: sub, encoding: "utf8" }).status, 0);
+  const kept = spawnSync(executable(sub, "keeps"), [], { cwd: sub, encoding: "utf8", timeout: 120_000, maxBuffer: 1 << 26 });
+  assert.deepEqual([kept.status, kept.stderr], [0, ""]);
+  let loud = 0; // how much the loud one says, in characters, the new line after each line counted
+  for (let i = 1; i <= 20_000; i++) loud += `line ${i} of a great many, to fill a pipe up\n`.length;
+  assert.equal(kept.stdout, ["code 7", "output: [out one", "out two", "[a b]", "]", "mistakes: [err one", "]",
+    `loud 3 ${loud} ${20_000 * "and the same to the other one\n".length}`, ""].join("\n"));
 });
 
 // A program that takes arguments, asks, reads and writes, built with each set of --allow flags, each in a

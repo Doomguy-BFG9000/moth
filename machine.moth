@@ -11255,7 +11255,7 @@ to emit_runtime with st
             reserve(a, name, 8, 8)
         end
     end
-    for each name in list of "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
+    for each name in list of "run_buf_0", "run_buf_1", "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
         "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev",
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
@@ -11348,7 +11348,8 @@ end
 
 set file_imports to list of "ReadFile", "ReadConsoleW", "CreateFileW", "CloseHandle", "GetLastError", "GetFileAttributesW",
     "GetCommandLineW", "WideCharToMultiByte", "FormatMessageW", "GetFullPathNameW",
-    "GetFinalPathNameByHandleW", "DeleteFileW", "CreateProcessW", "WaitForSingleObject", "GetExitCodeProcess"
+    "GetFinalPathNameByHandleW", "DeleteFileW", "CreateProcessW", "WaitForSingleObject", "GetExitCodeProcess",
+    "CreatePipe", "SetHandleInformation", "PeekNamedPipe", "Sleep"
 set in_size to 4096 # bytes of input read at a time
 # for each kind of thing a program may do (read a file, write one, go online, start a program): how a
 # question puts it, and how a refusal puts it
@@ -14008,12 +14009,18 @@ end
 # with --allow-run, or a person at a terminal says yes, the way reading and writing files are allowed.
 
 to emit_run with a, target
-    for each slot_name in list of "run_code", "run_status", "env_vector"
+    for each slot_name in list of "run_code", "run_status", "env_vector", "run_keeping", "run_got",
+        "run_read_0", "run_read_1", "run_write_0", "run_write_1", "run_room_0", "run_room_1",
+        "run_used_0", "run_used_1", "run_open_0", "run_open_1"
         reserve(a, slot_name, 8, 8)
     end
     if target is "windows"
         reserve(a, "run_si", 112, 16)
         reserve(a, "run_pi", 32, 16)
+    else
+        reserve(a, "run_pipe_0", 8, 8)
+        reserve(a, "run_pipe_1", 8, 8)
+        reserve(a, "run_wait", 16, 8)
     end
     if target is "windows"
         emit_command_line(a)
@@ -14021,8 +14028,16 @@ to emit_run with a, target
         emit_program_path(a)
     end
     emit_run_program(a, target)
+    emit_keep_words(a, target)
     emit_remove_file(a, target)
     emit_run_why(a)
+    set ro to rodata of a # what a record of a program's words is made of
+    pad_to(ro, 8)
+    set field_names to empty list
+    for each field in list of "code", "output", "mistakes"
+        add text_object(a, field) to field_names
+    end
+    table_of_texts(a, "run_fields", field_names)
 end
 
 # rt_b_arg: rax a text: into the builder as one argument of a Windows command line, in quotes if it holds a
@@ -14286,6 +14301,15 @@ end
 # the system looks for the program, as it does for any command; on Linux rt_run_path does. The program it
 # starts gets this program's own input and output, so what it says goes where this program's words go, and
 # what has collected here goes out first.
+# rt_run_program: xmm0 a program's name, xmm1 its arguments (a list of text), rdx 1 to keep what it says
+# instead of letting it through: the number it ended with, into xmm0 with rax 0, or with rdx 1 a record of
+# that number, what it said and what it said went wrong; or rax 2 with err_why 28 (the name isn't text),
+# 29 (the arguments aren't a list), 32 (one of them isn't text), 31 (there is no program of that name),
+# 30 (it can't be run) or 33 (it said more than a text can hold). On Windows the system looks for the
+# program, as it does for any command; on Linux rt_run_path does. A program whose words come through gets
+# this program's own input and output, so what it says goes where this program's words go, and what has
+# collected here goes out first; one whose words are kept gets a pipe for each of its two outputs, which
+# are read as it fills them, so it can't be stopped by a pipe that no one is emptying.
 to emit_run_program with a, target
     set not_text to new_label(a)
     set not_list to new_label(a)
@@ -14295,13 +14319,16 @@ to emit_run_program with a, target
     set refused to new_label(a)
     set no_program to new_label(a)
     set cant_run to new_label(a)
+    set too_long to new_label(a)
     set gave_up to new_label(a)
+    set plain_code to new_label(a)
     set run_out to new_label(a)
     mark(a, "rt_run_program")
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
     push_r(a, r14)
+    store(a, rip("run_keeping"), rdx)
     movq_rx(a, rbx, xmm0)
     movq_rx(a, r12, xmm1)
     store(a, rip("err_file"), rbx)
@@ -14348,7 +14375,10 @@ to emit_run_program with a, target
         set each_arg to new_label(a)
         set line_made to new_label(a)
         set converted to new_label(a)
+        set through to new_label(a)
+        set handles_set to new_label(a)
         set started to new_label(a)
+        set waited to new_label(a)
         call_to(a, "rt_b_reset") # the command line: the program, then each argument, quoted as it needs
         load(a, rax, rip("err_file"))
         call_to(a, "rt_b_arg")
@@ -14393,15 +14423,30 @@ to emit_run_program with a, target
         call_import(a, "imp_MultiByteToWideChar")
         win_leave(a)
         mark(a, converted)
-        lea(a, rax, rip("run_si")) # it gets this program's own input and output
+        lea(a, rax, rip("run_si"))
         storei(a, mem(rax, 0), 104)
         storei(a, mem(rax, 60), 0x100)
         load(a, rcx, rip("in_handle"))
         store(a, mem(rax, 80), rcx)
+        load(a, rcx, rip("run_keeping"))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, through)
+        for each k from 0 to 1 # a pipe for each of its outputs, whose read end it doesn't get
+            call_to(a, "rt_make_pipe")
+            alui(a, "cmp", rax, -1)
+            jcc(a, cc_e, cant_run)
+            store(a, rip("run_read_" + k), rax)
+            store(a, rip("run_write_" + k), rdx)
+            lea(a, rax, rip("run_si"))
+            store(a, mem(rax, 88 + 8 * k), rdx)
+        end
+        jmp_to(a, handles_set)
+        mark(a, through) # its words come through: this program's own output, as it is
         load(a, rcx, rip("out_handle"))
         store(a, mem(rax, 88), rcx)
         load(a, rcx, rip("err_handle"))
         store(a, mem(rax, 96), rcx)
+        mark(a, handles_set)
         win_enter(a)
         movi(a, rcx, 0)
         mov_rr(a, rdx, r13)
@@ -14421,9 +14466,26 @@ to emit_run_program with a, target
         call_import(a, "imp_GetLastError")
         mov32_rr(a, rdx, rax)
         win_leave(a)
+        push_r(a, rdx) # the pipes go, whatever went wrong
+        call_to(a, "rt_shut_pipes")
+        pop_r(a, rdx)
         missing_jump(a, target, no_program)
         jmp_to(a, cant_run)
-        mark(a, started) # wait for it, and take the number it ended with
+        mark(a, started)
+        win_leave(a)
+        load(a, rax, rip("run_keeping")) # what it says, as it says it, until both pipes have closed
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, waited)
+        for each k from 0 to 1 # the write ends are the program's own now, so the reads end when it does
+            win_enter(a)
+            load(a, rcx, rip("run_write_" + k))
+            call_import(a, "imp_CloseHandle")
+            win_leave(a)
+            storei(a, rip("run_write_" + k), -1)
+        end
+        call_to(a, "rt_keep_words")
+        mark(a, waited) # wait for it, and take the number it ended with
+        win_enter(a)
         load(a, rcx, rip("run_pi"))
         movi(a, rdx, -1)
         call_import(a, "imp_WaitForSingleObject")
@@ -14441,6 +14503,9 @@ to emit_run_program with a, target
         set measured_given to new_label(a)
         set copy_given to new_label(a)
         set copied_given to new_label(a)
+        set no_pipes to new_label(a)
+        set piped to new_label(a)
+        set child_ready to new_label(a)
         set parent to new_label(a)
         set waiting to new_label(a)
         set system_failed to new_label(a)
@@ -14511,9 +14576,41 @@ to emit_run_program with a, target
         jmp_to(a, copy_given)
         mark(a, copied_given)
         pop_r(a, r14) # where the pointers are
+        load(a, rax, rip("run_keeping")) # a pipe for each of its outputs, if its words are kept
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, no_pipes)
+        for each k from 0 to 1
+            lea(a, rdi, rip("run_pipe_" + k))
+            sys_call(a, 22)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ns, piped)
+            unary(a, "neg", rax)
+            mov_rr(a, rdx, rax)
+            jmp_to(a, cant_run)
+            mark(a, piped)
+            load32(a, rax, rip("run_pipe_" + k))
+            store(a, rip("run_read_" + k), rax)
+            load32(a, rax, rip_plus("run_pipe_" + k, 4))
+            store(a, rip("run_write_" + k), rax)
+            set piped to new_label(a)
+        end
+        mark(a, no_pipes)
         sys_call(a, 57) # fork: the child starts the program, with the same environment
         test_rr(a, rax, rax)
         jcc(a, cc_ne, parent)
+        load(a, rax, rip("run_keeping")) # the child: its outputs are the pipes', and the read ends are not its own
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, child_ready)
+        for each k from 0 to 1
+            load(a, rdi, rip("run_write_" + k))
+            movi(a, rsi, 1 + k)
+            sys_call(a, 33)
+            load(a, rdi, rip("run_write_" + k))
+            sys_call(a, 3)
+            load(a, rdi, rip("run_read_" + k))
+            sys_call(a, 3)
+        end
+        mark(a, child_ready)
         mov_rr(a, rdi, r12)
         mov_rr(a, rsi, r14)
         load(a, rdx, rip("env_vector"))
@@ -14524,6 +14621,15 @@ to emit_run_program with a, target
         test_rr(a, rax, rax)
         jcc(a, cc_s, system_failed)
         mov_rr(a, rbx, rax)
+        load(a, rax, rip("run_keeping"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, waiting)
+        for each k from 0 to 1 # the write ends are the child's now, so the reads end when it does
+            load(a, rdi, rip("run_write_" + k))
+            sys_call(a, 3)
+            storei(a, rip("run_write_" + k), -1)
+        end
+        call_to(a, "rt_keep_words")
         mark(a, waiting)
         mov_rr(a, rdi, rbx)
         lea(a, rsi, rip("run_status"))
@@ -14551,6 +14657,31 @@ to emit_run_program with a, target
         jmp_to(a, cant_run)
         mark(a, coded)
     end
+    load(a, rcx, rip("run_keeping")) # the number, or a record of it and what the program said
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, plain_code)
+    cvtsi2sd(a, xmm0, rax)
+    movq_rx(a, rax, xmm0)
+    push_r(a, rax)
+    for each k from 0 to 1
+        load(a, rsi, rip("run_buf_" + k))
+        load(a, rcx, rip("run_used_" + k))
+        call_to(a, "rt_decode_bytes")
+        call_to(a, "rt_b_fits")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, too_long)
+        call_to(a, "rt_b_text")
+        push_r(a, rax)
+    end
+    movi(a, rcx, 3)
+    mov_rr(a, rsi, rsp)
+    lea(a, rdx, rip("run_fields"))
+    call_to(a, "rt_record_make")
+    alui(a, "add", rsp, 24)
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    jmp_to(a, run_out)
+    mark(a, plain_code)
     cvtsi2sd(a, xmm0, rax)
     movi(a, rax, 0)
     jmp_to(a, run_out)
@@ -14569,6 +14700,9 @@ to emit_run_program with a, target
     mark(a, no_program)
     storei(a, rip("err_why"), 31)
     jmp_to(a, gave_up)
+    mark(a, too_long)
+    storei(a, rip("err_why"), 33)
+    jmp_to(a, gave_up)
     mark(a, cant_run) # rdx the system's code
     call_to(a, "rt_b_reset")
     call_to(a, "rt_os_text")
@@ -14583,6 +14717,200 @@ to emit_run_program with a, target
     pop_r(a, r12)
     pop_r(a, rbx)
     ret(a)
+end
+
+# The two pipes a program whose words are kept writes to, read until it has closed both: what came goes
+# into a block of its own for each, which doubles as it fills. Neither read waits, so a program that fills
+# one pipe while this one reads the other is never stopped by it.
+to emit_keep_words with a, target
+    set poll to new_label(a)
+    set read_all to new_label(a)
+    mark(a, "rt_keep_words")
+    push_r(a, rbx)
+    for each k from 0 to 1
+        movi(a, rcx, 65536)
+        store(a, rip("run_room_" + k), rcx)
+        storei(a, rip("run_used_" + k), 0)
+        storei(a, rip("run_open_" + k), 1)
+        call_to(a, "rt_alloc_raw")
+        store(a, rip("run_buf_" + k), rax)
+    end
+    if target is "linux" # a read that finds nothing waiting says so instead of waiting for it
+        for each k from 0 to 1
+            load(a, rdi, rip("run_read_" + k))
+            movi(a, rsi, 4)
+            movi(a, rdx, 0x800)
+            sys_call(a, 72)
+        end
+    end
+    mark(a, poll)
+    storei(a, rip("run_got"), 0)
+    for each k from 0 to 1
+        set next_stream to new_label(a)
+        set closed to new_label(a)
+        set roomy to new_label(a)
+        load(a, rax, rip("run_open_" + k))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, next_stream)
+        load(a, rax, rip("run_room_" + k)) # room for 4,096 bytes more
+        alu_load(a, "sub", rax, rip("run_used_" + k))
+        alui(a, "cmp", rax, 4096)
+        jcc(a, cc_ae, roomy)
+        load(a, rcx, rip("run_room_" + k))
+        alu(a, "add", rcx, rcx)
+        store(a, rip("run_room_" + k), rcx)
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, rdi, rax)
+        load(a, rsi, rip("run_buf_" + k))
+        load(a, rcx, rip("run_used_" + k))
+        store(a, rip("run_buf_" + k), rax)
+        rep_movsb(a)
+        mark(a, roomy)
+        if target is "windows"
+            set waiting_bytes to new_label(a)
+            win_enter(a) # how much is waiting: nothing to read now, or the pipe has closed
+            load(a, rcx, rip("run_read_" + k))
+            movi(a, rdx, 0)
+            movi(a, r8, 0)
+            movi(a, r9, 0)
+            lea(a, rax, mem(rsp, 48))
+            storei(a, mem(rsp, 48), 0)
+            store(a, mem(rsp, 32), rax)
+            storei(a, mem(rsp, 40), 0)
+            call_import(a, "imp_PeekNamedPipe")
+            mov32_rr(a, rbx, rax)
+            load32(a, rax, mem(rsp, 48))
+            win_leave(a)
+            test_rr(a, rbx, rbx)
+            jcc(a, cc_e, closed)
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, next_stream)
+            mark(a, waiting_bytes)
+            win_enter(a)
+            load(a, rcx, rip("run_read_" + k))
+            load(a, rdx, rip("run_buf_" + k))
+            alu_load(a, "add", rdx, rip("run_used_" + k))
+            movi(a, r8, 4096)
+            lea(a, r9, mem(rsp, 48))
+            storei(a, mem(rsp, 48), 0)
+            storei(a, mem(rsp, 32), 0)
+            call_import(a, "imp_ReadFile")
+            mov32_rr(a, rbx, rax)
+            load32(a, rax, mem(rsp, 48))
+            win_leave(a)
+            test_rr(a, rbx, rbx)
+            jcc(a, cc_e, closed)
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, closed)
+        else
+            set came to new_label(a)
+            set maybe_again to new_label(a)
+            load(a, rdi, rip("run_read_" + k))
+            load(a, rsi, rip("run_buf_" + k))
+            alu_load(a, "add", rsi, rip("run_used_" + k))
+            movi(a, rdx, 4096)
+            sys_call(a, 0)
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, closed)
+            jcc(a, cc_ns, came)
+            mark(a, maybe_again)
+            alui(a, "cmp", rax, -11) # nothing waiting just now
+            jcc(a, cc_e, next_stream)
+            alui(a, "cmp", rax, -4) # interrupted
+            jcc(a, cc_e, next_stream)
+            jmp_to(a, closed)
+            mark(a, came)
+        end
+        alu_store(a, "add", rip("run_used_" + k), rax)
+        alu_store(a, "add", rip("run_got"), rax)
+        jmp_to(a, next_stream)
+        mark(a, closed)
+        storei(a, rip("run_open_" + k), 0)
+        mark(a, next_stream)
+    end
+    load(a, rax, rip("run_open_0"))
+    alu_load(a, "or", rax, rip("run_open_1"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, read_all)
+    load(a, rax, rip("run_got"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, poll)
+    if target is "windows" # nothing came from either: a moment's wait, so this doesn't spin
+        win_enter(a)
+        movi(a, rcx, 1)
+        call_import(a, "imp_Sleep")
+        win_leave(a)
+    else
+        storei(a, rip("run_wait"), 0)
+        movi(a, rax, 1000000)
+        store(a, rip_plus("run_wait", 8), rax)
+        lea(a, rdi, rip("run_wait"))
+        movi(a, rsi, 0)
+        sys_call(a, 35)
+    end
+    jmp_to(a, poll)
+    mark(a, read_all)
+    call_to(a, "rt_shut_pipes")
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_shut_pipes: the pipes this program still holds are closed, and forgotten
+    mark(a, "rt_shut_pipes")
+    for each k from 0 to 1
+        for each which in list of "run_read_" + k, "run_write_" + k
+            set none to new_label(a)
+            load(a, rax, rip(which))
+            alui(a, "cmp", rax, -1)
+            jcc(a, cc_e, none)
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, none)
+            if target is "windows"
+                win_enter(a)
+                mov_rr(a, rcx, rax)
+                call_import(a, "imp_CloseHandle")
+                win_leave(a)
+            else
+                mov_rr(a, rdi, rax)
+                sys_call(a, 3)
+            end
+            storei(a, rip(which), -1)
+            mark(a, none)
+        end
+    end
+    ret(a)
+
+    if target is "windows"
+        # rt_make_pipe: a pipe the program it starts may write to: the read end in rax, which stays this
+        # program's own, and the write end in rdx; or rax -1, with the system's code in rdx
+        set pipe_failed to new_label(a)
+        mark(a, "rt_make_pipe")
+        win_enter(a)
+        lea(a, rax, mem(rsp, 64)) # it may have the handles the pipe is made with
+        storei(a, mem(rax, 0), 24)
+        storei(a, mem(rax, 8), 0)
+        storei(a, mem(rax, 16), 1)
+        mov_rr(a, r8, rax)
+        lea(a, rcx, mem(rsp, 48))
+        lea(a, rdx, mem(rsp, 56))
+        movi(a, r9, 0)
+        call_import(a, "imp_CreatePipe")
+        test32(a, rax)
+        jcc(a, cc_e, pipe_failed)
+        load(a, rcx, mem(rsp, 48)) # but not the end this program reads
+        movi(a, rdx, 1)
+        movi(a, r8, 0)
+        call_import(a, "imp_SetHandleInformation")
+        load(a, rax, mem(rsp, 48))
+        load(a, rdx, mem(rsp, 56))
+        win_leave(a)
+        ret(a)
+        mark(a, pipe_failed)
+        call_import(a, "imp_GetLastError")
+        mov32_rr(a, rdx, rax)
+        win_leave(a)
+        movi(a, rax, -1)
+        ret(a)
+    end
 end
 
 # rt_remove_file: xmm0 a file's name: rax 0 once it is gone; or rax 2 with err_why 20 (the name isn't
@@ -14668,9 +14996,11 @@ to emit_run_why with a
     set w30 to new_label(a)
     set w31 to new_label(a)
     set w32 to new_label(a)
+    set w33 to new_label(a)
     mark(a, "rt_why_run")
     load(a, rax, rip("err_why"))
-    for each pair in list of (list of 29, w29), (list of 30, w30), (list of 31, w31), (list of 32, w32)
+    for each pair in list of (list of 29, w29), (list of 30, w30), (list of 31, w31), (list of 32, w32),
+        (list of 33, w33)
         alui(a, "cmp", rax, item 1 of pair)
         jcc(a, cc_e, item 2 of pair)
     end
@@ -14696,6 +15026,9 @@ to emit_run_why with a
     file_name_text(a)
     b_text(a, "'")
     ret(a)
+    mark(a, w33)
+    b_text(a, too_big)
+    ret(a)
 end
 
 # ---------- what can't become machine code yet ----------
@@ -14704,7 +15037,7 @@ set node_words to dictionary where "list" is "a list", "record" is "a record", "
     "length" is "'length of'", "item" is "'item'", "field" is "a record's field",
     "random" is "'random number'", "builtin" is "this", "each" is "'for each ... in'",
     "setItem" is "'set item'", "setField" is "setting a field", "when" is "'when'", "every" is "'every'",
-    "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'", "expect" is "'expect'"
+    "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'"
 
 to not_yet with at, what
     fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions (as values too, and made inside functions), try, files, ask, arguments and most of the helpers can")
@@ -15398,6 +15731,8 @@ to gen_statement with fc, s
         gen_expr(fc, target of s)
         call_to(a, "rt_remove_file")
         why_stub(fc, at of s, "rt_why_file")
+    else if what is "expect"
+        gen_expect(fc, s)
     else if what is "exit"
         gen_exit(fc, s)
     else if what is "turtle"
@@ -15432,6 +15767,80 @@ to gen_exit with fc, s
         leave_cold(a, was)
     end
     jmp_to(a, "rt_finish")
+end
+
+# `expect total(2, 3) is 5`: the comparison the engines make, and if it doesn't hold, the mistake they
+# make of it, which says what each side was. Both values wait on the stack, so the message can show them
+# after the comparison.
+to gen_expect with fc, s
+    set a to a of fc
+    set c to cond of s
+    if kind of c is not "compare" # `expect done`: the value must count as yes
+        gen_expr(fc, c)
+        movsd_store(a, rip("err_a"), xmm0)
+        truth_test(a)
+        set not_yes to new_label(a)
+        jcc(a, cc_b, not_yes)
+        set was to enter_cold(a)
+        mark(a, not_yes)
+        stub_start(fc, at of s)
+        stub_text(a, "expected yes, but got ")
+        load(a, rax, rip("err_a"))
+        movi(a, rdx, 1)
+        call_to(a, "rt_e_shown")
+        jmp_to(a, "rt_e_end")
+        leave_cold(a, was)
+        return nothing
+    end
+    set test to item (op of c) of compare_names
+    gen_pair(fc, left of c, right of c)
+    push_value(fc)
+    movapd(a, xmm0, xmm1)
+    push_value(fc)
+    movsd_load(a, xmm1, mem(rsp, 0))
+    movsd_load(a, xmm0, mem(rsp, 8))
+    call_to(a, "rt_cmp_" + test)
+    set kinds_wrong to new_label(a)
+    set not_so to new_label(a)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_a, kinds_wrong)
+    if negate of c
+        alui(a, "xor", rax, 1)
+    end
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, not_so)
+    alui(a, "add", rsp, 16)
+    set pushed of fc to pushed of fc - 2
+    set was to enter_cold(a)
+    mark(a, not_so) # the two values are still on the stack here
+    stub_start(fc, at of s)
+    stub_text(a, "expected ")
+    load(a, rax, mem(rsp, 8))
+    movi(a, rdx, 1)
+    call_to(a, "rt_e_shown")
+    set middle to " to be"
+    if negate of c
+        set middle to " not to be"
+    end
+    if op of c is not "is"
+        set middle to middle + " " + op of c
+    end
+    stub_text(a, middle + " ")
+    load(a, rax, mem(rsp, 0))
+    movi(a, rdx, 1)
+    call_to(a, "rt_e_shown")
+    jmp_to(a, "rt_e_end")
+    mark(a, kinds_wrong)
+    if test is "div"
+        set kinds_only to new_label(a)
+        load(a, rax, rip("err_why"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, kinds_only)
+        jmp_to(a, fail_stub(fc, at of s, "can't divide by zero"))
+        mark(a, kinds_only)
+    end
+    two_kinds(fc, at of s, "can't check if ", " is " + op of c + " ") # the engines point at the `expect`
+    leave_cold(a, was)
 end
 
 to gen_loop_body with fc, body, exit
@@ -15936,8 +16345,12 @@ to gen_expr with fc, e
             alui(a, "add", rsp, 8 * n)
             set pushed of fc to pushed of fc - n
         end
-    else if what is "builtin" and name of e is "run program"
+    else if what is "builtin" and (name of e is "run program" or name of e is "run program keeping")
         gen_pair(fc, item 1 of args of e, item 2 of args of e)
+        movi(a, rdx, 0)
+        if name of e is "run program keeping"
+            movi(a, rdx, 1)
+        end
         call_to(a, "rt_run_program")
         why_stub(fc, at of e, "rt_why_run")
     else if what is "builtin" and name of e is "keys"

@@ -243,7 +243,7 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
-    "average", "largest", "smallest", "run program"
+    "average", "largest", "smallest", "run program", "run program keeping"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -1198,15 +1198,20 @@ to parse with tokens, reading
             set aggregate_args to list of column_or(no)
             return record with kind "builtin", name value of t, args aggregate_args, at t
         end
-        if is_word("run") and runs_program() # `run program "tool.exe" with (list of "a")`
+        if is_word("run") and runs_program() # `run program "tool.exe" with (list of "a") keeping its output`
             set pos to pos + 2
             set program to additive()
             set inputs to record with kind "list", items empty list, at t
             if not nl of peek() and word("with")
                 set inputs to additive()
             end
+            set run_name to "run program"
+            if not nl of peek() and is_word("keeping") and word_at(pos + 1, "its") and word_at(pos + 2, "output")
+                set pos to pos + 3
+                set run_name to "run program keeping"
+            end
             set run_args to list of program, inputs
-            return record with kind "builtin", name "run program", args run_args, at t
+            return record with kind "builtin", name run_name, args run_args, at t
         end
         # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
         if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"

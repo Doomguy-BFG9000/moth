@@ -408,6 +408,8 @@ end
 
 say "that went wrong" to the error output   # not the normal output: for what went wrong
 set code to run program "git" with (list of "status")   # start a program, wait, and take its number
+set answer to run program "git" with (list of "log") keeping its output
+say code of answer " " length of output of answer " " mistakes of answer
 if code is not 0
     stop the program with 1                 # end the whole program, with a number from 0 to 255
 end
@@ -564,6 +566,7 @@ moth build hello.moth                    compile it to machine code: hello.exe, 
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
 moth check hello.moth                    find problems in it without running it
+moth test hello.test.moth                run every test_ function in it, each in a run of its own
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
@@ -575,8 +578,22 @@ beside the source (`hello-run.exe`, or `hello-run` on Linux), gives it
 everything written after the file as its arguments and this terminal's own
 input and output, waits for it, removes the file, and ends with the number the
 program ended with. The `--allow` flags go before the file, since what comes
-after it is the program's own. `moth tidy` takes any number of files; `moth
-check` one.
+after it is the program's own. `moth tidy` and `moth test` take any number of
+files; `moth check` one.
+
+`moth test` runs each test on its own, in a run of its own, so one test can't
+spoil another: it builds the file once, then starts it once for each test, and
+keeps what the test said to show under it if it fails.
+
+```text
+$ moth test tools/json.test.moth
+✓ test_values
+✓ test_lists_and_objects
+✓ test_spaces_and_lines
+✓ test_escapes
+✓ test_mistakes
+5 passed
+```
 
 A program moth makes asks before it reads a file, writes one, goes online, or
 starts another program, the way Deno does: at a terminal you're asked, once for
@@ -604,10 +621,9 @@ output, so a program's own words stay clean; `moth` ends with 1 for a mistake,
 2 when it doesn't understand what it was asked, and for `moth run` with
 whatever the program ended with.
 
-Until 1.5 Moth also had a command line written for Node.js, with `moth test`, a
-shell and builds to JavaScript and web pages. Those went with the Rust engine;
-`moth test` isn't back yet, and the debugger and finding problems as you type
-are the playground's.
+Until 1.5 Moth also had a command line written for Node.js, with a shell and
+builds to JavaScript and web pages. Those went with the Rust engine; the
+debugger and finding problems as you type are the playground's.
 
 ## Without JavaScript
 
@@ -726,11 +742,13 @@ calls that led there.
   far more than they keep; and a tool's files, arguments, answers and `--allow`
   flags against what `moth run` did
 - the commands moth.exe has: a program it builds that starts another program,
-  waits for it and removes a file; `moth run` passing arguments, input, output
-  and the number a program ended with through, and leaving nothing behind;
-  `moth tidy` on every Moth file here and on programs broken on purpose, each
-  tidied to exactly the bytes `format()` makes; and `moth check` against the
-  checker, its own problems word for word
+  waits for it and removes a file, and one that keeps what another said, from
+  both its outputs, more of it than a pipe holds; `moth run` passing arguments,
+  input, output and the number a program ended with through, and leaving
+  nothing behind; `moth tidy` on every Moth file here and on programs broken on
+  purpose, each tidied to exactly the bytes `format()` makes; `moth check`
+  against the checker, its own problems word for word; and `moth test` on the
+  tests in Moth here, said exactly as `test()` says them
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -762,7 +780,7 @@ unboxed numbers were all caught, some only by the fuzzer.
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
 - `moth build` takes only part of Moth so far: no units, tables,
-  `random number`, `draw chart of` or `expect`; anything else stops with a
+  `random number` or `draw chart of`; anything else stops with a
   mistake that says it can't become machine code yet. What it makes can't go
   online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
@@ -771,10 +789,14 @@ unboxed numbers were all caught, some only by the fuzzer.
   colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only
   opens at a terminal or when started from Explorer: with its output going to
   a file or another program, a program runs as it would on Linux.
-- `say ... to the error output`, `stop the program`, `run program` and `remove
-  the file` only work in a program `moth build` makes: in the playground and
-  the tests, the error output is shown as a mistake is and an exit code just
-  ends the run, and starting a program is a mistake that says so.
+- `say ... to the error output`, `stop the program`, `run program` (with or
+  without `keeping its output`) and `remove the file` only work in a program
+  `moth build` makes: in the playground and the tests, the error output is
+  shown as a mistake is and an exit code just ends the run, and starting a
+  program is a mistake that says so.
+- `moth test` needs its files named: a program in machine code can't look
+  through a folder yet, so `moth test` on its own doesn't find every
+  `.test.moth` file the way the Node.js command line did.
 - A program ends with a number from 0 to 255, which is all Linux keeps. A
   program `run program` starts gives back the number the system reports: on
   Linux the number it ended with, or 128 and the signal's number if one ended
