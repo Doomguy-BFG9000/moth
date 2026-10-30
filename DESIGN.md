@@ -1155,3 +1155,91 @@ hold them to agreeing.
   which read a drawn 1 and a drawn 2.
 - **Linux has no window yet.** A program there draws into the list and shows
   nothing, and an app sets up and ends.
+
+## 29. The moth command, complete
+
+- **What it was missing.** moth.exe could only `moth build`: a program's
+  mistakes went to the normal output, it couldn't end with a code of its own,
+  and running, tidying and checking a program had gone with the Node.js command
+  line in 1.6. All four needed something Moth itself couldn't do, so the
+  language grew first.
+- **Two ways to end, in words Moth already has.** A new reserved word breaks
+  every program that used it as a name, so both phrases are built from words
+  Moth already keeps: `say "oops" to the error output` is `say` with a target,
+  the way `write ... to` has one, and `stop the program with 2` is `stop`
+  followed by words that could never have meant anything else (`stop` alone
+  still only leaves a loop, and `the` and `program` are still names). The
+  number is a whole number from 0 to 255, which is all Linux keeps of it, so a
+  program ends the same way on both systems. Nothing catches it: a `stop the
+  program` inside a `try` ends the program, as running out of steps does.
+- **Starting a program.** `run program "git" with (list of "status")` gives
+  back the number it ended with. `run program` reads like the two words it is,
+  and `run` on its own is still a name, so only `run program` together starts
+  one; it gives a value, so a line of its own that starts with it says to write
+  `set code to run program ...` instead. `remove the file "old.txt"` is
+  `remove`, which already removes a dictionary's keys, with `the file` after
+  it. Every phrase works the same in all three JavaScript engines, in the
+  compiler written in Moth (whose JavaScript and bytecode are still byte for
+  byte what moth.js makes), and in machine code; in the playground and the
+  tests the error output is shown the way a mistake is, an exit code just ends
+  the run, and starting a program is a mistake that says only a program
+  `moth build` makes can.
+- **In machine code.** The error output goes out at once, after whatever the
+  normal output has waiting, so the two stay in the order they were said.
+  `stop the program` flushes and ends through one ending the runtime shares
+  with a program that just finishes, so what was drawn still gets its window.
+  A program is started with `CreateProcessW` and waited for with
+  `WaitForSingleObject` and `GetExitCodeProcess` on Windows, where the command
+  line is put together and quoted as Rust's `std::process` does it; on Linux
+  with `fork`, `execve` and `wait4`, where a name with no `/` in it is looked
+  for in each folder of PATH first, as `execvp` does, since a bare `execve`
+  searches nothing. A signal that ends it gives 128 and the signal's number, as
+  a shell does. The program it starts gets this program's own input and output,
+  so what it says goes where this program's words go.
+- **Asked for, like a file.** Starting a program is a fourth thing a program
+  may do, beside reading a file, writing one and going online: `--allow-run`
+  (Deno's name) lets it without asking, `--allow-all` covers it, and otherwise
+  a person at a terminal is asked "moth: let this program run 'git'?" once for
+  each program, or for all of them with `a`. Away from a terminal the answer is
+  no, and the refusal is a mistake a `try` can catch. `--allow-run` names
+  nothing: a program may start programs, or it may not. moth.exe itself is
+  built with it, since `moth run` starts what it built.
+- **`moth run`.** It builds the program into a file beside its source
+  (`hello-run.exe`, or `hello-run` on Linux, with `./` in front when the source
+  has no folder, so the system looks for it there and nowhere else), starts it
+  with whatever was written after the file, waits, removes the file, and ends
+  with the program's number. A number no system can end with (Windows gives a
+  crash a huge one) becomes 1.
+- **`moth tidy`.** `format()` in moth.js, in Moth. It needed two things from
+  the parser, which only the parser knows: how deep in blocks each statement
+  starts, and which pieces are written with no space after them (a negating
+  minus, a call's bracket). compiler.moth's parser now writes both into the
+  `reading` record when it's asked to, as moth.js's does, and machine.moth
+  hands them to the command line. The rest is in moth.moth: one line's pieces
+  as they were written, counted in the columns the parser counts, then the
+  lines joined the one way Moth writes them. After tidying, the pieces are
+  read again and must be the same pieces in the same order, as moth.js checks;
+  a mistake in the code is a mistake, and the file is left alone.
+- **`moth check`.** checker.js finds two kinds of problem: what the scope rules
+  know (a name nothing ever sets, a line that can never run, a name set or made
+  and never used), and what its types know, which it gets by trying an
+  operation on sample values of the types it worked out — every one of Moth's
+  operations, through the same code the VM runs. The first kind is the scope
+  rules compiler.moth already has, so `moth check` does those, in the checker's
+  words (the same `undefined_message`, with the same "Did you mean") and in the
+  checker's order. The second kind would mean writing all of vm.js in Moth
+  again; the playground's Problems pane has it. A call to a name nothing sets
+  doesn't look at what it was given, as the checker doesn't, so the same
+  "never used" warnings come out.
+- **Checked.** Every command runs as a process against what moth.js does:
+  `moth tidy` on every Moth file here and on programs broken on purpose, each
+  tidied to exactly the bytes `format()` makes and tidy again the second time;
+  `moth check` against `check()` with its type warnings taken away, word for
+  word and in order; `moth run` passing arguments, input, output and the number
+  a program ended with through, and leaving nothing behind; and a program that
+  starts another, with and without `--allow-run`. The phrases themselves are
+  held to the three JavaScript engines, the compiler written in Moth, and
+  machine code, on Windows and on Linux.
+- **What's left.** `moth test` is not back yet: the test runner needs `expect`
+  in machine code, and a way to keep what a program it started said, so each
+  test's own output can be shown under it the way moth.js's `test()` shows it.

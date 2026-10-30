@@ -206,7 +206,7 @@ other compiler, and builds itself into exactly the bytes Node.js built it into,
 in about 3 seconds:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write
+$ moth build moth.moth --allow-read --allow-write --allow-run
 compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (81,408 bytes)
@@ -401,8 +401,15 @@ say math's sqrt(2)
 
 set notes to read "notes.txt"               # files: read, read bytes, write ... to
 write uppercase of notes to "loud.txt"
+remove the file "loud.txt"                  # there must be a file of that name
 for each word in arguments                  # tool a b c, once moth build made tool
     say word
+end
+
+say "that went wrong" to the error output   # not the normal output: for what went wrong
+set code to run program "git" with (list of "status")   # start a program, wait, and take its number
+if code is not 0
+    stop the program with 1                 # end the whole program, with a number from 0 to 255
 end
 
 set block to 4 bytes                        # memory: bytes from 0 to 255
@@ -554,21 +561,33 @@ source with Node.js: `node bootstrap.mjs`.
 
 ```text
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
+moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
+moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
+moth check hello.moth                    find problems in it without running it
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
-moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-all)
+moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
-moth build moth.moth --allow-read --allow-write    moth, built by itself
+moth build moth.moth --allow-read --allow-write --allow-run    moth, built by itself
 ```
 
-A program moth makes asks before it reads a file, writes one, or goes online,
-the way Deno does: at a terminal you're asked, once for each file or site (or
-`a` for all of them); anywhere else, such as in a script, the answer is no
-unless it was built with `--allow-read`, `--allow-write`, `--allow-net` or
-`--allow-all`. The first three can name what they allow:
-`--allow-read=data,notes.txt` lets it read those files and everything in those
-folders, wherever their links lead; `--allow-net=example.com` that site. `use`
-only reads files in the program's own folder, or folders inside it. A refusal
-is a mistake the program can catch with `try`:
+`moth run` is `moth build` and then the program: it builds it into a file
+beside the source (`hello-run.exe`, or `hello-run` on Linux), gives it
+everything written after the file as its arguments and this terminal's own
+input and output, waits for it, removes the file, and ends with the number the
+program ended with. The `--allow` flags go before the file, since what comes
+after it is the program's own. `moth tidy` takes any number of files; `moth
+check` one.
+
+A program moth makes asks before it reads a file, writes one, goes online, or
+starts another program, the way Deno does: at a terminal you're asked, once for
+each file, site or program (or `a` for all of them); anywhere else, such as in a
+script, the answer is no unless it was built with `--allow-read`,
+`--allow-write`, `--allow-net`, `--allow-run` or `--allow-all`. The first three
+can name what they allow: `--allow-read=data,notes.txt` lets it read those files
+and everything in those folders, wherever their links lead;
+`--allow-net=example.com` that site. `use` only reads files in the program's own
+folder, or folders inside it. A refusal is a mistake the program can catch with
+`try`:
 
 ```text
 $ moth build copy.moth
@@ -580,10 +599,15 @@ write uppercase of read "notes.txt" to "loud.txt"
                    ^
 ```
 
-Until 1.5 Moth also had a command line written for Node.js, with `moth run`,
-`moth test`, `moth fmt`, a shell and builds to JavaScript and web pages. It's
-gone with the Rust engine; running a program without building it, tidying it
-and finding its problems as you type are the playground's now.
+A mistake in a program, and what `moth` itself says went wrong, go to the error
+output, so a program's own words stay clean; `moth` ends with 1 for a mistake,
+2 when it doesn't understand what it was asked, and for `moth run` with
+whatever the program ended with.
+
+Until 1.5 Moth also had a command line written for Node.js, with `moth test`, a
+shell and builds to JavaScript and web pages. Those went with the Rust engine;
+`moth test` isn't back yet, and the debugger and finding problems as you type
+are the playground's.
 
 ## Without JavaScript
 
@@ -595,7 +619,7 @@ by byte, with no assembler, linker or other compiler, and
 machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write
+$ moth build moth.moth --allow-read --allow-write --allow-run
 compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
 ```
 
@@ -701,6 +725,12 @@ calls that led there.
   the same bytes; every character's upper and lower case; programs that make
   far more than they keep; and a tool's files, arguments, answers and `--allow`
   flags against what `moth run` did
+- the commands moth.exe has: a program it builds that starts another program,
+  waits for it and removes a file; `moth run` passing arguments, input, output
+  and the number a program ended with through, and leaving nothing behind;
+  `moth tidy` on every Moth file here and on programs broken on purpose, each
+  tidied to exactly the bytes `format()` makes; and `moth check` against the
+  checker, its own problems word for word
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -741,9 +771,23 @@ unboxed numbers were all caught, some only by the fuzzer.
   colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only
   opens at a terminal or when started from Explorer: with its output going to
   a file or another program, a program runs as it would on Linux.
-- moth.exe can't write to the error output or end with a code of its own, as
-  Moth has no way to yet, so a mistake in the program it builds is shown on the
-  normal output, and a line from moth.moth after it.
+- `say ... to the error output`, `stop the program`, `run program` and `remove
+  the file` only work in a program `moth build` makes: in the playground and
+  the tests, the error output is shown as a mistake is and an exit code just
+  ends the run, and starting a program is a mistake that says so.
+- A program ends with a number from 0 to 255, which is all Linux keeps. A
+  program `run program` starts gives back the number the system reports: on
+  Linux the number it ended with, or 128 and the signal's number if one ended
+  it; on Windows whatever it ended with, which for a crash is a huge number, so
+  `moth run` ends with 1 instead of passing one of those on. On Linux a program
+  that `run program` names without a `/` is looked for in PATH, as a shell looks
+  for it, and one it finds but may not run is "no program called that"; Windows
+  lets the system look, and says what it says.
+- `moth check` leaves out the checker's "will fail" warnings that come from the
+  types it works out (`"a" - 1`, `item 4 of (list of 1, 2)`), since those need
+  every one of Moth's operations again in Moth. It finds a name nothing ever
+  sets, a line that can never run, and a name set or made and never used, in
+  the checker's own words. The playground's Problems pane finds all of them.
 - JavaScript stops code nested more deeply than its stack allows (about 900
   brackets, or a list held 2,000 deep) with a mistake.
 
