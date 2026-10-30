@@ -19,10 +19,21 @@ let app = null; // the running app, once the program has set it up
 let lines = [];
 let drawn = [];
 let sent = 0;
+// A picture drawn again and again (a game's sprite) goes to the page once: the drawing names it by number.
+const pictureIds = new Map();
+let pictures = []; // [number, image] for each picture drawn for the first time since the last message
+const pictureId = (image) => {
+  if (!pictureIds.has(image)) {
+    pictureIds.set(image, pictureIds.size);
+    pictures.push([pictureIds.size - 1, image]);
+  }
+  return pictureIds.get(image);
+};
 const flush = () => {
-  if (lines.length || drawn.length) postMessage({ lines, drawn });
+  if (lines.length || drawn.length) postMessage({ lines, drawn, pictures });
   lines = [];
   drawn = [];
+  pictures = [];
   sent = performance.now();
 };
 const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
@@ -30,10 +41,11 @@ const due = () => performance.now() - sent > 50 && flush(); // stream while the 
 let source = "";
 let files = {};
 // A mistake ends the program, or the app; anything else that goes wrong is Moth's own.
-// A page has no files of its own: `write` makes them, for this run. `read "https://..."` reads a site, if the
-// site lets pages read it; the browser keeps the program to what any page can do.
-function pageDisk() {
-  const files = memoryDisk();
+// A page's files are the ones picked or dropped on it (`start`, by name), and `write` makes more, for this
+// run. `read "https://..."` reads a site, if the site lets pages read it; the browser keeps the program to
+// what any page can do.
+function pageDisk(start) {
+  const files = memoryDisk(start);
   return {
     read: (name, asBytes) => {
       if (!/^https?:\/\//i.test(name)) return files.read(name, asBytes);
@@ -89,7 +101,7 @@ function handle(run) {
 onmessage = ({ data }) => {
   if (data.event) return handle(() => app.send(data.event, data.inputs)); // a key or a click, from the page
   ({ source, files = {} } = data);
-  const { engine, answers = [], seed = 1 } = data;
+  const { engine, answers = [], seed = 1, disk = {} } = data;
   let said = 0;
   let total = 0;
   let pictured = 0; // drawn since the last clear
@@ -122,13 +134,13 @@ onmessage = ({ data }) => {
       draw: (d) => {
         total++;
         if (d.clear) pictured = 0;
-        if (++pictured <= MAX_DRAWN) drawn.push(d);
+        if (++pictured <= MAX_DRAWN) drawn.push(d.shape === "picture" ? { ...d, image: pictureId(d.image) } : d);
         due();
       },
       engine,
       ask,
       files: (name) => files[name],
-      disk: pageDisk(), // a page has no files of its own: `write` makes them, for this run
+      disk: pageDisk(disk), // the files picked or dropped on the page, and what `write` makes, for this run
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
       printError: sayError,
       exit: (code) => (stopped = code),
