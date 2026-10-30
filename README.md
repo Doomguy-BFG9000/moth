@@ -12,7 +12,7 @@ Written from scratch in JavaScript, with no dependencies.</p>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
-<a href="https://github.com/samyyy2423/moth/releases/tag/v1.5.1">Release 1.5.1</a>
+<a href="https://github.com/samyyy2423/moth/releases/tag/v1.7.0">Release 1.7</a>
 </p>
 
 <p>
@@ -203,13 +203,13 @@ line, written in Moth: it reads a program and the files it uses, compiles it
 with machine.moth and writes the program it makes. Made into machine code, it's
 `moth.exe` (`moth` on Linux), which needs neither JavaScript nor Rust, nor any
 other compiler, and builds itself into exactly the bytes Node.js built it into,
-in about 3 seconds:
+in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
 $ moth build tools/wordcount.moth --allow-read
-compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (81,408 bytes)
+compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (86,016 bytes)
 $ tools/wordcount.exe tools/story.txt 3
 290 words, 107 different ones
 the  ██████████████████████████████ 45
@@ -637,10 +637,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (7,947,264 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (10,662,912 bytes)
 ```
 
-That's the same 7,947,264 bytes Node.js made of it, and the moth.exe they make
+That's the same 10,662,912 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -780,8 +780,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   dictionaries JavaScript's engine, which has years of tuning behind it, is
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
-- `moth build` takes only part of Moth so far: no units, tables,
-  `random number` or `draw chart of`; anything else stops with a
+- `moth build` takes only part of Moth so far: no units, tables or
+  `draw chart of`; anything else stops with a
   mistake that says it can't become machine code yet. What it makes can't go
   online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
