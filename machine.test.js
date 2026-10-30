@@ -3,7 +3,8 @@
 // exactly as the JavaScript engine does. Windows and Linux only.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +55,8 @@ function onEngine(source, name) {
 test("machine code says, fails and exits exactly as the JavaScript engine does", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
   const sources = [...MACHINE_CASES, ...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s),
-    ...brokenPrograms(11, 300), ...machinePrograms(2026, 400)];
+    // half an emoji, which the fuzzer can make, can't be in a file: machine code shows it as U+FFFD
+    ...brokenPrograms(11, 300).filter((source) => !/[\ud800-\udfff]/u.test(source)), ...machinePrograms(2026, 400)];
   let made = 0;
   try {
     sources.forEach((source, i) => {
@@ -744,6 +746,162 @@ test("moth.exe builds --allow flags in, and its program reads, writes, asks and 
   } finally {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Going online: a program reads sites from a server of this test's own, on 127.0.0.1 over plain http, so
+// nothing here needs the internet. What it must say is what moth-native (Moth's Rust engine, which went
+// online with curl) said: the page's text or bytes, a move to another address followed only where the
+// program may go, and any other answer from 300 up, a refused connection or an address that can't be one
+// a mistake in the same words, on Windows (WinHTTP) and on Linux (curl) alike.
+const ONLINE_SOURCE = [
+  "set base to item 1 of arguments",
+  "set nobody to item 2 of arguments",
+  "to show with address, as_bytes",
+  "    try",
+  "        if as_bytes",
+  "            say read bytes address",
+  "        else",
+  "            set page to read address",
+  "            if length of page is greater than 100",
+  '                say length of page " characters, ending " item (length of page) of page',
+  "            else",
+  '                say "[" page "]"',
+  "            end",
+  "        end",
+  "    if it fails with why",
+  "        say why",
+  "    end",
+  "end",
+  'for each path in list of "/text", "/moved", "/twice", "/far", "/loop", "/ftp", "/nowhere", "/missing", "/broken", "/empty", "/big"',
+  "    show(base + path, no)",
+  "end",
+  'show(base + "/bytes", yes)',
+  "show(nobody, no)",
+  'show("http://127.0.0.1:99999/", no)',
+  'show("http://127.0.0.1/a page", no)',
+].join("\n");
+const BIG_PAGE = "0123456789abcdef".repeat(200_000); // 3.2 MB
+
+// a server of the test's own; what it answers is in `routes`, by path
+async function siteServer() {
+  const server = createServer((req, res) => {
+    const port = server.address().port;
+    const routes = {
+      "/text": [200, {}, Buffer.concat([Buffer.from("héllo\nwörld "), Buffer.from([0xff]), Buffer.from("!")])],
+      "/bytes": [200, {}, Buffer.from([0, 1, 2, 254, 255, 10, 13])],
+      "/moved": [302, { location: "/text" }, ""],
+      "/twice": [307, { location: "moved" }, ""], // in the same folder, then on again
+      "/far": [301, { location: `http://localhost:${port}/text` }, ""], // to another host
+      "/loop": [302, { location: "/loop" }, ""],
+      "/ftp": [302, { location: "ftp://example.com/file" }, ""],
+      "/nowhere": [303, {}, "moved, but it doesn't say where"],
+      "/missing": [404, {}, "not here"],
+      "/broken": [500, {}, "oops"],
+      "/empty": [204, {}, ""],
+      "/big": [200, {}, BIG_PAGE],
+    };
+    const [status, headers, body] = routes[req.url] ?? [404, {}, ""];
+    res.writeHead(status, headers);
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return server;
+}
+
+// a port on 127.0.0.1 nothing listens on
+async function unusedPort() {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+// a program run while this one goes on, so the server above can answer it
+function runWhileServing(exe, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    let [stdout, stderr] = ["", ""];
+    child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.on("error", reject);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, status });
+    });
+    child.stdin.end(); // away from a terminal, so nothing is asked
+  });
+}
+
+// what the program says with --allow-net, or with only some sites allowed
+function online(base, nobody, { refused = () => false } = {}) {
+  const port = new URL(base).port;
+  const cant = (path, why) => `can't read '${base}${path}': ${why}`;
+  const notAllowed = "this program isn't allowed to go online (start it with --allow-net)";
+  const read = (path, page) => (refused(base) ? cant(path, notAllowed) : page);
+  return [
+    read("/text", "[héllo\nwörld �!]"),
+    read("/moved", "[héllo\nwörld �!]"),
+    read("/twice", "[héllo\nwörld �!]"),
+    read("/far", refused(`http://localhost:${port}/text`) ? cant("/far", `it moved to 'http://localhost:${port}/text', and ${notAllowed}`) : "[héllo\nwörld �!]"),
+    read("/loop", cant("/loop", "it moved too many times")),
+    read("/ftp", cant("/ftp", "it moved to 'ftp://example.com/file', which isn't a site")),
+    read("/nowhere", cant("/nowhere", "the site answered 303")),
+    read("/missing", cant("/missing", "the site answered 404")),
+    read("/broken", cant("/broken", "the site answered 500")),
+    read("/empty", "[]"),
+    read("/big", `${BIG_PAGE.length} characters, ending f`),
+    read("/bytes", "(7 bytes: 0, 1, 2, 254, 255, 10, 13)"),
+    refused(nobody) ? `can't read '${nobody}': ${notAllowed}` : `can't read '${nobody}': couldn't reach it (Failed to connect to 127.0.0.1 port ${new URL(nobody).port}: Couldn't connect to server)`,
+    refused("http://127.0.0.1:99999/") ? `can't read 'http://127.0.0.1:99999/': ${notAllowed}` : "can't read 'http://127.0.0.1:99999/': couldn't reach it (URL using bad/illegal format or missing URL)",
+    refused("http://127.0.0.1/a page") ? `can't read 'http://127.0.0.1/a page': ${notAllowed}` : "can't read 'http://127.0.0.1/a page': couldn't reach it (URL using bad/illegal format or missing URL)",
+    "",
+  ].join("\n");
+}
+
+test("a program reads sites: their text and bytes, moves to another address, and what can go wrong", { skip }, async () => {
+  const server = await siteServer();
+  const dir = mkdtempSync(join(tmpdir(), "moth-online-"));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const nobody = `http://127.0.0.1:${await unusedPort()}/`;
+    const exe = executable(dir, "online");
+    const local = (address) => /^https?:\/\/127\.0\.0\.1[:/]/i.test(address);
+    for (const [allow, refused] of [
+      [["--allow-net"], () => false],
+      [["--allow-all"], () => false],
+      [["--allow-net=127.0.0.1"], (address) => !local(address)], // a name allows its host on any port
+      [[`--allow-net=127.0.0.1:${server.address().port}`], (address) => !address.startsWith(base)], // or only on that one
+      [["--allow-net=localhost"], (address) => local(address)],
+      [[], () => true], // away from a terminal no one is asked, so nothing is allowed
+      [["--allow-read", "--allow-write"], () => true],
+    ]) {
+      writeFileSync(exe, machine(ONLINE_SOURCE, { target, name: "online.moth", allow }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = await runWhileServing(exe, [base, nobody], dir);
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: online(base, nobody, { refused }), stderr: "", status: 0 }, allow.join(" "));
+    }
+    // and `moth run`, which builds the --allow flags in the same way
+    const { exe: moth, dir: mothDir } = mothExe();
+    writeFileSync(join(mothDir, "online.moth"), ONLINE_SOURCE);
+    const ran = await runWhileServing(moth, ["run", "--allow-net=127.0.0.1", "online.moth", base, nobody], mothDir);
+    assert.deepEqual({ stdout: ran.stdout, stderr: ran.stderr, status: ran.status }, { stdout: online(base, nobody, { refused: (address) => !local(address) }), stderr: "", status: 0 });
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A program that never reads is the bytes it was before it could go online: only one that reads has the
+// code for it, and on Windows only one that reads imports WinHTTP.
+test("only a program that reads can go online, and only it imports WinHTTP", () => {
+  const imports = (bytes) => Buffer.from(bytes).includes(Buffer.from("WINHTTP.dll"));
+  assert.ok(!imports(machine('say "hello"\nwrite "x" to "out.txt"\n', { target: "windows", name: "w.moth", allow: ["--allow-all"] })));
+  assert.ok(imports(machine('say read "notes.txt"\n', { target: "windows", name: "r.moth" })));
+  const reads = (source) => machine(source, { target: "linux", name: "r.moth" });
+  assert.ok(!Buffer.from(reads('say "hello"\n')).includes(Buffer.from("%{http_code}")));
+  assert.ok(Buffer.from(reads('say read bytes "notes.txt"\n')).includes(Buffer.from("%{http_code}")));
 });
 
 // A program's picture as its window shows it, drawn into a file instead (MOTH_PICTURE) after the events

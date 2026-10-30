@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, Ended, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
+import { MothError, Ended, fail, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -120,6 +120,23 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const wordAt = (i, w) => tokens[i].type === "word" && tokens[i].value === w;
   // `run program "git" with (list of "status")`: `run` alone is still a name
   const runsProgram = () => wordAt(pos + 1, "program") && !tokens[pos + 1].nl;
+  // `load "scores.txt"`, `load name`: `load` alone, or with `of` after it, is still a name
+  const loadsFile = () => !tokens[pos + 1].nl && (tokens[pos + 1].type === "string"
+    || (tokens[pos + 1].type === "word" && !RESERVED.has(tokens[pos + 1].value) && tokens[pos + 1].value !== "of"));
+  // A phrase that starts with a word that could be a name: `wait 2 seconds`, `save x to "f"`. `parsed` reads the
+  // rest, and gives a node, or nothing if this isn't the phrase after all, which makes the line a call again.
+  function phrase(parsed) {
+    const start = pos;
+    let node = null;
+    try {
+      pos++;
+      node = parsed();
+    } catch (err) {
+      if (!(err instanceof MothError)) throw err;
+    }
+    if (!node) pos = start;
+    return node;
+  }
 
   function name(what) {
     const t = peek();
@@ -370,6 +387,31 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "turtle", action: "text", value: { ...place, items: [text, ...place.items, size] }, at: t };
     }
     if (isWord("run") && runsProgram()) fail(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'");
+    if (isWord("wait") && !tokens[pos + 1].nl) { // `wait 2 seconds`, `wait n milliseconds`: `wait` alone is still a name
+      const waiting = phrase(() => {
+        let amount = additive();
+        const timed = (e) => e.kind === "builtin" && e.name === "unit" && UNITS[unitNamed(e.args[1].value)][2] === 1;
+        let unit;
+        if (timed(amount)) { // `wait 2 seconds`: the number, and its unit
+          unit = unitNamed(amount.args[1].value);
+          amount = amount.args[0];
+        } else if (amount.kind === "negate" && timed(amount.operand)) { // `wait -2 seconds`, which is a mistake when it runs
+          unit = unitNamed(amount.operand.args[1].value);
+          amount = { ...amount, operand: amount.operand.args[0] };
+        } else if (unitAt(pos) && UNITS[unitNamed(peek().value)][2] === 1) unit = unitNamed(tokens[pos++].value); // `wait n seconds`
+        else return null;
+        return peek().nl ? { kind: "wait", amount, unit: UNITS[unit][3] * 1000, at: t } : null;
+      });
+      if (waiting) return waiting;
+    }
+    if (isWord("save") && !tokens[pos + 1].nl) { // `save scores to "scores.txt"`: `write` of what `load` reads back
+      const saving = phrase(() => {
+        const value = expression();
+        if (!word("to")) return null;
+        return { kind: "write", value: { kind: "builtin", name: "save", args: [value], at: t }, target: expression(), at: t };
+      });
+      if (saving) return saving;
+    }
     if (t.type === "word" && !RESERVED.has(t.value)) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
       pos++;
@@ -471,6 +513,18 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const unit = tokens[pos++];
       left = { kind: "builtin", name: "in", args: [left, { kind: "value", value: unit.value, at: unit }], at: t };
     }
+    // `scores in order`, `scores in reverse order`, `people in order by age`
+    if (converting && isWord("in") && !tokens[pos + 1].nl && (wordAt(pos + 1, "order") || (wordAt(pos + 1, "reverse") && wordAt(pos + 2, "order")))) {
+      const t = tokens[pos++];
+      const how = word("reverse") ? "reverse order" : "order";
+      pos++;
+      if (isWord("by") && !tokens[pos + 1].nl) {
+        pos++;
+        const field = peek();
+        return { kind: "builtin", name: `${how} by`, args: [left, { kind: "value", value: name("a field name"), at: field }], at: t };
+      }
+      return { kind: "builtin", name: how, args: [left], at: t };
+    }
     return left;
   }
 
@@ -567,6 +621,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const keeping = !peek().nl && isWord("keeping") && wordAt(pos + 1, "its") && wordAt(pos + 2, "output");
       if (keeping) pos += 3;
       return { kind: "builtin", name: keeping ? "run program keeping" : "run program", args: [program, inputs], at: t };
+    }
+    // `the time`, `the date`, `the year` ... `the weekday`, `the clock`
+    if (isWord("the") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word" && NOW_WORDS.includes(tokens[pos + 1].value)) {
+      pos += 2;
+      return { kind: "now", which: NOW_WORDS.indexOf(tokens[pos - 1].value), at: t };
+    }
+    if (isWord("load") && loadsFile()) { // `load "scores.txt"`: a value `save` wrote, read back
+      pos++;
+      return { kind: "builtin", name: "load", args: [{ kind: "read", bytes: false, of: additive(), at: t }], at: t };
     }
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
@@ -668,7 +731,8 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, READ_FOLDER } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
+  READ_FOLDER } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -878,6 +942,10 @@ class Compiler extends Scope {
         this.expr(s.target);
         this.emit(s.at, REMOVE_FILE);
         return;
+      case "wait":
+        this.expr(s.amount);
+        this.emit(s.at, WAIT, s.unit);
+        return;
       case "expect": // a comparison keeps both its sides, to say what they were
         if (s.cond.kind === "compare") {
           this.expr(s.cond.left);
@@ -995,6 +1063,9 @@ class Compiler extends Scope {
         this.expr(e.left);
         this.expr(e.right);
         this.emit(e.at, RANDOM);
+        return;
+      case "now":
+        this.emit(e.at, NOW, e.which);
         return;
       case "builtin":
         for (const arg of e.args) this.expr(arg);
@@ -1190,9 +1261,10 @@ export function format(source) {
 // `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
 // `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
 // for `use` (see build). `disk` holds the files `read` and `write` use (see readFile in vm.js, and memoryDisk
-// below), `args` is what `arguments` gives, and `random` gives the random numbers (seeded() unless given).
+// below), `args` is what `arguments` gives, `random` gives the random numbers (seeded() unless given), and
+// `clock` the time and the waiting (fakeClock() unless given: see vm.js).
 // A program that sets up handlers with `when` or `every` is an app: run() returns it, to be sent events.
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit } = {}) {
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock() } = {}) {
   const reading = { files, file };
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
   // Kept, so that running it again (below) gets the same, and writes nothing twice.
@@ -1209,6 +1281,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   };
   const answer = ask && kept(ask);
   const chance = kept(random);
+  const timer = { now: kept(() => clock.now()), since: kept(() => clock.since()), sleep: kept((ms) => clock.sleep(ms)) };
   const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)),
     remove: disk.remove && kept((name) => disk.remove(name)), folder: disk.folder && kept((name) => disk.folder(name)) };
   let program = null;
@@ -1226,7 +1299,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
 
   // The program on the VM. `again`: run from the start once more, as the JIT or WebAssembly engine handed it
   // over, getting everything from outside that the first run got, and passing on only what it hadn't said or
-  // drawn already. Moth programs can't read the clock, so a second run does exactly the same things.
+  // drawn already. The clock is from outside too, so a second run gets the same times, and doesn't wait again.
   function onVm(again) {
     let [next, skipSaid, skipDrawn, skipComplained] = [0, again ? said : 0, again ? drawn : 0, again ? complained : 0];
     const replay = (f) => f && (!again ? f : (...inputs) => {
@@ -1238,6 +1311,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     const say = (line) => skipSaid-- > 0 || print(line);
     const options = {
       maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove), folder: replay(drive.folder) }, args, random: replay(chance),
+      clock: { now: replay(timer.now), since: replay(timer.since), sleep: replay(timer.sleep) },
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
     };
     new Machine(compile(source, reading), say, options).run();
@@ -1261,7 +1335,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       try {
         // counted once passed on, so a hand-over in the middle of passing one on can't lose it
         program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance, host,
-          (line) => (printError(line), complained++));
+          (line) => (printError(line), complained++), timer);
       } catch (err) {
         if (!handOver(err)) throw err;
         host = onVm(true);
@@ -1419,8 +1493,8 @@ export function machineCompiler(machineSource, compilerSource) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random, printError } = {}) {
-  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random, printError });
+export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random, printError, clock } = {}) {
+  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random, printError, clock });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
@@ -1428,7 +1502,7 @@ export function debug(source, print = console.log, draw = undefined, ask = undef
 // (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step,
 // and `stop the program` with a `done` one that says what it `stopped` with. `answers` answer its questions,
 // in order, each shown after its question as a line of output; lines said to the error output are output too.
-export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args, random } = {}) {
+export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args, random, clock } = {}) {
   const said = [];
   const drawn = [];
   let asked = 0;
@@ -1437,7 +1511,7 @@ export function timeline(source, { limit = 10_000, answers = [], files, file, di
     said.push(`${question} ${answers[asked]}`);
     return answers[asked++];
   };
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args, random, printError: (line) => said.push(line) });
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args, random, printError: (line) => said.push(line), clock });
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;

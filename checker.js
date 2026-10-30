@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
-  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile, readFolder } from "./vm.js";
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile, NOW_WORDS, waitFor, fakeClock, readFolder } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -116,6 +116,8 @@ class Checker extends Scope {
       case "length":
       case "random":
         return () => "number";
+      case "now": // `the time`, `the date` and `the weekday` are text; the rest are numbers
+        return () => (["time", "date", "weekday"].includes(NOW_WORDS[e.which]) ? "text" : "number");
       case "builtin": {
         if (e.name === "unit" || e.name === "in") return () => unitType(e.args[1].value); // `5 km`, `trip in miles`
         const { gives } = BUILTINS.find((b) => b.name === e.name);
@@ -290,6 +292,12 @@ class Checker extends Scope {
         this.willFail(s.at, () => this.known(type()) && type() !== "text" && removeFile(SAMPLES[type()], null, found));
         return;
       }
+      case "wait": { // how long must be a number of 0 or more
+        this.expr(s.amount);
+        const type = this.type(s.amount);
+        this.willFail(s.at, () => this.known(type()) && waitFor(this.sample(s.amount), s.unit, fakeClock(), found));
+        return;
+      }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program
         this.maybeSkipped++;
         this.block(s.body);
@@ -407,6 +415,8 @@ class Checker extends Scope {
       }
       case "ask":
         this.expr(e.question);
+        return;
+      case "now":
         return;
       case "random": { // only numbers that aren't numbers at all are certain to fail
         this.expr(e.left);

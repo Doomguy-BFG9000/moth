@@ -243,7 +243,8 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
-    "average", "largest", "smallest", "run program", "run program keeping"
+    "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
+    "save", "load"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -290,6 +291,11 @@ set time_units to dictionary where "millisecond" is 1, "milliseconds" is 1, "sec
     "minute" is 60000, "minutes" is 60000, "hour" is 3600000, "hours" is 3600000, "day" is 86400000, "days" is 86400000,
     "week" is 604800000, "weeks" is 604800000
 set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is still a name
+# a line that starts like a phrase but isn't one, which would otherwise be a call to a function nothing made
+set phrase_hints to dictionary where "wait" is "to wait, say how long: 'wait 2 seconds'",
+    "save" is "to save a value, say where: 'save scores to \"scores.txt\"'"
+# `the time`, `the date`, ... `the clock`, in the order of NOW_WORDS in vm.js
+set now_words to list of "time", "date", "year", "month", "day", "hour", "minute", "second", "weekday", "clock"
 # what an input can say it is, `with width as a number`, in the order of KINDS in vm.js
 set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
     (list of "a", "record"), (list of "a", "dictionary"), (list of "bytes"), (list of "a", "function")
@@ -396,6 +402,78 @@ to parse with tokens, reading
     to runs_program
         set after to item (pos + 1) of tokens
         return type of after is "word" and value of after is "program" and not nl of after
+    end
+
+    # `load "scores.txt"`, `load name`: `load` alone, or with `of` after it, is still a name
+    to loads_file
+        set after to item (pos + 1) of tokens
+        if nl of after
+            return no
+        end
+        return type of after is "string" or (type of after is "word" and not contains(reserved, value of after) and value of after is not "of")
+    end
+
+    # A phrase that starts with a word that could be a name: `wait 2 seconds`, `save x to "f"`. It gives the
+    # node, or nothing if this isn't the phrase after all, which makes the line a call again.
+    to phrase with which, t
+        set start to pos
+        set node to nothing
+        try
+            set pos to pos + 1
+            if which is "wait"
+                set node to wait_rest(t)
+            else
+                set node to save_rest(t)
+            end
+        if it fails
+            set node to nothing
+        end
+        if node is nothing
+            set pos to start
+        end
+        return node
+    end
+
+    # `wait 2 seconds`, `wait n milliseconds`
+    to wait_rest with t
+        set amount to additive()
+        set unit to 0
+        if kind of amount is "builtin" and name of amount is "unit"
+            set unit_word to value of item 2 of args of amount
+            if unit_word is in time_units # `wait 2 seconds`: the number, and its unit
+                set unit to item unit_word of time_units
+                set amount to item 1 of args of amount
+            end
+        else if kind of amount is "negate" and kind of operand of amount is "builtin" and name of operand of amount is "unit"
+            set unit_word to value of item 2 of args of operand of amount # `wait -2 seconds`, a mistake when it runs
+            if unit_word is in time_units
+                set unit to item unit_word of time_units
+                set amount to record with kind "negate", operand item 1 of args of operand of amount, at at of amount
+            end
+        end
+        if unit is 0
+            if unit_at(pos) and value of peek() is in time_units # `wait n seconds`
+                set unit to item (value of peek()) of time_units
+                set pos to pos + 1
+            else
+                return nothing
+            end
+        end
+        if not nl of peek()
+            return nothing
+        end
+        return record with kind "wait", amount amount, unit unit, at t
+    end
+
+    # `save scores to "scores.txt"`: `write` of what `load` reads back
+    to save_rest with t
+        set value to expression()
+        if not word("to")
+            return nothing
+        end
+        set save_args to list of value
+        set saved to record with kind "builtin", name "save", args save_args, at t
+        return record with kind "write", value saved, target expression(), at t
     end
 
     to take_name with what
@@ -876,6 +954,18 @@ to parse with tokens, reading
         if is_word("run") and runs_program()
             fail with problem(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'")
         end
+        if is_word("wait") and not nl of item (pos + 1) of tokens # `wait 2 seconds`: `wait` alone is still a name
+            set waiting to phrase("wait", t)
+            if waiting is not nothing
+                return waiting
+            end
+        end
+        if is_word("save") and not nl of item (pos + 1) of tokens # `save scores to "scores.txt"`
+            set saving to phrase("save", t)
+            if saving is not nothing
+                return saving
+            end
+        end
         if type of t is "word" and not contains(reserved, value of t)
             # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
             set pos to pos + 1
@@ -1055,6 +1145,25 @@ to parse with tokens, reading
             add (record with kind "value", type "string", value value of unit_token, at unit_token) to unit_args
             set left to record with kind "builtin", name "in", args unit_args, at in_token
         end
+        # `scores in order`, `scores in reverse order`, `people in order by age`
+        if converting and is_word("in") and not nl of item (pos + 1) of tokens and (word_at(pos + 1, "order") or (word_at(pos + 1, "reverse") and word_at(pos + 2, "order")))
+            set in_token to peek()
+            set pos to pos + 1
+            set how to "order"
+            if word("reverse")
+                set how to "reverse order"
+            end
+            set pos to pos + 1
+            if is_word("by") and not nl of item (pos + 1) of tokens
+                set pos to pos + 1
+                set field_token to peek()
+                set order_args to list of left
+                add (record with kind "value", type "string", value take_name("a field name"), at field_token) to order_args
+                return record with kind "builtin", name how + " by", args order_args, at in_token
+            end
+            set order_args to list of left
+            return record with kind "builtin", name how, args order_args, at in_token
+        end
         return left
     end
 
@@ -1216,6 +1325,16 @@ to parse with tokens, reading
             end
             set run_args to list of program, inputs
             return record with kind "builtin", name run_name, args run_args, at t
+        end
+        # `the time`, `the date`, `the year` ... `the weekday`, `the clock`
+        if is_word("the") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word" and contains(now_words, value of item (pos + 1) of tokens)
+            set pos to pos + 2
+            return record with kind "now", which slot_of(now_words, value of item (pos - 1) of tokens) - 1, at t
+        end
+        if is_word("load") and loads_file() # `load "scores.txt"`: a value `save` wrote, read back
+            set pos to pos + 1
+            set load_args to list of (record with kind "read", binary no, subject additive(), at t)
+            return record with kind "builtin", name "load", args load_args, at t
         end
         # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
         if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"
@@ -1484,6 +1603,9 @@ to rename with node, alias, hidden
     if what is "removeFile"
         rename(target of node, alias, hidden)
     end
+    if what is "wait"
+        rename(amount of node, alias, hidden)
+    end
 end
 
 # A scope is one function (or the whole program): item n of its names is the name in slot n. The last
@@ -1676,6 +1798,9 @@ end
 # What to say when a name nothing ever sets is used. A line that starts with an unknown name may be a
 # misspelled Moth word instead, like `sya "hi"`.
 to undefined_message with scope, wanted, call, statement
+    if call and wanted is in phrase_hints # a phrase missing its last part, like `wait 2`
+        return "there is no function called '" + wanted + "' (" + item wanted of phrase_hints + ")"
+    end
     set known to empty list
     set here to scope
     repeat while here is not nothing
@@ -1906,6 +2031,9 @@ to js_statement with scope, s
     if what is "removeFile"
         return "removeFile(" + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
     end
+    if what is "wait"
+        return "wait(" + js_expr(scope, amount of s) + ", " + unit of s + ", " + remember(at of s) + ");"
+    end
     if what is "expect"
         set c to cond of s
         if kind of c is not "compare"
@@ -2053,6 +2181,9 @@ to js_expr with scope, e
     if what is "random"
         return "random(" + js_expr(scope, left of e) + ", " + js_expr(scope, right of e) + ", " + remember(at of e) + ")"
     end
+    if what is "now"
+        return "now(" + which of e + ")"
+    end
     if what is "builtin"
         return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"
     end
@@ -2154,7 +2285,9 @@ set op_every to 54
 set op_say_error to 55
 set op_exit to 56
 set op_remove_file to 57
-set op_read_folder to 58
+set op_now to 58
+set op_wait to 59
+set op_read_folder to 60
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
@@ -2394,6 +2527,9 @@ to bytecode_statement with fc, s
     else if what is "removeFile"
         bytecode_expr(fc, target of s)
         emit(fc, at of s, list of op_remove_file)
+    else if what is "wait"
+        bytecode_expr(fc, amount of s)
+        emit(fc, at of s, list of op_wait, unit of s)
     else if what is "expect" # a comparison keeps both its sides, to say what they were
         set c to cond of s
         if kind of c is "compare"
@@ -2526,6 +2662,8 @@ to bytecode_expr with fc, e
         bytecode_expr(fc, left of e)
         bytecode_expr(fc, right of e)
         emit(fc, at of e, list of op_random)
+    else if what is "now"
+        emit(fc, at of e, list of op_now, which of e)
     else if what is "builtin"
         bytecode_list(fc, args of e)
         emit(fc, at of e, list of op_builtin, slot_of(builtin_names, name of e) - 1)

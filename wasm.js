@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, readFolder } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -85,6 +85,8 @@ const IMPORTS = {
   readFolder: [[EQ, I32], [EQ]], // the folder's name, and a position
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
+  now: [[I32], [EQ]], // which, in NOW_WORDS
+  wait: [[EQ, F64, I32], []], // how long, the milliseconds in each, a position
   handle: [[I32, EQ, I32], []], // which event (EVENTS), its handler, a position
   every: [[EQ, F64, EQ, I32], []], // how often, 1 or 1000 (for seconds), the handler, a position
   expect: [[I32, I32, EQ, EQ, I32], []], // which comparison, 1 for `is not`, its two sides, and a position
@@ -957,6 +959,10 @@ class WasmCompiler extends Scope {
         this.expr(s.target);
         this.e("i32.const", this.pos(s.at)).e("call", im.removeFile);
         return;
+      case "wait":
+        this.expr(s.amount);
+        this.e("f64.const", s.unit).e("i32.const", this.pos(s.at)).e("call", im.wait);
+        return;
       case "expect":
         if (s.cond.kind !== "compare") {
           this.expr(s.cond);
@@ -1185,6 +1191,9 @@ class WasmCompiler extends Scope {
         this.expr(e.right);
         this.e("i32.const", this.pos(e.at)).e("call", im.random);
         return;
+      case "now":
+        this.e("i32.const", e.which).e("call", im.now);
+        return;
       case "builtin": {
         const index = BUILTINS.findIndex((b) => b.name === e.name);
         const bits = BIT_BUILTINS.indexOf(e.name);
@@ -1288,11 +1297,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError, clock) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError, clock).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error) {
+function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error, clock = fakeClock()) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1470,6 +1479,8 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     readFolder: (name, k) => toWasm(readFolder(toJs(name), disk, errors[k])),
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
+    now: (which) => toWasm(nowValue(which, clock)),
+    wait: (amount, unit, k) => waitFor(toJs(amount), unit, clock, errors[k]),
     handle: (event, closure) => void host.handlers.push({ event: EVENTS[event], closure }),
     every: (interval, unit, closure, k) => void host.handlers.push({ event: "every", interval: everyInterval(toJs(interval), unit, errors[k]), closure }),
     expect: (op, negate, a, b, k) => expectThat(COMPARE_OPS[op], negate === 1, toJs(a), toJs(b), errors[k]),

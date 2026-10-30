@@ -3,10 +3,11 @@
 # tokenizer, parser and scope rules, writes every instruction's bytes itself, and wraps them in the file
 # the system runs, PE for Windows and ELF for Linux.
 #
-# It takes all of Moth. Only a hex or binary number past 2^53, and a function too big for its frame, stop
-# with a mistake that says they can't become machine code yet. What it makes does just what the JavaScript
-# engine does: numbers are shown and compared to 15 digits, and a mistake says the same thing, points at the
-# same spot, and lists the same calls.
+# It takes all of Moth but its newest phrases: `the time` and the rest of the clock, `wait`, `in order`,
+# `save` and `load`. Those, a hex or binary number past 2^53, and a function too big for its frame stop with
+# a mistake that says they can't become machine code yet. What it makes does just what the JavaScript engine
+# does: numbers are shown and compared to 15 digits, and a mistake says the same thing, points at the same
+# spot, and lists the same calls.
 
 use "compiler.moth" as front
 
@@ -228,7 +229,8 @@ end
 to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
-        absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, units no, charts no
+        absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
+        charts no
     set code of made to hot of made
     return made
 end
@@ -13690,6 +13692,7 @@ to emit_runtime with st
         set windowed to uses_drawing of st or uses_app of st or uses_pad of st
     end
     set pad of a to windowed and uses_pad of st
+    set net of a to uses_read of st
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
     if uses_drawing of st or uses_app of st
@@ -13754,6 +13757,11 @@ to emit_runtime with st
         emit_random(a, target of st)
         if target of st is "windows"
             add (list of "KERNEL32.dll", (list of "GetEnvironmentVariableW")) to wanted
+        end
+    end
+    if net of a and target of st is "windows" # WinHTTP, only for a program that may go online
+        for each group in net_imports
+            add group to wanted
         end
     end
     if uses_folders of st and target of st is "windows"
@@ -13843,6 +13851,11 @@ to emit_runtime with st
         "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d",
         "err_file", "err_reason", "asked"
         reserve(a, name, 8, 8)
+    end
+    if net of a # going online's own: the names it reads and the memory it reads a site into
+        for each name in list of "net_name", "net_url", "net_next", "net_copy", "net_buf", "net_whost", "net_wpath", "net_argv"
+            reserve(a, name, 8, 8)
+        end
     end
     reserve(a, "scratch", 64, 16)
     reserve(a, "gc_roots_to", 0, 8)
@@ -13934,9 +13947,9 @@ end
 # or written, or a site read, only once the program may: the --allow flags it was built with say what it may
 # do without asking (allow_all: 1 to read, 2 to write and 4 to go online, added up), and otherwise a person at
 # a terminal is asked, once for each file or site, or for all of them with 'a'; anywhere else the answer is
-# no. Machine code can't go online yet, so a site it may read can't be reached. The input comes a line at a
-# time through in_buf, which keeps what came after a line for the next one. What went wrong is in err_why,
-# with the file's name in err_file and why in err_reason, both as text.
+# no. A site is read as "the runtime: going online" says. The input comes a line at a time through in_buf,
+# which keeps what came after a line for the next one. What went wrong is in err_why, with the file's name
+# in err_file and why in err_reason, both as text.
 
 set file_imports to list of "ReadFile", "ReadConsoleW", "CreateFileW", "CloseHandle", "GetLastError", "GetFileAttributesW",
     "GetCommandLineW", "WideCharToMultiByte", "FormatMessageW", "GetFullPathNameW",
@@ -14204,6 +14217,17 @@ to emit_files with a, target, allowed
         reserve(a, "msg_wide", 4096, 16)
         reserve(a, "msg_utf8", 6144, 16)
     end
+    if net of a
+        for each slot_name in list of "net_moves", "net_status", "net_secure", "net_port", "net_host_at", "net_host_len",
+            "net_path_at", "net_path_len", "net_len", "net_exit", "net_start", "net_session", "net_connect", "net_request",
+            "net_room", "net_used", "net_loc_len"
+            reserve(a, slot_name, 8, 8)
+        end
+        if target is "windows"
+            reserve(a, "net_loc_wide", net_location_room * 2, 16)
+            reserve(a, "net_loc_utf8", net_location_room * 3, 16)
+        end
+    end
     emit_input(a, target)
     emit_permits(a)
     emit_file_io(a, target)
@@ -14213,6 +14237,9 @@ to emit_files with a, target, allowed
     emit_arguments(a, target)
     emit_run(a, target)
     emit_file_why(a)
+    if net of a
+        emit_online(a, target)
+    end
 end
 
 to emit_input with a, target
@@ -15930,6 +15957,12 @@ to emit_reading with a, target
     set failed to new_label(a)
     set gave_up to new_label(a)
     set read_out to new_label(a)
+    set have_all to new_label(a)
+    set online to new_label(a)
+    set site_failed to new_label(a)
+    if net of a # a site is read, as rt_fetch reads it
+        set offline to online
+    end
     mark(a, "rt_read")
     push_r(a, rbx)
     push_r(a, r12)
@@ -15994,6 +16027,7 @@ to emit_reading with a, target
     mark(a, all_read)
     mov_rr(a, rax, r13)
     call_to(a, "rt_file_close")
+    mark(a, have_all) # r14 where its bytes are, f_used how many
     test_rr(a, r12, r12)
     jcc(a, cc_e, as_text)
     load(a, rcx, rip("f_used")) # its bytes
@@ -16043,13 +16077,26 @@ to emit_reading with a, target
     mark(a, refused) # err_reason says why
     storei(a, rip("err_why"), 21)
     jmp_to(a, gave_up)
-    mark(a, offline)
-    call_to(a, "rt_b_reset")
-    b_text(a, "couldn't reach it (a program in machine code can't go online yet)")
-    call_to(a, "rt_b_text")
-    store(a, rip("err_reason"), rax)
-    storei(a, rip("err_why"), 21)
-    jmp_to(a, gave_up)
+    if net of a
+        mark(a, online) # the site's page, read as a file is
+        call_to(a, "rt_fetch")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, site_failed)
+        mov_rr(a, r14, rsi)
+        store(a, rip("f_used"), rcx)
+        jmp_to(a, have_all)
+        mark(a, site_failed) # err_reason says why
+        storei(a, rip("err_why"), 21)
+        jmp_to(a, gave_up)
+    else
+        mark(a, offline)
+        call_to(a, "rt_b_reset")
+        b_text(a, "couldn't reach it (a program in machine code can't go online yet)")
+        call_to(a, "rt_b_text")
+        store(a, rip("err_reason"), rax)
+        storei(a, rip("err_why"), 21)
+        jmp_to(a, gave_up)
+    end
     mark(a, nul_name)
     nul_reason(a, target)
     storei(a, rip("err_why"), 21)
@@ -16500,6 +16547,1320 @@ to emit_file_why with a
     ret(a)
 end
 
+# ---------- the runtime: going online ----------
+# `read "https://..."` reads a site's page as `read` reads a file, once the program may go online, the way
+# Moth's Rust engine read it with curl: the page as the site sent it, and no move to another address made
+# by itself. A site that sends the program on (an answer from 300 to 399 that says where) is asked about
+# again there, as rt_permit asks, and followed at most 10 times; any other answer from 300 up is a mistake,
+# "the site answered 404", and a site gets 60 seconds in all. On Windows WinHTTP fetches it, with the
+# system's certificates; on Linux, where a program machine.moth makes has no library to call, the system's
+# curl does, started as `run program` starts one, its page and words read through two pipes. Either way a
+# mistake says what went wrong in the same words, curl's. Only a program that reads (`read` or `read
+# bytes`) may go online, so only its machine code has this, and only it imports WinHTTP.
+
+set net_imports to list of (list of "WINHTTP.dll", (list of "WinHttpOpen", "WinHttpConnect", "WinHttpOpenRequest",
+    "WinHttpSetOption", "WinHttpSetTimeouts", "WinHttpSendRequest", "WinHttpReceiveResponse", "WinHttpQueryHeaders",
+    "WinHttpReadData", "WinHttpCloseHandle")), (list of "KERNEL32.dll", (list of "GetTickCount64"))
+set net_location_room to 32768 # the longest address a site may send the program on to, in UTF-16 units
+set net_most_moves to 10
+set net_time_limit to 60000 # how long a site gets, in milliseconds
+# what curl is started with, before the address: no .curlrc of its own, nothing shown but a mistake, the
+# address as it is (no [] or {} patterns), only http and https, 60 seconds at most, and after the page a
+# line with the answer's number and where the site sends the program on to, if anywhere
+set curl_args to list of "curl", "-q", "-sS", "-g", "-A", "moth", "--max-time", "60", "--proto", "=http,https", "-w",
+    "\n%{http_code} %{redirect_url}"
+# what can go wrong, in curl's words, then which of curl's exit codes and which of WinHTTP's errors say it;
+# the first two name the host, and the second its port too
+set net_whys to list of (list of "Could not resolve host: ", (list of 6), (list of 12007)),
+    (list of "Failed to connect to ", (list of 7), (list of 12029)),
+    (list of "Operation timed out after 60000 milliseconds", (list of 28), (list of 12002)),
+    (list of "SSL connect error", (list of 35, 51, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91, 98),
+    (list of 12037, 12038, 12044, 12045, 12057, 12169, 12170, 12175, 12179)),
+    (list of "Failure when receiving data from the peer", (list of 8, 16, 18, 52, 55, 56, 92, 95),
+    (list of 12030, 12152, 12181, 12182, 12183, 12184)),
+    (list of "URL using bad/illegal format or missing URL", (list of 3), (list of 12005, 12006))
+set net_no_curl to "on Linux a Moth program goes online through curl, and there is no program called 'curl'"
+
+to emit_online with a, target
+    emit_fetch(a)
+    emit_url_parts(a)
+    if target is "windows"
+        emit_fetch_windows(a)
+    else
+        emit_fetch_linux(a)
+    end
+    emit_net_reason(a, target)
+end
+
+# the byte at base + index, into dst
+to byte_at with a, dst, base, index
+    mov_rr(a, dst, base)
+    alu(a, "add", dst, index)
+    load8(a, dst, mem(dst, 0))
+end
+
+to emit_fetch with a
+    # rt_fetch: err_file a site's address, which the program may read: rax 0 with its page, rsi where its
+    # bytes are and rcx how many; or rax 1 with err_reason why not. err_file is the address read, whatever
+    # happened.
+    set again to new_label(a)
+    set moved to new_label(a)
+    set too_many to new_label(a)
+    set not_site to new_label(a)
+    set refused to new_label(a)
+    set reasoned to new_label(a)
+    set fetched to new_label(a)
+    mark(a, "rt_fetch")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    load(a, rax, rip("err_file"))
+    store(a, rip("net_name"), rax)
+    store(a, rip("net_url"), rax)
+    storei(a, rip("net_moves"), 0)
+    mark(a, again)
+    call_to(a, "rt_fetch_once")
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_e, moved)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, fetched)
+    movi(a, rax, 1)
+    jmp_to(a, fetched)
+    mark(a, moved) # somewhere else: a site, which the program may go to, and not once too often
+    load(a, rax, rip("net_moves"))
+    alui(a, "cmp", rax, net_most_moves)
+    jcc(a, cc_e, too_many)
+    load(a, rax, rip("net_next"))
+    store(a, rip("err_file"), rax)
+    call_to(a, "rt_is_site")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, not_site)
+    movi(a, rcx, 2)
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, refused)
+    load(a, rax, rip("net_name"))
+    store(a, rip("err_file"), rax)
+    load(a, rax, rip("net_next"))
+    store(a, rip("net_url"), rax)
+    alu_at(a, "add", rip("net_moves"), 1)
+    jmp_to(a, again)
+    mark(a, too_many)
+    call_to(a, "rt_b_reset")
+    b_text(a, "it moved too many times")
+    jmp_to(a, reasoned)
+    mark(a, not_site)
+    call_to(a, "rt_b_reset")
+    b_text(a, "it moved to '")
+    load(a, rax, rip("net_next"))
+    call_to(a, "rt_b_shown_name")
+    b_text(a, "', which isn't a site")
+    jmp_to(a, reasoned)
+    mark(a, refused)
+    call_to(a, "rt_b_reset")
+    b_text(a, "it moved to '")
+    load(a, rax, rip("net_next"))
+    call_to(a, "rt_b_shown_name")
+    b_text(a, "', and ")
+    reason_text(a)
+    mark(a, reasoned)
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    load(a, rax, rip("net_name"))
+    store(a, rip("err_file"), rax)
+    movi(a, rax, 1)
+    mark(a, fetched)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_url_parts with a
+    # rt_url_copy: net_url's bytes in memory of their own, net_copy, with a 0 after them and each \ before
+    # any ? or # made a /, as a browser reads an address, so the host an --allow-net name was matched against
+    # is the one gone to; net_len how many. rax 1 if one of them is a space or a control character, which an
+    # address can't have.
+    set copy_loop to new_label(a)
+    set not_mark to new_label(a)
+    set copy_char to new_label(a)
+    set copied to new_label(a)
+    set bad_copy to new_label(a)
+    mark(a, "rt_url_copy")
+    load(a, rax, rip("net_url"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    store(a, rip("net_len"), rcx)
+    inc_r(a, rcx)
+    call_to(a, "rt_alloc_raw")
+    store(a, rip("net_copy"), rax)
+    mov_rr(a, rdi, rax)
+    load(a, rax, rip("net_url"))
+    untag(a, rax)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, rip("net_len"))
+    movi(a, r8, 0) # 1 once a ? or # has come
+    mark(a, copy_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, copied)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 32)
+    jcc(a, cc_be, bad_copy)
+    alui(a, "cmp", rax, 127)
+    jcc(a, cc_e, bad_copy)
+    alui(a, "cmp", rax, 63)
+    jcc(a, cc_e, not_mark)
+    alui(a, "cmp", rax, 35)
+    jcc(a, cc_ne, copy_char)
+    mark(a, not_mark)
+    movi(a, r8, 1)
+    mark(a, copy_char)
+    test_rr(a, r8, r8)
+    set kept_char to new_label(a)
+    jcc(a, cc_ne, kept_char)
+    alui(a, "cmp", rax, 92)
+    jcc(a, cc_ne, kept_char)
+    movi(a, rax, 47)
+    mark(a, kept_char)
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rsi)
+    inc_r(a, rdi)
+    dec_r(a, rcx)
+    jmp_to(a, copy_loop)
+    mark(a, copied)
+    movi(a, rax, 0)
+    store8(a, mem(rdi, 0), rax)
+    ret(a)
+    mark(a, bad_copy)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_url_parts: net_copy, a site's address, in its parts: net_secure 1 for https, its host (after any
+    # name@, before any port) at net_host_at for net_host_len bytes, net_port the port (80, or 443 for https,
+    # if none is given), and its path and query (up to a #) at net_path_at for net_path_len bytes; rax 1 if it
+    # has no host, or a port that isn't a number from 1 to 65535. Uses rax, rcx, rdx, rsi and r8 to r11.
+    set plain to new_label(a)
+    set auth_loop to new_label(a)
+    set auth_end to new_label(a)
+    set at_loop to new_label(a)
+    set not_at to new_label(a)
+    set at_done to new_label(a)
+    set bracket_loop to new_label(a)
+    set name_host to new_label(a)
+    set name_loop to new_label(a)
+    set host_end to new_label(a)
+    set port_given to new_label(a)
+    set digits to new_label(a)
+    set port_got to new_label(a)
+    set port_done to new_label(a)
+    set path_loop to new_label(a)
+    set path_done to new_label(a)
+    set bad_parts to new_label(a)
+    mark(a, "rt_url_parts")
+    load(a, rsi, rip("net_copy"))
+    load(a, rcx, rip("net_len"))
+    movi(a, r8, 7) # where the host starts: after http:// or https://
+    movi(a, rax, 0)
+    load8(a, rdx, mem(rsi, 4))
+    alui(a, "or", rdx, 32)
+    alui(a, "cmp", rdx, 115)
+    jcc(a, cc_ne, plain)
+    movi(a, r8, 8)
+    movi(a, rax, 1)
+    mark(a, plain)
+    store(a, rip("net_secure"), rax)
+    mov_rr(a, r9, r8) # r9 where the host and port end: at a /, ? or #
+    mark(a, auth_loop)
+    alu(a, "cmp", r9, rcx)
+    jcc(a, cc_ae, auth_end)
+    byte_at(a, rdx, rsi, r9)
+    for each stop_at in list of 47, 63, 35
+        alui(a, "cmp", rdx, stop_at)
+        jcc(a, cc_e, auth_end)
+    end
+    inc_r(a, r9)
+    jmp_to(a, auth_loop)
+    mark(a, auth_end)
+    store(a, rip("net_path_at"), r9)
+    mov_rr(a, r10, r8) # r10 where the host starts: after the last @
+    mov_rr(a, r11, r8)
+    mark(a, at_loop)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_ae, at_done)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "cmp", rdx, 64)
+    jcc(a, cc_ne, not_at)
+    lea(a, r10, mem(r11, 1))
+    mark(a, not_at)
+    inc_r(a, r11)
+    jmp_to(a, at_loop)
+    mark(a, at_done)
+    store(a, rip("net_host_at"), r10)
+    alu(a, "cmp", r10, r9)
+    jcc(a, cc_ae, bad_parts)
+    byte_at(a, rdx, rsi, r10)
+    alui(a, "cmp", rdx, 91)
+    jcc(a, cc_ne, name_host)
+    mov_rr(a, r11, r10) # [ and an IPv6 address, up to its ]
+    mark(a, bracket_loop)
+    inc_r(a, r11)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_ae, bad_parts)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "cmp", rdx, 93)
+    jcc(a, cc_ne, bracket_loop)
+    inc_r(a, r11)
+    jmp_to(a, host_end)
+    mark(a, name_host) # a name, up to a :
+    mov_rr(a, r11, r10)
+    mark(a, name_loop)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_ae, host_end)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "cmp", rdx, 58)
+    jcc(a, cc_e, host_end)
+    inc_r(a, r11)
+    jmp_to(a, name_loop)
+    mark(a, host_end)
+    mov_rr(a, rax, r11)
+    alu(a, "sub", rax, r10)
+    store(a, rip("net_host_len"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, bad_parts)
+    movi(a, rax, 80) # then nothing, a : alone, or a : and the port
+    load(a, rdx, rip("net_secure"))
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, port_given)
+    movi(a, rax, 443)
+    mark(a, port_given)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_e, port_done)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "cmp", rdx, 58)
+    jcc(a, cc_ne, bad_parts)
+    inc_r(a, r11)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_e, port_done)
+    movi(a, rax, 0)
+    mark(a, digits)
+    alu(a, "cmp", r11, r9)
+    jcc(a, cc_ae, port_got)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_a, bad_parts)
+    imul_ri(a, rax, rax, 10)
+    alu(a, "add", rax, rdx)
+    alui(a, "cmp", rax, 65535)
+    jcc(a, cc_a, bad_parts)
+    inc_r(a, r11)
+    jmp_to(a, digits)
+    mark(a, port_got)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, bad_parts)
+    mark(a, port_done)
+    store(a, rip("net_port"), rax)
+    mov_rr(a, r11, r9) # the path and query: up to a #
+    mark(a, path_loop)
+    alu(a, "cmp", r11, rcx)
+    jcc(a, cc_ae, path_done)
+    byte_at(a, rdx, rsi, r11)
+    alui(a, "cmp", rdx, 35)
+    jcc(a, cc_e, path_done)
+    inc_r(a, r11)
+    jmp_to(a, path_loop)
+    mark(a, path_done)
+    alu(a, "sub", r11, r9)
+    store(a, rip("net_path_len"), r11)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, bad_parts)
+    movi(a, rax, 1)
+    ret(a)
+end
+
+# rt_net_class: rax one of curl's exit codes (column 2 of net_whys) or one of WinHTTP's errors (column 3):
+# which of net_whys it is, from 1, in rax; 0 for any other
+to emit_net_class with a, column
+    set classed to new_label(a)
+    set found to empty list
+    mark(a, "rt_net_class")
+    for each why in net_whys
+        set here_label to new_label(a)
+        add here_label to found
+        for each code_number in item column of why
+            alui(a, "cmp", rax, code_number)
+            jcc(a, cc_e, here_label)
+        end
+    end
+    movi(a, rax, 0)
+    ret(a)
+    set k to 0
+    for each here_label in found
+        add 1 to k
+        mark(a, here_label)
+        movi(a, rax, k)
+        ret(a)
+    end
+end
+
+to emit_net_reason with a, target
+    # rt_net_reason: rax what went wrong (which of net_whys, from 1; 7 for no curl; 0 for anything else):
+    # err_reason, "couldn't reach it (...)" with it in curl's words. For anything else they are curl's own
+    # words for it, the first line it wrote as a mistake without the "curl: (6) " before it, or "no answer"
+    # if it wrote none; on Windows, WinHTTP's error's number.
+    set closing to new_label(a)
+    set whys to empty list
+    mark(a, "rt_net_reason")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    call_to(a, "rt_b_reset")
+    b_text(a, "couldn't reach it (")
+    for each why in net_whys
+        set why_label to new_label(a)
+        add why_label to whys
+    end
+    set no_curl_label to new_label(a)
+    set k to 0
+    for each why_label in whys
+        add 1 to k
+        alui(a, "cmp", rbx, k)
+        jcc(a, cc_e, why_label)
+    end
+    alui(a, "cmp", rbx, 7)
+    jcc(a, cc_e, no_curl_label)
+    if target is "windows"
+        b_text(a, "WinHTTP error ")
+        load(a, rax, rip("net_exit"))
+        call_to(a, "rt_e_plain")
+        jmp_to(a, closing)
+    else
+        set no_answer to new_label(a)
+        set lead_space to new_label(a)
+        set fronted to new_label(a)
+        set line_end to new_label(a)
+        set line_ended to new_label(a)
+        set back to new_label(a)
+        set backed to new_label(a)
+        set no_curl_word to new_label(a)
+        set no_code to new_label(a)
+        set code_end to new_label(a)
+        load(a, rsi, rip("run_buf_1"))
+        load(a, rcx, rip("run_used_1"))
+        test_rr(a, rsi, rsi)
+        jcc(a, cc_e, no_answer)
+        mark(a, lead_space) # the space before it
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, no_answer)
+        load8(a, rax, mem(rsi, 0))
+        ascii_space_jump(a, rax, fronted)
+        jmp_to(a, line_end)
+        mark(a, fronted)
+        inc_r(a, rsi)
+        dec_r(a, rcx)
+        jmp_to(a, lead_space)
+        mark(a, line_end) # its first line
+        movi(a, rdx, 0)
+        set seek to new_label(a)
+        mark(a, seek)
+        alu(a, "cmp", rdx, rcx)
+        jcc(a, cc_ae, line_ended)
+        byte_at(a, rax, rsi, rdx)
+        alui(a, "cmp", rax, 10)
+        jcc(a, cc_e, line_ended)
+        inc_r(a, rdx)
+        jmp_to(a, seek)
+        mark(a, line_ended)
+        mov_rr(a, rcx, rdx)
+        mark(a, back) # and the space after it
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, no_answer)
+        mov_rr(a, rax, rsi)
+        alu(a, "add", rax, rcx)
+        load8(a, rax, mem(rax, -1))
+        ascii_space_jump(a, rax, backed)
+        jmp_to(a, no_curl_word)
+        mark(a, backed)
+        dec_r(a, rcx)
+        jmp_to(a, back)
+        mark(a, no_curl_word) # without "curl: " and "(6) " before it
+        alui(a, "cmp", rcx, 6)
+        jcc(a, cc_b, no_code)
+        set curl_said to new_label(a)
+        ascii_prefix(a, "curl: ", no_code)
+        alui(a, "add", rsi, 6)
+        alui(a, "sub", rcx, 6)
+        mark(a, no_code)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, no_answer)
+        load8(a, rax, mem(rsi, 0))
+        alui(a, "cmp", rax, 40)
+        jcc(a, cc_ne, curl_said)
+        movi(a, rdx, 1)
+        set code_seek to new_label(a)
+        mark(a, code_seek)
+        lea(a, rax, mem(rdx, 1))
+        alu(a, "cmp", rax, rcx)
+        jcc(a, cc_ae, curl_said)
+        byte_at(a, rax, rsi, rdx)
+        alui(a, "cmp", rax, 41)
+        jcc(a, cc_ne, code_end)
+        lea(a, r8, mem(rdx, 1))
+        byte_at(a, rax, rsi, r8)
+        alui(a, "cmp", rax, 32)
+        jcc(a, cc_ne, code_end)
+        alui(a, "add", rdx, 2)
+        alu(a, "add", rsi, rdx)
+        alu(a, "sub", rcx, rdx)
+        jmp_to(a, curl_said)
+        mark(a, code_end)
+        inc_r(a, rdx)
+        jmp_to(a, code_seek)
+        mark(a, curl_said) # as text, after "couldn't reach it ("
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, no_answer)
+        call_to(a, "rt_decode_bytes")
+        call_to(a, "rt_b_text")
+        push_r(a, rax)
+        push_r(a, rax)
+        call_to(a, "rt_b_reset")
+        b_text(a, "couldn't reach it (")
+        pop_r(a, rax)
+        pop_r(a, rax)
+        untag(a, rax)
+        load(a, rcx, mem(rax, 0))
+        load(a, rsi, mem(rax, 16))
+        call_to(a, "rt_b_bytes")
+        jmp_to(a, closing)
+        mark(a, no_answer)
+        b_text(a, "no answer")
+        jmp_to(a, closing)
+    end
+    set k to 0
+    for each why_label in whys
+        add 1 to k
+        mark(a, why_label)
+        b_text(a, item 1 of item k of net_whys)
+        if k is 1 # the host, as the address has it
+            load(a, rsi, rip("net_copy"))
+            alu_load(a, "add", rsi, rip("net_host_at"))
+            load(a, rcx, rip("net_host_len"))
+            call_to(a, "rt_b_bytes")
+        else if k is 2 # the host, without the [ ] around an IPv6 address, then its port
+            set unbracketed to new_label(a)
+            load(a, rsi, rip("net_copy"))
+            alu_load(a, "add", rsi, rip("net_host_at"))
+            load(a, rcx, rip("net_host_len"))
+            load8(a, rax, mem(rsi, 0))
+            alui(a, "cmp", rax, 91)
+            jcc(a, cc_ne, unbracketed)
+            inc_r(a, rsi)
+            alui(a, "sub", rcx, 2)
+            mark(a, unbracketed)
+            call_to(a, "rt_b_bytes")
+            b_text(a, " port ")
+            load(a, rax, rip("net_port"))
+            call_to(a, "rt_e_plain")
+            b_text(a, ": Couldn't connect to server")
+        end
+        jmp_to(a, closing)
+    end
+    mark(a, no_curl_label)
+    b_text(a, net_no_curl)
+    mark(a, closing)
+    movi(a, rax, 41)
+    call_to(a, "rt_b_byte")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# rt_fetch_once: net_url, a site's address: rax 0 with its page (rsi where its bytes are, rcx how many), 1 if
+# it sends the program on to net_next, or 2 with err_reason why it can't be read; by curl, started with
+# curl_args and the address, which writes the page and its mistakes into two pipes, read as `run program
+# ... keeping its output` reads them
+to emit_fetch_linux with a
+    set ro to rodata of a
+    set arg_labels to empty list
+    set k to 0
+    for each word in curl_args
+        set arg_label to "curl_arg_" + k
+        rodata_here(a, arg_label)
+        put_all(ro, word as bytes)
+        add 0 to ro
+        add arg_label to arg_labels
+        add 1 to k
+    end
+    set bad_url to new_label(a)
+    set no_curl to new_label(a)
+    set no_start to new_label(a)
+    set parent to new_label(a)
+    set waiting to new_label(a)
+    set exited to new_label(a)
+    set coded to new_label(a)
+    set seek_line to new_label(a)
+    set tail_from to new_label(a)
+    set skip_space to new_label(a)
+    set number_loop to new_label(a)
+    set number_end to new_label(a)
+    set not_number to new_label(a)
+    set numbered to new_label(a)
+    set trim_back to new_label(a)
+    set trimmed to new_label(a)
+    set curl_failed to new_label(a)
+    set page to new_label(a)
+    set answered to new_label(a)
+    set once_out to new_label(a)
+    mark(a, "rt_fetch_once")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    call_to(a, "rt_url_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad_url)
+    call_to(a, "rt_url_parts")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad_url)
+    lea(a, rax, rip(text_object(a, "curl"))) # where curl is
+    call_to(a, "rt_run_path")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_curl)
+    mov_rr(a, r12, rax)
+    movi(a, rcx, 8 * (length of curl_args + 2)) # what it's started with, then the address
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rbx, rax)
+    store(a, rip("net_argv"), rax)
+    set k to 0
+    for each arg_label in arg_labels
+        lea(a, rax, rip(arg_label))
+        store(a, mem(rbx, 8 * k), rax)
+        add 1 to k
+    end
+    load(a, rax, rip("net_copy"))
+    store(a, mem(rbx, 8 * k), rax)
+    storei(a, mem(rbx, 8 * (k + 1)), 0)
+    for each k from 0 to 1 # a pipe for each of its outputs
+        storei(a, rip("run_read_" + k), -1)
+        storei(a, rip("run_write_" + k), -1)
+    end
+    for each k from 0 to 1
+        lea(a, rdi, rip("run_pipe_" + k))
+        sys_call(a, 22)
+        test_rr(a, rax, rax)
+        jcc(a, cc_s, no_start)
+        load32(a, rax, rip("run_pipe_" + k))
+        store(a, rip("run_read_" + k), rax)
+        load32(a, rax, rip_plus("run_pipe_" + k, 4))
+        store(a, rip("run_write_" + k), rax)
+    end
+    sys_call(a, 57) # fork: the child becomes curl
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, parent)
+    for each k from 0 to 1
+        load(a, rdi, rip("run_write_" + k))
+        movi(a, rsi, 1 + k)
+        sys_call(a, 33)
+        load(a, rdi, rip("run_write_" + k))
+        sys_call(a, 3)
+        load(a, rdi, rip("run_read_" + k))
+        sys_call(a, 3)
+    end
+    mov_rr(a, rdi, r12)
+    mov_rr(a, rsi, rbx)
+    load(a, rdx, rip("env_vector"))
+    sys_call(a, 59)
+    movi(a, rdi, 127)
+    sys_call(a, 231)
+    mark(a, parent)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, no_start)
+    mov_rr(a, r14, rax)
+    for each k from 0 to 1 # the write ends are curl's now, so the reads end when it does
+        load(a, rdi, rip("run_write_" + k))
+        sys_call(a, 3)
+        storei(a, rip("run_write_" + k), -1)
+    end
+    call_to(a, "rt_keep_words")
+    mark(a, waiting)
+    mov_rr(a, rdi, r14)
+    lea(a, rsi, rip("run_status"))
+    movi(a, rdx, 0)
+    movi(a, r10, 0)
+    sys_call(a, 61)
+    alui(a, "cmp", rax, -4) # interrupted: wait again
+    jcc(a, cc_e, waiting)
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, no_start)
+    load32(a, rax, rip("run_status")) # the number it ended with, or 1000 if a signal ended it
+    mov_rr(a, rcx, rax)
+    alui(a, "and", rcx, 0x7F)
+    jcc(a, cc_e, exited)
+    movi(a, rax, 1000)
+    jmp_to(a, coded)
+    mark(a, exited)
+    shifti(a, "shr", rax, 8)
+    alui(a, "and", rax, 0xFF)
+    mark(a, coded)
+    store(a, rip("net_exit"), rax)
+    load(a, rsi, rip("run_buf_0")) # the line it wrote after the page: from the last \n on
+    load(a, rcx, rip("run_used_0"))
+    mov_rr(a, r8, rcx)
+    mark(a, seek_line)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, tail_from)
+    dec_r(a, r8)
+    byte_at(a, rdx, rsi, r8)
+    alui(a, "cmp", rdx, 10)
+    jcc(a, cc_ne, seek_line)
+    mark(a, tail_from)
+    store(a, rip("net_used"), r8)
+    mov_rr(a, r9, r8) # the answer's number, after the space before it, up to a space
+    mark(a, skip_space)
+    alu(a, "cmp", r9, rcx)
+    jcc(a, cc_ae, number_end)
+    byte_at(a, rdx, rsi, r9)
+    set spaced to new_label(a)
+    ascii_space_jump(a, rdx, spaced)
+    jmp_to(a, number_end)
+    mark(a, spaced)
+    inc_r(a, r9)
+    jmp_to(a, skip_space)
+    mark(a, number_end)
+    movi(a, rax, 0)
+    movi(a, r10, 0)
+    mark(a, number_loop)
+    alu(a, "cmp", r9, rcx)
+    jcc(a, cc_ae, numbered)
+    byte_at(a, rdx, rsi, r9)
+    alui(a, "cmp", rdx, 32)
+    jcc(a, cc_e, numbered)
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_a, not_number)
+    imul_ri(a, rax, rax, 10)
+    alu(a, "add", rax, rdx)
+    inc_r(a, r10)
+    alui(a, "cmp", r10, 9)
+    jcc(a, cc_a, not_number)
+    inc_r(a, r9)
+    jmp_to(a, number_loop)
+    mark(a, not_number)
+    movi(a, r10, 0)
+    mark(a, numbered)
+    test_rr(a, r10, r10)
+    set some_number to new_label(a)
+    jcc(a, cc_ne, some_number)
+    movi(a, rax, 0)
+    mark(a, some_number)
+    store(a, rip("net_status"), rax)
+    alu(a, "cmp", r9, rcx) # then where it sends the program on to, the rest of the line
+    set past_space to new_label(a)
+    jcc(a, cc_ae, past_space)
+    inc_r(a, r9)
+    mark(a, past_space)
+    mov_rr(a, r13, r9)
+    mov_rr(a, r11, rcx)
+    mark(a, trim_back)
+    alu(a, "cmp", r11, r13)
+    jcc(a, cc_be, trimmed)
+    mov_rr(a, rdx, rsi)
+    alu(a, "add", rdx, r11)
+    load8(a, rdx, mem(rdx, -1))
+    set back_space to new_label(a)
+    ascii_space_jump(a, rdx, back_space)
+    jmp_to(a, trimmed)
+    mark(a, back_space)
+    dec_r(a, r11)
+    jmp_to(a, trim_back)
+    mark(a, trimmed)
+    alu(a, "sub", r11, r13)
+    store(a, rip("net_loc_len"), r11)
+    load(a, rax, rip("net_exit")) # what it means: curl went wrong, or there was no answer
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, curl_failed)
+    load(a, rax, rip("net_status"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, curl_failed)
+    alui(a, "cmp", rax, 300)
+    jcc(a, cc_b, page)
+    alui(a, "cmp", rax, 400)
+    jcc(a, cc_ae, answered)
+    load(a, rcx, rip("net_loc_len"))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, answered)
+    load(a, rsi, rip("run_buf_0")) # it sends the program on: where to, as text
+    alu(a, "add", rsi, r13)
+    call_to(a, "rt_decode_bytes")
+    call_to(a, "rt_b_text")
+    store(a, rip("net_next"), rax)
+    movi(a, rax, 1)
+    jmp_to(a, once_out)
+    mark(a, answered)
+    call_to(a, "rt_b_reset")
+    b_text(a, "the site answered ")
+    load(a, rax, rip("net_status"))
+    call_to(a, "rt_e_plain")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, page)
+    load(a, rsi, rip("run_buf_0"))
+    load(a, rcx, rip("net_used"))
+    movi(a, rax, 0)
+    jmp_to(a, once_out)
+    mark(a, curl_failed)
+    load(a, rax, rip("net_exit"))
+    call_to(a, "rt_net_class")
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, bad_url)
+    movi(a, rax, 6)
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, no_curl)
+    movi(a, rax, 7)
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, no_start) # rax the system's code, below 0
+    unary(a, "neg", rax)
+    push_r(a, rax)
+    call_to(a, "rt_shut_pipes")
+    call_to(a, "rt_b_reset")
+    b_text(a, "couldn't reach it (curl couldn't be started: ")
+    pop_r(a, rdx)
+    call_to(a, "rt_os_text")
+    movi(a, rax, 41)
+    call_to(a, "rt_b_byte")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    movi(a, rax, 2)
+    mark(a, once_out) # what curl said is let go: rsi keeps a page
+    storei(a, rip("run_buf_0"), 0)
+    storei(a, rip("run_buf_1"), 0)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+    emit_net_class(a, 2)
+end
+
+# rt_fetch_once, by WinHTTP: the address in its parts, the host and the path as UTF-16, then a request
+# which follows no move by itself, and each step given what's left of the site's 60 seconds
+to emit_fetch_windows with a
+    set agent to wide_place(a, "moth")
+    set verb to wide_place(a, "GET")
+    set any_type to wide_place(a, "*/*")
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "net_accept")
+    absolute(a, "rodata", length of ro, any_type, 0)
+    put64(ro, 0)
+    put64(ro, 0)
+    set bad_url to new_label(a)
+    set slash to new_label(a)
+    set path_loop to new_label(a)
+    set path_byte to new_label(a)
+    set path_next to new_label(a)
+    set path_done to new_label(a)
+    set failed to new_label(a)
+    set timed_out to new_label(a)
+    set answered to new_label(a)
+    set read_page to new_label(a)
+    set read_more to new_label(a)
+    set roomy to new_label(a)
+    set page_done to new_label(a)
+    set once_out to new_label(a)
+    mark(a, "rt_fetch_once")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    storei(a, rip("net_session"), 0)
+    storei(a, rip("net_connect"), 0)
+    storei(a, rip("net_request"), 0)
+    call_to(a, "rt_url_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad_url)
+    call_to(a, "rt_url_parts")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad_url)
+    load(a, r12, rip("net_copy")) # the host, as UTF-16 (an IPv6 address in its [ ])
+    alu_load(a, "add", r12, rip("net_host_at"))
+    load(a, rbx, rip("net_host_len"))
+    win_enter(a)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    mov_rr(a, r8, r12)
+    mov_rr(a, r9, rbx)
+    storei(a, mem(rsp, 32), 0)
+    storei(a, mem(rsp, 40), 0)
+    call_import(a, "imp_MultiByteToWideChar")
+    mov32_rr(a, r13, rax)
+    win_leave(a)
+    lea(a, rcx, mem(r13, 1))
+    alu(a, "add", rcx, rcx)
+    call_to(a, "rt_alloc_raw")
+    store(a, rip("net_whost"), rax)
+    win_enter(a)
+    store(a, mem(rsp, 32), rax)
+    store(a, mem(rsp, 40), r13)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    mov_rr(a, r8, r12)
+    mov_rr(a, r9, rbx)
+    call_import(a, "imp_MultiByteToWideChar")
+    win_leave(a)
+    call_to(a, "rt_b_reset") # the path, from a /, with each byte above 127 written %xx, then the query as it is, as curl sends them
+    load(a, r12, rip("net_copy"))
+    alu_load(a, "add", r12, rip("net_path_at"))
+    load(a, r13, rip("net_path_len"))
+    movi(a, r14, 0) # 1 in the query
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, slash)
+    load8(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 47)
+    jcc(a, cc_e, path_loop)
+    mark(a, slash)
+    movi(a, rax, 47)
+    call_to(a, "rt_b_byte")
+    mark(a, path_loop)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, path_done)
+    load8(a, rax, mem(r12, 0))
+    set not_query to new_label(a)
+    alui(a, "cmp", rax, 63)
+    jcc(a, cc_ne, not_query)
+    movi(a, r14, 1)
+    mark(a, not_query)
+    test_rr(a, r14, r14)
+    jcc(a, cc_ne, path_byte)
+    alui(a, "cmp", rax, 128)
+    jcc(a, cc_b, path_byte)
+    push_r(a, rax)
+    movi(a, rax, 37)
+    call_to(a, "rt_b_byte")
+    load(a, rax, mem(rsp, 0))
+    shifti(a, "shr", rax, 4)
+    hex_digit(a)
+    pop_r(a, rax)
+    alui(a, "and", rax, 15)
+    hex_digit(a)
+    jmp_to(a, path_next)
+    mark(a, path_byte)
+    call_to(a, "rt_b_byte")
+    mark(a, path_next)
+    inc_r(a, r12)
+    dec_r(a, r13)
+    jmp_to(a, path_loop)
+    mark(a, path_done) # as UTF-16, which WinHTTP sends as UTF-8 again
+    load(a, rcx, rip("b_len"))
+    alu(a, "add", rcx, rcx)
+    alui(a, "add", rcx, 2)
+    call_to(a, "rt_alloc_raw")
+    store(a, rip("net_wpath"), rax)
+    win_enter(a)
+    store(a, mem(rsp, 32), rax)
+    load(a, rax, rip("b_len"))
+    store(a, mem(rsp, 40), rax)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    load(a, r8, rip("b_ptr"))
+    load(a, r9, rip("b_len"))
+    call_import(a, "imp_MultiByteToWideChar")
+    win_leave(a)
+    win_enter(a) # when it started
+    call_import(a, "imp_GetTickCount64")
+    win_leave(a)
+    store(a, rip("net_start"), rax)
+    win_enter(a) # a session, with the system's proxy
+    lea(a, rcx, rip(agent))
+    movi(a, rdx, 4)
+    movi(a, r8, 0)
+    movi(a, r9, 0)
+    storei(a, mem(rsp, 32), 0)
+    call_import(a, "imp_WinHttpOpen")
+    win_leave(a)
+    store(a, rip("net_session"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, failed)
+    win_enter(a) # the site
+    load(a, rcx, rip("net_session"))
+    load(a, rdx, rip("net_whost"))
+    load(a, r8, rip("net_port"))
+    movi(a, r9, 0)
+    call_import(a, "imp_WinHttpConnect")
+    win_leave(a)
+    store(a, rip("net_connect"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, failed)
+    win_enter(a) # the request: GET the path as it is (nothing escaped), secure for https
+    load(a, rcx, rip("net_connect"))
+    lea(a, rdx, rip(verb))
+    load(a, r8, rip("net_wpath"))
+    movi(a, r9, 0)
+    storei(a, mem(rsp, 32), 0)
+    lea(a, rax, rip("net_accept"))
+    store(a, mem(rsp, 40), rax)
+    load(a, rax, rip("net_secure"))
+    shifti(a, "shl", rax, 23)
+    alui(a, "or", rax, 0xC0)
+    store(a, mem(rsp, 48), rax)
+    call_import(a, "imp_WinHttpOpenRequest")
+    win_leave(a)
+    store(a, rip("net_request"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, failed)
+    win_enter(a) # which goes nowhere else by itself
+    load(a, rcx, rip("net_request"))
+    movi(a, rdx, 63)
+    lea(a, r8, mem(rsp, 64))
+    storei(a, mem(rsp, 64), 2)
+    movi(a, r9, 4)
+    call_import(a, "imp_WinHttpSetOption")
+    win_leave(a)
+    test32(a, rax)
+    jcc(a, cc_e, failed)
+    call_to(a, "rt_net_deadline")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, timed_out)
+    win_enter(a)
+    load(a, rcx, rip("net_request"))
+    movi(a, rdx, 0)
+    movi(a, r8, 0)
+    movi(a, r9, 0)
+    storei(a, mem(rsp, 32), 0)
+    storei(a, mem(rsp, 40), 0)
+    storei(a, mem(rsp, 48), 0)
+    call_import(a, "imp_WinHttpSendRequest")
+    win_leave(a)
+    test32(a, rax)
+    jcc(a, cc_e, failed)
+    call_to(a, "rt_net_deadline")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, timed_out)
+    win_enter(a)
+    load(a, rcx, rip("net_request"))
+    movi(a, rdx, 0)
+    call_import(a, "imp_WinHttpReceiveResponse")
+    win_leave(a)
+    test32(a, rax)
+    jcc(a, cc_e, failed)
+    win_enter(a) # the answer's number
+    load(a, rcx, rip("net_request"))
+    movi(a, rdx, 0x20000013)
+    movi(a, r8, 0)
+    lea(a, r9, mem(rsp, 64))
+    storei(a, mem(rsp, 64), 0)
+    lea(a, rax, mem(rsp, 72))
+    store(a, mem(rsp, 32), rax)
+    storei(a, mem(rsp, 72), 4)
+    storei(a, mem(rsp, 40), 0)
+    call_import(a, "imp_WinHttpQueryHeaders")
+    mov32_rr(a, rbx, rax)
+    load32(a, rax, mem(rsp, 64))
+    win_leave(a)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, failed)
+    store(a, rip("net_status"), rax)
+    alui(a, "cmp", rax, 300)
+    jcc(a, cc_b, read_page)
+    alui(a, "cmp", rax, 400)
+    jcc(a, cc_ae, answered)
+    win_enter(a) # where it sends the program on to, if it says
+    load(a, rcx, rip("net_request"))
+    movi(a, rdx, 33)
+    movi(a, r8, 0)
+    lea(a, r9, rip("net_loc_wide"))
+    lea(a, rax, mem(rsp, 72))
+    store(a, mem(rsp, 32), rax)
+    storei(a, mem(rsp, 72), (net_location_room - 1) * 2)
+    storei(a, mem(rsp, 40), 0)
+    call_import(a, "imp_WinHttpQueryHeaders")
+    mov32_rr(a, rbx, rax)
+    load32(a, rax, mem(rsp, 72))
+    win_leave(a)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, answered)
+    shifti(a, "shr", rax, 1)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, answered)
+    win_enter(a)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    lea(a, r8, rip("net_loc_wide"))
+    mov_rr(a, r9, rax)
+    lea(a, rax, rip("net_loc_utf8"))
+    store(a, mem(rsp, 32), rax)
+    storei(a, mem(rsp, 40), net_location_room * 3)
+    storei(a, mem(rsp, 48), 0)
+    storei(a, mem(rsp, 56), 0)
+    call_import(a, "imp_WideCharToMultiByte")
+    mov32_rr(a, rax, rax)
+    win_leave(a)
+    store(a, rip("net_loc_len"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, answered)
+    call_to(a, "rt_net_resolve")
+    call_to(a, "rt_b_text")
+    store(a, rip("net_next"), rax)
+    call_to(a, "rt_net_close")
+    movi(a, rax, 1)
+    jmp_to(a, once_out)
+    mark(a, answered)
+    call_to(a, "rt_net_close")
+    call_to(a, "rt_b_reset")
+    b_text(a, "the site answered ")
+    load(a, rax, rip("net_status"))
+    call_to(a, "rt_e_plain")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, read_page) # the page, into memory that doubles as it fills
+    movi(a, rcx, 65536)
+    store(a, rip("net_room"), rcx)
+    storei(a, rip("net_used"), 0)
+    call_to(a, "rt_alloc_raw")
+    store(a, rip("net_buf"), rax)
+    mark(a, read_more)
+    load(a, rax, rip("net_room"))
+    alu_load(a, "sub", rax, rip("net_used"))
+    alui(a, "cmp", rax, 16384)
+    jcc(a, cc_ae, roomy)
+    load(a, rcx, rip("net_room"))
+    alu(a, "add", rcx, rcx)
+    store(a, rip("net_room"), rcx)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("net_buf"))
+    load(a, rcx, rip("net_used"))
+    store(a, rip("net_buf"), rax)
+    rep_movsb(a)
+    mark(a, roomy)
+    call_to(a, "rt_net_deadline")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, timed_out)
+    win_enter(a)
+    load(a, rcx, rip("net_request"))
+    load(a, rdx, rip("net_buf"))
+    alu_load(a, "add", rdx, rip("net_used"))
+    load(a, r8, rip("net_room"))
+    alu_load(a, "sub", r8, rip("net_used"))
+    lea(a, r9, mem(rsp, 64))
+    storei(a, mem(rsp, 64), 0)
+    call_import(a, "imp_WinHttpReadData")
+    mov32_rr(a, rbx, rax)
+    load32(a, rax, mem(rsp, 64))
+    win_leave(a)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, failed)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, page_done)
+    alu_store(a, "add", rip("net_used"), rax)
+    jmp_to(a, read_more)
+    mark(a, page_done)
+    call_to(a, "rt_net_close")
+    load(a, rsi, rip("net_buf"))
+    load(a, rcx, rip("net_used"))
+    storei(a, rip("net_buf"), 0)
+    movi(a, rax, 0)
+    jmp_to(a, once_out)
+    mark(a, timed_out)
+    call_to(a, "rt_net_close")
+    movi(a, rax, 3)
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, failed) # what WinHTTP says went wrong
+    win_enter(a)
+    call_import(a, "imp_GetLastError")
+    mov32_rr(a, rax, rax)
+    win_leave(a)
+    store(a, rip("net_exit"), rax)
+    call_to(a, "rt_net_close")
+    load(a, rax, rip("net_exit"))
+    call_to(a, "rt_net_class")
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    jmp_to(a, once_out)
+    mark(a, bad_url)
+    movi(a, rax, 6)
+    call_to(a, "rt_net_reason")
+    movi(a, rax, 2)
+    mark(a, once_out)
+    storei(a, rip("net_buf"), 0)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_net_deadline: rax 1 if the site's time is up; else 0, with the request given what's left of it
+    set late to new_label(a)
+    mark(a, "rt_net_deadline")
+    win_enter(a)
+    call_import(a, "imp_GetTickCount64")
+    win_leave(a)
+    alu_load(a, "sub", rax, rip("net_start"))
+    movi(a, rcx, net_time_limit)
+    alu(a, "sub", rcx, rax)
+    jcc(a, cc_le, late)
+    mov_rr(a, rdx, rcx)
+    win_enter(a)
+    mov_rr(a, r8, rdx)
+    mov_rr(a, r9, rdx)
+    store(a, mem(rsp, 32), rdx)
+    load(a, rcx, rip("net_request"))
+    call_import(a, "imp_WinHttpSetTimeouts")
+    win_leave(a)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, late)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_net_close: the request, the site and the session WinHTTP has open are closed, and forgotten
+    mark(a, "rt_net_close")
+    for each which in list of "net_request", "net_connect", "net_session"
+        set none_open to new_label(a)
+        load(a, rcx, rip(which))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, none_open)
+        win_enter(a)
+        call_import(a, "imp_WinHttpCloseHandle")
+        win_leave(a)
+        storei(a, rip(which), 0)
+        mark(a, none_open)
+    end
+    ret(a)
+
+    # rt_net_resolve: where a site sends the program on to (net_loc_utf8, net_loc_len bytes), as a whole
+    # address, into the builder: as it is if it starts with a scheme (http:, ftp:...), else from net_copy's
+    # scheme, host, path or query on, as it starts with //, /, ? or # or anything else
+    set has_scheme to new_label(a)
+    set scheme_loop to new_label(a)
+    set no_scheme to new_label(a)
+    set root to new_label(a)
+    set not_root to new_label(a)
+    set keep_query to new_label(a)
+    set dir_seek to new_label(a)
+    set cut_here to new_label(a)
+    set no_dir to new_label(a)
+    set the_rest to new_label(a)
+    set ends_seek to new_label(a)
+    set ends_found to new_label(a)
+    mark(a, "rt_net_resolve")
+    call_to(a, "rt_b_reset")
+    lea(a, r12, rip("net_loc_utf8"))
+    load(a, r13, rip("net_loc_len"))
+    load(a, r14, rip("net_copy"))
+    load8(a, rax, mem(r12, 0)) # a scheme: a letter, then letters, digits, + - and ., then a :
+    alui(a, "or", rax, 32)
+    alui(a, "sub", rax, 97)
+    alui(a, "cmp", rax, 25)
+    jcc(a, cc_a, no_scheme)
+    movi(a, rdx, 1)
+    mark(a, scheme_loop)
+    alu(a, "cmp", rdx, r13)
+    jcc(a, cc_ae, no_scheme)
+    byte_at(a, rax, r12, rdx)
+    alui(a, "cmp", rax, 58)
+    jcc(a, cc_e, has_scheme)
+    inc_r(a, rdx)
+    for each fine in list of 43, 45, 46
+        alui(a, "cmp", rax, fine)
+        jcc(a, cc_e, scheme_loop)
+    end
+    mov_rr(a, rcx, rax)
+    alui(a, "sub", rcx, 48)
+    alui(a, "cmp", rcx, 9)
+    jcc(a, cc_be, scheme_loop)
+    alui(a, "or", rax, 32)
+    alui(a, "sub", rax, 97)
+    alui(a, "cmp", rax, 25)
+    jcc(a, cc_be, scheme_loop)
+    jmp_to(a, no_scheme)
+    mark(a, has_scheme)
+    jmp_to(a, the_rest)
+    mark(a, no_scheme)
+    load8(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 47)
+    jcc(a, cc_ne, not_root)
+    alui(a, "cmp", r13, 2) # //host...: after this one's scheme and its :
+    jcc(a, cc_b, root)
+    load8(a, rax, mem(r12, 1))
+    alui(a, "cmp", rax, 47)
+    jcc(a, cc_ne, root)
+    mov_rr(a, rsi, r14)
+    movi(a, rcx, 5)
+    alu_load(a, "add", rcx, rip("net_secure"))
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, the_rest)
+    mark(a, root) # /path: after this one's scheme and host
+    mov_rr(a, rsi, r14)
+    load(a, rcx, rip("net_path_at"))
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, the_rest)
+    mark(a, not_root) # rdx where this one's query starts, or its # for an address that is a # and more
+    load(a, rdx, rip("net_path_at"))
+    mark(a, ends_seek)
+    alu_load(a, "cmp", rdx, rip("net_len"))
+    jcc(a, cc_ae, ends_found)
+    byte_at(a, rcx, r14, rdx)
+    alui(a, "cmp", rcx, 35)
+    jcc(a, cc_e, ends_found)
+    load8(a, rax, mem(r12, 0))
+    alui(a, "cmp", rax, 35)
+    jcc(a, cc_e, keep_query)
+    alui(a, "cmp", rcx, 63)
+    jcc(a, cc_e, ends_found)
+    mark(a, keep_query)
+    inc_r(a, rdx)
+    jmp_to(a, ends_seek)
+    mark(a, ends_found)
+    load8(a, rax, mem(r12, 0)) # ?query or #fragment: in place of this one's
+    alui(a, "cmp", rax, 63)
+    jcc(a, cc_e, cut_here)
+    alui(a, "cmp", rax, 35)
+    jcc(a, cc_e, cut_here)
+    mov_rr(a, r8, rdx) # anything else: in this one's folder, after the last / of its path
+    mark(a, dir_seek)
+    alu_load(a, "cmp", r8, rip("net_path_at"))
+    jcc(a, cc_be, no_dir)
+    dec_r(a, r8)
+    byte_at(a, rax, r14, r8)
+    alui(a, "cmp", rax, 47)
+    jcc(a, cc_ne, dir_seek)
+    lea(a, rdx, mem(r8, 1))
+    jmp_to(a, cut_here)
+    mark(a, no_dir) # it has no path: after a / of its own
+    mov_rr(a, rsi, r14)
+    load(a, rcx, rip("net_path_at"))
+    call_to(a, "rt_b_bytes")
+    movi(a, rax, 47)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, the_rest)
+    mark(a, cut_here)
+    mov_rr(a, rsi, r14)
+    mov_rr(a, rcx, rdx)
+    call_to(a, "rt_b_bytes")
+    mark(a, the_rest)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    call_to(a, "rt_b_bytes")
+    ret(a)
+    emit_net_class(a, 3)
+end
+
 # `random number from 1 to 6`: into xmm0
 to gen_random with fc, e
     set a to a of fc
@@ -16521,6 +17882,7 @@ to gen_outside with fc, e
         return nothing
     end
     if kind of e is "read"
+        set uses_read of st of fc to yes # any name read may be a site's, so the program may go online
         gen_expr(fc, subject of e)
         movi(a, rdx, 0)
         if binary of e
@@ -18156,7 +19518,7 @@ to new_state with a, program_name, files, source, target
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
-        uses_random no, uses_units no, uses_tables no, uses_folders no
+        uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no
 end
 
 to new_fc with st, scope, main, name, inputs, own
