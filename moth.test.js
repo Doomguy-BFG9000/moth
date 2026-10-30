@@ -823,8 +823,9 @@ test("say ... to the error output and stop the program, on all three engines and
     ['say "a" to the error output\nsay "b"\nto deep with n\n    if n is 0\n        say "bottom" to the error output\n        stop the program with 5\n    end\n    deep(n - 1)\nend\ndeep(5000)',
       [["err", "a"], ["out", "b"], ["err", "bottom"], ["end", 5]]],
     ['set c to run program "tool" with (list of "a")', [["mistake", "line 1: can't run programs here: only a program made by moth build can"]]],
-    ['set c to run program (3 bytes) keeping its output', [["mistake", "line 1: can't run programs here: only a program made by moth build can"]]],
-    ["set c to run program 5", [["mistake", "line 1: 'run program' needs text or bytes, not a number"]]],
+    ['set c to run program "x" with (list of "a", "b")', [["mistake", "line 1: can't run programs here: only a program made by moth build can"]]],
+    ['set c to run program "x" with (list of 5)', [["mistake", "line 1: 'run program ... with' needs text, not a number"]]],
+    ["set c to run program 5", [["mistake", "line 1: 'run program' needs text, not a number"]]],
     ['set c to run program "x" with "a"', [["mistake", "line 1: 'run program ... with' needs a list, not text"]]],
     // words the phrases are made of are still names, and the phrases only start where they could never have
     // meant anything else
@@ -856,7 +857,16 @@ test("say ... to the error output and stop the program, on all three engines and
   assert.deepEqual([steps.at(-1).done, steps.at(-1).stopped, steps.length], [true, 6, 3]);
   assert.deepEqual(problems("stop the program with 300\nsay 1"), ["1:1 fails: 'stop the program with' needs a whole number from 0 to 255, not 300",
     "2:1 never runs: this line can never run, because 'stop the program' comes first"]);
-  assert.deepEqual(problems('set c to run program 5 with (list of "a")\nsay c'), ["1:10 fails: 'run program' needs text or bytes, not a number"]);
+  assert.deepEqual(problems('set c to run program 5 with (list of "a")\nsay c'), ["1:10 fails: 'run program' needs text, not a number"]);
+  // remove the file: on every engine, through what holds the files
+  for (const engine of ENGINES) {
+    const disk = memoryDisk({ "old.txt": "x", "keep.txt": "y" });
+    const removing = 'remove the file "old.txt"\nsay "gone"\ntry\n    remove the file "old.txt"\nif it fails with why\n    say why\nend\nremove the file 5';
+    assert.deepEqual(streams(removing, { engine, disk }).log, [["out", "gone"], ["out", "there is no file called 'old.txt'"], ["mistake", "line 8: a file name is text, not a number"]], engine);
+    assert.deepEqual([...disk.files.keys()], ["keep.txt"], engine);
+    assert.deepEqual(streams('remove the file "a"', { engine }).log, [["mistake", "line 1: this program removes a file, but there are no files here"]], engine);
+  }
+  assert.deepEqual(problems("remove the file 5"), ["1:1 fails: a file name is text, not a number"]);
 });
 
 // ---------- tidying ----------

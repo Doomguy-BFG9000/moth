@@ -304,9 +304,10 @@ export const ERRORS = [
   ["every 0 seconds\n    say 1\nend", "line 1: 'every' needs a number above 0, not 0"],
   ["set when to 1", "line 1: 'when' is a Moth word, so it can't be used as a variable name"],
   ["when a key is pressed\n    stop\nend", "line 2: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
-  ["say \"a\" to the error output\nstop the program with 256", "line 2: 'stop the program with' needs a whole number from 0 to 255, not 256"],
+  ["set code to 255\nstop the program with code + 1", "line 2: 'stop the program with' needs a whole number from 0 to 255, not 256"],
   ["say 1 to the error put", "line 1: expected 'the error output' but found 'the'"],
-  ["set c to run program 5 with (list of \"a\")", "line 1: 'run program' needs text or bytes, not a number"],
+  ["set c to run program 5 with (list of \"a\")", "line 1: 'run program' needs text, not a number"],
+  ["remove the file list of \"a\"", "line 1: a file name is text, not a list"],
   ["run program \"x\"", "line 1: 'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'"],
 ];
 

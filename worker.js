@@ -51,6 +51,7 @@ function pageDisk() {
       return Uint8Array.from(request.responseText, (c) => c.charCodeAt(0) & 0xff);
     },
     write: files.write,
+    remove: files.remove,
   };
 }
 

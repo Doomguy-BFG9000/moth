@@ -4,7 +4,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, machineCompiler, excerpt, describeTrail, MothError } from "./moth.js";
@@ -26,6 +26,7 @@ const refused = (doing) => () => {
 const NOTHING_ALLOWED = {
   read: (name) => refused(/^https?:\/\//i.test(name) ? "go online (start it with --allow-net)" : "read files (start it with --allow-read)")(),
   write: refused("write files (start it with --allow-write)"),
+  remove: refused("write files (start it with --allow-write)"),
 };
 
 // What the JavaScript engine prints for p.moth, writes to the error output (what it says there, then a
@@ -194,7 +195,7 @@ function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
   const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write"] });
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"] });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
   if (target === "linux") chmodSync(exe, 0o755);
@@ -212,7 +213,7 @@ test("moth.exe builds a program, and itself into the same bytes", { skip }, () =
   assert.equal(built.status, 0, built.stdout + built.stderr);
   assert.match(built.stdout, /^compiled hi\.moth to machine code for (Windows|Linux) -> hi(\.exe)? \(.* bytes\)\n$/);
   assert.equal(spawnSync(executable(dir, "hi"), [], { encoding: "utf8" }).stdout, "abab\nSTRASSE\n");
-  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write", "--allow-run"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.ok(Buffer.from(made).equals(readFileSync(executable(dir, "moth"))), "moth.exe built itself into different bytes");
 });
@@ -235,6 +236,106 @@ test("a program moth.exe builds uses files, and shows a mistake in one as moth r
   const broken = spawnSync(exe, ["build", join("uses", "broken.moth")], { cwd: dir, encoding: "utf8" });
   assert.deepEqual([broken.status, broken.stdout], [1, ""]); // a mistake in the program: on the error output, and 1
   assert.equal(broken.stderr, `${join("uses", "broken.moth")}:3:1: expected ')' but found the end of the code\n\n^\n`);
+});
+
+// `run program` and `remove the file`: a program moth.exe builds starts another and waits for it, with the
+// same input and output, and gives the number it ended with; and only if it was built with --allow-run.
+test("a program moth.exe builds starts another program, waits for it, and removes a file", { skip }, () => {
+  const { dir, exe } = mothExe();
+  writeFileSync(join(dir, "child.moth"), [
+    'say "child out"',
+    'say "child err" to the error output',
+    "for each a in arguments",
+    '    say "[" a "]"',
+    "end",
+    'set answer to ask "Name?"',
+    'say "child heard " answer',
+    "stop the program with 7",
+  ].join("\n"));
+  writeFileSync(join(dir, "parent.moth"), [
+    'say "parent before"',
+    `set child to "${target === "windows" ? "./child.exe" : "./child"}"`,
+    'set code to run program child with (list of "one", "two words", "q\\"uote", "")',
+    'say "child ended with " code',
+    'write "temporary" to "gone.txt"',
+    'say read "gone.txt"',
+    'remove the file "gone.txt"',
+    "try",
+    '    say read "gone.txt"',
+    "if it fails with why",
+    "    say why",
+    "end",
+    "try",
+    '    remove the file "gone.txt"',
+    "if it fails with why",
+    "    say why",
+    "end",
+    'set missing to run program "nowhere-at-all-here"',
+  ].join("\n"));
+  assert.equal(spawnSync(exe, ["build", "child.moth"], { cwd: dir, encoding: "utf8" }).status, 0);
+  // without --allow-run it may not start one, and away from a terminal it isn't asked
+  const built = spawnSync(exe, ["build", "parent.moth", "--allow-read", "--allow-write"], { cwd: dir, encoding: "utf8" });
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  const refused = spawnSync(executable(dir, "parent"), [], { cwd: dir, encoding: "utf8", input: "Sam\n" });
+  assert.equal(refused.stdout, "parent before\n");
+  assert.match(refused.stderr, /: can't run '\.\/child(\.exe)?': this program isn't allowed to start programs \(start it with --allow-run\)\n/);
+  assert.equal(refused.status, 1);
+  // with it, the child says what it says where this program's own words go, and ends with 7
+  const again = spawnSync(exe, ["build", "parent.moth", "--allow-read", "--allow-write", "--allow-run"], { cwd: dir, encoding: "utf8" });
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  const ran = spawnSync(executable(dir, "parent"), [], { cwd: dir, encoding: "utf8", input: "Sam\n" });
+  assert.equal(ran.stdout, ["parent before", "child out", "[one]", "[two words]", 'q"uote'.replace(/^/, "[") + "]", "[]", "Name? Sam",
+    "child heard Sam", "child ended with 7", "temporary", "there is no file called 'gone.txt'", "there is no file called 'gone.txt'", ""].join("\n"));
+  assert.equal(ran.stderr, `child err\nparent.moth:18:16: there is no program called 'nowhere-at-all-here'\nset missing to run program "nowhere-at-all-here"\n               ^\n`);
+  assert.equal(ran.status, 1);
+  assert.ok(!existsSync(join(dir, "gone.txt")));
+});
+
+// `moth run`: the program built into a file beside it, run with the arguments after it, ending with the
+// number it ended with, and the file gone again.
+test("moth.exe runs a program, passing its arguments, input, output and exit code through", { skip }, () => {
+  const { dir, exe } = mothExe();
+  writeFileSync(join(dir, "tool.moth"), [
+    "for each a in arguments",
+    '    say "[" a "]"',
+    "end",
+    'say "to the error output" to the error output',
+    'set answer to ask "Name?"',
+    'say "heard " answer',
+    'say read "notes.txt"',
+    "stop the program with 5",
+  ].join("\n"));
+  writeFileSync(join(dir, "notes.txt"), "noted");
+  writeFileSync(join(dir, "broken.moth"), "say 1 +\n");
+  mkdirSync(join(dir, "deeper"), { recursive: true });
+  writeFileSync(join(dir, "deeper", "deep.moth"), 'say "deep"\n');
+  const left = () => readdirSync(dir).filter((name) => name.includes("-run"));
+  const ran = spawnSync(exe, ["run", "--allow-read", "tool.moth", "one", "two words", "--allow-write"], { cwd: dir, encoding: "utf8", input: "Sam\n" });
+  assert.deepEqual({ stdout: ran.stdout, stderr: ran.stderr, status: ran.status }, {
+    stdout: "[one]\n[two words]\n[--allow-write]\nName? Sam\nheard Sam\nnoted\n", // what comes after the file is the program's own
+    stderr: "to the error output\n",
+    status: 5,
+  });
+  assert.deepEqual(left(), [], "the file it ran was left behind");
+  // without the flag the program may not read, as `moth build` builds the flags in
+  const unallowed = spawnSync(exe, ["run", "tool.moth"], { cwd: dir, encoding: "utf8", input: "Sam\n" });
+  assert.match(unallowed.stderr, /can't read 'notes\.txt': this program isn't allowed to read files/);
+  assert.equal(unallowed.status, 1);
+  assert.deepEqual(left(), []);
+  // a mistake in the program, or no such file: the mistake on the error output, and 1
+  const broken = spawnSync(exe, ["run", "broken.moth"], { cwd: dir, encoding: "utf8" });
+  assert.deepEqual([broken.status, broken.stdout, broken.stderr], [1, "", "broken.moth:2:1: expected a value but found the end of the code\n\n^\n"]);
+  const missing = spawnSync(exe, ["run", "nowhere.moth"], { cwd: dir, encoding: "utf8" });
+  assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
+  // a program in a folder of its own, and `run` with no file at all
+  const deep = spawnSync(exe, ["run", join("deeper", "deep.moth")], { cwd: dir, encoding: "utf8" });
+  assert.deepEqual([deep.status, deep.stdout], [0, "deep\n"]);
+  assert.deepEqual(readdirSync(join(dir, "deeper")).filter((name) => name.includes("-run")), []);
+  for (const bad of [["run"], ["run", "--target", "linux", "tool.moth"], ["walk", "tool.moth"]]) {
+    const said = spawnSync(exe, bad, { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([said.status, said.stdout], [2, ""], bad.join(" "));
+    assert.match(said.stderr, /^usage: moth /, bad.join(" "));
+  }
 });
 
 // A program that takes arguments, asks, reads and writes, built with each set of --allow flags, each in a

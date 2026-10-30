@@ -148,11 +148,12 @@ export const OPCODES = [
   ["EVERY", 1], // the function on the stack runs every so often: the number under it, times the operand (1 or 1000)
   ["SAY_ERROR", 1], // as SAY, but the line goes to the error output
   ["EXIT", 0], // `stop the program with` the number on the stack
+  ["REMOVE_FILE", 0], // `remove the file` named on the stack
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
@@ -706,18 +707,19 @@ export const BUILTINS = [
   },
   { name: "largest", needs: [["list"]], gives: null, run: ([list], error) => extreme("largest", list, error) },
   { name: "smallest", needs: [["list"]], gives: null, run: ([list], error) => extreme("smallest", list, error) },
-  // `run program "git" with (list of "status")`: the number it ended with; and `... keeping its output`, a
-  // record of that and what it said. Only a program moth build makes can start one; anywhere else it's a
-  // mistake, once its inputs are what they must be.
-  { name: "run program", needs: [["text", "bytes"], ["list"]], gives: "number", run: (inputs, error) => runProgram(inputs, error) },
-  { name: "run program keeping", needs: [["text", "bytes"], ["list"]], gives: "record", run: (inputs, error) => runProgram(inputs, error) },
+  // `run program "tool.exe" with (list of "a")`: starts it, waits for it, and gives the number it ended
+  // with. Only a program moth build makes can start one; anywhere else it's a mistake, once its inputs are
+  // what they must be.
+  {
+    name: "run program", needs: [["text"], ["list"]], gives: "number",
+    run: ([program, args], error) => {
+      needText("'run program'", program, error);
+      if (!isList(args)) error(`'run program ... with' needs a list, not ${kindOf(args)}`);
+      for (const arg of args) needText("'run program ... with'", arg, error);
+      error("can't run programs here: only a program made by moth build can");
+    },
+  },
 ];
-
-function runProgram([program, args], error) {
-  if (typeof program !== "string" && !isBytes(program)) error(`'run program' needs text or bytes, not ${kindOf(program)}`);
-  if (!isList(args)) error(`'run program ... with' needs a list, not ${kindOf(args)}`);
-  error("can't run programs here: only a program made by moth build can");
-}
 
 // `stop the program with 2`: the number a program ends with, a whole number from 0 to 255 (all Linux keeps)
 export function exitCode(v, error) {
@@ -802,6 +804,20 @@ export function writeFile(value, name, disk, error) {
   } catch (err) {
     error(`can't write '${name}': ${err.message}`);
   }
+}
+
+// `remove the file "old.txt"`: there must be such a file. A disk that can remove files has remove(name), which
+// gives whether there was one, and may throw an Error, whose message is passed on.
+export function removeFile(name, disk, error) {
+  if (typeof name !== "string") error(`a file name is text, not ${kindOf(name)}`);
+  if (!disk?.remove) error("this program removes a file, but there are no files here");
+  let gone;
+  try {
+    gone = disk.remove(name);
+  } catch (err) {
+    error(`can't remove '${name}': ${err.message}`);
+  }
+  if (!gone) error(`there is no file called '${name}'`);
 }
 
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
@@ -1125,6 +1141,9 @@ export class Machine {
           }
           case EXIT: // not a Failure, so no `try` catches it, and it isn't a mistake
             throw new Ended(exitCode(stack.pop(), oops));
+          case REMOVE_FILE:
+            removeFile(stack.pop(), this.disk, oops);
+            break;
           case CHECK_REPEAT:
             stack[stack.length - 1] = checkRepeat(stack[stack.length - 1], oops); // to 15 digits: 0.1 * 30 is 3 times
             break;

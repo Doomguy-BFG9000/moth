@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord, Ended, exitCode } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -81,6 +81,7 @@ const IMPORTS = {
   ask: [[EQ, I32], [EQ]],
   read: [[EQ, I32, I32], [EQ]], // the file's name, 1 for bytes or 0 for text, and a position
   write: [[EQ, EQ, I32], []],
+  removeFile: [[EQ, I32], []],
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
   handle: [[I32, EQ, I32], []], // which event (EVENTS), its handler, a position
@@ -951,6 +952,10 @@ class WasmCompiler extends Scope {
         this.expr(s.target);
         this.e("i32.const", this.pos(s.at)).e("call", im.write);
         return;
+      case "removeFile":
+        this.expr(s.target);
+        this.e("i32.const", this.pos(s.at)).e("call", im.removeFile);
+        return;
       case "expect":
         if (s.cond.kind !== "compare") {
           this.expr(s.cond);
@@ -1456,6 +1461,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
+    removeFile: (name, k) => removeFile(toJs(name), disk, errors[k]),
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
     handle: (event, closure) => void host.handlers.push({ event: EVENTS[event], closure }),

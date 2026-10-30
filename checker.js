@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
-  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode } from "./vm.js";
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -281,6 +281,12 @@ class Checker extends Scope {
         this.expr(s.target);
         const type = this.type(s.target);
         this.willFail(s.at, () => this.known(type()) && type() !== "text" && writeFile(null, SAMPLES[type()], null, found));
+        return;
+      }
+      case "removeFile": { // as with `write`, only a name that isn't text is certain to fail
+        this.expr(s.target);
+        const type = this.type(s.target);
+        this.willFail(s.at, () => this.known(type()) && type() !== "text" && removeFile(SAMPLES[type()], null, found));
         return;
       }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program

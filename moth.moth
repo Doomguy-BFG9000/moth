@@ -2,18 +2,19 @@
 # (moth on Linux), which compiles a Moth program into a program of its own with neither JavaScript nor Rust:
 #
 #     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
+#     moth run [--allow-...] program.moth [arguments...]
 #
 # The first moth.exe comes from GitHub's releases, or from Node.js (`node bootstrap.mjs`); after that it
 # builds itself, into the same bytes:
 #
-#     moth build moth.moth --allow-read --allow-write
+#     moth build moth.moth --allow-read --allow-write --allow-run
 #
 # A file used `as` a name shares its functions' variables with the program's top level, so every name made
 # here starts with cli_, which machine.moth and compiler.moth never use.
 
 use "machine.moth" as machine
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-read] [--allow-write] [--allow-net] [--allow-all]\n  compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file> for Linux,\n  for the system moth runs on unless --target says; the --allow flags let it read or write files, or read\n  sites, without asking, and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those"
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those"
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -141,7 +142,36 @@ to cli_text_of with cli_path
     return nothing
 end
 
-to cli_build with cli_path, cli_target, cli_allowing
+# a path without its .moth
+to cli_stem with cli_path
+    if length of cli_path is greater than 5 and cli_tail(cli_path, length of cli_path - 4) is ".moth"
+        return cli_first(cli_path, length of cli_path - 5)
+    end
+    return cli_path
+end
+
+# where `moth build` puts the program it makes
+to cli_out_for with cli_path, cli_target
+    if cli_target is "windows"
+        return cli_stem(cli_path) + ".exe"
+    end
+    return cli_stem(cli_path)
+end
+
+# where `moth run` puts the program it makes, for as long as it runs: beside the file, with its folder
+# named even when it has none, so the system looks for it there and nowhere else
+to cli_temp_for with cli_path, cli_target
+    set cli_beside to cli_stem(cli_path)
+    if cli_folder_of(cli_path) is ""
+        set cli_beside to "./" + cli_beside
+    end
+    if cli_target is "windows"
+        return cli_beside + "-run.exe"
+    end
+    return cli_beside + "-run"
+end
+
+to cli_build with cli_path, cli_target, cli_allowing, cli_into, cli_telling
     set cli_folder to cli_folder_of(cli_path)
     set cli_source to cli_text_of(cli_path)
     if cli_source is nothing
@@ -174,18 +204,45 @@ to cli_build with cli_path, cli_target, cli_allowing
         cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
         return no
     end
-    set cli_out to cli_path
-    if length of cli_out is greater than 5 and cli_tail(cli_out, length of cli_out - 4) is ".moth"
-        set cli_out to cli_first(cli_out, length of cli_out - 5)
-    end
     set cli_system to "Linux"
     if cli_target is "windows"
-        set cli_out to cli_out + ".exe"
         set cli_system to "Windows"
     end
-    write cli_bytes as bytes to cli_out
-    say "compiled " + cli_path + " to machine code for " + cli_system + " -> " + cli_out + " (" + cli_grouped(length of cli_bytes) + " bytes)"
+    try
+        write cli_bytes as bytes to cli_into
+    if it fails with cli_whynot
+        say "moth: " + cli_whynot to the error output
+        return no
+    end
+    if cli_telling
+        say "compiled " + cli_path + " to machine code for " + cli_system + " -> " + cli_into + " (" + cli_grouped(length of cli_bytes) + " bytes)"
+    end
     return yes
+end
+
+# `moth run file.moth a b`: the program, built into a file beside it, started with those arguments and
+# this moth's own input and output, waited for, and the file removed. Gives the number it ended with, or 1
+# for a mistake, or for a number this system can't end with (Windows gives a crash a huge one).
+to cli_run with cli_path, cli_target, cli_allowing, cli_passed_on
+    set cli_temp to cli_temp_for(cli_path, cli_target)
+    if not cli_build(cli_path, cli_target, cli_allowing, cli_temp, no)
+        return 1
+    end
+    set cli_ended to 1
+    try
+        set cli_ended to run program cli_temp with cli_passed_on
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+    end
+    try
+        remove the file cli_temp
+    if it fails with cli_whygone
+        say "moth: " + cli_whygone to the error output
+    end
+    if cli_ended is less than 0 or cli_ended is greater than 255
+        return 1
+    end
+    return cli_ended
 end
 
 # what moth runs on: Linux has /proc, Windows doesn't
@@ -199,33 +256,41 @@ to cli_host
     end
 end
 
-# --allow-read, --allow-write, --allow-net or --allow-all, each maybe with =names
+# --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, the first three maybe with =names
 to cli_allow_flag with cli_flag
-    for each cli_kind in list of "read", "write", "net", "all"
+    for each cli_kind in list of "read", "write", "net", "run", "all"
         set cli_start to "--allow-" + cli_kind
         if cli_flag is cli_start
             return yes
         end
         if length of cli_flag is greater than length of cli_start + 1 and cli_first(cli_flag, length of cli_start + 1) is cli_start + "="
-            return cli_kind is not "all"
+            return cli_kind is not "all" and cli_kind is not "run"
         end
     end
     return no
 end
 
-# the arguments: `build`, the file, maybe --target, and any --allow flags. In a function, as anything a
-# function sets that the top level sets too is the top level's, and the other functions here count with
-# cli_k as well.
+# the arguments: `build` or `run`, the file, any --allow flags, --target for a build, and for a run
+# whatever comes after the file, which is the program's own. In a function, as anything a function sets
+# that the top level sets too is the top level's, and the other functions here count with cli_k as well.
 to cli_main
     set cli_given to arguments
     set cli_target to nothing
     set cli_flags to empty list
     set cli_file to nothing
-    set cli_fine to length of cli_given is at least 2 and item 1 of cli_given is "build"
+    set cli_passed to empty list
+    set cli_command to ""
+    if length of cli_given is at least 1
+        set cli_command to item 1 of cli_given
+    end
+    set cli_fine to length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run")
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
-        if cli_arg is "--target" and cli_k is less than length of cli_given and cli_target is nothing
+        if cli_file is not nothing and cli_command is "run" # after the file, everything is the program's own
+            add cli_arg to cli_passed
+            add 1 to cli_k
+        else if cli_arg is "--target" and cli_command is "build" and cli_k is less than length of cli_given and cli_target is nothing
             set cli_target to item (cli_k + 1) of cli_given
             set cli_fine to cli_target is "windows" or cli_target is "linux"
             add 2 to cli_k
@@ -249,7 +314,10 @@ to cli_main
     if cli_target is nothing
         set cli_target to cli_host()
     end
-    if not cli_build(cli_file, cli_target, cli_flags) # a mistake in the program, or a file that can't be read: 1
+    if cli_command is "run"
+        stop the program with cli_run(cli_file, cli_target, cli_flags, cli_passed)
+    end
+    if not cli_build(cli_file, cli_target, cli_flags, cli_out_for(cli_file, cli_target), yes) # a mistake in the program, or a file that can't be read: 1
         stop the program with 1
     end
 end

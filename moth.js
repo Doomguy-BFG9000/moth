@@ -325,7 +325,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
       return { kind: "stop", at: t };
     }
-    if (word("remove")) { // `remove "Sam" from ages`
+    if (word("remove")) { // `remove "Sam" from ages`, `remove the file "old.txt"`
+      if (isWord("the") && !peek().nl && wordAt(pos + 1, "file")) {
+        pos += 2;
+        return { kind: "removeFile", target: additive(), at: t };
+      }
       const key = additive();
       expectWord("from");
       return { kind: "remove", key, target: unary(), at: t };
@@ -552,13 +556,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += 2;
       return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
     } // what the program was started with: `tool a b`
-    if (isWord("run") && runsProgram()) { // `run program "x" with (list of "a")`, `... keeping its output`
+    if (isWord("run") && runsProgram()) { // `run program "tool.exe" with (list of "a")`
       pos += 2;
       const program = additive();
       const inputs = !peek().nl && word("with") ? additive() : { kind: "list", items: [], at: t };
-      const keeping = !peek().nl && isWord("keeping") && wordAt(pos + 1, "its") && wordAt(pos + 2, "output");
-      if (keeping) pos += 3;
-      return { kind: "builtin", name: keeping ? "run program keeping" : "run program", args: [program, inputs], at: t };
+      return { kind: "builtin", name: "run program", args: [program, inputs], at: t };
     }
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
@@ -661,7 +663,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -866,6 +868,10 @@ class Compiler extends Scope {
         this.expr(s.value);
         this.expr(s.target);
         this.emit(s.at, WRITE);
+        return;
+      case "removeFile":
+        this.expr(s.target);
+        this.emit(s.at, REMOVE_FILE);
         return;
       case "expect": // a comparison keeps both its sides, to say what they were
         if (s.cond.kind === "compare") {
@@ -1194,7 +1200,8 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   };
   const answer = ask && kept(ask);
   const chance = kept(random);
-  const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)) };
+  const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)),
+    remove: disk.remove && kept((name) => disk.remove(name)) };
   let program = null;
   if (engine !== "vm") {
     try {
@@ -1221,7 +1228,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     });
     const say = (line) => skipSaid-- > 0 || print(line);
     const options = {
-      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write) }, args, random: replay(chance),
+      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove) }, args, random: replay(chance),
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
     };
     new Machine(compile(source, reading), say, options).run();
@@ -1327,6 +1334,7 @@ export function memoryDisk(start = {}) {
       return typeof data === "string" ? data : new TextDecoder().decode(data);
     },
     write: (name, data) => void files.set(name, data),
+    remove: (name) => files.delete(name),
   };
 }
 

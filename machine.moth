@@ -8658,10 +8658,14 @@ end
 
 to emit_linux with a
     mark(a, "start")
-    load(a, rax, mem(rsp, 0)) # what it was started with, for `arguments`
-    store(a, rip("arg_count"), rax)
+    load(a, rcx, mem(rsp, 0)) # what it was started with, for `arguments`, and its environment, for `run program`
+    store(a, rip("arg_count"), rcx)
     lea(a, rax, mem(rsp, 8))
     store(a, rip("arg_vector"), rax)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    alui(a, "add", rax, 8)
+    store(a, rip("env_vector"), rax)
     lea(a, rsp, rip_plus("stack", stack_size))
     for each stream in list of 1, 2 # a terminal answers TCGETS
         movi(a, rdi, stream)
@@ -8849,13 +8853,14 @@ end
 
 set file_imports to list of "ReadFile", "ReadConsoleW", "CreateFileW", "CloseHandle", "GetLastError", "GetFileAttributesW",
     "GetCommandLineW", "WideCharToMultiByte", "FormatMessageW", "GetFullPathNameW",
-    "GetFinalPathNameByHandleW"
+    "GetFinalPathNameByHandleW", "DeleteFileW", "CreateProcessW", "WaitForSingleObject", "GetExitCodeProcess"
 set in_size to 4096 # bytes of input read at a time
-# for each kind of thing a program may do (read a file, write one, go online): how a question puts it, and
-# how a refusal puts it
+# for each kind of thing a program may do (read a file, write one, go online, start a program): how a
+# question puts it, and how a refusal puts it
 set permission_words to list of (list of "read", "this program isn't allowed to read files (start it with --allow-read)"),
     (list of "write", "this program isn't allowed to write files (start it with --allow-write)"),
-    (list of "go online to", "this program isn't allowed to go online (start it with --allow-net)")
+    (list of "go online to", "this program isn't allowed to go online (start it with --allow-net)"),
+    (list of "run", "this program isn't allowed to start programs (start it with --allow-run)")
 # what Linux's error numbers mean, as glibc's strerror, and so Rust's io::Error, says it
 set errno_words to list of (list of 1, "Operation not permitted"), (list of 2, "No such file or directory"),
     (list of 4, "Interrupted system call"), (list of 5, "Input/output error"), (list of 6, "No such device or address"),
@@ -8866,12 +8871,13 @@ set errno_words to list of (list of 1, "Operation not permitted"), (list of 2, "
     (list of 27, "File too large"), (list of 28, "No space left on device"), (list of 30, "Read-only file system"),
     (list of 36, "File name too long"), (list of 40, "Too many levels of symbolic links"), (list of 122, "Disk quota exceeded")
 
-# what the --allow flags a program is built with let it do without asking, as moth-native's add_allow reads
-# them: `bits` what it may do to everything (1 to read, 2 to write and 4 to go online, added up), and `names`,
-# for each of those three, the files, folders or sites it may (a site's in lowercase, as it's matched)
+# What the --allow flags a program is built with let it do without asking, as moth-native's add_allow read
+# them: `bits` what it may do to everything (1 to read, 2 to write, 4 to go online and 8 to start a
+# program, added up), and `names`, for each of those four, the files, folders or sites it may (a site's in
+# lowercase, as it's matched). --allow-run names nothing: a program may start any program, or none.
 to allowed_of with flags
     set made_bits to 0
-    set named to list of (empty list), (empty list), (empty list)
+    set named to list of (empty list), (empty list), (empty list), (empty list)
     for each flag in flags
         set head to ""
         set flag_word to ""
@@ -8897,8 +8903,10 @@ to allowed_of with flags
                 set kind_nums to list of 2
             else if flag_word is "net"
                 set kind_nums to list of 3
+            else if flag_word is "run" and listed is nothing
+                set kind_nums to list of 4
             else if flag_word is "all" and listed is nothing
-                set kind_nums to list of 1, 2, 3
+                set kind_nums to list of 1, 2, 3, 4
             end
         end
         if length of kind_nums is 0
@@ -8906,7 +8914,7 @@ to allowed_of with flags
         end
         for each k in kind_nums
             if listed is nothing
-                set made_bits to made_bits bit or (item k of (list of 1, 2, 4))
+                set made_bits to made_bits bit or (item k of (list of 1, 2, 4, 8))
             else
                 set these to item k of named
                 for each one in split listed by ","
@@ -9115,6 +9123,7 @@ to emit_files with a, target, allowed
     emit_reading(a, target)
     emit_writing(a, target)
     emit_arguments(a, target)
+    emit_run(a, target)
     emit_file_why(a)
 end
 
@@ -10193,7 +10202,7 @@ to emit_named with a, target
     push_r(a, r12)
     push_r(a, r13)
     mov_rr(a, rbx, rcx)
-    for each k from 0 to 2
+    for each k from 0 to 3
         set other to new_label(a)
         alui(a, "cmp", rbx, k)
         jcc(a, cc_ne, other)
@@ -11350,11 +11359,13 @@ to emit_file_why with a
     set w21 to new_label(a)
     set w22 to new_label(a)
     set w23 to new_label(a)
+    set w24 to new_label(a)
     set w26 to new_label(a)
     set w27 to new_label(a)
     mark(a, "rt_why_file")
     load(a, rax, rip("err_why"))
-    for each pair in list of (list of 21, w21), (list of 22, w22), (list of 23, w23), (list of 26, w26), (list of 27, w27)
+    for each pair in list of (list of 21, w21), (list of 22, w22), (list of 23, w23), (list of 24, w24), (list of 26, w26),
+        (list of 27, w27)
         alui(a, "cmp", rax, item 1 of pair)
         jcc(a, cc_e, item 2 of pair)
     end
@@ -11374,6 +11385,12 @@ to emit_file_why with a
     ret(a)
     mark(a, w23)
     b_text(a, "can't write '")
+    file_name_text(a)
+    b_text(a, "': ")
+    reason_text(a)
+    ret(a)
+    mark(a, w24)
+    b_text(a, "can't remove '")
     file_name_text(a)
     b_text(a, "': ")
     reason_text(a)
@@ -11412,6 +11429,702 @@ to gen_write with fc, s
     gen_pair(fc, value of s, target of s)
     call_to(a of fc, "rt_write_file")
     why_stub(fc, at of s, "rt_why_file")
+end
+
+# ---------- the runtime: starting another program, and removing a file ----------
+# `run program` starts another program, with the same input and output as this one, waits for it, and gives
+# the number it ended with; `remove the file` removes one. A program may only start another if it was built
+# with --allow-run, or a person at a terminal says yes, the way reading and writing files are allowed.
+
+to emit_run with a, target
+    for each slot_name in list of "run_code", "run_status", "env_vector"
+        reserve(a, slot_name, 8, 8)
+    end
+    if target is "windows"
+        reserve(a, "run_si", 112, 16)
+        reserve(a, "run_pi", 32, 16)
+    end
+    if target is "windows"
+        emit_command_line(a)
+    else
+        emit_program_path(a)
+    end
+    emit_run_program(a, target)
+    emit_remove_file(a, target)
+    emit_run_why(a)
+end
+
+# rt_b_arg: rax a text: into the builder as one argument of a Windows command line, in quotes if it holds a
+# space, a tab or a quote, or nothing at all, with the backslashes before a quote doubled, and those at its
+# end doubled too, as Rust's std::process writes a command line
+to emit_command_line with a
+    set look to new_label(a)
+    set plainly to new_label(a)
+    set quoted to new_label(a)
+    set walk to new_label(a)
+    set a_slash to new_label(a)
+    set a_quote to new_label(a)
+    set ended to new_label(a)
+    set slashes_out to new_label(a)
+    set more_slashes to new_label(a)
+    set no_more to new_label(a)
+    set arg_done to new_label(a)
+    mark(a, "rt_b_arg")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    untag(a, rax)
+    load(a, r12, mem(rax, 16))
+    load(a, r13, mem(rax, 0))
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, quoted)
+    movi(a, rbx, 0)
+    mark(a, look)
+    alu(a, "cmp", rbx, r13)
+    jcc(a, cc_ae, plainly)
+    mov_rr(a, rax, r12)
+    alu(a, "add", rax, rbx)
+    load8(a, rax, mem(rax, 0))
+    for each one in list of 32, 9, 34
+        alui(a, "cmp", rax, one)
+        jcc(a, cc_e, quoted)
+    end
+    inc_r(a, rbx)
+    jmp_to(a, look)
+    mark(a, plainly)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, arg_done)
+    mark(a, quoted)
+    movi(a, rax, 34)
+    call_to(a, "rt_b_byte")
+    movi(a, rbx, 0)
+    movi(a, r14, 0) # backslashes waiting to go out
+    mark(a, walk)
+    alu(a, "cmp", rbx, r13)
+    jcc(a, cc_ae, ended)
+    mov_rr(a, rax, r12)
+    alu(a, "add", rax, rbx)
+    load8(a, rax, mem(rax, 0))
+    inc_r(a, rbx)
+    alui(a, "cmp", rax, 92)
+    jcc(a, cc_e, a_slash)
+    alui(a, "cmp", rax, 34)
+    jcc(a, cc_e, a_quote)
+    push_r(a, rax)
+    call_to(a, slashes_out)
+    pop_r(a, rax)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, walk)
+    mark(a, a_slash)
+    inc_r(a, r14)
+    jmp_to(a, walk)
+    mark(a, a_quote) # twice as many backslashes, then \" for the quote itself
+    alu(a, "add", r14, r14)
+    call_to(a, slashes_out)
+    movi(a, rax, 92)
+    call_to(a, "rt_b_byte")
+    movi(a, rax, 34)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, walk)
+    mark(a, ended) # the ones at its end, twice as many, then the quote that closes it
+    alu(a, "add", r14, r14)
+    call_to(a, slashes_out)
+    movi(a, rax, 34)
+    call_to(a, "rt_b_byte")
+    jmp_to(a, arg_done)
+    mark(a, slashes_out) # r14 backslashes, and none left waiting
+    mark(a, more_slashes)
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, no_more)
+    movi(a, rax, 92)
+    call_to(a, "rt_b_byte")
+    dec_r(a, r14)
+    jmp_to(a, more_slashes)
+    mark(a, no_more)
+    ret(a)
+    mark(a, arg_done)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# Linux has no search of its own: rt_run_path: rax a text, a program's name: where its path is, as bytes
+# with a 0 after them, in rax, or 0 if there is no program of that name that may be run. A name with a / in
+# it is the path; any other is looked for in each of the folders PATH names, in order, as execvp does, with
+# an empty one meaning the folder the program runs in.
+to emit_program_path with a
+    set can_run_no to new_label(a)
+    set seek_slash to new_label(a)
+    set has_slash to new_label(a)
+    set no_slash to new_label(a)
+    set each_env to new_label(a)
+    set next_env to new_label(a)
+    set measure_path to new_label(a)
+    set measured_path to new_label(a)
+    set each_folder to new_label(a)
+    set folder_byte to new_label(a)
+    set folder_end to new_label(a)
+    set empty_folder to new_label(a)
+    set folder_copied to new_label(a)
+    set found_it to new_label(a)
+    set path_none to new_label(a)
+    set path_out to new_label(a)
+    mark(a, "rt_can_run") # rdi a path with a 0 after it: rax 1 if there is a program there that may be run
+    movi(a, rsi, 1)
+    sys_call(a, 21)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, can_run_no)
+    movi(a, rax, 1)
+    ret(a)
+    mark(a, can_run_no)
+    movi(a, rax, 0)
+    ret(a)
+
+    mark(a, "rt_run_path")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    untag(a, rax)
+    load(a, r12, mem(rax, 16))
+    load(a, r13, mem(rax, 0))
+    movi(a, rbx, 0)
+    mark(a, seek_slash)
+    alu(a, "cmp", rbx, r13)
+    jcc(a, cc_ae, no_slash)
+    mov_rr(a, rax, r12)
+    alu(a, "add", rax, rbx)
+    load8(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 47)
+    jcc(a, cc_e, has_slash)
+    inc_r(a, rbx)
+    jmp_to(a, seek_slash)
+    mark(a, has_slash) # the name itself, if there is a program there
+    lea(a, rcx, mem(r13, 1))
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rbx, rax)
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    rep_movsb(a)
+    mov_rr(a, rdi, rbx)
+    call_to(a, "rt_can_run")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, path_none)
+    mov_rr(a, rax, rbx)
+    jmp_to(a, path_out)
+    mark(a, no_slash) # PATH, among what the program was started with
+    load(a, r14, rip("env_vector"))
+    test_rr(a, r14, r14)
+    jcc(a, cc_e, path_none)
+    mark(a, each_env)
+    load(a, rsi, mem(r14, 0))
+    test_rr(a, rsi, rsi)
+    jcc(a, cc_e, path_none)
+    set k to 0
+    for each c in "PATH="
+        load8(a, rax, mem(rsi, k))
+        alui(a, "cmp", rax, byte 1 of (c as bytes))
+        jcc(a, cc_ne, next_env)
+        add 1 to k
+    end
+    lea(a, r14, mem(rsi, 5)) # the folders, and room for the longest of them with the name after it
+    movi(a, rcx, 0)
+    mark(a, measure_path)
+    mov_rr(a, rax, r14)
+    alu(a, "add", rax, rcx)
+    load8(a, rax, mem(rax, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, measured_path)
+    inc_r(a, rcx)
+    jmp_to(a, measure_path)
+    mark(a, measured_path)
+    alu(a, "add", rcx, r13)
+    alui(a, "add", rcx, 3)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rbx, rax)
+    mark(a, each_folder) # this folder, up to the next :, then / and the name
+    mov_rr(a, rdi, rbx)
+    movi(a, rdx, 0)
+    mark(a, folder_byte)
+    mov_rr(a, rax, r14)
+    alu(a, "add", rax, rdx)
+    load8(a, rax, mem(rax, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, folder_end)
+    alui(a, "cmp", rax, 58)
+    jcc(a, cc_e, folder_end)
+    inc_r(a, rdx)
+    jmp_to(a, folder_byte)
+    mark(a, folder_end)
+    push_r(a, rdx)
+    mov_rr(a, rsi, r14)
+    mov_rr(a, rcx, rdx)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, empty_folder)
+    rep_movsb(a)
+    jmp_to(a, folder_copied)
+    mark(a, empty_folder) # nothing: the folder it runs in
+    movi(a, rax, 46)
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rdi)
+    mark(a, folder_copied)
+    movi(a, rax, 47)
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rdi)
+    mov_rr(a, rsi, r12)
+    mov_rr(a, rcx, r13)
+    rep_movsb(a)
+    movi(a, rax, 0)
+    store8(a, mem(rdi, 0), rax)
+    mov_rr(a, rdi, rbx)
+    call_to(a, "rt_can_run")
+    pop_r(a, rdx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, found_it)
+    alu(a, "add", r14, rdx)
+    load8(a, rax, mem(r14, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, path_none)
+    inc_r(a, r14)
+    jmp_to(a, each_folder)
+    mark(a, found_it)
+    mov_rr(a, rax, rbx)
+    jmp_to(a, path_out)
+    mark(a, next_env)
+    alui(a, "add", r14, 8)
+    jmp_to(a, each_env)
+    mark(a, path_none)
+    movi(a, rax, 0)
+    mark(a, path_out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# rt_run_program: xmm0 a program's name, xmm1 its arguments (a list of text): the number it ended with,
+# into xmm0 with rax 0; or rax 2 with err_why 28 (the name isn't text), 29 (the arguments aren't a list),
+# 32 (one of them isn't text), 31 (there is no program of that name) or 30 (it can't be run). On Windows
+# the system looks for the program, as it does for any command; on Linux rt_run_path does. The program it
+# starts gets this program's own input and output, so what it says goes where this program's words go, and
+# what has collected here goes out first.
+to emit_run_program with a, target
+    set not_text to new_label(a)
+    set not_list to new_label(a)
+    set item_not_text to new_label(a)
+    set each_given to new_label(a)
+    set given_fine to new_label(a)
+    set refused to new_label(a)
+    set no_program to new_label(a)
+    set cant_run to new_label(a)
+    set gave_up to new_label(a)
+    set run_out to new_label(a)
+    mark(a, "rt_run_program")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    movq_rx(a, rbx, xmm0)
+    movq_rx(a, r12, xmm1)
+    store(a, rip("err_file"), rbx)
+    store(a, rip("err_a"), rbx)
+    mov_rr(a, rax, rbx)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, not_text)
+    store(a, rip("err_a"), r12)
+    mov_rr(a, rax, r12)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_ne, not_list)
+    mov_rr(a, rax, r12) # each argument must be text
+    untag(a, rax)
+    load(a, r13, mem(rax, 0))
+    load(a, r14, mem(rax, 16))
+    movi(a, rbx, 0)
+    mark(a, each_given)
+    alu(a, "cmp", rbx, r13)
+    jcc(a, cc_ae, given_fine)
+    mov_rr(a, rax, rbx)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r14)
+    load(a, rax, mem(rax, 0))
+    store(a, rip("err_a"), rax)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, item_not_text)
+    inc_r(a, rbx)
+    jmp_to(a, each_given)
+    mark(a, given_fine)
+    movi(a, rcx, 3) # may it?
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, refused)
+    mov_rr(a, rax, r12) # rt_permit keeps rbx and r12 only
+    untag(a, rax)
+    load(a, r13, mem(rax, 0))
+    load(a, r14, mem(rax, 16))
+    call_to(a, "rt_in_setup")
+    call_to(a, "rt_flush_out")
+    if target is "windows"
+        set each_arg to new_label(a)
+        set line_made to new_label(a)
+        set converted to new_label(a)
+        set started to new_label(a)
+        call_to(a, "rt_b_reset") # the command line: the program, then each argument, quoted as it needs
+        load(a, rax, rip("err_file"))
+        call_to(a, "rt_b_arg")
+        movi(a, rbx, 0)
+        mark(a, each_arg)
+        alu(a, "cmp", rbx, r13)
+        jcc(a, cc_ae, line_made)
+        movi(a, rax, 32)
+        call_to(a, "rt_b_byte")
+        mov_rr(a, rax, rbx)
+        shifti(a, "shl", rax, 3)
+        alu(a, "add", rax, r14)
+        load(a, rax, mem(rax, 0))
+        call_to(a, "rt_b_arg")
+        inc_r(a, rbx)
+        jmp_to(a, each_arg)
+        mark(a, line_made) # as UTF-16, in memory of its own, which CreateProcessW may write in
+        win_enter(a)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        load(a, r8, rip("b_ptr"))
+        load(a, r9, rip("b_len"))
+        storei(a, mem(rsp, 32), 0)
+        storei(a, mem(rsp, 40), 0)
+        call_import(a, "imp_MultiByteToWideChar")
+        mov32_rr(a, rbx, rax)
+        win_leave(a)
+        mov_rr(a, rcx, rbx)
+        alu(a, "add", rcx, rcx)
+        alui(a, "add", rcx, 2)
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, r13, rax)
+        test_rr(a, rbx, rbx)
+        jcc(a, cc_e, converted)
+        win_enter(a)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        load(a, r8, rip("b_ptr"))
+        load(a, r9, rip("b_len"))
+        store(a, mem(rsp, 32), r13)
+        store(a, mem(rsp, 40), rbx)
+        call_import(a, "imp_MultiByteToWideChar")
+        win_leave(a)
+        mark(a, converted)
+        lea(a, rax, rip("run_si")) # it gets this program's own input and output
+        storei(a, mem(rax, 0), 104)
+        storei(a, mem(rax, 60), 0x100)
+        load(a, rcx, rip("in_handle"))
+        store(a, mem(rax, 80), rcx)
+        load(a, rcx, rip("out_handle"))
+        store(a, mem(rax, 88), rcx)
+        load(a, rcx, rip("err_handle"))
+        store(a, mem(rax, 96), rcx)
+        win_enter(a)
+        movi(a, rcx, 0)
+        mov_rr(a, rdx, r13)
+        movi(a, r8, 0)
+        movi(a, r9, 0)
+        storei(a, mem(rsp, 32), 1)
+        storei(a, mem(rsp, 40), 0)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        lea(a, rax, rip("run_si"))
+        store(a, mem(rsp, 64), rax)
+        lea(a, rax, rip("run_pi"))
+        store(a, mem(rsp, 72), rax)
+        call_import(a, "imp_CreateProcessW")
+        test32(a, rax)
+        jcc(a, cc_ne, started)
+        call_import(a, "imp_GetLastError")
+        mov32_rr(a, rdx, rax)
+        win_leave(a)
+        missing_jump(a, target, no_program)
+        jmp_to(a, cant_run)
+        mark(a, started) # wait for it, and take the number it ended with
+        load(a, rcx, rip("run_pi"))
+        movi(a, rdx, -1)
+        call_import(a, "imp_WaitForSingleObject")
+        load(a, rcx, rip("run_pi"))
+        lea(a, rdx, rip("run_code"))
+        call_import(a, "imp_GetExitCodeProcess")
+        load(a, rcx, rip("run_pi"))
+        call_import(a, "imp_CloseHandle")
+        load(a, rcx, rip_plus("run_pi", 8))
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+        load32(a, rax, rip("run_code"))
+    else
+        set measure_given to new_label(a)
+        set measured_given to new_label(a)
+        set copy_given to new_label(a)
+        set copied_given to new_label(a)
+        set parent to new_label(a)
+        set waiting to new_label(a)
+        set system_failed to new_label(a)
+        set by_signal to new_label(a)
+        set coded to new_label(a)
+        load(a, rax, rip("err_file"))
+        call_to(a, "rt_run_path")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, no_program)
+        mov_rr(a, r12, rax) # the path, and then the name and the arguments, in one block: the pointers
+        movi(a, rdx, 0) # first, then each of them as bytes with a 0 after it
+        load(a, rax, rip("err_file"))
+        untag(a, rax)
+        load(a, rcx, mem(rax, 0))
+        alu(a, "add", rdx, rcx)
+        inc_r(a, rdx)
+        movi(a, rbx, 0)
+        mark(a, measure_given)
+        alu(a, "cmp", rbx, r13)
+        jcc(a, cc_ae, measured_given)
+        mov_rr(a, rax, rbx)
+        shifti(a, "shl", rax, 3)
+        alu(a, "add", rax, r14)
+        load(a, rax, mem(rax, 0))
+        untag(a, rax)
+        load(a, rcx, mem(rax, 0))
+        alu(a, "add", rdx, rcx)
+        inc_r(a, rdx)
+        inc_r(a, rbx)
+        jmp_to(a, measure_given)
+        mark(a, measured_given)
+        mov_rr(a, rcx, r13)
+        alui(a, "add", rcx, 2)
+        shifti(a, "shl", rcx, 3)
+        alu(a, "add", rcx, rdx)
+        call_to(a, "rt_alloc_raw")
+        push_r(a, rax)
+        mov_rr(a, r8, rax)
+        mov_rr(a, rdi, rax)
+        mov_rr(a, rcx, r13)
+        alui(a, "add", rcx, 2)
+        shifti(a, "shl", rcx, 3)
+        alu(a, "add", rdi, rcx)
+        load(a, rax, rip("err_file"))
+        untag(a, rax)
+        store(a, mem(r8, 0), rdi)
+        alui(a, "add", r8, 8)
+        load(a, rcx, mem(rax, 0))
+        load(a, rsi, mem(rax, 16))
+        rep_movsb(a)
+        inc_r(a, rdi)
+        movi(a, rbx, 0)
+        mark(a, copy_given)
+        alu(a, "cmp", rbx, r13)
+        jcc(a, cc_ae, copied_given)
+        mov_rr(a, rax, rbx)
+        shifti(a, "shl", rax, 3)
+        alu(a, "add", rax, r14)
+        load(a, rax, mem(rax, 0))
+        untag(a, rax)
+        store(a, mem(r8, 0), rdi)
+        alui(a, "add", r8, 8)
+        load(a, rcx, mem(rax, 0))
+        load(a, rsi, mem(rax, 16))
+        rep_movsb(a)
+        inc_r(a, rdi)
+        inc_r(a, rbx)
+        jmp_to(a, copy_given)
+        mark(a, copied_given)
+        pop_r(a, r14) # where the pointers are
+        sys_call(a, 57) # fork: the child starts the program, with the same environment
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, parent)
+        mov_rr(a, rdi, r12)
+        mov_rr(a, rsi, r14)
+        load(a, rdx, rip("env_vector"))
+        sys_call(a, 59)
+        movi(a, rdi, 127) # it couldn't be started after all, as a shell ends then
+        sys_call(a, 231)
+        mark(a, parent)
+        test_rr(a, rax, rax)
+        jcc(a, cc_s, system_failed)
+        mov_rr(a, rbx, rax)
+        mark(a, waiting)
+        mov_rr(a, rdi, rbx)
+        lea(a, rsi, rip("run_status"))
+        movi(a, rdx, 0)
+        movi(a, r10, 0)
+        sys_call(a, 61)
+        alui(a, "cmp", rax, -4) # interrupted: wait again
+        jcc(a, cc_e, waiting)
+        test_rr(a, rax, rax)
+        jcc(a, cc_s, system_failed)
+        load32(a, rax, rip("run_status"))
+        mov_rr(a, rcx, rax)
+        alui(a, "and", rcx, 0x7F)
+        jcc(a, cc_ne, by_signal)
+        shifti(a, "shr", rax, 8)
+        alui(a, "and", rax, 0xFF)
+        jmp_to(a, coded)
+        mark(a, by_signal) # a signal ended it: 128 and the signal's number, as a shell has it
+        mov_rr(a, rax, rcx)
+        alui(a, "add", rax, 128)
+        jmp_to(a, coded)
+        mark(a, system_failed)
+        unary(a, "neg", rax)
+        mov_rr(a, rdx, rax)
+        jmp_to(a, cant_run)
+        mark(a, coded)
+    end
+    cvtsi2sd(a, xmm0, rax)
+    movi(a, rax, 0)
+    jmp_to(a, run_out)
+    mark(a, not_text)
+    storei(a, rip("err_why"), 28)
+    jmp_to(a, gave_up)
+    mark(a, not_list)
+    storei(a, rip("err_why"), 29)
+    jmp_to(a, gave_up)
+    mark(a, item_not_text)
+    storei(a, rip("err_why"), 32)
+    jmp_to(a, gave_up)
+    mark(a, refused) # err_reason says why
+    storei(a, rip("err_why"), 30)
+    jmp_to(a, gave_up)
+    mark(a, no_program)
+    storei(a, rip("err_why"), 31)
+    jmp_to(a, gave_up)
+    mark(a, cant_run) # rdx the system's code
+    call_to(a, "rt_b_reset")
+    call_to(a, "rt_os_text")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    storei(a, rip("err_why"), 30)
+    mark(a, gave_up)
+    movi(a, rax, 2)
+    mark(a, run_out)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# rt_remove_file: xmm0 a file's name: rax 0 once it is gone; or rax 2 with err_why 20 (the name isn't
+# text), 22 (there is no file called that) or 24 (it can't be removed). A program may remove a file only if
+# it may write files.
+to emit_remove_file with a, target
+    set not_text to new_label(a)
+    set refused to new_label(a)
+    set nul_name to new_label(a)
+    set gone to new_label(a)
+    set no_file to new_label(a)
+    set failed to new_label(a)
+    set gave_up to new_label(a)
+    set remove_out to new_label(a)
+    mark(a, "rt_remove_file")
+    movq_rx(a, rax, xmm0)
+    store(a, rip("err_file"), rax)
+    store(a, rip("err_a"), rax)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, not_text)
+    movi(a, rcx, 1)
+    call_to(a, "rt_permit")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, refused)
+    call_to(a, "rt_name_nul")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, nul_name)
+    call_to(a, "rt_file_path")
+    if target is "windows"
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_DeleteFileW")
+        test32(a, rax)
+        jcc(a, cc_ne, gone)
+        call_import(a, "imp_GetLastError")
+        mov32_rr(a, rdx, rax)
+        win_leave(a)
+        jmp_to(a, failed)
+        mark(a, gone)
+        win_leave(a)
+    else
+        mov_rr(a, rdi, rax)
+        sys_call(a, 87)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ns, gone)
+        unary(a, "neg", rax)
+        mov_rr(a, rdx, rax)
+        jmp_to(a, failed)
+        mark(a, gone)
+    end
+    movi(a, rax, 0)
+    jmp_to(a, remove_out)
+    mark(a, failed) # rdx the system's code: the system's own words for it
+    missing_jump(a, target, no_file)
+    call_to(a, "rt_b_reset")
+    call_to(a, "rt_os_text")
+    call_to(a, "rt_b_text")
+    store(a, rip("err_reason"), rax)
+    storei(a, rip("err_why"), 24)
+    jmp_to(a, gave_up)
+    mark(a, not_text)
+    storei(a, rip("err_why"), 20)
+    jmp_to(a, gave_up)
+    mark(a, refused) # err_reason says why
+    storei(a, rip("err_why"), 24)
+    jmp_to(a, gave_up)
+    mark(a, nul_name)
+    nul_reason(a, target)
+    storei(a, rip("err_why"), 24)
+    jmp_to(a, gave_up)
+    mark(a, no_file)
+    storei(a, rip("err_why"), 22)
+    mark(a, gave_up)
+    movi(a, rax, 2)
+    mark(a, remove_out)
+    ret(a)
+end
+
+# rt_why_run: what was wrong with starting a program, from err_why, into the builder
+to emit_run_why with a
+    set w29 to new_label(a)
+    set w30 to new_label(a)
+    set w31 to new_label(a)
+    set w32 to new_label(a)
+    mark(a, "rt_why_run")
+    load(a, rax, rip("err_why"))
+    for each pair in list of (list of 29, w29), (list of 30, w30), (list of 31, w31), (list of 32, w32)
+        alui(a, "cmp", rax, item 1 of pair)
+        jcc(a, cc_e, item 2 of pair)
+    end
+    b_text(a, "'run program' needs text, not ") # 28
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w29)
+    b_text(a, "'run program ... with' needs a list, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w32)
+    b_text(a, "'run program ... with' needs text, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w30)
+    b_text(a, "can't run '")
+    file_name_text(a)
+    b_text(a, "': ")
+    reason_text(a)
+    ret(a)
+    mark(a, w31)
+    b_text(a, "there is no program called '")
+    file_name_text(a)
+    b_text(a, "'")
+    ret(a)
 end
 
 # ---------- what can't become machine code yet ----------
@@ -12070,6 +12783,10 @@ to gen_statement with fc, s
         end
     else if what is "write"
         gen_write(fc, s)
+    else if what is "removeFile"
+        gen_expr(fc, target of s)
+        call_to(a, "rt_remove_file")
+        why_stub(fc, at of s, "rt_why_file")
     else if what is "exit"
         gen_exit(fc, s)
     else
@@ -12607,6 +13324,10 @@ to gen_expr with fc, e
             alui(a, "add", rsp, 8 * n)
             set pushed of fc to pushed of fc - n
         end
+    else if what is "builtin" and name of e is "run program"
+        gen_pair(fc, item 1 of args of e, item 2 of args of e)
+        call_to(a, "rt_run_program")
+        why_stub(fc, at of e, "rt_why_run")
     else if what is "builtin" and name of e is "keys"
         gen_expr(fc, item 1 of args of e)
         call_to(a, "rt_keys")

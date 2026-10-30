@@ -167,7 +167,8 @@ export const MACHINE_CASES = [
   "try\n    stop the program with nothing\nif it fails with why\n    say \"caught: \" why\n    stop the program with 4\nend",
   "set c to run program 5",
   "set c to run program \"x\" with 5",
-  "set c to run program (list of 1) keeping its output",
+  "set c to run program (list of 1)",
+  "for each name in list of \"in.txt\", 5, nothing\n    try\n        remove the file name\n    if it fails with why\n        say why\n    end\nend\nremove the file \"nowhere.txt\"",
 ];
 
 export function machinePrograms(seed, count) {

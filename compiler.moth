@@ -243,7 +243,7 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
-    "average", "largest", "smallest", "run program", "run program keeping"
+    "average", "largest", "smallest", "run program"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -758,7 +758,11 @@ to parse with tokens, reading
             end
             return record with kind "stop", at t
         end
-        if word("remove") # `remove "Sam" from ages`
+        if word("remove") # `remove "Sam" from ages`, `remove the file "old.txt"`
+            if is_word("the") and not nl of peek() and word_at(pos + 1, "file")
+                set pos to pos + 2
+                return record with kind "removeFile", target additive(), at t
+            end
             set key to additive()
             expect_word("from")
             return record with kind "remove", key key, target unary(), at t
@@ -1160,20 +1164,15 @@ to parse with tokens, reading
             set aggregate_args to list of column_or(no)
             return record with kind "builtin", name value of t, args aggregate_args, at t
         end
-        if is_word("run") and runs_program() # `run program "x" with (list of "a")`, `... keeping its output`
+        if is_word("run") and runs_program() # `run program "tool.exe" with (list of "a")`
             set pos to pos + 2
             set program to additive()
             set inputs to record with kind "list", items empty list, at t
             if not nl of peek() and word("with")
                 set inputs to additive()
             end
-            set run_name to "run program"
-            if not nl of peek() and is_word("keeping") and word_at(pos + 1, "its") and word_at(pos + 2, "output")
-                set pos to pos + 3
-                set run_name to "run program keeping"
-            end
             set run_args to list of program, inputs
-            return record with kind "builtin", name run_name, args run_args, at t
+            return record with kind "builtin", name "run program", args run_args, at t
         end
         # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
         if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"
@@ -1436,6 +1435,9 @@ to rename with node, alias, top, hidden
     end
     if what is "exit"
         rename(value of node, alias, top, hidden)
+    end
+    if what is "removeFile"
+        rename(target of node, alias, top, hidden)
     end
 end
 
@@ -1790,6 +1792,9 @@ to js_statement with scope, s
     if what is "write"
         return "write(" + js_expr(scope, value of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
     end
+    if what is "removeFile"
+        return "removeFile(" + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
+    end
     if what is "expect"
         set c to cond of s
         if kind of c is not "compare"
@@ -2034,6 +2039,7 @@ set op_handle to 53
 set op_every to 54
 set op_say_error to 55
 set op_exit to 56
+set op_remove_file to 57
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
@@ -2270,6 +2276,9 @@ to bytecode_statement with fc, s
         bytecode_expr(fc, value of s)
         bytecode_expr(fc, target of s)
         emit(fc, at of s, list of op_write)
+    else if what is "removeFile"
+        bytecode_expr(fc, target of s)
+        emit(fc, at of s, list of op_remove_file)
     else if what is "expect" # a comparison keeps both its sides, to say what they were
         set c to cond of s
         if kind of c is "compare"
