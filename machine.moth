@@ -3,10 +3,10 @@
 # tokenizer, parser and scope rules, writes every instruction's bytes itself, and wraps them in the file
 # the system runs, PE for Windows and ELF for Linux.
 #
-# This is its first part: numbers, yes, no and nothing, variables, say, if, the loops, and functions made
-# at the top of the program. Anything else stops with a mistake that says it can't become machine code
-# yet. What it makes does just what `moth run` does: numbers are shown and compared to 15 digits, and a
-# mistake says the same thing, points at the same spot, and lists the same calls.
+# It takes all of Moth. Only a hex or binary number past 2^53, and a function too big for its frame, stop
+# with a mistake that says they can't become machine code yet. What it makes does just what the JavaScript
+# engine does: numbers are shown and compared to 15 digits, and a mistake says the same thing, points at the
+# same spot, and lists the same calls.
 
 use "compiler.moth" as front
 
@@ -18127,7 +18127,7 @@ set node_words to dictionary where "list" is "a list", "record" is "a record", "
     "turtle" is "drawing", "fail" is "'fail with'", "remove" is "'remove'"
 
 to not_yet with at, what
-    fail with front's problem(at, what + " can't become machine code yet: so far, numbers, yes, no and nothing, text, lists, records, dictionaries, bytes, variables, say, if, loops, functions (as values too, and made inside functions), try, files, ask, arguments and most of the helpers can")
+    fail with front's problem(at, what + " can't become machine code yet")
 end
 
 to not_yet_node with node
