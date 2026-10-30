@@ -915,6 +915,7 @@ function picture(source, events = "") {
   try {
     const exe = join(dir, "p.exe");
     writeFileSync(exe, machine(source, { target, name: "p.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
     const file = join(dir, "p.bmp");
     const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: file, MOTH_EVENTS: events } });
     if (!existsSync(file)) return { at: null, stdout: ran.stdout, stderr: ran.stderr, status: ran.status }; // it stopped at a mistake
@@ -1205,6 +1206,7 @@ test("a picture from a file is drawn pixel for pixel, blended where it's see-thr
   try {
     const exe = join(dir, "p.exe");
     writeFileSync(exe, machine('draw picture "c" at -100, -100', { target, name: "p.moth", allow: ["--allow-read"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
     const back = [0x0b, 0x11, 0x22];
     for (const [i, c] of [...pngCases(1), ...bmpCases(1)].entries()) {
       writeFileSync(join(dir, "c"), c.bytes);
@@ -1531,6 +1533,7 @@ test("an app's handlers make their sounds as its events come, and only a program
     const exe = join(dir, "app.exe");
     const bytes = machine(source, { target, name: "app.moth" });
     writeFileSync(exe, bytes);
+    if (target === "linux") chmodSync(exe, 0o755);
     const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: join(dir, "app.bmp"), MOTH_EVENTS: events, MOTH_SOUND: "app.wav" } });
     assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["", "", 2]);
     assert.ok(Buffer.from(soundWav(played)).equals(readFileSync(join(dir, "app.wav"))));
