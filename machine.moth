@@ -15397,7 +15397,8 @@ end
 to new_fc with st, scope, main, name, inputs, own
     return record with st st, a a of st, scope scope, main main, name name, inputs inputs, own own, hidden 0,
         most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing, tries 0, saved_try nothing, level 0,
-        env_slot nothing, outer_slot nothing, facts empty dictionary, cache empty dictionary, next_reg 8, open no, fn nothing
+        env_slot nothing, outer_slot nothing, facts empty dictionary, cache empty dictionary, next_reg 8, open no, fn nothing,
+        marks nothing, marked 0
 end
 
 # where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
@@ -15941,6 +15942,10 @@ end
 
 to gen_block with fc, body
     for each s in body
+        if marks of fc is not nothing # where a loop's other way goes on (see gen_whole)
+            set marked of fc to marked of fc + 1
+            mark(a of fc, item (marked of fc) of marks of fc)
+        end
         gen_statement(fc, s)
     end
 end
@@ -15981,12 +15986,19 @@ to gen_statement with fc, s
         set info to new_region()
         scan_expr(fc, info, cond of s, 8)
         scan_block(fc, info, body of s, 8)
-        set stable to region_facts(fc, facts of fc, info)
+        set stable to region_facts(fc, facts of fc, info, nothing, nothing)
         set facts of fc to facts_copy(stable)
         set was to cache_enter(fc, info, 0)
+        set plan to whole_plan(fc, body of s, cond of s, stable, nothing)
+        if plan is not nothing
+            gen_whole(fc, plan, body of s, cond of s, nothing, top, exit)
+            set marks of fc to labels of plan
+            set marked of fc to 0
+        end
         mark(a, top)
         gen_cond(fc, cond of s, exit, no)
         gen_loop_body(fc, body of s, exit)
+        set marks of fc to nothing
         jmp_to(a, top)
         mark(a, exit)
         cache_leave(fc, was)
@@ -16354,7 +16366,7 @@ to gen_try with fc, s
     set tries of fc to tries of fc + 1
     set info to new_region() # the handler may start from anywhere in the body
     scan_block(fc, info, body of s, 1)
-    set stable to region_facts(fc, facts of fc, info)
+    set stable to region_facts(fc, facts of fc, info, nothing, nothing)
     gen_block(fc, body of s)
     set tries of fc to tries of fc - 1
     load(a, rax, mem(rsp, 24)) # over: the try further out
@@ -16410,7 +16422,8 @@ to gen_each with fc, s
     set info to new_region()
     region_set(fc, info, name of s, "value", nothing, 8)
     scan_block(fc, info, body of s, 8)
-    set stable to region_facts(fc, facts of fc, info)
+    set before to facts_copy(facts of fc)
+    set stable to region_facts(fc, before, info, name_key(fc, name of s), "value")
     set was to cache_enter(fc, info, 0)
     set top to new_label(a)
     set exit to new_label(a)
@@ -16432,7 +16445,7 @@ to gen_each with fc, s
     jmp_to(a, top)
     mark(a, exit)
     cache_leave(fc, was)
-    set facts of fc to stable
+    set facts of fc to loop_after(stable, before, name_key(fc, name of s))
     set hidden of fc to hidden of fc - 3
 end
 
@@ -16445,7 +16458,7 @@ to gen_repeat with fc, s
     jcc(a, cc_ne, bad)
     set info to new_region()
     scan_block(fc, info, body of s, 8)
-    set stable to region_facts(fc, facts of fc, info)
+    set stable to region_facts(fc, facts of fc, info, nothing, nothing)
     set held to cache_enter(fc, info, 1)
     set left to new_slot(fc)
     slot_store(a, left, xmm0)
@@ -16500,7 +16513,8 @@ to gen_count with fc, s
     set info to new_region()
     region_set(fc, info, name of s, "count", start of s, 8)
     scan_block(fc, info, body of s, 8)
-    set stable to region_facts(fc, facts of fc, info)
+    set before to facts_copy(facts of fc)
+    set stable to region_facts(fc, before, info, name_key(fc, name of s), counted)
     set held to cache_enter(fc, info, 2)
     set from_slot to new_slot(fc)
     set to_slot to new_slot(fc)
@@ -16510,6 +16524,15 @@ to gen_count with fc, s
     set close to new_label(a)
     set go to new_label(a)
     set exit to new_label(a)
+    set counter_key to name_key(fc, name of s)
+    if counter_key is not nothing
+        set plan to whole_plan(fc, body of s, nothing, stable, counter_key)
+        if plan is not nothing
+            gen_whole(fc, plan, body of s, nothing, (list of from_slot, to_slot), top, exit)
+            set marks of fc to labels of plan
+            set marked of fc to 0
+        end
+    end
     mark(a, top)
     if reg of from_slot is not nothing and reg of to_slot is not nothing
         ucomisd(a, reg of from_slot, reg_at(reg of to_slot))
@@ -16533,10 +16556,11 @@ to gen_count with fc, s
     set facts of fc to facts_copy(stable)
     set_fact(fc, name_key(fc, name of s), counted)
     gen_loop_body(fc, body of s, exit)
+    set marks of fc to nothing
     jmp_to(a, top)
     mark(a, exit)
     cache_leave(fc, held)
-    set facts of fc to stable
+    set facts of fc to loop_after(stable, before, name_key(fc, name of s))
     set hidden of fc to hidden of fc - slots_hidden(list of from_slot, to_slot)
     set was to enter_cold(a)
     mark(a, close) # past the limit, unless the two are the same to 15 digits
@@ -16905,14 +16929,19 @@ end
 # What stays known all through a stretch of code that can run again and again, or stop anywhere in the
 # middle (a loop's, or a try's), when `known` is what's known as it starts: a variable stays known only as
 # far as everything that sets it in there gives a value of that kind, worked out from this same knowledge
-# until it settles, and a function called in there may change any of main's.
-to region_facts with fc, known, info
+# until it settles, and a function called in there may change any of main's. A loop's own variable, set to
+# a value of kind `seed_kind` each time round before its body, is known in there (`seed`, its key; see
+# loop_after for after the loop).
+to region_facts with fc, known, info, seed, seed_kind
     if unknown of info
         return empty dictionary
     end
     set stable to facts_copy(known)
     if calls of info
         set stable to facts_own(stable)
+    end
+    if seed is not nothing
+        set item seed of stable to seed_kind
     end
     set changed to yes
     repeat while changed
@@ -16942,6 +16971,24 @@ to region_facts with fc, known, info
         end
     end
     return stable
+end
+
+# What's known after a loop whose variable has the key `seed` (see region_facts), from what's known as it
+# starts and all through it: if it goes round no times, the variable is as it was.
+to loop_after with stable, known, seed
+    set made to facts_copy(stable)
+    if seed is not nothing and seed is in made
+        set was to nothing
+        if seed is in known
+            set was to kind_meet(item seed of known, item seed of made)
+        end
+        if was is nothing
+            remove seed from made
+        else
+            set item seed of made to was
+        end
+    end
+    return made
 end
 
 # ---------- variables in registers ----------
@@ -17089,6 +17136,585 @@ to slots_hidden with slots
         end
     end
     return n
+end
+
+# ---------- whole numbers in general registers ----------
+# A loop kept in registers whose body only works out whole numbers (`set`, `add`, `if` and `stop`, with +,
+# - and *, comparisons and `divisible by`) can also run another way: with its whole-number variables as
+# 64-bit whole numbers in general registers, where each + is one instruction that doesn't wait on the one
+# before as a double's does. The loop as written above stays as it is, and is the way that always works. On
+# the way in, every whole-number variable must hold one from -2^53 to 2^53, and a count's start and limit
+# must be small enough, or it goes that way. Inside, every sum must stay from -2^53 to 2^53, where doubles
+# are exact, so the two ways agree on every digit: each number is kept 1024 times over, so a sum that goes
+# past sets the overflow flag. One that does, or dividing by 0, puts each register back in its variable as
+# a double and goes on the other way at the start of that statement, which does it again from there.
+# Leaving the loop puts them back too, so after it all is as the other way leaves it. (A double can be -0
+# where a whole number can't, so a * or - that would make -0 goes the other way.)
+
+set whole_regs to list of rsi, rdi, r8, r9, r10, r11 # used by nothing that runs inside such a loop
+set whole_holds to dictionary where "lt" is cc_l, "gt" is cc_g, "le" is cc_le, "ge" is cc_ge, "is" is cc_e
+set whole_fails to dictionary where "lt" is cc_ge, "gt" is cc_le, "le" is cc_g, "ge" is cc_l, "is" is cc_ne
+
+# a number written out that's whole and below 2^53, in decimal (0x and 0b ones don't count here)
+to small_literal with st, written
+    if literal_kind(st, written) is not "whole"
+        return no
+    end
+    set chars to front's letters(written)
+    if length of chars is at least 2 and item 1 of chars is "0" and (item 2 of chars is "x" or item 2 of chars is "b")
+        return no
+    end
+    set eight to double_bytes(number of written)
+    return (item 8 of eight bit and 127) * 16 + shift (item 7 of eight) right by 4 is at most 1075
+end
+
+# whether `e` is a sum of whole numbers as this works them out: small whole numbers written out, variables
+# (their keys go in `reads`), and +, -, * and - of them
+to whole_shape with fc, e, reads
+    set what to kind of e
+    if what is "value"
+        return type of e is "number" and small_literal(st of fc, value of e)
+    end
+    if what is "name"
+        set key to name_key(fc, name of e)
+        if key is nothing
+            return no
+        end
+        set item key of reads to yes
+        return yes
+    end
+    if what is "math"
+        return op of e is not "/" and whole_shape(fc, left of e, reads) and whole_shape(fc, right of e, reads)
+    end
+    if what is "negate"
+        return whole_shape(fc, operand of e, reads)
+    end
+    return no
+end
+
+# whether `c` is a comparison of such sums, or `and`, `or` and `not` of them
+to whole_test_shape with fc, c, reads
+    set what to kind of c
+    if what is "compare"
+        return op of c is not "in" and whole_shape(fc, left of c, reads) and whole_shape(fc, right of c, reads)
+    end
+    if what is "and" or what is "or"
+        return whole_test_shape(fc, left of c, reads) and whole_test_shape(fc, right of c, reads)
+    end
+    if what is "not"
+        return whole_test_shape(fc, operand of c, reads)
+    end
+    return no
+end
+
+# whether a loop's body is only what this can do; `found_sets` gets each variable it sets and how: "sum" if
+# always to a sum, "plain" if always to something else written out (`set prime to no`)
+to whole_scan with fc, body, found_sets, reads
+    for each s in body
+        set what to kind of s
+        if what is "set" or what is "add"
+            set key to name_key(fc, name of s)
+            if key is nothing
+                return no
+            end
+            set how to "plain"
+            if whole_shape(fc, value of s, reads)
+                set how to "sum"
+            else if what is "add" or kind of value of s is not "value"
+                return no
+            end
+            if key is in found_sets and item key of found_sets is not how
+                return no
+            end
+            set item key of found_sets to how
+        else if what is "if"
+            if not whole_test_shape(fc, cond of s, reads)
+                return no
+            end
+            if not (whole_scan(fc, then of s, found_sets, reads) and whole_scan(fc, otherwise of s, found_sets, reads))
+                return no
+            end
+        else if what is not "stop"
+            return no
+        end
+    end
+    return yes
+end
+
+# How a loop runs the other way (see above), or nothing if it can't: which register each variable it keeps
+# as a whole number has (`regs`), those it sets (`kept`, which go back at the end), and for a count, the
+# registers of the next count and the limit. `stable` is what's known all through the loop, `counted` the
+# key of a count's variable (nothing for `repeat while`).
+to whole_plan with fc, body, cond, stable, counted
+    if not open of fc
+        return nothing
+    end
+    set found_sets to empty dictionary
+    set reads to empty dictionary
+    if cond is not nothing and not whole_test_shape(fc, cond, reads)
+        return nothing
+    end
+    if not whole_scan(fc, body, found_sets, reads)
+        return nothing
+    end
+    set kept to empty list
+    set fixed to empty list
+    if counted is not nothing
+        if counted is in found_sets and item counted of found_sets is not "sum"
+            return nothing
+        end
+        add counted to kept
+    end
+    for each key in keys of found_sets
+        if item key of found_sets is "sum" and key is not counted
+            if not (key is in stable and item key of stable is "whole")
+                return nothing
+            end
+            add key to kept
+        end
+    end
+    for each key in keys of reads
+        if key is in found_sets
+            if item key of found_sets is "plain"
+                return nothing
+            end
+        else if key is not counted
+            if not (key is in stable and item key of stable is "whole")
+                return nothing
+            end
+            add key to fixed
+        end
+    end
+    set want to length of kept + length of fixed
+    if counted is not nothing
+        set want to want + 2
+    end
+    if want is greater than length of whole_regs
+        return nothing
+    end
+    set regs to empty dictionary
+    set k to 0
+    set next_count to nothing
+    set limit_reg to nothing
+    if counted is not nothing
+        set next_count to item 1 of whole_regs
+        set limit_reg to item 2 of whole_regs
+        set k to 2
+    end
+    for each key in kept
+        add 1 to k
+        set item key of regs to item k of whole_regs
+    end
+    for each key in fixed
+        add 1 to k
+        set item key of regs to item k of whole_regs
+    end
+    set a to a of fc
+    return record with regs regs, kept kept, fixed fixed, next_count next_count, limit_reg limit_reg,
+        labels empty list, used 0, back new_label(a), exit new_label(a), stubs empty dictionary, depth 0
+end
+
+# a label for each statement of the body, in the order they're written, for the other way's code to mark
+# (see gen_block) and this way to go on to
+to whole_labels with a, body, labels
+    for each s in body
+        add new_label(a) to labels
+        if kind of s is "if"
+            whole_labels(a, then of s, labels)
+            whole_labels(a, otherwise of s, labels)
+        end
+    end
+end
+
+# xmm x gets the variable with this key, from its xmm register or memory
+to key_load with fc, key, x
+    set r to reg_of(fc, key)
+    if r is nothing
+        movsd_load(a of fc, x, key_place(fc, key))
+    else
+        movapd(a of fc, x, r)
+    end
+end
+
+# the variable with this key gets xmm x, in memory and in its xmm register
+to key_store with fc, key, x
+    movsd_store(a of fc, key_place(fc, key), x)
+    set r to reg_of(fc, key)
+    if r is not nothing
+        movapd(a of fc, r, x)
+    end
+end
+
+# jumps to `label` unless register r is from -2^53 to 2^53 - 1; uses rdx
+to whole_range with a, r, label
+    mov_rr(a, rdx, r)
+    shifti(a, "sar", rdx, 53)
+    inc_r(a, rdx)
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_a, label)
+end
+
+# register r gets xmm x as a whole number, 1024 times over, or it jumps to `label` if x isn't one from -2^53
+# to 2^53 (or is -0); uses rdx and xmm4
+to whole_from with a, r, x, label
+    cvttsd2si(a, r, x)
+    cvtsi2sd(a, xmm4, r)
+    ucomisd(a, xmm4, reg_at(x))
+    jcc(a, cc_p, label)
+    jcc(a, cc_ne, label)
+    whole_range(a, r, label)
+    set not_zero to new_label(a)
+    test_rr(a, r, r)
+    jcc(a, cc_ne, not_zero)
+    movq_rx(a, rdx, x)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_s, label)
+    mark(a, not_zero)
+    shifti(a, "shl", r, 10) # 1024 times over
+end
+
+# where to jump, from code with `depth` whole numbers waiting on the stack, to go on the other way at
+# `target`: code that drops them, says where, and puts the registers back (see whole_back)
+to whole_bail with fc, plan, target, depth
+    set key to target + ":" + depth
+    set known to stubs of plan
+    if key is in known
+        return item key of known
+    end
+    set a to a of fc
+    set was to enter_cold(a)
+    set over to new_label(a)
+    if was is "cold"
+        jmp_to(a, over)
+    end
+    set label to new_label(a)
+    mark(a, label)
+    if depth is greater than 0
+        alui(a, "add", rsp, 8 * depth)
+    end
+    lea(a, rax, rip(target))
+    jmp_to(a, back of plan)
+    mark(a, over)
+    leave_cold(a, was)
+    set item key of known to label
+    return label
+end
+
+# the label of the next statement, in the order whole_labels made them
+to whole_next_label with plan
+    set used of plan to used of plan + 1
+    return item (used of plan) of labels of plan
+end
+
+# rax gets `e` (see whole_shape), 1024 times over, or it jumps to go on the other way at `target`
+to whole_expr with fc, plan, e, target
+    set a to a of fc
+    set what to kind of e
+    if what is "value" or what is "name"
+        whole_operand(fc, plan, rax, e)
+    else if what is "negate"
+        whole_expr(fc, plan, operand of e, target)
+        set bail to whole_bail(fc, plan, target, depth of plan)
+        test_rr(a, rax, rax) # -0
+        jcc(a, cc_e, bail)
+        unary(a, "neg", rax)
+        jcc(a, 0, bail) # jo
+    else
+        whole_expr(fc, plan, left of e, target)
+        whole_right(fc, plan, right of e, target)
+        set bail to whole_bail(fc, plan, target, depth of plan)
+        if op of e is "+"
+            alu(a, "add", rax, rcx)
+        else if op of e is "-"
+            alu(a, "sub", rax, rcx)
+        else # 1024a times b is 1024ab
+            shifti(a, "sar", rcx, 10)
+            mov_rr(a, rdx, rax)
+            imul_rr(a, rax, rcx)
+            set back to new_label(a)
+            set zero to new_label(a)
+            jcc(a, 0, bail) # jo
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, zero)
+            mark(a, back)
+            set was to enter_cold(a)
+            mark(a, zero) # 0 times a number below 0 is -0
+            alu(a, "or", rdx, rcx)
+            jcc(a, cc_s, bail)
+            jmp_to(a, back)
+            leave_cold(a, was)
+            return nothing
+        end
+        jcc(a, 0, bail) # jo: past 2^53
+    end
+end
+
+# rcx gets the right of a sum or comparison, with the left kept in rax
+to whole_right with fc, plan, right, target
+    set a to a of fc
+    if kind of right is "name" or kind of right is "value"
+        whole_operand(fc, plan, rcx, right)
+        return nothing
+    end
+    push_temp(fc, rax)
+    set depth of plan to depth of plan + 1
+    whole_expr(fc, plan, right, target)
+    mov_rr(a, rcx, rax)
+    set depth of plan to depth of plan - 1
+    pop_temp(fc, rax)
+end
+
+# a register waits on the stack, counted with the values there, and comes back
+to push_temp with fc, r
+    push_r(a of fc, r)
+    set pushed of fc to pushed of fc + 1
+    if pushed of fc is greater than most_pushed of fc
+        set most_pushed of fc to pushed of fc
+    end
+end
+
+to pop_temp with fc, r
+    pop_r(a of fc, r)
+    set pushed of fc to pushed of fc - 1
+end
+
+# register r gets a variable's whole number, or one written out, 1024 times over
+to whole_operand with fc, plan, r, e
+    if kind of e is "name"
+        mov_rr(a of fc, r, item (name_key(fc, name of e)) of regs of plan)
+    else
+        whole_literal(a of fc, r, value of e)
+    end
+end
+
+to whole_literal with a, r, written
+    set v to number of written
+    if v is less than 2097152
+        movi(a, r, v * 1024)
+    else
+        movi64(a, r, bytes_of(v))
+        shifti(a, "shl", r, 10)
+    end
+end
+
+# what a whole number written out is, 1024 times over, if that fits in 32 bits, for an instruction's own
+# number; or nothing
+to whole_small with e
+    if kind of e is "value"
+        set v to number of value of e
+        if v is less than 2097152
+            return v * 1024
+        end
+    end
+    return nothing
+end
+
+# jumps to `label` when what comparison `c` says is `goal`, with whole numbers
+to whole_cond with fc, plan, c, label, goal, target
+    set a to a of fc
+    set what to kind of c
+    if what is "and" or what is "or"
+        set skip to new_label(a)
+        set first_goal to no
+        set first_to to label
+        if what is "and" and goal
+            set first_to to skip
+        else if what is "or"
+            set first_goal to yes
+            if not goal
+                set first_to to skip
+            end
+        end
+        whole_cond(fc, plan, left of c, first_to, first_goal, target)
+        whole_cond(fc, plan, right of c, label, goal, target)
+        mark(a, skip)
+        return nothing
+    end
+    if what is "not"
+        whole_cond(fc, plan, operand of c, label, not goal, target)
+        return nothing
+    end
+    set test to item (op of c) of compare_names
+    set jump_true to goal
+    if negate of c
+        set jump_true to not goal
+    end
+    whole_expr(fc, plan, left of c, target)
+    whole_right(fc, plan, right of c, target)
+    if test is "div"
+        test_rr(a, rcx, rcx) # by 0: the other way says what's wrong
+        jcc(a, cc_e, whole_bail(fc, plan, target, depth of plan))
+        raw(a, list of 0x48, 0x99) # cqo
+        unary(a, "idiv", rcx)
+        test_rr(a, rdx, rdx)
+        if jump_true
+            jcc(a, cc_e, label)
+        else
+            jcc(a, cc_ne, label)
+        end
+    else
+        alu(a, "cmp", rax, rcx)
+        if jump_true
+            jcc(a, item test of whole_holds, label)
+        else
+            jcc(a, item test of whole_fails, label)
+        end
+    end
+end
+
+to whole_block with fc, plan, body
+    for each s in body
+        whole_statement(fc, plan, s, whole_next_label(plan))
+    end
+end
+
+# one statement of the body, which goes on the other way at `target` if it must
+to whole_statement with fc, plan, s, target
+    set a to a of fc
+    set what to kind of s
+    if what is "if"
+        set otherwise_at to new_label(a)
+        set end_at to new_label(a)
+        whole_cond(fc, plan, cond of s, otherwise_at, no, target)
+        whole_block(fc, plan, then of s)
+        jmp_to(a, end_at)
+        mark(a, otherwise_at)
+        whole_block(fc, plan, otherwise of s)
+        mark(a, end_at)
+    else if what is "stop"
+        jmp_to(a, exit of plan)
+    else
+        set key to name_key(fc, name of s)
+        if not (key is in regs of plan) # a value written out, as the other way writes it
+            gen_value(fc, value of s, xmm0)
+            key_store(fc, key, xmm0)
+            return nothing
+        end
+        set r to item key of regs of plan
+        set value to value of s
+        set simple to kind of value is "name" or kind of value is "value"
+        if what is "set"
+            if simple
+                whole_operand(fc, plan, r, value)
+            else
+                whole_expr(fc, plan, value, target)
+                mov_rr(a, r, rax)
+            end
+            return nothing
+        end
+        set too_far to new_label(a) # add: then back as it was, if it went too far
+        set small to whole_small(value)
+        set from_reg to rax
+        if small is not nothing
+            alui(a, "add", r, small)
+        else if kind of value is "name"
+            set from_reg to item (name_key(fc, name of value)) of regs of plan
+            alu(a, "add", r, from_reg)
+        else
+            whole_expr(fc, plan, value, target)
+            alu(a, "add", r, rax)
+        end
+        jcc(a, 0, too_far) # jo
+        set was to enter_cold(a)
+        mark(a, too_far)
+        if small is not nothing
+            alui(a, "sub", r, small)
+        else
+            alu(a, "sub", r, from_reg)
+        end
+        jmp_to(a, whole_bail(fc, plan, target, 0))
+        leave_cold(a, was)
+    end
+end
+
+# The other way's code, from the variables in registers (see above): `slots` are a count's start and limit
+# (nothing for `repeat while`), and `fallback` is where the loop's own code starts, which also goes on after
+# a statement or the condition at `top`.
+to gen_whole with fc, plan, body, cond, slots, fallback, finish
+    set a to a of fc
+    whole_labels(a, body, labels of plan)
+    if slots is not nothing # the limit first, as rt_order uses most registers: the last count it reaches
+        set ready to new_label(a)
+        slot_load(a, xmm1, item 2 of slots)
+        cvttsd2si(a, rax, xmm1) # rounded down
+        cvtsi2sd(a, xmm2, rax)
+        ucomisd(a, xmm2, reg_at(xmm1))
+        jcc(a, cc_be, ready)
+        dec_r(a, rax)
+        mark(a, ready)
+        mov_rr(a, rdx, rax)
+        shifti(a, "sar", rdx, 46)
+        inc_r(a, rdx)
+        alui(a, "cmp", rdx, 1)
+        jcc(a, cc_a, fallback)
+        set limited to new_label(a)
+        cvtsi2sd(a, xmm2, rax) # one past it, if the limit is that to 15 digits
+        ucomisd(a, xmm2, reg_at(xmm1))
+        jcc(a, cc_e, limited)
+        push_temp(fc, rax)
+        inc_r(a, rax)
+        cvtsi2sd(a, xmm0, rax)
+        call_to(a, "rt_order")
+        pop_temp(fc, rcx)
+        test_rr(a, rax, rax)
+        mov_rr(a, rax, rcx)
+        jcc(a, cc_ne, limited)
+        inc_r(a, rax)
+        mark(a, limited)
+        shifti(a, "shl", rax, 10)
+        mov_rr(a, limit_reg of plan, rax)
+        slot_load(a, xmm0, item 1 of slots)
+        whole_from(a, next_count of plan, xmm0, fallback)
+        alu(a, "cmp", next_count of plan, limit_reg of plan) # it goes round at least once
+        jcc(a, cc_g, fallback)
+    end
+    for each key in kept of plan
+        if slots is nothing or key is not item 1 of kept of plan
+            key_load(fc, key, xmm0)
+            whole_from(a, item key of regs of plan, xmm0, fallback)
+        end
+    end
+    for each key in fixed of plan
+        key_load(fc, key, xmm0)
+        whole_from(a, item key of regs of plan, xmm0, fallback)
+    end
+    set body_at to new_label(a)
+    set test_at to new_label(a)
+    if slots is nothing
+        jmp_to(a, test_at)
+    end
+    mark(a, body_at)
+    if slots is not nothing
+        mov_rr(a, item (item 1 of kept of plan) of regs of plan, next_count of plan)
+        alui(a, "add", next_count of plan, 1024)
+    end
+    whole_block(fc, plan, body)
+    mark(a, test_at)
+    if slots is nothing
+        whole_cond(fc, plan, cond, body_at, yes, fallback)
+    else
+        alu(a, "cmp", next_count of plan, limit_reg of plan)
+        jcc(a, cc_le, body_at)
+    end
+    mark(a, exit of plan)
+    lea(a, rax, rip(finish))
+    jmp_to(a, back of plan)
+    set was to enter_cold(a) # every register back in its variable, then on to rax
+    mark(a, back of plan)
+    for each key in kept of plan
+        mov_rr(a, rdx, item key of regs of plan)
+        shifti(a, "sar", rdx, 10)
+        cvtsi2sd(a, xmm0, rdx)
+        key_store(fc, key, xmm0)
+    end
+    if slots is not nothing
+        mov_rr(a, rdx, next_count of plan)
+        shifti(a, "sar", rdx, 10)
+        cvtsi2sd(a, xmm0, rdx)
+        slot_store(a, item 1 of slots, xmm0)
+    end
+    jmp_r(a, rax)
+    leave_cold(a, was)
 end
 
 # ---------- conditions ----------
