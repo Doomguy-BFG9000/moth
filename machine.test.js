@@ -84,7 +84,6 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
   not("say 0x20000000000000", /^line 1: a hex or binary number this big can't become machine code yet/);
-  not("draw chart of (list of 1, 2)", /^line 1: 'draw chart of' can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
 });
 
@@ -96,7 +95,8 @@ const TABLES = [
   [['set sales to read table "sales.csv"', 'say length of sales " rows: " item 1 of sales',
     "for each row in sales where price of row is not nothing and price of row is greater than 1.6", "    say name of row", "end",
     'say total of price in sales " " average of price in sales " " largest of qty in sales " " smallest of name in sales',
-    "say sales", 'say (read table "sales.csv") is sales'].join("\n"), { "sales.csv": SALES }],
+    "say sales", 'say (read table "sales.csv") is sales', "draw chart of price in sales", 'say "charted"'].join("\n"),
+    { "sales.csv": SALES }],
   ['set t to read table "x.csv"\nfor each r in t\n    say r\nend', { "x.csv": 'A b,"q""uote",a b,,1x,_x_,\u00c9\u00c0,a-b-c,a b\r\n1,2,3,4,5,6,7,8,9\r\n\r\n"multi\nline",-3.5, 07 ,0x10,1e3,,"",x"y,\n\n' }],
   ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"', { "a.csv": "", "b.csv": "\n\n\r\n", "c.csv": "only,header" }],
   ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"\nsay read table "d.csv"', { "a.csv": "a,a,a,a_2\n1,2,3,4\n5",
@@ -755,6 +755,27 @@ draw box at -20, -20 size 40 by 40`);
   assert.equal(at(15, 15), BACKGROUND);
   assert.equal(at(220, 220), "#ffd700");
   assert.equal(at(-40, -40), BACKGROUND); // the red box was cleared
+});
+
+test("a chart is the bars, values and labels the playground draws", { skip: onWindows }, () => {
+  const { at, stdout } = picture(`pen color "red"
+draw chart of (list of 1, 2, nothing, -1)
+say "charted"`);
+  assert.equal(stdout, "charted\n");
+  assert.equal(at(15, 50), "#ff0000"); // the first bar, 100 high
+  assert.equal(at(15, 105), BACKGROUND);
+  assert.equal(at(55, 150), "#ff0000"); // the second, 200 high
+  assert.equal(at(35, 50), BACKGROUND); // 10 between them
+  assert.equal(at(95, 50), BACKGROUND); // nothing: no bar
+  assert.equal(at(135, -50), "#ff0000"); // below 0, downwards
+  assert.equal(at(135, 10), BACKGROUND);
+  let labels = 0;
+  for (let x = 0; x < 30; x++) for (let y = -18; y < -6; y++) if (at(x, y) !== BACKGROUND) labels++;
+  assert.ok(labels > 5, `the label under the first bar has ${labels} pixels`);
+  const amounts = picture(`draw chart of (dictionary where "a" is 3 km, "b" is 1500 m)`).at;
+  assert.equal(amounts(15, 190), "#4f8ff7"); // 3 km is the longest, 200
+  assert.equal(amounts(55, 90), "#4f8ff7"); // 1500 m is half of it
+  assert.equal(amounts(55, 110), BACKGROUND);
 });
 
 // Apps: keys, clicks, drags and timers (by their place among the timers) sent to the handlers in order

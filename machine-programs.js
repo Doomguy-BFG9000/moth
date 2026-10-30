@@ -227,6 +227,16 @@ export const MACHINE_CASES = [
   "say total of (list of 1, nothing, yes)",
   "say average of (list of 1, 2)\nsay average of (list of 0.1, 0.2)\nsay total of (list of 9007199254740992, 1, 1)",
   "say largest of (list of 0.1 + 0.2, 0.3)\nsay smallest of (list of 2, 2.0000000000000004, 1.9999999999999998)",
+  // draw chart of: lists, dictionaries and amounts, and its mistakes
+  "draw chart of (list of 1, 2)\npen color \"red\"\ndraw chart of (list of 3, -1.5, nothing, 0, 2.25)\nset d to dictionary where \"Mon\" is 4200, \"Tue\" is 8100\nremove \"Tue\" from d\nset item 7 of d to 100\ndraw chart of d\ndraw chart of (list of 5 km, 300 m, 1 mile)\ndraw chart of empty list\ndraw chart of (list of nothing, 0, 0)\nsay \"charted\"",
+  "draw chart of 5",
+  "draw chart of \"abc\"",
+  "draw chart of (list of 1, \"a\")",
+  "draw chart of (list of nothing, 1 km, 2)",
+  "draw chart of (list of 1, 2 km)",
+  "draw chart of (list of 1 km, 1 kg)",
+  "draw chart of (dictionary where \"a\" is 1, \"b\" is yes)",
+  "set week to list of (record with day \"Mon\", steps 4200), (record with day \"Tue\", steps 8100)\ndraw chart of steps in week\ndraw chart of day in week",
 ];
 
 export function machinePrograms(seed, count) {
