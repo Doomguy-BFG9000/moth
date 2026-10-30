@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError } from "./moth.js";
+import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -86,6 +86,50 @@ test("what can't become machine code yet stops at a mistake that says so", () =>
   not("say 0x20000000000000", /^line 1: a hex or binary number this big can't become machine code yet/);
   not("draw chart of (list of 1, 2)", /^line 1: 'draw chart of' can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
+});
+
+// `read table`, which needs a file: each program built with --allow-read and run in a folder with its files,
+// against the JavaScript engine reading the same files from memory. Headers made into field names, cells in
+// quotes, blank lines, missing cells, a table read twice, and the mistakes.
+const SALES = 'Name,Price,Qty\nApple,1.5,10\nPear,2,3\n"Big, red melon",12.25,1\nKiwi,,\n';
+const TABLES = [
+  [['set sales to read table "sales.csv"', 'say length of sales " rows: " item 1 of sales',
+    "for each row in sales where price of row is not nothing and price of row is greater than 1.6", "    say name of row", "end",
+    'say total of price in sales " " average of price in sales " " largest of qty in sales " " smallest of name in sales',
+    "say sales", 'say (read table "sales.csv") is sales'].join("\n"), { "sales.csv": SALES }],
+  ['set t to read table "x.csv"\nfor each r in t\n    say r\nend', { "x.csv": 'A b,"q""uote",a b,,1x,_x_,\u00c9\u00c0,a-b-c,a b\r\n1,2,3,4,5,6,7,8,9\r\n\r\n"multi\nline",-3.5, 07 ,0x10,1e3,,"",x"y,\n\n' }],
+  ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"', { "a.csv": "", "b.csv": "\n\n\r\n", "c.csv": "only,header" }],
+  ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"\nsay read table "d.csv"', { "a.csv": "a,a,a,a_2\n1,2,3,4\n5",
+    "b.csv": 'x\n"unclosed,1\n2', "c.csv": '"""",b\n"""""",""x', "d.csv": "1,2,3\n4,5,6\n,,\n7\n" }],
+  ['set t to read table "e.csv"\nsay name of item 1 of t\nsay (record with name "Ana", age 3) is item 2 of t\nsay total of age in t\nsay total of ages in t', { "e.csv": "Name,Age\nSam,20\nAna,3\n" }],
+  ['set t to read table "e.csv"\nsay total of age in t', { "e.csv": "Name,Age\nSam,old\n" }],
+  ['say read table "missing.csv"', {}],
+];
+
+test("a table read from a file is the list of records the JavaScript engine makes of it", { skip }, () => {
+  const dirs = [];
+  try {
+    TABLES.forEach(([source, files], i) => {
+      const dir = mkdtempSync(join(tmpdir(), "moth-table-"));
+      dirs.push(dir);
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+      let [stdout, stderr, status] = ["", "", 0];
+      try {
+        run(source, (line) => (stdout += `${line}\n`), { file: "t.moth", disk: memoryDisk(files) });
+      } catch (err) {
+        if (!(err instanceof MothError)) throw err;
+        stderr = `t.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
+        status = 1;
+      }
+      const exe = executable(dir, "t");
+      writeFileSync(exe, machine(source, { target, name: "t.moth", allow: ["--allow-read"] }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout, stderr, status }, `${i}: ${source}`);
+    });
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // Programs that make far more than they keep, so the garbage collector runs many times over: lists, text
