@@ -209,6 +209,11 @@ export const SAVING = [
     "line 1: can't divide by zero"],
   ["say the clock\nwait 90 minutes\nsay the time \" \" the clock\nwait 1 day\nsay the date \" \" the weekday \" \" the day \" \" the month \" \" the year\nwait 400 days\nsay the date \" \" the weekday\nwait 0.25 seconds\nsay the clock \" \" the second\n",
     "0\n04:34:05 5400\n2026-01-03 Saturday 3 1 2026\n2027-02-07 Sunday\n34651800.25 5"],
+  // numbers written with an exponent, as save writes the very small and the very large
+  ["set tiny to list of 1 / 10000000, 0 - 1 / 30000000000, 1 / 1000000000000000000000000, 123456789 * 10000000000000000\nsave tiny to \"t.txt\"\nsay read \"t.txt\"\nset back to load \"t.txt\"\nsay back\nsay back is tiny",
+    "[1e-7, -3.33333333333333e-11, 1e-24, 1.23456789e+24]\n[1e-7, -3.33333333333333e-11, 1e-24, 1.23456789e+24]\nyes"],
+  ["write \"[1e-7, -2.5e-300, 1e+21, 1e+400, -1e-99999, 0.05e+1, 5e-324, 1.7976931348623157e+308, -0e+0]\" to \"e.txt\"\nsay load \"e.txt\"",
+    "[1e-7, -2.5e-300, 1e+21, Infinity, 0, 0.5, 5e-324, 1.7976931348623157e+308, 0]"],
 ];
 
 export const ERRORS = [

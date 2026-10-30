@@ -17834,6 +17834,29 @@ to emit_loader with a
     test_rr(a, rax, rax)
     jcc(a, cc_ne, expo_more)
     mark(a, number_done)
+    set seek_e to new_label(a)
+    set has_exponent to new_label(a)
+    set no_exponent to new_label(a)
+    mov_rr(a, rsi, rbx) # an exponent: written out without it
+    mark(a, seek_e)
+    alu(a, "cmp", rsi, r12)
+    jcc(a, cc_ae, no_exponent)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 101)
+    jcc(a, cc_e, has_exponent)
+    inc_r(a, rsi)
+    jmp_to(a, seek_e)
+    mark(a, has_exponent)
+    push_r(a, r12)
+    push_r(a, r13)
+    call_to(a, "rt_ld_expand")
+    pop_r(a, r13)
+    pop_r(a, r12)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, "rt_ld_bad")
+    movq_rx(a, rax, xmm0)
+    ret(a)
+    mark(a, no_exponent)
     mov_rr(a, rsi, rbx) # as a text, read as a number
     mov_rr(a, rcx, r12)
     alu(a, "sub", rcx, rbx)
@@ -17847,6 +17870,193 @@ to emit_loader with a
     test_rr(a, rax, rax)
     jcc(a, cc_ne, "rt_ld_bad")
     movq_rx(a, rax, xmm0)
+    ret(a)
+
+    # rt_ld_expand: rbx a number's first byte, rsi its e and r12 just past it: the number its digits and its
+    # exponent make, written out without the exponent (1.5e-7 as 0.00000015) and read by rt_parse_number,
+    # which gets it exactly right: in xmm0 with rax 0, or rax 1. One whose first digit that isn't 0 is past
+    # 10^310 is Infinity, and one below 10^-330 zero, with its sign, so a huge exponent costs nothing.
+    set x_unsigned to new_label(a)
+    set x_exp_plus to new_label(a)
+    set x_exp_loop to new_label(a)
+    set x_exp_next to new_label(a)
+    set x_exp_done to new_label(a)
+    set x_exp_signed to new_label(a)
+    set x_int_loop to new_label(a)
+    set x_int_done to new_label(a)
+    set x_no_point to new_label(a)
+    set x_zero_loop to new_label(a)
+    set x_zero_skip to new_label(a)
+    set x_zeros_done to new_label(a)
+    set x_point_later to new_label(a)
+    set x_lead_zeros to new_label(a)
+    set x_digits to new_label(a)
+    set x_copy to new_label(a)
+    set x_put to new_label(a)
+    set x_trail to new_label(a)
+    set x_built to new_label(a)
+    set x_infinite to new_label(a)
+    set x_zero to new_label(a)
+    set x_signed_out to new_label(a)
+    set x_out to new_label(a)
+    mark(a, "rt_ld_expand")
+    movi(a, r8, 0) # r8 1 for a minus, r9 where the digits start
+    mov_rr(a, r9, rbx)
+    load8(a, rax, mem(r9, 0))
+    alui(a, "cmp", rax, 45)
+    jcc(a, cc_ne, x_unsigned)
+    movi(a, r8, 1)
+    inc_r(a, r9)
+    mark(a, x_unsigned)
+    lea(a, rcx, mem(rsi, 1)) # r10 the exponent, at most 100000 either way
+    load8(a, rax, mem(rcx, 0))
+    movi(a, rdx, 0)
+    alui(a, "cmp", rax, 45)
+    jcc(a, cc_ne, x_exp_plus)
+    movi(a, rdx, 1)
+    mark(a, x_exp_plus)
+    inc_r(a, rcx)
+    movi(a, r10, 0)
+    mark(a, x_exp_loop)
+    alu(a, "cmp", rcx, r12)
+    jcc(a, cc_ae, x_exp_done)
+    load8(a, rax, mem(rcx, 0))
+    alui(a, "sub", rax, 48)
+    imul_ri(a, r10, r10, 10)
+    alu(a, "add", r10, rax)
+    alui(a, "cmp", r10, 100000)
+    jcc(a, cc_l, x_exp_next)
+    movi(a, r10, 100000)
+    mark(a, x_exp_next)
+    inc_r(a, rcx)
+    jmp_to(a, x_exp_loop)
+    mark(a, x_exp_done)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, x_exp_signed)
+    unary(a, "neg", r10)
+    mark(a, x_exp_signed)
+    movi(a, r11, 0) # r11 how many digits come before the point
+    mov_rr(a, rcx, r9)
+    mark(a, x_int_loop)
+    alu(a, "cmp", rcx, rsi)
+    jcc(a, cc_ae, x_int_done)
+    load8(a, rax, mem(rcx, 0))
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, x_int_done)
+    inc_r(a, r11)
+    inc_r(a, rcx)
+    jmp_to(a, x_int_loop)
+    mark(a, x_int_done)
+    mov_rr(a, rdi, rsi) # rdi how many digits in all
+    alu(a, "sub", rdi, r9)
+    alu(a, "cmp", rcx, rsi)
+    jcc(a, cc_ae, x_no_point)
+    dec_r(a, rdi)
+    mark(a, x_no_point)
+    movi(a, rdx, 0) # rdx the zeros before the first digit that isn't one; none but zeros is zero
+    mov_rr(a, rcx, r9)
+    mark(a, x_zero_loop)
+    alu(a, "cmp", rcx, rsi)
+    jcc(a, cc_ae, x_zero)
+    load8(a, rax, mem(rcx, 0))
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, x_zero_skip)
+    alui(a, "cmp", rax, 48)
+    jcc(a, cc_ne, x_zeros_done)
+    inc_r(a, rdx)
+    mark(a, x_zero_skip)
+    inc_r(a, rcx)
+    jmp_to(a, x_zero_loop)
+    mark(a, x_zeros_done)
+    mov_rr(a, rcx, r11) # rcx how many digits come before the point now
+    alu(a, "add", rcx, r10)
+    mov_rr(a, rax, rcx) # the power of ten of that first digit
+    alu(a, "sub", rax, rdx)
+    dec_r(a, rax)
+    alui(a, "cmp", rax, 310)
+    jcc(a, cc_g, x_infinite)
+    alui(a, "cmp", rax, -330)
+    jcc(a, cc_l, x_zero)
+    for each r in list of r8, r9, rsi, rcx, rdi
+        push_r(a, r)
+    end
+    mov_rr(a, rcx, rdi) # room for the digits, the zeros, a minus and a point
+    alu(a, "add", rcx, rcx)
+    alui(a, "add", rcx, 400)
+    call_to(a, "rt_alloc_raw")
+    for each r in list of rdi, rcx, rsi, r9, r8
+        pop_r(a, r)
+    end
+    mov_rr(a, r10, rax) # r10 where it's written, r11 the next byte's place, rdx how many digits so far
+    mov_rr(a, r11, rax)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, x_point_later)
+    store8i(a, mem(r11, 0), 45)
+    inc_r(a, r11)
+    mark(a, x_point_later)
+    movi(a, rdx, 0)
+    alui(a, "cmp", rcx, 0)
+    jcc(a, cc_g, x_digits)
+    store8i(a, mem(r11, 0), 48) # 0., then zeros, then the digits, with no point among them
+    store8i(a, mem(r11, 1), 46)
+    alui(a, "add", r11, 2)
+    mark(a, x_lead_zeros)
+    alui(a, "cmp", rcx, 0)
+    jcc(a, cc_ge, x_digits)
+    store8i(a, mem(r11, 0), 48)
+    inc_r(a, r11)
+    inc_r(a, rcx)
+    jmp_to(a, x_lead_zeros)
+    mark(a, x_digits)
+    alui(a, "cmp", rcx, 0)
+    set x_has_point to new_label(a)
+    jcc(a, cc_g, x_has_point)
+    mov_rr(a, rcx, rdi)
+    mark(a, x_has_point)
+    mov_rr(a, rbx, r9)
+    mark(a, x_copy) # each digit, with the point before the one it now comes before
+    alu(a, "cmp", rbx, rsi)
+    jcc(a, cc_ae, x_trail)
+    load8(a, rax, mem(rbx, 0))
+    inc_r(a, rbx)
+    alui(a, "cmp", rax, 46)
+    jcc(a, cc_e, x_copy)
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_ne, x_put)
+    store8i(a, mem(r11, 0), 46)
+    inc_r(a, r11)
+    mark(a, x_put)
+    store8(a, mem(r11, 0), rax)
+    inc_r(a, r11)
+    inc_r(a, rdx)
+    jmp_to(a, x_copy)
+    mark(a, x_trail) # and zeros after them, up to where the point is
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_ge, x_built)
+    store8i(a, mem(r11, 0), 48)
+    inc_r(a, r11)
+    inc_r(a, rdx)
+    jmp_to(a, x_trail)
+    mark(a, x_built)
+    mov_rr(a, rsi, r10)
+    mov_rr(a, rcx, r11)
+    alu(a, "sub", rcx, r10)
+    call_to(a, "rt_text_from")
+    untag(a, rax)
+    jmp_to(a, "rt_parse_number")
+    mark(a, x_infinite)
+    movi64(a, rax, list of 0, 0, 0, 0, 0, 0, 0xF0, 0x7F)
+    jmp_to(a, x_signed_out)
+    mark(a, x_zero)
+    movi(a, rax, 0)
+    mark(a, x_signed_out)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, x_out)
+    movi64(a, rcx, list of 0, 0, 0, 0, 0, 0, 0, 0x80)
+    alu(a, "or", rax, rcx)
+    mark(a, x_out)
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
     ret(a)
 
     # rt_ld_byte: the byte at r12 in rax, or -1 at the end; rt_ld_digit: rax 1 and past it if it's a digit
@@ -19615,7 +19825,8 @@ end
 set file_imports to list of "ReadFile", "ReadConsoleW", "CreateFileW", "CloseHandle", "GetLastError", "GetFileAttributesW",
     "GetCommandLineW", "WideCharToMultiByte", "FormatMessageW", "GetFullPathNameW",
     "GetFinalPathNameByHandleW", "DeleteFileW", "CreateProcessW", "WaitForSingleObject", "GetExitCodeProcess",
-    "CreatePipe", "SetHandleInformation", "PeekNamedPipe", "Sleep"
+    "CreatePipe", "SetHandleInformation", "PeekNamedPipe", "Sleep", "SearchPathW", "GetSystemDirectoryW",
+    "GetWindowsDirectoryW", "GetEnvironmentVariableW"
 set in_size to 4096 # bytes of input read at a time
 # for each kind of thing a program may do (read a file, write one, go online, start a program): how a
 # question puts it, and how a refusal puts it
@@ -24138,6 +24349,8 @@ to emit_run with a, target
     if target is "windows"
         reserve(a, "run_si", 112, 16)
         reserve(a, "run_pi", 32, 16)
+        reserve(a, "run_app", 8, 8)
+        reserve(a, "run_batch", 8, 8)
     else
         reserve(a, "run_pipe_0", 8, 8)
         reserve(a, "run_pipe_1", 8, 8)
@@ -24431,6 +24644,262 @@ end
 # this program's own input and output, so what it says goes where this program's words go, and what has
 # collected here goes out first; one whose words are kept gets a pipe for each of its two outputs, which
 # are read as it fills them, so it can't be stopped by a pipe that no one is emptying.
+# Windows runs a .bat or .cmd file in cmd.exe, which reads " % ^ & | < > ! and a line break in its
+# arguments as part of a command however they're quoted, so `run program "x.bat" with (list of "a & del *")`
+# would run `del *` too. An argument to one that holds any of them is refused, err_reason saying why. The
+# name is the program's, err_file, with Windows' dots and spaces at its end left out, as Windows leaves
+# them out; r13 and r14 are how many arguments and where they are. run_batch is 1 for a batch file.
+to batch_arguments with a, refused
+    set trim to new_label(a)
+    set trim_one to new_label(a)
+    set trimmed to new_label(a)
+    set try_cmd to new_label(a)
+    set batch to new_label(a)
+    set each_arg to new_label(a)
+    set each_byte to new_label(a)
+    set next_arg to new_label(a)
+    set bad to new_label(a)
+    set not_batch to new_label(a)
+    storei(a, rip("run_batch"), 0)
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    mark(a, trim)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, trimmed)
+    mov_rr(a, rdx, rsi)
+    alu(a, "add", rdx, rcx)
+    load8(a, rdx, mem(rdx, -1))
+    alui(a, "cmp", rdx, 46)
+    jcc(a, cc_e, trim_one)
+    alui(a, "cmp", rdx, 32)
+    jcc(a, cc_ne, trimmed)
+    mark(a, trim_one)
+    dec_r(a, rcx)
+    jmp_to(a, trim)
+    mark(a, trimmed)
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_b, not_batch)
+    mov_rr(a, rdi, rsi)
+    alu(a, "add", rdi, rcx)
+    load8(a, rdx, mem(rdi, -4))
+    alui(a, "cmp", rdx, 46)
+    jcc(a, cc_ne, not_batch)
+    set k to 0
+    for each letter in "bat" as bytes
+        set k to k + 1
+        load8(a, rdx, mem(rdi, k - 4))
+        alui(a, "or", rdx, 32)
+        alui(a, "cmp", rdx, letter)
+        jcc(a, cc_ne, try_cmd)
+    end
+    jmp_to(a, batch)
+    mark(a, try_cmd)
+    set k to 0
+    for each letter in "cmd" as bytes
+        set k to k + 1
+        load8(a, rdx, mem(rdi, k - 4))
+        alui(a, "or", rdx, 32)
+        alui(a, "cmp", rdx, letter)
+        jcc(a, cc_ne, not_batch)
+    end
+    mark(a, batch) # each argument, byte by byte
+    storei(a, rip("run_batch"), 1)
+    movi(a, rbx, 0)
+    mark(a, each_arg)
+    alu(a, "cmp", rbx, r13)
+    jcc(a, cc_ae, not_batch)
+    mov_rr(a, rax, rbx)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r14)
+    load(a, rax, mem(rax, 0))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    mark(a, each_byte)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, next_arg)
+    dec_r(a, rcx)
+    mov_rr(a, rdx, rsi)
+    alu(a, "add", rdx, rcx)
+    load8(a, rdx, mem(rdx, 0))
+    for each c in list of 34, 37, 94, 38, 124, 60, 62, 33, 10, 13 # " % ^ & | < > ! and a line break
+        alui(a, "cmp", rdx, c)
+        jcc(a, cc_e, bad)
+    end
+    jmp_to(a, each_byte)
+    mark(a, next_arg)
+    inc_r(a, rbx)
+    jmp_to(a, each_arg)
+    mark(a, bad)
+    lea(a, rax, rip(text_object(a, batch_why)))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, rip("err_reason"), rax)
+    jmp_to(a, refused)
+    mark(a, not_batch)
+end
+
+set batch_why to "an argument to a .bat or .cmd file can't hold \" % ^ & | < > ! or a line break, which cmd.exe would read as part of a command"
+
+# On Windows a program's name with no folder in it (no / \ or :) is looked for as Rust's std::process looks
+# for it, but not in this program's own folder, where a file of that name could be put to run in its place:
+# in the system's folder (System32), then Windows' own, then the folders PATH names, with .exe after it if
+# it has no extension of its own. run_app is where it was found, which CreateProcessW is given, or 0 for a
+# name with a folder, which the system follows from where this program runs. Nowhere: on to `missing`.
+to find_program with a, missing
+    set scan to new_label(a)
+    set scanned to new_label(a)
+    set path_given to new_label(a)
+    set found to new_label(a)
+    set nowhere to new_label(a)
+    set out to new_label(a)
+    storei(a, rip("run_app"), 0)
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, out)
+    mark(a, scan)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, scanned)
+    dec_r(a, rcx)
+    mov_rr(a, rdx, rsi)
+    alu(a, "add", rdx, rcx)
+    load8(a, rdx, mem(rdx, 0))
+    for each c in list of 47, 92, 58
+        alui(a, "cmp", rdx, c)
+        jcc(a, cc_e, out)
+    end
+    jmp_to(a, scan)
+    mark(a, scanned)
+    push_r(a, rbx)
+    push_r(a, rsi)
+    push_r(a, rdi)
+    push_r(a, r14)
+    movi(a, rcx, 2 * (520 + 520 + 32768 + 8)) # rdi: System32;Windows;PATH, as UTF-16
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rsi, rax)
+    for each pair in list of (list of "imp_GetSystemDirectoryW", 520), (list of "imp_GetWindowsDirectoryW", 520)
+        set fits to new_label(a)
+        set none to new_label(a)
+        win_enter(a)
+        mov_rr(a, rcx, rsi)
+        movi(a, rdx, item 2 of pair)
+        call_import(a, item 1 of pair)
+        win_leave(a)
+        mov32_rr(a, rax, rax)
+        alui(a, "cmp", rax, item 2 of pair)
+        jcc(a, cc_b, fits)
+        movi(a, rax, 0)
+        mark(a, fits)
+        alu(a, "add", rax, rax)
+        alu(a, "add", rsi, rax)
+        store16i(a, mem(rsi, 0), 59) # ;
+        alui(a, "add", rsi, 2)
+    end
+    set path_fits to new_label(a)
+    mov_rr(a, rbx, rsi) # where PATH starts
+    win_enter(a)
+    lea(a, rcx, rip(wide_place(a, "PATH")))
+    mov_rr(a, rdx, rsi)
+    movi(a, r8, 32768)
+    call_import(a, "imp_GetEnvironmentVariableW")
+    win_leave(a)
+    mov32_rr(a, rax, rax)
+    alui(a, "cmp", rax, 32768)
+    jcc(a, cc_b, path_fits)
+    movi(a, rax, 0)
+    mark(a, path_fits)
+    alu(a, "add", rax, rax)
+    alu(a, "add", rsi, rax)
+    # with its empty folders left out: SearchPathW takes one between two ;s as the folder the program is
+    # started from, which is just where it mustn't look
+    set squeeze to new_label(a)
+    set kept to new_label(a)
+    set squeezed to new_label(a)
+    mov_rr(a, rcx, rbx)
+    mov_rr(a, rdx, rbx)
+    movi(a, r8, 1) # just after a ;, or at the start
+    mark(a, squeeze)
+    alu(a, "cmp", rcx, rsi)
+    jcc(a, cc_ae, squeezed)
+    load16(a, rax, mem(rcx, 0))
+    alui(a, "add", rcx, 2)
+    alui(a, "cmp", rax, 59)
+    jcc(a, cc_ne, kept)
+    test_rr(a, r8, r8)
+    jcc(a, cc_ne, squeeze)
+    movi(a, r8, 1)
+    store16(a, mem(rdx, 0), rax)
+    alui(a, "add", rdx, 2)
+    jmp_to(a, squeeze)
+    mark(a, kept)
+    movi(a, r8, 0)
+    store16(a, mem(rdx, 0), rax)
+    alui(a, "add", rdx, 2)
+    jmp_to(a, squeeze)
+    mark(a, squeezed)
+    mov_rr(a, rsi, rdx)
+    store16i(a, mem(rsi, 0), 0)
+    load(a, rax, rip("err_file")) # rbx: the name, as UTF-16
+    untag(a, rax)
+    load(a, r14, mem(rax, 0))
+    mov_rr(a, rcx, r14)
+    alu(a, "add", rcx, rcx)
+    alui(a, "add", rcx, 2)
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rbx, rax)
+    load(a, rax, rip("err_file"))
+    untag(a, rax)
+    load(a, r8, mem(rax, 16))
+    win_enter(a)
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    mov_rr(a, r9, r14)
+    store(a, mem(rsp, 32), rbx)
+    store(a, mem(rsp, 40), r14)
+    call_import(a, "imp_MultiByteToWideChar")
+    win_leave(a)
+    mov32_rr(a, rax, rax)
+    alu(a, "add", rax, rax)
+    alu(a, "add", rax, rbx)
+    store16i(a, mem(rax, 0), 0)
+    movi(a, rcx, 2 * 32768) # r14: where it is, as SearchPathW finds it
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, r14, rax)
+    win_enter(a)
+    mov_rr(a, rcx, rdi)
+    mov_rr(a, rdx, rbx)
+    lea(a, r8, rip(wide_place(a, ".exe")))
+    movi(a, r9, 32768)
+    store(a, mem(rsp, 32), r14)
+    storei(a, mem(rsp, 40), 0)
+    call_import(a, "imp_SearchPathW")
+    win_leave(a)
+    mov32_rr(a, rax, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, nowhere)
+    alui(a, "cmp", rax, 32768)
+    jcc(a, cc_ae, nowhere)
+    store(a, rip("run_app"), r14)
+    pop_r(a, r14)
+    pop_r(a, rdi)
+    pop_r(a, rsi)
+    pop_r(a, rbx)
+    jmp_to(a, out)
+    mark(a, nowhere)
+    pop_r(a, r14)
+    pop_r(a, rdi)
+    pop_r(a, rsi)
+    pop_r(a, rbx)
+    jmp_to(a, missing)
+    mark(a, out)
+end
+
 to emit_run_program with a, target
     set not_text to new_label(a)
     set not_list to new_label(a)
@@ -24482,6 +24951,9 @@ to emit_run_program with a, target
     inc_r(a, rbx)
     jmp_to(a, each_given)
     mark(a, given_fine)
+    if target is "windows"
+        batch_arguments(a, refused)
+    end
     movi(a, rcx, 3) # may it?
     call_to(a, "rt_permit")
     test_rr(a, rax, rax)
@@ -24500,8 +24972,42 @@ to emit_run_program with a, target
         set handles_set to new_label(a)
         set started to new_label(a)
         set waited to new_label(a)
+        find_program(a, no_program)
         call_to(a, "rt_b_reset") # the command line: the program, then each argument, quoted as it needs
+        set by_name to new_label(a)
+        set named to new_label(a)
+        load(a, rax, rip("run_batch")) # cmd.exe looks for a batch file again, from where this program
+        test_rr(a, rax, rax) # runs, so one that was found is named by where it was found
+        jcc(a, cc_e, by_name)
+        load(a, rax, rip("run_app"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, by_name)
+        push_r(a, rdi)
+        movi(a, rcx, 3 * 32768 + 8)
+        call_to(a, "rt_alloc_raw")
+        mov_rr(a, rdi, rax)
+        win_enter(a)
+        movi(a, rcx, 65001)
+        movi(a, rdx, 0)
+        load(a, r8, rip("run_app"))
+        movi(a, r9, -1)
+        store(a, mem(rsp, 32), rdi)
+        storei(a, mem(rsp, 40), 3 * 32768)
+        storei(a, mem(rsp, 48), 0)
+        storei(a, mem(rsp, 56), 0)
+        call_import(a, "imp_WideCharToMultiByte")
+        win_leave(a)
+        mov32_rr(a, rcx, rax)
+        mov_rr(a, rsi, rdi)
+        pop_r(a, rdi)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, by_name)
+        dec_r(a, rcx) # less the 0 at its end
+        call_to(a, "rt_text_from")
+        jmp_to(a, named)
+        mark(a, by_name)
         load(a, rax, rip("err_file"))
+        mark(a, named)
         call_to(a, "rt_b_arg")
         set slash_loop to new_label(a) # its forward slashes turned to backslashes, which Windows needs to find a program in a folder
         set slashes_done to new_label(a)
@@ -24585,7 +25091,7 @@ to emit_run_program with a, target
         store(a, mem(rax, 96), rcx)
         mark(a, handles_set)
         win_enter(a)
-        movi(a, rcx, 0)
+        load(a, rcx, rip("run_app")) # where find_program found it, or 0 for a path, which the system follows
         mov_rr(a, rdx, r13)
         movi(a, r8, 0)
         movi(a, r9, 0)
@@ -28508,6 +29014,8 @@ to label_offset with a, name
     return at of target
 end
 
+set load_config_size to 320 # IMAGE_LOAD_CONFIG_DIRECTORY64 as Windows 10 and 11 know it
+
 to windows_file with a
     set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess",
         "VirtualAlloc"
@@ -28605,6 +29113,18 @@ to windows_file with a
         put_all(dat, item 1 of group as bytes)
         add 0 to dat
     end
+    # the load configuration, only for what it says about those DLLs: look for them in the system's own folder
+    # (System32), never in the program's, where a file of the same name could be put to run in its place
+    pad_to(dat, 8)
+    set load_config to length of dat
+    put32(dat, load_config_size)
+    repeat 74 times
+        add 0 to dat
+    end
+    put16(dat, 0x800) # DependentLoadFlags: LOAD_LIBRARY_SEARCH_SYSTEM32
+    repeat load_config_size - 80 times
+        add 0 to dat
+    end
     pad_to(dat, 16)
     set bss_rva to data_rva + length of dat
     set data_virtual to length of dat + bss of a
@@ -28661,6 +29181,9 @@ to windows_file with a
         if n is 1 # the imports
             put32(out, data_rva + descriptors)
             put32(out, 20 * (length of groups + 1))
+        else if n is 10 # the load configuration
+            put32(out, data_rva + load_config)
+            put32(out, load_config_size)
         else if n is 12 # the import address table
             put32(out, data_rva + slots)
             put32(out, 8 * slot_count)

@@ -1465,3 +1465,55 @@ test("an app's handlers make their sounds as its events come, and only a program
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Where a program on Windows looks: its DLLs and the programs it starts come only from the system's folders
+// and PATH, never from beside the program, where a file of the same name could be put to run in their place;
+// an empty folder in PATH isn't the one the program runs in; and a .bat or .cmd file, which cmd.exe runs, gets
+// no argument that cmd.exe would read as part of a command
+test("on Windows a program takes its DLLs and the programs it starts only from where the system keeps them", { skip: onWindows }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-places-"));
+  try {
+    writeFileSync(join(dir, "whoami.exe"), machine('say "not the real whoami"', { target, name: "w.moth" }));
+    writeFileSync(join(dir, "elsewhere.exe"), machine('say "only here"', { target, name: "e.moth" }));
+    for (const dll of ["winmm.dll", "winhttp.dll", "gdiplus.dll"]) { // any DLL that isn't the real one stops a program that loads it
+      writeFileSync(join(dir, dll), readFileSync(join(process.env.SystemRoot, "System32", "version.dll")));
+    }
+    writeFileSync(join(dir, "show.bat"), "@echo off\r\necho got %1\r\n");
+    const source = `move forward 10
+play a beep
+try
+    say read "https://127.0.0.1:1/"
+if it fails with why
+    say "not online"
+end
+say "whoami: " output of (run program "whoami" with (empty list) keeping its output)
+for each name in list of "elsewhere", "./show.bat", "show.bat"
+    try
+        set answer to run program name with (list of "it") keeping its output
+        say name ": " output of answer
+    if it fails with why
+        say name ": " why
+    end
+end
+for each argument in list of "a & echo INJECTED", "50%", "x\\"y"
+    try
+        set answer to run program "./SHOW.BAT. " with (list of argument) keeping its output
+        say output of answer
+    if it fails with why
+        say why
+    end
+end
+say output of (run program "./SHOW.BAT" with (list of "fine") keeping its output)`;
+    const exe = join(dir, "p.exe");
+    writeFileSync(exe, machine(source, { target, name: "p.moth", allow: ["--allow-run", "--allow-net"] }));
+    const whoami = spawnSync(join(process.env.SystemRoot, "System32", "whoami.exe"), [], { encoding: "utf8" }).stdout.replaceAll("\r", "");
+    const PATH = `${process.env.SystemRoot}\\System32;;${process.env.PATH}`;
+    const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH } });
+    const why = "can't run './SHOW.BAT. ': an argument to a .bat or .cmd file can't hold \" % ^ & | < > ! or a line break, which cmd.exe would read as part of a command";
+    const want = ["not online", `whoami: ${whoami}`, "elsewhere: there is no program called 'elsewhere'", "./show.bat: got it\n",
+      "show.bat: there is no program called 'show.bat'", why, why, why, "got fine\n"];
+    assert.deepEqual([got.stdout.replaceAll("\r", ""), got.stderr, got.status], [`${want.join("\n")}\n`, "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

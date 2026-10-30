@@ -1675,3 +1675,46 @@ hold them to agreeing.
   pixel for pixel (blended where they can be seen through), and 350 broken
   files stop at the same mistake everywhere, on Windows and on Linux.
 
+## 38. A security check, and what it changed
+
+- **What was checked.** The playground, for any way a program or a shared link
+  could reach the page; the JIT, for any way text in a program could become
+  JavaScript; the `--allow` flags, against look-alike folder names, `..`,
+  junctions and symlinks, for reading and for writing; going online on Linux;
+  how programs and DLLs are found on Windows; how built programs are laid out
+  in memory; and 3,000 broken pictures and saved files, on Windows and Linux,
+  looking for a crash. The page escapes all it shows, the JIT writes every text
+  as a JSON string, the flags held, refused writes left files as they were, and
+  nothing crashed.
+- **DLLs only from System32.** Windows looks for a program's DLLs beside the
+  program first, and winhttp.dll, winmm.dll and gdiplus.dll aren't among the
+  ones it always takes from its own folder. So a file called winhttp.dll in
+  Downloads, beside moth.exe, would have run inside it. A program now carries a
+  load configuration whose DependentLoadFlags say LOAD_LIBRARY_SEARCH_SYSTEM32,
+  so its DLLs come only from System32 (Windows 10 1607 and later).
+- **Programs from the system's folders and PATH.** `run program "git"` let
+  CreateProcessW look, and it looks beside the running program first, so a
+  git.exe put there would run. Now a name with no folder in it is looked for
+  with SearchPathW in System32, then Windows' folder, then PATH with its empty
+  entries left out (SearchPathW takes an empty one as the current folder), and
+  CreateProcessW is given what it found. A name with a folder is followed as it
+  is.
+- **Batch files.** Windows runs a .bat or .cmd file in cmd.exe, which reads `&`,
+  `|`, `%` and the rest in its arguments as commands whatever the quoting: an
+  argument of `x" & echo INJECTED` ran `echo INJECTED`. Rust had the same hole
+  (CVE-2024-24576). Moth now refuses an argument to a batch file that holds any
+  of `" % ^ & | < > !` or a line break, rather than trying to quote for cmd.exe,
+  which has no quoting that holds for all of them; and since cmd.exe looks for
+  the batch file again by its name, starting in the folder the program runs
+  in, one that was found on PATH is named by its whole path.
+- **Not changed.** Programs still load at a fixed address (no ASLR): they never
+  run their data or write their code, and Moth checks every index and every
+  kind, so it would only matter with a bug in the runtime. A shared playground
+  link still runs its code as it opens, in the page's worker, which can't reach
+  the page.
+- **A bug found on the way.** The fuzzing found that machine code couldn't
+  `load` a number with an exponent, like `1e-7`, which `save` writes for very
+  small and very large numbers. `load` now writes such a number out in full
+  (`0.0000001`) and reads that, which is exact; past 10^310 it's Infinity and
+  below 10^-330 zero, so a huge exponent costs nothing.
+

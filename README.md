@@ -211,7 +211,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (12,850,688 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (13,076,480 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -690,10 +690,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (12,850,688 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (13,076,480 bytes)
 ```
 
-That's the same 12,850,688 bytes Node.js made of it, and the moth.exe they make
+That's the same 13,076,480 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -894,8 +894,12 @@ unboxed numbers were all caught, some only by the fuzzer.
   it; on Windows whatever it ended with, which for a crash is a huge number, so
   `moth run` ends with 1 instead of passing one of those on. On Linux a program
   that `run program` names without a `/` is looked for in PATH, as a shell looks
-  for it, and one it finds but may not run is "no program called that"; Windows
-  lets the system look, and says what it says.
+  for it, and one it finds but may not run is "no program called that". On
+  Windows one named without a folder is looked for in the system's folder, then
+  Windows', then PATH, but never beside the program or in the folder it runs
+  from: name one there as `./tool.exe`. A `.bat` or `.cmd` file runs in
+  cmd.exe, so it can't be given an argument holding `" % ^ & | < > !` or a line
+  break, which cmd.exe would read as part of a command.
 - `moth check` leaves out the checker's "will fail" warnings that come from the
   types it works out (`"a" - 1`, `item 4 of (list of 1, 2)`), since those need
   every one of Moth's operations again in Moth. It finds a name nothing ever
