@@ -152,6 +152,22 @@ export const MACHINE_CASES = [
   "for each name in list of \"in.txt\", \"https://example.com/x\", \"HTTP://a\", 5, nothing, list of 1\n    try\n        say read name\n    if it fails with why\n        say why\n    end\n    try\n        say read bytes name\n    if it fails with why\n        say why\n    end\nend\nfor each name in list of \"out.txt\", \"https://example.com/x\", yes\n    try\n        write \"x\" to name\n    if it fails with why\n        say why\n    end\nend\nwrite list of 1, 2 to \"out.txt\"",
   "to save with v\n    write v to \"keep.txt\"\nend\nsave(\"x\")",
   "say read bytes 3",
+  // the error output, and the number a program ends with
+  "say \"out 1\"\nsay \"err \" 1 + 1 \" \" list of 1, \"a\" to the error output\nsay \"out 2\"\nfor each i from 1 to 3\n    say i to the error output\n    say i * 10\nend\nsay \"\" to the error output\nsay \"é😀\\ttab\" to the error output",
+  "say \"before\"\nstop the program\nsay \"after\"",
+  "say \"a\"\nstop the program with 3",
+  "to deep with n\n    if n is 0\n        try\n            stop the program with 7\n        if it fails\n            say \"caught\"\n        end\n    end\n    say n\n    deep(n - 1)\nend\nfor each i from 1 to 10\n    deep(5)\nend",
+  "say \"x\" to the error output\nstop the program with 0.1 * 30",
+  "stop the program with 255",
+  "say 1\nstop the program with 256",
+  "stop the program with -1",
+  "stop the program with 2.5",
+  "stop the program with \"2\"",
+  "set codes to list of 1, 2\nstop the program with codes",
+  "try\n    stop the program with nothing\nif it fails with why\n    say \"caught: \" why\n    stop the program with 4\nend",
+  "set c to run program 5",
+  "set c to run program \"x\" with 5",
+  "set c to run program (list of 1) keeping its output",
 ];
 
 export function machinePrograms(seed, count) {

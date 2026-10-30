@@ -128,12 +128,25 @@ to cli_report with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
             add " " to cli_mark
         end
     end
-    say cli_where + ":" + line of cli_at + ":" + col of cli_at + ": " + reason of cli_why + "\n" + cli_text + "\n" + cli_mark + "^"
+    say cli_where + ":" + line of cli_at + ":" + col of cli_at + ": " + reason of cli_why + "\n" + cli_text + "\n" + cli_mark + "^" to the error output
+end
+
+# a file's text, or nothing, with why on the error output, if it can't be read
+to cli_text_of with cli_path
+    try
+        return read cli_path
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+    end
+    return nothing
 end
 
 to cli_build with cli_path, cli_target, cli_allowing
     set cli_folder to cli_folder_of(cli_path)
-    set cli_source to read cli_path
+    set cli_source to cli_text_of(cli_path)
+    if cli_source is nothing
+        return no
+    end
     set cli_names to empty list # every file it uses, and the files they use, by the names `use` gives
     set cli_texts to empty list
     set cli_waiting to cli_used_by(cli_source)
@@ -229,15 +242,15 @@ to cli_main
     if cli_file is nothing
         set cli_fine to no
     end
-    if not cli_fine
-        say cli_usage
-    else
-        if cli_target is nothing
-            set cli_target to cli_host()
-        end
-        if not cli_build(cli_file, cli_target, cli_flags)
-            fail with "the program has a mistake"
-        end
+    if not cli_fine # wrong usage: how to use it, and 2
+        say cli_usage to the error output
+        stop the program with 2
+    end
+    if cli_target is nothing
+        set cli_target to cli_host()
+    end
+    if not cli_build(cli_file, cli_target, cli_flags) # a mistake in the program, or a file that can't be read: 1
+        stop the program with 1
     end
 end
 

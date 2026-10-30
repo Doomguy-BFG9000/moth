@@ -304,6 +304,10 @@ export const ERRORS = [
   ["every 0 seconds\n    say 1\nend", "line 1: 'every' needs a number above 0, not 0"],
   ["set when to 1", "line 1: 'when' is a Moth word, so it can't be used as a variable name"],
   ["when a key is pressed\n    stop\nend", "line 2: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"],
+  ["say \"a\" to the error output\nstop the program with 256", "line 2: 'stop the program with' needs a whole number from 0 to 255, not 256"],
+  ["say 1 to the error put", "line 1: expected 'the error output' but found 'the'"],
+  ["set c to run program 5 with (list of \"a\")", "line 1: 'run program' needs text or bytes, not a number"],
+  ["run program \"x\"", "line 1: 'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

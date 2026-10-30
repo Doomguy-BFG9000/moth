@@ -165,7 +165,7 @@
     .answer.drawing { flex-direction: column; align-items: flex-start; }
     .pad { width: 220px; height: 220px; background: #080c18; border: 1px solid #2a3456; border-radius: 8px; touch-action: none; cursor: crosshair; }
     .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #2a3456; border-radius: 8px; padding: 4px 9px; }
-    #output.error { color: #ff9d8a; }
+    #output.error, #output .error-output { color: #ff9d8a; }
     #canvas { display: block; width: min(100% - 28px, 440px); aspect-ratio: 1; margin: 14px auto; background: radial-gradient(circle at 50% 45%, #10172d, #080c18 75%); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 0 46px -20px #f4b54a55; touch-action: none; }
     #canvas:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
     #bytecode { color: #9aa1ba; }
@@ -662,7 +662,10 @@ Did you mean 'total'?</pre></div>
           const skip = Math.min(skipLines, data.lines.length);
           skipLines -= skip;
           if (data.lines.length > skip) {
-            output.append(data.lines.slice(skip).join("\n") + "\n");
+            for (const line of data.lines.slice(skip)) { // a line said to the error output in the colour of a mistake
+              if (typeof line === "string") output.append(`${line}\n`);
+              else output.append(Object.assign(document.createElement("span"), { className: "error-output", textContent: `${line.error}\n` }));
+            }
             shownLines += data.lines.length - skip;
           }
         }
@@ -679,12 +682,14 @@ Did you mean 'total'?</pre></div>
         }
         if (data.question !== undefined) return waitForAnswer(data.question);
         if (data.error) fail(data.error, data.mistake);
+        if (data.stopped !== undefined && !data.done) return finish(`The app stopped the program with ${data.stopped}`); // a handler did
         if (data.done) {
           if (data.empty && !data.app) output.append("(no output)");
           const engine = { jit: "the JIT", wasm: "WebAssembly", vm: "the VM" }[$("engine").value];
           const ms = data.ms < 10 ? data.ms.toFixed(1) : Math.round(data.ms);
           if (data.app) return startApp(data.app, `Set up in ${ms} ms on ${engine}`);
-          finish(`Ran in ${ms} ms on ${engine}`);
+          // `stop the program with 2` just ends the run: there is no system here to hand the 2 to
+          finish(`Ran in ${ms} ms on ${engine}${data.stopped === undefined ? "" : `, and stopped the program with ${data.stopped}`}`);
         }
       };
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
@@ -864,7 +869,8 @@ Did you mean 'total'?</pre></div>
       if (s.error) output.append(`Error: ${s.error.message}\n${excerpt(code.value, s.error)}`);
       if (s.done && !s.said && !trace.drawn.length) output.append("(no output)");
       render(trace.drawn.slice(0, s.drawn), trace.drawn); // fit to the whole drawing, so the view doesn't jump
-      status.textContent = s.error ? `Stopped by a mistake on line ${line}` : s.done ? "Finished" : `Before line ${line}`;
+      const finished = s.stopped === undefined ? "Finished" : `Finished: it stopped the program with ${s.stopped}`;
+      status.textContent = s.error ? `Stopped by a mistake on line ${line}` : s.done ? finished : `Before line ${line}`;
 
       const list = (vars) => (vars.length ? vars.map(([name, value]) => `  ${name} = ${value}`).join("\n") : "  (nothing yet)");
       const calls = []; // "branch ×8" rather than eight of them, when a function calls itself

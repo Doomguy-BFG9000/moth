@@ -1,6 +1,8 @@
 // Runs one Moth program off the page's main thread, so a loop that never ends can't freeze the page:
 // the page just ends this worker when Stop is pressed. An app (a program with `when` or `every`) keeps the
 // worker going after it has set up: the worker runs its timers, and the page sends it keys and clicks.
+// A line said to the error output goes to the page as { error: line }, among the others, and `stop the
+// program` ends the run (or the app) with the number it gave, which the page shows.
 import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./moth.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more.
@@ -74,6 +76,10 @@ function handle(run) {
   try {
     run();
     flush();
+    if (app.stopped !== undefined) { // a handler stopped the program: the app is over
+      postMessage({ stopped: app.stopped });
+      app = null;
+    }
   } catch (err) {
     failed(err);
   }
@@ -88,6 +94,12 @@ onmessage = ({ data }) => {
   let pictured = 0; // drawn since the last clear
   const say = (line) => {
     if (++said <= MAX_LINES) lines.push(line);
+    else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
+    due();
+  };
+  let stopped; // the number `stop the program` gave, if it ran
+  const sayError = (line) => { // a line said to the error output, which the page shows in the colour of a mistake
+    if (++said <= MAX_LINES) lines.push({ error: line });
     else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
     due();
   };
@@ -117,9 +129,11 @@ onmessage = ({ data }) => {
       files: (name) => files[name],
       disk: pageDisk(), // a page has no files of its own: `write` makes them, for this run
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
+      printError: sayError,
+      exit: (code) => (stopped = code),
     }) ?? null;
     flush();
-    postMessage({ done: true, app: app?.waits, empty: said === 0 && total === 0, ms: performance.now() - start });
+    postMessage({ done: true, app: app?.waits, empty: said === 0 && total === 0, ms: performance.now() - start, stopped });
     app?.waits.forEach((wait, i) => wait.event === "every" && setInterval(() => handle(() => app.handle(i)), Math.max(FASTEST, wait.interval)));
   } catch (err) {
     if (err instanceof Waiting) return; // the page asks, and runs it again

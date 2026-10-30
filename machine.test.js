@@ -28,20 +28,22 @@ const NOTHING_ALLOWED = {
   write: refused("write files (start it with --allow-write)"),
 };
 
-// What the JavaScript engine prints for p.moth, writes as a mistake, and exits with; null for a program too long to wait for.
+// What the JavaScript engine prints for p.moth, writes to the error output (what it says there, then a
+// mistake), and exits with: 1 for a mistake, or what `stop the program` gave; null for a program too long to wait for.
 function onEngine(source, name) {
-  let stdout = "";
+  let [stdout, stderr, status] = ["", "", 0];
   const ask = (question) => {
     stdout += `${question} \n`; // the question, then a line of its own, as the input has ended
     return null;
   };
   try {
-    run(source, (line) => (stdout += `${line}\n`), { maxSteps: 3_000_000, file: name, ask, disk: NOTHING_ALLOWED, args: [] });
-    return { stdout, stderr: "", status: 0 };
+    run(source, (line) => (stdout += `${line}\n`), { maxSteps: 3_000_000, file: name, ask, disk: NOTHING_ALLOWED, args: [],
+      printError: (line) => (stderr += `${line}\n`), exit: (code) => (status = code) });
+    return { stdout, stderr, status };
   } catch (err) {
     if (!(err instanceof MothError)) throw err;
-    if (/^stopped after/.test(err.reason)) return null;
-    let stderr = `${err.file ?? name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
+    if (/^stopped after|^can't run programs here/.test(err.reason)) return null; // too long to wait for, or a program it would run
+    stderr += `${err.file ?? name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
     if (err.trail.length) stderr += `${describeTrail(err.trail)}\n`;
     return { stdout, stderr, status: 1 };
   }
@@ -228,8 +230,11 @@ test("a program moth.exe builds uses files, and shows a mistake in one as moth r
   assert.equal(ran.stderr, "shapes.moth:6:9: below 0\n        fail with \"below 0\"\n        ^\n  in 'shapes's check', called from line 3\n");
   assert.equal(ran.status, 1);
   const missing = spawnSync(exe, ["build", "nowhere.moth"], { cwd: dir, encoding: "utf8" });
-  assert.notEqual(missing.status, 0);
-  assert.match(missing.stderr, /there is no file called 'nowhere\.moth'/);
+  assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
+  writeFileSync(join(sub, "broken.moth"), 'use "shapes.moth" as shapes\nsay shapes\'s square(1, 2\n');
+  const broken = spawnSync(exe, ["build", join("uses", "broken.moth")], { cwd: dir, encoding: "utf8" });
+  assert.deepEqual([broken.status, broken.stdout], [1, ""]); // a mistake in the program: on the error output, and 1
+  assert.equal(broken.stderr, `${join("uses", "broken.moth")}:3:1: expected ')' but found the end of the code\n\n^\n`);
 });
 
 // A program that takes arguments, asks, reads and writes, built with each set of --allow flags, each in a
@@ -284,10 +289,11 @@ test("moth.exe builds --allow flags in, and its program reads, writes, asks and 
       const out = existsSync(join(dir, "out.txt")) ? readFileSync(join(dir, "out.txt"), "utf8") : null;
       assert.deepEqual({ flags: want.flags, stdout: got.stdout, stderr: got.stderr, status: got.status, out }, want, want.flags.join(" "));
     }
-    for (const bad of ["--allow-everything", "--allow-all=x"]) { // not a flag moth knows: it says how to use it, and builds nothing
+    for (const bad of ["--allow-everything", "--allow-all=x"]) { // not a flag moth knows: it says how to use it, ends with 2, and builds nothing
       const dir = setUp();
       const said = spawnSync(exe, ["build", "tool.moth", bad], { cwd: dir, encoding: "utf8" });
-      assert.match(said.stdout, /^usage: moth build/, bad);
+      assert.match(said.stderr, /^usage: moth /, bad);
+      assert.deepEqual([said.status, said.stdout], [2, ""], bad);
       assert.ok(!existsSync(executable(dir, "tool")), bad);
     }
   } finally {

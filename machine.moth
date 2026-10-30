@@ -3453,6 +3453,25 @@ to emit_builder with a
     movi(a, rax, 0)
     ret(a)
 
+    # rt_say_error_end: the same, as a line of the error output, which goes out at once, after what the output
+    # has waiting, so the two come in the order they were said
+    set error_line_fits to new_label(a)
+    mark(a, "rt_say_error_end")
+    call_to(a, "rt_b_fits")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, error_line_fits)
+    ret(a)
+    mark(a, error_line_fits)
+    movi(a, rax, 10)
+    call_to(a, "rt_b_byte")
+    call_to(a, "rt_flush_out")
+    movi(a, rdi, 2)
+    load(a, rsi, rip("b_ptr"))
+    load(a, rdx, rip("b_len"))
+    call_to(a, "rt_write")
+    movi(a, rax, 0)
+    ret(a)
+
     # rt_join: xmm2 and xmm1 shown and joined, as `+` joins text, into xmm0, with rax 0, or 3 if that's longer
     # than JavaScript's longest text. When the first is text whose bytes end where its block's used bytes
     # do, and there's room, the second goes straight after them, and the new text shares them; a long text
@@ -12051,9 +12070,39 @@ to gen_statement with fc, s
         end
     else if what is "write"
         gen_write(fc, s)
+    else if what is "exit"
+        gen_exit(fc, s)
     else
         not_yet_node(s)
     end
+end
+
+# `stop the program with 2`: what the output has waiting goes out, and the program ends with that number, a
+# whole number from 0 to 255; no `try` stops it
+to gen_exit with fc, s
+    set a to a of fc
+    if value of s is nothing
+        movi(a, rcx, 0)
+    else
+        gen_expr(fc, value of s)
+        movapd(a, xmm2, xmm0)
+        call_to(a, "rt_byte")
+        set bad to new_label(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, bad)
+        set was to enter_cold(a)
+        mark(a, bad)
+        stub_start(fc, at of s)
+        stub_text(a, "'stop the program with' needs a whole number from 0 to 255, not ")
+        load(a, rax, rip("err_a"))
+        call_to(a, "rt_described")
+        jmp_to(a, "rt_e_end")
+        leave_cold(a, was)
+    end
+    push_r(a, rcx)
+    call_to(a, "rt_flush_out")
+    pop_r(a, rcx)
+    jmp_to(a, "rt_exit")
 end
 
 to gen_loop_body with fc, body, exit
@@ -12091,7 +12140,11 @@ to gen_say with fc, s
             add 1 to j
         end
     end
-    call_to(a, "rt_say_end")
+    if errors of s
+        call_to(a, "rt_say_error_end")
+    else
+        call_to(a, "rt_say_end")
+    end
     test_rr(a, rax, rax)
     jcc(a, cc_ne, fail_stub(fc, at of s, too_big))
     if waiting is greater than 0

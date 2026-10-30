@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
+import { MothError, Ended, fail, seeded, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -117,6 +117,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const describe = (t) => (t.type === "eof" ? "the end of the code" : t.type === "string" ? `"${t.value}"` : `'${t.text ?? t.value}'`);
   const expected = (what) => fail(peek(), `expected ${what} but found ${describe(peek())}`);
   const expectWord = (w) => word(w) || expected(`'${w}'`);
+  const wordAt = (i, w) => tokens[i].type === "word" && tokens[i].value === w;
+  // `run program "git" with (list of "status")`: `run` alone is still a name
+  const runsProgram = () => wordAt(pos + 1, "program") && !tokens[pos + 1].nl;
 
   function name(what) {
     const t = peek();
@@ -223,10 +226,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("to");
       return { kind: "add", value, name: name("a variable name"), at: t };
     }
-    if (word("say")) {
+    if (word("say")) { // `say "oops" to the error output`
       const parts = [expression()];
-      while (!peek().nl) parts.push(expression());
-      return { kind: "say", parts, at: t };
+      while (!peek().nl && !isWord("to")) parts.push(expression());
+      if (peek().nl || !word("to")) return { kind: "say", parts, at: t };
+      if (!(isWord("the") && wordAt(pos + 1, "error") && wordAt(pos + 2, "output"))) expected("'the error output'");
+      pos += 3;
+      return { kind: "say", parts, at: t, errors: true };
     }
     if (word("if")) return ifRest(t);
     if (word("repeat")) {
@@ -312,6 +318,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "use", body: useFile(nameToken, alias), at: t };
     }
     if (word("stop")) {
+      if (isWord("the") && !peek().nl && wordAt(pos + 1, "program")) { // `stop the program`, `stop the program with 2`
+        pos += 2;
+        return { kind: "exit", value: !peek().nl && word("with") ? expression() : null, at: t };
+      }
       if (!loopDepth) fail(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')");
       return { kind: "stop", at: t };
     }
@@ -355,6 +365,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const size = word("size") ? expression() : { kind: "value", value: null, at: t }; // no size: the usual one
       return { kind: "turtle", action: "text", value: { ...place, items: [text, ...place.items, size] }, at: t };
     }
+    if (isWord("run") && runsProgram()) fail(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'");
     if (t.type === "word" && !RESERVED.has(t.value)) {
       // a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
       pos++;
@@ -541,6 +552,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += 2;
       return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
     } // what the program was started with: `tool a b`
+    if (isWord("run") && runsProgram()) { // `run program "x" with (list of "a")`, `... keeping its output`
+      pos += 2;
+      const program = additive();
+      const inputs = !peek().nl && word("with") ? additive() : { kind: "list", items: [], at: t };
+      const keeping = !peek().nl && isWord("keeping") && wordAt(pos + 1, "its") && wordAt(pos + 2, "output");
+      if (keeping) pos += 3;
+      return { kind: "builtin", name: keeping ? "run program keeping" : "run program", args: [program, inputs], at: t };
+    }
     // `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
     if (isWord("random") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "number" && tokens[pos + 2].type === "word" && tokens[pos + 2].value === "from") {
       pos += 3;
@@ -642,7 +661,7 @@ function prefixed(body, alias) {
 
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -753,7 +772,12 @@ class Compiler extends Scope {
       }
       case "say":
         for (const part of s.parts) this.expr(part);
-        this.emit(s.at, SAY, s.parts.length);
+        this.emit(s.at, s.errors ? SAY_ERROR : SAY, s.parts.length);
+        return;
+      case "exit":
+        if (s.value) this.expr(s.value);
+        else this.emit(s.at, CONST, this.constant(0));
+        this.emit(s.at, EXIT);
         return;
       case "if": {
         this.expr(s.cond);
@@ -1145,14 +1169,15 @@ export function format(source) {
   return result;
 }
 
-// Runs a Moth program. Each `say` line goes to `print`, each line the turtle draws to `draw`, and each
-// `ask` to `ask`, which returns the answer (see askFor in vm.js); mistakes in the program throw MothError.
+// Runs a Moth program. Each `say` line goes to `print` (or to `printError`, said to the error output), each
+// line the turtle draws to `draw`, and each `ask` to `ask`, which returns the answer (see askFor in vm.js);
+// mistakes in the program throw MothError. `stop the program with 2` ends the run, and `exit` gets the 2.
 // `maxSteps` stops loops and calls after that many rounds, for running untrusted code without a Stop button.
 // `engine` is "jit" (compile to JavaScript), "wasm" (WebAssembly) or "vm" (bytecode). `files` and `file` are
 // for `use` (see build). `disk` holds the files `read` and `write` use (see readFile in vm.js, and memoryDisk
 // below), `args` is what `arguments` gives, and `random` gives the random numbers (seeded() unless given).
 // A program that sets up handlers with `when` or `every` is an app: run() returns it, to be sent events.
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded() } = {}) {
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit } = {}) {
   const reading = { files, file };
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
   // Kept, so that running it again (below) gets the same, and writes nothing twice.
@@ -1179,6 +1204,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     }
   }
   let said = 0;
+  let complained = 0; // lines said to the error output
   let drawn = 0;
   const sent = []; // each event an app has handled so far, as [handler, inputs]: a run on the VM handles them again
 
@@ -1186,7 +1212,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   // over, getting everything from outside that the first run got, and passing on only what it hadn't said or
   // drawn already. Moth programs can't read the clock, so a second run does exactly the same things.
   function onVm(again) {
-    let [next, skipSaid, skipDrawn] = [0, again ? said : 0, again ? drawn : 0];
+    let [next, skipSaid, skipDrawn, skipComplained] = [0, again ? said : 0, again ? drawn : 0, again ? complained : 0];
     const replay = (f) => f && (!again ? f : (...inputs) => {
       if (next >= outside.length) return f(...inputs);
       const before = outside[next++];
@@ -1196,7 +1222,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
     const say = (line) => skipSaid-- > 0 || print(line);
     const options = {
       maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write) }, args, random: replay(chance),
-      listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)),
+      listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
     };
     new Machine(compile(source, reading), say, options).run();
     const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options) };
@@ -1207,30 +1233,50 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   // Calls went deeper than the JIT (or the WebAssembly engine) goes, or the stack ran out anyway, or a value
   // outgrew what JavaScript allows: the VM keeps its own stack, and reports a too-big value at the right line.
   const handOver = (err) => err instanceof TooDeep || err instanceof RangeError || err?.name === "InternalError";
+  // `stop the program` ends it on purpose, not as a mistake: `exit` gets the number it ended with
+  const ended = (err) => {
+    if (!(err instanceof Ended)) throw err;
+    exit?.(err.code);
+  };
   let host = { handlers: [] }; // the engine running the program, which fills in its handlers and how to call one
-  if (!program) host = onVm(false);
-  else {
-    try {
-      // counted once passed on, so a hand-over in the middle of passing one on can't lose it
-      program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance, host);
-    } catch (err) {
-      if (!handOver(err)) throw err;
-      host = onVm(true);
+  try {
+    if (!program) host = onVm(false);
+    else {
+      try {
+        // counted once passed on, so a hand-over in the middle of passing one on can't lose it
+        program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance, host,
+          (line) => (printError(line), complained++));
+      } catch (err) {
+        if (!handOver(err)) throw err;
+        host = onVm(true);
+      }
     }
+  } catch (err) {
+    ended(err);
+    return undefined;
   }
   if (!host.handlers.length) return undefined;
 
   // An app: what its handlers wait for, and a way to hand them events. Each handler call gets `maxSteps` of
-  // its own, and a mistake in one throws, which ends the app.
+  // its own, and a mistake in one throws, which ends the app. A handler that stops the program ends it too:
+  // `stopped` is then the number it ended with, and events after it do nothing.
   const app = {
     waits: host.handlers.map(({ event, interval }) => (interval === undefined ? { event } : { event, interval })),
+    stopped: undefined,
     handle(i, inputs = []) {
+      if (app.stopped !== undefined) return;
       try {
-        host.call(host.handlers[i], inputs);
+        try {
+          host.call(host.handlers[i], inputs);
+        } catch (err) {
+          if (host.vm || !handOver(err)) throw err;
+          host = onVm(true); // everything so far again, on the VM, then this event
+          host.call(host.handlers[i], inputs);
+        }
       } catch (err) {
-        if (host.vm || !handOver(err)) throw err;
-        host = onVm(true); // everything so far again, on the VM, then this event
-        host.call(host.handlers[i], inputs);
+        if (!(err instanceof Ended)) throw err;
+        app.stopped = err.code;
+        exit?.(err.code);
       }
       sent.push([i, inputs]);
     },
@@ -1245,19 +1291,21 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
 const copy = (v) => (v instanceof Uint8Array ? v.slice() : v); // bytes a program read could be changed after
 
 // Runs a file's tests: each function at its top level named test_something, on its own, in a fresh run of
-// the file, so one test can't spoil another. A mistake in it, like an `expect` that isn't so, fails it. A
-// file with no tests is one test itself. Gives [{ name, said, error }], `error` only for a test that failed,
-// whose trail leaves out the call that started the test. Options as for run(); a file that can't be read
-// at all throws, as in run().
+// the file, so one test can't spoil another. A mistake in it, like an `expect` that isn't so, fails it, and
+// so does stopping the program with a number other than 0. A file with no tests is one test itself. Gives
+// [{ name, said, error, stopped }], `error` only for a test that failed with a mistake, whose trail leaves
+// out the call that started the test, and `stopped` only for one that stopped the program with a number
+// other than 0. Options as for run(); a file that can't be read at all throws, as in run().
 export function test(source, options = {}) {
   const program = build(source, (body) => body, options);
   const names = program.filter((s) => s.kind === "define" && s.name.startsWith("test_")).map((s) => s.name);
   const last = source.split("\n").length; // the call that starts a test goes on the line after this one
   const one = (name) => {
     const said = [];
+    let stopped = 0;
     try {
-      run(name ? `${source}\n${name}()` : source, (line) => said.push(line), options);
-      return { name, said };
+      run(name ? `${source}\n${name}()` : source, (line) => said.push(line), { ...options, exit: (code) => (stopped = code) });
+      return stopped ? { name, said, stopped } : { name, said };
     } catch (err) {
       if (!(err instanceof MothError)) throw err;
       err.trail = err.trail.filter((t) => t.file || t.line <= last);
@@ -1339,14 +1387,15 @@ export function machineCompiler(machineSource, compilerSource) {
 
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
-export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random } = {}) {
-  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random });
+export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random, printError } = {}) {
+  return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random, printError });
 }
 
 // A whole run, recorded for a time-travel debugger: at every statement, where the program was, what its
 // variables held, and how many lines it had said and drawn by then. Recording stops after `limit` steps
-// (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step.
-// `answers` answer its questions, in order, each shown after its question as a line of output.
+// (`cut` is then true), so a loop that never ends can't run forever. A mistake ends it with an `error` step,
+// and `stop the program` with a `done` one that says what it `stopped` with. `answers` answer its questions,
+// in order, each shown after its question as a line of output; lines said to the error output are output too.
 export function timeline(source, { limit = 10_000, answers = [], files, file, disk, args, random } = {}) {
   const said = [];
   const drawn = [];
@@ -1356,7 +1405,7 @@ export function timeline(source, { limit = 10_000, answers = [], files, file, di
     said.push(`${question} ${answers[asked]}`);
     return answers[asked++];
   };
-  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args, random });
+  const machine = debug(source, (line) => said.push(line), (line) => drawn.push(line), ask, { files, file, disk, args, random, printError: (line) => said.push(line) });
   const steps = [];
   const snapshot = (extra) => steps.push({ ...machine.inspect(), said: said.length, drawn: drawn.length, ...extra });
   let cut = false;
@@ -1370,8 +1419,9 @@ export function timeline(source, { limit = 10_000, answers = [], files, file, di
       if ((cut = steps.length >= limit)) break;
     }
   } catch (err) {
-    if (!(err instanceof MothError)) throw err;
-    snapshot({ error: err }); // the variables as they were when it failed, since lists and values change in place
+    if (err instanceof Ended) snapshot({ done: true, stopped: err.code });
+    else if (!(err instanceof MothError)) throw err;
+    else snapshot({ error: err }); // the variables as they were when it failed, since lists and values change in place
   }
   return { steps, said, drawn, cut };
 }
