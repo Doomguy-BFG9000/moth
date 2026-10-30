@@ -888,6 +888,35 @@ test("say ... to the error output and stop the program, on all three engines and
   assert.deepEqual(problems("remove the file 5"), ["1:1 fails: a file name is text, not a number"]);
 });
 
+// `read the folder "tests"`, which `moth test` needs to find tests: the names in a folder, in order, a folder's
+// with / after it, through what holds the files, on every engine and in the compiler written in Moth
+test("read the folder, on all three engines and in the compiler written in Moth", () => {
+  const source = ['say read the folder "."', 'for each name in read the folder "data/"', "    say name", "end", "try",
+    '    say read the folder "nowhere"', "if it fails with why", "    say why", "end", "say read the folder 5"].join("\n");
+  const files = { "b.txt": "x", "A.txt": "y", "data/z.txt": "1", "data/a b.txt": "2", "data/sub/deep.txt": "3", "data/sub/more.txt": "4" };
+  const moth = mothCompiler(COMPILER);
+  for (const engine of ENGINES) {
+    assert.deepEqual(streams(source, { engine, disk: memoryDisk(files) }).log, [["out", '["A.txt", "b.txt", "data/"]'],
+      ["out", "a b.txt"], ["out", "sub/"], ["out", "z.txt"], ["out", "there is no folder called 'nowhere'"],
+      ["mistake", "line 10: a folder name is text, not a number"]], engine);
+    assert.deepEqual(streams('say read the folder "."', { engine }).log, [["mistake", "line 1: this program reads a folder, but there are no files here"]], engine);
+    // its words are still names, and the phrase only starts where it could never have meant anything else
+    assert.deepEqual(streams('set the to "b.txt"\nset folder to 2\nsay read the\nsay folder', { engine, disk: memoryDisk(files) }).log, [["out", "x"], ["out", "2"]], engine);
+  }
+  for (const program of [source, "say read the folder", 'set the to 1\nsay read the folder\n"x"']) {
+    assert.deepEqual(compiled(moth, program), compiled(compileToJs, program), program);
+  }
+  assert.equal(format('say  read the folder   "x"'), 'say read the folder "x"\n');
+  assert.deepEqual(problems('say read the folder 5\nsay length of read the folder "."'), ["1:5 fails: a folder name is text, not a number"]);
+  // in a file used `as` a name, its name is renamed with the rest
+  const used = { "lister.moth": 'set where to "data"\nto names\n    return read the folder where\nend' };
+  const using = 'use "lister.moth" as lister\nsay lister\'s names()';
+  for (const engine of ENGINES) {
+    assert.deepEqual(streams(using, { engine, files: (name) => used[name], disk: memoryDisk(files) }).log, [["out", '["a b.txt", "sub/", "z.txt"]']], engine);
+  }
+  assert.deepEqual(compiled((s) => moth(s, used), using), compiled((s) => compileToJs(s, { files: (name) => used[name] }), using));
+});
+
 // ---------- tidying ----------
 
 test("format() tidies code the one way, without changing a piece of it, and tidy code stays as it is", () => {

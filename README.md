@@ -222,7 +222,7 @@ or `--target linux`, and a Linux moth.exe and a Windows one build each other
 byte for byte too. The first one comes from Node.js
 (`node bootstrap.mjs`) or from
 [the releases](https://github.com/samyyy2423/moth/releases); after that, each
-builds the next. It takes the part of Moth machine.moth takes, drawing and
+builds the next. It takes nearly all of Moth, units, tables, charts, drawing and
 apps included. On Windows, a program that draws shows its picture in a window
 when it ends, an app runs in one, and a question that starts with "Draw" opens a
 pad to draw the answer on, so `moth build handwriting.moth` makes the
@@ -402,6 +402,7 @@ say math's sqrt(2)
 set notes to read "notes.txt"               # files: read, read bytes, write ... to
 write uppercase of notes to "loud.txt"
 remove the file "loud.txt"                  # there must be a file of that name
+say read the folder "tools"                 # what's in a folder, in order: a folder's name ends in /
 for each word in arguments                  # tool a b c, once moth build made tool
     say word
 end
@@ -567,6 +568,7 @@ moth run hello.moth Sam 3                build it beside itself, run it with tho
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
 moth check hello.moth                    find problems in it without running it
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
+moth test                                the same for every .test.moth file here and in the folders inside
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
@@ -580,7 +582,9 @@ input and output, waits for it, removes the file, and ends with the number the
 program ended with. If a file of that name is already there, it leaves it
 alone and runs nothing. The `--allow` flags go before the file, since what
 comes after it is the program's own. `moth tidy` and `moth test` take any
-number of files; `moth check` one.
+number of files, and `moth test` with none finds every file ending in
+`.test.moth` here and in the folders inside, but not hidden ones or
+`node_modules`; `moth check` takes one.
 
 `moth test` runs each test on its own, in a run of its own, so one test can't
 spoil another: it builds the file once, then starts it once for each test, and
@@ -747,16 +751,21 @@ calls that led there.
   take, each built for the system the tests run on, which must print, fail and
   exit exactly alike; machine.moth and moth.exe each building themselves into
   the same bytes; every character's upper and lower case; programs that make
-  far more than they keep; and a tool's files, arguments, answers and `--allow`
-  flags against what `moth run` did
+  far more than they keep; a tool's files, arguments, answers and `--allow`
+  flags against what `moth run` did; amounts, tables and folders read from real
+  files, against the JavaScript engine reading the same files from memory; and
+  charts and `rgb()` and `hsl()` colours, pixel by pixel in the picture the
+  window draws
 - the commands moth.exe has: a program it builds that starts another program,
   waits for it and removes a file, and one that keeps what another said, from
   both its outputs, more of it than a pipe holds; `moth run` passing arguments,
   input, output and the number a program ended with through, and leaving
   nothing behind; `moth tidy` on every Moth file here and on programs broken on
   purpose, each tidied to exactly the bytes `format()` makes; `moth check`
-  against the checker, its own problems word for word; and `moth test` on the
-  tests in Moth here, said exactly as `test()` says them
+  against the checker, its own problems word for word; `moth test` on the
+  tests in Moth here, said exactly as `test()` says them; and `moth test` on
+  its own, finding the tests in a folder in the order the Node.js command line
+  found them
 - going online in machine code, against a server of the tests' own on
   127.0.0.1: a page's text and bytes, moves to other addresses, the answers
   that are mistakes, a refused connection, a big page and the `--allow-net`
@@ -793,23 +802,24 @@ unboxed numbers were all caught, some only by the fuzzer.
   dictionaries JavaScript's engine, which has years of tuning behind it, is
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
-- `moth build` takes only part of Moth so far: no units, tables or
-  `draw chart of`; anything else stops with a
-  mistake that says it can't become machine code yet. It makes programs for
-  x86-64 Windows and Linux, not for Macs.
+- `moth build` doesn't take Moth's newest phrases yet: `the time` and the rest
+  of the clock, `wait`, `in order`, `save` and `load`. A program that uses one
+  stops with a mistake that says it can't become machine code yet. It makes
+  programs for x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
   showing its picture, and an app's handlers never run. The window knows CSS's
-  colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only
-  opens at a terminal or when started from Explorer: with its output going to
-  a file or another program, a program runs as it would on Linux.
+  colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but not
+  `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
+  when started from Explorer: with its output going to a file or another
+  program, a program runs as it would on Linux.
 - `say ... to the error output`, `stop the program`, `run program` (with or
   without `keeping its output`) and `remove the file` only work in a program
   `moth build` makes: in the playground and the tests, the error output is
   shown as a mistake is and an exit code just ends the run, and starting a
   program is a mistake that says so.
-- `moth test` needs its files named: a program in machine code can't look
-  through a folder yet, so `moth test` on its own doesn't find every
-  `.test.moth` file the way the Node.js command line did.
+- `moth test` on its own sorts the files it finds as `localeCompare` sorts
+  letters, digits and the marks on a keyboard; any other character comes after
+  them, by its bytes, which isn't always where `localeCompare` puts it.
 - A program ends with a number from 0 to 255, which is all Linux keeps. A
   program `run program` starts gives back the number the system reports: on
   Linux the number it ended with, or 128 and the signal's number if one ended

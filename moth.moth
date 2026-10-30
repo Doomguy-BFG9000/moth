@@ -17,7 +17,7 @@
 
 use "machine.moth" as machine
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test <files...> [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -250,15 +250,16 @@ to cli_build with cli_path, cli_target, cli_allowing, cli_into, cli_telling
     if cli_source is nothing
         return no
     end
-    return cli_build_source(cli_path, cli_source, cli_target, cli_allowing, cli_into, cli_telling)
+    return cli_build_source(cli_path, cli_source, cli_target, cli_allowing, cli_into, cli_telling, cli_name_of(cli_path))
 end
 
-# the same, for code that isn't quite what the file holds: the test runner adds lines at its end
-to cli_build_source with cli_path, cli_source, cli_target, cli_allowing, cli_into, cli_telling
+# the same, for code that isn't quite what the file holds: the test runner adds lines at its end. Its
+# mistakes say they're in `cli_program`: the file's name, or for a test its path, as the Node.js command
+# line said it.
+to cli_build_source with cli_path, cli_source, cli_target, cli_allowing, cli_into, cli_telling, cli_program
     set cli_used to cli_sources_of(cli_path, cli_source)
     set cli_names to names of cli_used
     set cli_texts to texts of cli_used
-    set cli_program to cli_name_of(cli_path)
     try
         set cli_bytes to machine's compile_allowing(cli_source, cli_names, cli_texts, cli_target, cli_program, cli_allowing)
     if it fails with cli_why
@@ -771,7 +772,7 @@ to cli_check_expr with cli_state, cli_frame, cli_e
         cli_check_each(cli_state, cli_frame, values of cli_e)
     else if cli_what is "builtin"
         cli_check_each(cli_state, cli_frame, args of cli_e)
-    else if cli_what is "length" or cli_what is "field" or cli_what is "read"
+    else if cli_what is "length" or cli_what is "field" or cli_what is "read" or cli_what is "readFolder"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)
     else if cli_what is "item"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)
@@ -1081,7 +1082,7 @@ to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
     if cli_in_the_way(cli_temp)
         return record with passed 0, failed 1
     end
-    if not cli_build_source(cli_path, cli_source + "\n" + cli_driver, cli_target, cli_allowing, cli_temp, no)
+    if not cli_build_source(cli_path, cli_source + "\n" + cli_driver, cli_target, cli_allowing, cli_temp, no, cli_path)
         return record with passed 0, failed 1
     end
     set cli_passed to 0
@@ -1115,6 +1116,113 @@ to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
         say "moth: " + cli_whyleft to the error output
     end
     return record with passed cli_passed, failed cli_failed
+end
+
+# Finding the tests when none are named, as the Node.js command line found them: every file ending in .test.moth
+# in the folder moth runs in and the folders inside it, but not hidden ones or node_modules, in the order a
+# person sorts names (JavaScript's localeCompare), each folder's before the next name after it.
+
+# punctuation, as localeCompare sorts it: before digits, which come before letters
+set cli_marks to "_-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$"
+
+# where a character comes in that order, ignoring case: a number, more for later
+to cli_weight with cli_c
+    set cli_at to position of cli_c in "0123456789"
+    if cli_at is greater than 0
+        return 200 + cli_at
+    end
+    set cli_at to position of cli_c in "abcdefghijklmnopqrstuvwxyz"
+    if cli_at is 0
+        set cli_at to position of cli_c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    end
+    if cli_at is greater than 0
+        return 300 + cli_at
+    end
+    set cli_at to position of cli_c in cli_marks
+    if cli_at is greater than 0
+        return 100 + cli_at
+    end
+    if cli_c is " " or cli_c is "\t"
+        return 50
+    end
+    return 1000 + item 1 of (cli_c as bytes) # anything else after the letters, as its first byte has it
+end
+
+# whether name a comes before name b: by their characters ignoring case, then lower case before upper
+to cli_collates_before with cli_a, cli_b
+    set cli_ka to empty list
+    for each cli_c in cli_a
+        add cli_weight(cli_c) to cli_ka
+    end
+    set cli_kb to empty list
+    for each cli_c in cli_b
+        add cli_weight(cli_c) to cli_kb
+    end
+    set cli_n to length of cli_ka
+    if length of cli_kb is less than cli_n
+        set cli_n to length of cli_kb
+    end
+    for each cli_k from 1 to cli_n
+        if item cli_k of cli_ka is not item cli_k of cli_kb
+            return item cli_k of cli_ka is less than item cli_k of cli_kb
+        end
+    end
+    if length of cli_ka is not length of cli_kb
+        return length of cli_ka is less than length of cli_kb
+    end
+    for each cli_k from 1 to cli_n
+        set cli_ca to item cli_k of cli_a
+        set cli_cb to item cli_k of cli_b
+        if cli_ca is not cli_cb
+            return position of cli_ca in "abcdefghijklmnopqrstuvwxyz" is greater than 0
+        end
+    end
+    return no
+end
+
+# a folder's names, a folder's without the / after it, as localeCompare sorts them: each with whether it's a folder
+to cli_sorted_entries with cli_names
+    set cli_entries to empty list
+    for each cli_name in cli_names
+        set cli_is_folder to cli_tail(cli_name, length of cli_name) is "/"
+        set cli_bare to cli_name
+        if cli_is_folder
+            set cli_bare to cli_first(cli_name, length of cli_name - 1)
+        end
+        set cli_entry to record with name cli_bare, folder cli_is_folder
+        set cli_k to length of cli_entries # into its place among those before it
+        add cli_entry to cli_entries
+        repeat while cli_k is at least 1 and cli_collates_before(cli_bare, name of item cli_k of cli_entries)
+            set item (cli_k + 1) of cli_entries to item cli_k of cli_entries
+            set item cli_k of cli_entries to cli_entry
+            set cli_k to cli_k - 1
+        end
+    end
+    return cli_entries
+end
+
+# the .test.moth files in a folder ("" for the one moth runs in) and those inside it, joined to it as Node's
+# path.join joins them, with \ on Windows
+to cli_find_tests with cli_folder, cli_sep, cli_found
+    set cli_looked to cli_folder
+    if cli_looked is ""
+        set cli_looked to "."
+    end
+    for each cli_entry in cli_sorted_entries(read the folder cli_looked)
+        set cli_name to name of cli_entry
+        set cli_path to cli_name
+        if cli_folder is not ""
+            set cli_path to cli_folder + cli_sep + cli_name
+        end
+        if cli_first(cli_name, 1) is not "." and cli_name is not "node_modules"
+            if folder of cli_entry
+                cli_find_tests(cli_path, cli_sep, cli_found)
+            else if length of cli_name is greater than 10 and cli_tail(cli_name, length of cli_name - 9) is ".test.moth"
+                add cli_path to cli_found
+            end
+        end
+    end
+    return cli_found
 end
 
 # `moth test a.test.moth b.test.moth`: every file's tests, then how many passed; 1 if any failed
@@ -1152,7 +1260,7 @@ to cli_main
     if length of cli_given is at least 1
         set cli_command to item 1 of cli_given
     end
-    set cli_fine to length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "tidy" or cli_command is "check" or cli_command is "test")
+    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
@@ -1182,7 +1290,7 @@ to cli_main
     if cli_file is nothing and cli_command is not "tidy" and cli_command is not "test"
         set cli_fine to no
     end
-    if (cli_command is "tidy" or cli_command is "test") and length of cli_paths is 0
+    if cli_command is "tidy" and length of cli_paths is 0
         set cli_fine to no
     end
     if not cli_fine # wrong usage: how to use it, and 2
@@ -1196,6 +1304,17 @@ to cli_main
         stop the program with cli_check_file(cli_file)
     end
     if cli_command is "test"
+        if length of cli_paths is 0 # none named: every one here and in the folders inside
+            set cli_sep to "/"
+            if cli_host() is "windows"
+                set cli_sep to "\\"
+            end
+            set cli_paths to cli_find_tests("", cli_sep, empty list)
+            if length of cli_paths is 0
+                say "moth: no tests found: name a file, or put tests in files ending in .test.moth" to the error output
+                stop the program with 1
+            end
+        end
         stop the program with cli_test_all(cli_paths, cli_host(), cli_flags)
     end
     if cli_target is nothing

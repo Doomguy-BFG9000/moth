@@ -151,11 +151,13 @@ export const OPCODES = [
   ["REMOVE_FILE", 0], // `remove the file` named on the stack
   ["NOW", 1], // `the time`, `the date` and the rest: the operand is which, in NOW_WORDS
   ["WAIT", 1], // `wait` the number on the stack, times the operand (milliseconds in each)
+  ["READ_FOLDER", 0], // `read the folder` named on the stack
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
+  READ_FOLDER } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
@@ -1006,6 +1008,22 @@ export function removeFile(name, disk, error) {
   if (!gone) error(`there is no file called '${name}'`);
 }
 
+// `read the folder "tests"`: the names of what is in a folder, in order, a folder's with "/" after it. A disk
+// that can look in folders has folder(name), which gives those names in any order, or null if there is no
+// such folder, and may throw an Error, whose message is passed on.
+export function readFolder(name, disk, error) {
+  if (typeof name !== "string") error(`a folder name is text, not ${kindOf(name)}`);
+  if (!disk?.folder) error("this program reads a folder, but there are no files here");
+  let names;
+  try {
+    names = disk.folder(name);
+  } catch (err) {
+    error(`can't read '${name}': ${err.message}`);
+  }
+  if (names === null || names === undefined) error(`there is no folder called '${name}'`);
+  return [...names].sort();
+}
+
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
 export function failWith(value, error) {
   error(show(value), value);
@@ -1329,6 +1347,9 @@ export class Machine {
             throw new Ended(exitCode(stack.pop(), oops));
           case REMOVE_FILE:
             removeFile(stack.pop(), this.disk, oops);
+            break;
+          case READ_FOLDER:
+            stack.push(readFolder(stack.pop(), this.disk, oops));
             break;
           case CHECK_REPEAT:
             stack[stack.length - 1] = checkRepeat(stack[stack.length - 1], oops); // to 15 digits: 0.1 * 30 is 3 times

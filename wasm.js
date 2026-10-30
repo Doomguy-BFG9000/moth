@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -82,6 +82,7 @@ const IMPORTS = {
   read: [[EQ, I32, I32], [EQ]], // the file's name, 1 for bytes or 0 for text, and a position
   write: [[EQ, EQ, I32], []],
   removeFile: [[EQ, I32], []],
+  readFolder: [[EQ, I32], [EQ]], // the folder's name, and a position
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
   now: [[I32], [EQ]], // which, in NOW_WORDS
@@ -1178,6 +1179,10 @@ class WasmCompiler extends Scope {
         this.expr(e.of);
         this.e("i32.const", e.bytes ? 1 : 0).e("i32.const", this.pos(e.at)).e("call", im.read);
         return;
+      case "readFolder":
+        this.expr(e.of);
+        this.e("i32.const", this.pos(e.at)).e("call", im.readFolder);
+        return;
       case "arguments":
         this.e("call", im.args);
         return;
@@ -1471,6 +1476,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
     removeFile: (name, k) => removeFile(toJs(name), disk, errors[k]),
+    readFolder: (name, k) => toWasm(readFolder(toJs(name), disk, errors[k])),
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
     now: (which) => toWasm(nowValue(which, clock)),

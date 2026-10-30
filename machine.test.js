@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError } from "./moth.js";
+import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -28,6 +28,7 @@ const NOTHING_ALLOWED = {
   read: (name) => refused(/^https?:\/\//i.test(name) ? "go online (start it with --allow-net)" : "read files (start it with --allow-read)")(),
   write: refused("write files (start it with --allow-write)"),
   remove: refused("write files (start it with --allow-write)"),
+  folder: refused("read files (start it with --allow-read)"),
 };
 
 // What the JavaScript engine prints for p.moth, writes to the error output (what it says there, then a
@@ -85,10 +86,74 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
 
 test("what can't become machine code yet stops at a mistake that says so", () => {
   const not = (source, wanted) => assert.throws(() => machine(source, { target: "linux" }), (err) => err instanceof MothError && wanted.test(err.message), source);
-  not("say 5 km", /^line 1: 'unit' can't become machine code yet/);
-  not("draw chart of (list of 1, 2)", /^line 1: 'draw chart of' can't become machine code yet/);
+  not("say 0x20000000000000", /^line 1: a hex or binary number this big can't become machine code yet/);
   not("say 1 +", /^line 1: expected a value but found the end of the code$/); // a mistake in the program, as run says it
 });
+
+// `read table`, which needs a file: each program built with --allow-read and run in a folder with its files,
+// against the JavaScript engine reading the same files from memory. Headers made into field names, cells in
+// quotes, blank lines, missing cells, a table read twice, and the mistakes.
+const SALES = 'Name,Price,Qty\nApple,1.5,10\nPear,2,3\n"Big, red melon",12.25,1\nKiwi,,\n';
+const TABLES = [
+  [['set sales to read table "sales.csv"', 'say length of sales " rows: " item 1 of sales',
+    "for each row in sales where price of row is not nothing and price of row is greater than 1.6", "    say name of row", "end",
+    'say total of price in sales " " average of price in sales " " largest of qty in sales " " smallest of name in sales',
+    "say sales", 'say (read table "sales.csv") is sales', "draw chart of price in sales", 'say "charted"'].join("\n"),
+    { "sales.csv": SALES }],
+  ['set t to read table "x.csv"\nfor each r in t\n    say r\nend', { "x.csv": 'A b,"q""uote",a b,,1x,_x_,\u00c9\u00c0,a-b-c,a b\r\n1,2,3,4,5,6,7,8,9\r\n\r\n"multi\nline",-3.5, 07 ,0x10,1e3,,"",x"y,\n\n' }],
+  ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"', { "a.csv": "", "b.csv": "\n\n\r\n", "c.csv": "only,header" }],
+  ['say read table "a.csv"\nsay read table "b.csv"\nsay read table "c.csv"\nsay read table "d.csv"', { "a.csv": "a,a,a,a_2\n1,2,3,4\n5",
+    "b.csv": 'x\n"unclosed,1\n2', "c.csv": '"""",b\n"""""",""x', "d.csv": "1,2,3\n4,5,6\n,,\n7\n" }],
+  ['set t to read table "e.csv"\nsay name of item 1 of t\nsay (record with name "Ana", age 3) is item 2 of t\nsay total of age in t\nsay total of ages in t', { "e.csv": "Name,Age\nSam,20\nAna,3\n" }],
+  ['set t to read table "e.csv"\nsay total of age in t', { "e.csv": "Name,Age\nSam,old\n" }],
+  ['say read table "missing.csv"', {}],
+];
+
+// Each program, built with --allow-read, run in a folder of its own with its files, against the JavaScript
+// engine with the same files in memory
+function withFiles(cases) {
+  const dirs = [];
+  try {
+    cases.forEach(([source, files], i) => {
+      const dir = mkdtempSync(join(tmpdir(), "moth-files-"));
+      dirs.push(dir);
+      for (const [name, text] of Object.entries(files)) {
+        mkdirSync(join(dir, ...name.split("/").slice(0, -1)), { recursive: true });
+        writeFileSync(join(dir, ...name.split("/")), text);
+      }
+      let [stdout, stderr, status] = ["", "", 0];
+      try {
+        run(source, (line) => (stdout += `${line}\n`), { file: "t.moth", disk: memoryDisk(files) });
+      } catch (err) {
+        if (!(err instanceof MothError)) throw err;
+        stderr = `t.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
+        status = 1;
+      }
+      const exe = executable(dir, "t");
+      writeFileSync(exe, machine(source, { target, name: "t.moth", allow: ["--allow-read"] }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout, stderr, status }, `${i}: ${source}`);
+    });
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("a table read from a file is the list of records the JavaScript engine makes of it", { skip }, () => withFiles(TABLES));
+
+// `read the folder`: what is in a folder and the folders inside it, in Moth's order for text, a folder's name
+// with / after it; and what goes wrong. (The folder the program runs in also holds the program, so only the
+// folders inside it are compared.)
+const FOLDER_FILES = { "data/z.txt": "1", "data/a b.txt": "2", "data/sub/deep.txt": "3", "data/\u00c9.txt": "4", "data/B.txt": "5",
+  "data/sub/more/x.txt": "6", "data/.hidden": "7", "data/\ud83d\ude00.txt": "8", "data/\uff21.txt": "9", "data/_.txt": "0" };
+const FOLDERS = [
+  ['say read the folder "data"\nfor each n in read the folder "data/"\n    say n\nend\nsay read the folder "data/sub"\nsay read the folder "data/sub/more/"', FOLDER_FILES],
+  ['to walk with folder\n    for each n in read the folder folder\n        if "/" is in n\n            walk(folder + "/" + n)\n        else\n            say folder + "/" + n\n        end\n    end\nend\nwalk("data")', FOLDER_FILES],
+  ['for each name in list of "nowhere", 5, list of "data"\n    try\n        say read the folder name\n    if it fails with why\n        say why\n    end\nend\nsay read the folder "data/nowhere"', FOLDER_FILES],
+];
+
+test("a folder read in machine code holds what the JavaScript engine finds in it", { skip }, () => withFiles(FOLDERS));
 
 // Programs that make far more than they keep, so the garbage collector runs many times over: lists, text
 // that grows, records kept while others come and go, dictionaries, functions made inside functions, and
@@ -100,6 +165,7 @@ const GARBAGE = [
   "set d to empty dictionary\nfor each i from 1 to 300000\n    set item (\"k\" + i) of d to list of i\nend\nfor each round from 1 to 5\n    set e to empty dictionary\n    for each i from 1 to 100000\n        set item i of e to \"v\" + i\n    end\nend\nsay length of keys of d\nsay item \"k77777\" of d\nsay item 99999 of e",
   "to make with n\n    set seen to list of n\n    to get\n        return item 1 of seen\n    end\n    return get\nend\nset fs to empty list\nfor each i from 1 to 100000\n    add make(i) to fs\nend\nset total to 0\nfor each round from 1 to 20\n    for each i from 1 to 100000\n        set g to make(i)\n        add g() to total\n    end\nend\nfor each f in fs\n    add f() to total\nend\nsay total",
   "to deep with n, acc\n    if n is 0\n        return length of acc\n    end\n    return deep(n - 1, acc + \"z\")\nend\nset total to 0\nfor each i from 1 to 40\n    add deep(2000, \"\") to total\nend\nsay total\nto tree with n\n    if n is 0\n        return list of \"leaf\"\n    end\n    return list of tree(n - 1), tree(n - 1)\nend\nto count with t\n    if length of t is 1\n        return 1\n    end\n    return count(item 1 of t) + count(item 2 of t)\nend\nfor each i from 1 to 30\n    set t to tree(14)\nend\nsay count(t)",
+  "set trip to 0 km\nset legs to empty list\nfor each i from 1 to 3000000\n    add 1 m to trip\n    if i is divisible by 1000\n        add trip in m to legs\n    end\nend\nsay trip\nsay length of legs\nsay item 1000 of legs\nsay total of legs\nsay largest of legs\nset rows to empty list\nfor each i from 1 to 200000\n    add record with n i, d i * 1 km to rows\nend\nsay total of d in rows\nsay average of n in rows",
 ];
 
 test("garbage: programs that make far more than they keep say what the JavaScript engine says", { skip }, () => {
@@ -548,8 +614,44 @@ test("moth.exe runs a file's tests, each in a run of its own, and says what test
   assert.equal(several.stdout.split("\n").at(-2), "5 passed, 1 failed");
   const missing = testing(["nowhere.test.moth"]);
   assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "0 passed, 1 failed\n", "moth: there is no file called 'nowhere.test.moth'\n"]);
-  const nothing = spawnSync(exe, ["test"], { cwd: sub, encoding: "utf8" });
-  assert.deepEqual([nothing.status, nothing.stdout], [2, ""]);
+});
+
+// `moth test` with no file named finds them as the Node.js command line did (cli.js at 1.5.1, findTests below):
+// every file ending in .test.moth here and in the folders inside, but not hidden ones or node_modules, sorted
+// by localeCompare and joined with the system's separator. A failing test's mistake names its file's path.
+test("moth.exe test with no file named finds every .test.moth file, as the Node.js command line did", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const tree = join(dir, "finding");
+  const pass = "to test_one\n    expect 1 is 1\nend\n";
+  const files = { "b.test.moth": pass, "A.test.moth": pass, "1.test.moth": pass, "_u.test.moth": "expect yes\n", "x.moth": "say 1\n",
+    "sub/c.test.moth": pass, "sub/a_b.test.moth": "to test_wrong\n    expect 1 is 2\nend\n", "sub/deeper/d-1.test.moth": pass,
+    "sub/deeper/d.test.moth": pass, "Zeta/z.test.moth": pass, ".hidden/x.test.moth": pass, "node_modules/y.test.moth": pass };
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(join(tree, ...name.split("/").slice(0, -1)), { recursive: true });
+    writeFileSync(join(tree, ...name.split("/")), text);
+  }
+  const findTests = (folder) => {
+    const found = [];
+    for (const entry of readdirSync(join(tree, folder), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) found.push(...findTests(path));
+      else if (entry.name.endsWith(".test.moth")) found.push(path);
+    }
+    return found;
+  };
+  const wanted = findTests(".");
+  assert.equal(wanted.length, 9);
+  const ran = spawnSync(exe, ["test"], { cwd: tree, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual(ran.stdout.split("\n").filter((line) => line.endsWith(".test.moth") && !/^[✓✗ ]/.test(line)), wanted); // each file's name, then its tests
+  const wrong = join("sub", "a_b.test.moth");
+  assert.ok(ran.stdout.includes(`${wrong}\n✗ test_wrong\n    ${wrong}:2:5: expected 1 to be 2\n`), ran.stdout);
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.split("\n").at(-2)], [1, "", "8 passed, 1 failed"]);
+  const empty = join(dir, "no-tests");
+  mkdirSync(join(empty, "sub"), { recursive: true });
+  writeFileSync(join(empty, "sub", "plain.moth"), "say 1\n");
+  const none = spawnSync(exe, ["test"], { cwd: empty, encoding: "utf8" });
+  assert.deepEqual([none.status, none.stdout, none.stderr], [1, "", "moth: no tests found: name a file, or put tests in files ending in .test.moth\n"]);
 });
 
 // `run program ... keeping its output`: what the program said instead of letting it through, however much
@@ -869,6 +971,54 @@ draw box at -20, -20 size 40 by 40`);
   assert.equal(at(15, 15), BACKGROUND);
   assert.equal(at(220, 220), "#ffd700");
   assert.equal(at(-40, -40), BACKGROUND); // the red box was cleared
+});
+
+// rgb(), rgba(), hsl() and hsla(), as a canvas reads them: each drawn as a box over one of #123456, so a colour
+// it doesn't read keeps that one, and one that's partly see-through shows it under. [colour, red, green, blue,
+// alpha], or [colour] for one it doesn't read.
+const FUNCTION_COLOURS = [
+  ["rgb(255, 0, 0)", 255, 0, 0], ["RGB(0,128,0)", 0, 128, 0], ["rgb(100%, 50%, 0%)", 255, 128, 0], ["rgb(10% 20 none)", 26, 20, 0],
+  ["rgb(300, -20, 127.6)", 255, 0, 128], ["  rgb(1e2, 0.5e2, .5)  ", 100, 50, 1], ["hsl(120, 100%, 50%)", 0, 255, 0],
+  ["hsl(240deg, 100%, 25%)", 0, 0, 128], ["hsl(0.5turn 100% 50%)", 0, 255, 255], ["HSL(-120, 100%, 50%)", 0, 0, 255],
+  ["hsl(210, 60%, 70%)", 133, 179, 224], ["hsl(30 50 50)", 191, 128, 64], ["rgba(255, 0, 0, 0.5)", 255, 0, 0, 0.5],
+  ["hsla(240 100% 50% / 25%)", 0, 0, 255, 0.25], ["rgb(255, 0, 0"], ["rgb(255 0, 0)"], ["rgb(100%, 0, 0)"], ["hsl(120, 100, 50)"],
+  ["rgb(1px 2 3)"], ["rgb(none, 0, 0)"], ["rgb(1 2 3) x"], ["rgba(1 2 3 / 4deg)"],
+];
+
+test("colours as rgb(), rgba(), hsl() and hsla() are read as a canvas reads them", { skip: onWindows }, () => {
+  const place = (i) => [-240 + (i % 10) * 45, 200 - Math.floor(i / 10) * 45];
+  const { at } = picture(FUNCTION_COLOURS.map(([colour], i) => {
+    const [x, y] = place(i);
+    return `pen color "#123456"\ndraw box at ${x}, ${y} size 30 by 30\npen color ${JSON.stringify(colour)}\ndraw box at ${x}, ${y} size 30 by 30`;
+  }).join("\n"));
+  const under = [0x12, 0x34, 0x56];
+  FUNCTION_COLOURS.forEach(([colour, ...rgba], i) => {
+    const [x, y] = place(i);
+    const want = rgba.length ? rgba.slice(0, 3).map((c, k) => c * (rgba[3] ?? 1) + under[k] * (1 - (rgba[3] ?? 1))) : under;
+    const got = at(x + 15, y + 15).slice(1).match(/../g).map((h) => parseInt(h, 16));
+    assert.ok(got.every((c, k) => Math.abs(c - want[k]) <= 1), `${colour}: ${got} rather than ${want}`);
+  });
+});
+
+test("a chart is the bars, values and labels the playground draws", { skip: onWindows }, () => {
+  const { at, stdout } = picture(`pen color "red"
+draw chart of (list of 1, 2, nothing, -1)
+say "charted"`);
+  assert.equal(stdout, "charted\n");
+  assert.equal(at(15, 50), "#ff0000"); // the first bar, 100 high
+  assert.equal(at(15, 105), BACKGROUND);
+  assert.equal(at(55, 150), "#ff0000"); // the second, 200 high
+  assert.equal(at(35, 50), BACKGROUND); // 10 between them
+  assert.equal(at(95, 50), BACKGROUND); // nothing: no bar
+  assert.equal(at(135, -50), "#ff0000"); // below 0, downwards
+  assert.equal(at(135, 10), BACKGROUND);
+  let labels = 0;
+  for (let x = 0; x < 30; x++) for (let y = -18; y < -6; y++) if (at(x, y) !== BACKGROUND) labels++;
+  assert.ok(labels > 5, `the label under the first bar has ${labels} pixels`);
+  const amounts = picture(`draw chart of (dictionary where "a" is 3 km, "b" is 1500 m)`).at;
+  assert.equal(amounts(15, 190), "#4f8ff7"); // 3 km is the longest, 200
+  assert.equal(amounts(55, 90), "#4f8ff7"); // 1500 m is half of it
+  assert.equal(amounts(55, 110), BACKGROUND);
 });
 
 // Apps: keys, clicks, drags and timers (by their place among the timers) sent to the handlers in order
