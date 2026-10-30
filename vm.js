@@ -153,12 +153,13 @@ export const OPCODES = [
   ["NOW", 1], // `the time`, `the date` and the rest: the operand is which, in NOW_WORDS
   ["WAIT", 1], // `wait` the number on the stack, times the operand (milliseconds in each)
   ["READ_FOLDER", 0], // `read the folder` named on the stack
+  ["PLAY", 1], // `play note` with how long on the stack, above the note, in units of the operand's milliseconds; 0 for `play a beep`
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
-  READ_FOLDER } = OP;
+  READ_FOLDER, PLAY } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart", "picture", // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
@@ -1215,6 +1216,93 @@ function pictureOf(data, name, error) {
   return image;
 }
 
+// ---------- sound ----------
+// `play note "C4" for 0.5 seconds`, `play note 440 for 1 second` and `play a beep`. A sound is { hertz,
+// seconds }: how many times a second it shakes (0 for a rest, which is silence) and how long it lasts. The
+// engines hand each sound to `play`, in order, and whoever runs the program plays them one after the other.
+
+// The notes from middle C up, C4 to B4, in hertz: A4 is 440, and each is 2 to the power 1/12 times the one
+// before. They're written out, so every engine and machine code have exactly the same numbers; another
+// octave is these doubled or halved, which is exact.
+export const NOTE_HERTZ = [261.6255653005986, 277.1826309768721, 293.6647679174076, 311.1269837220809, 329.6275569128699,
+  349.2282314330039, 369.9944227116344, 391.99543598174927, 415.3046975799451, 440, 466.1637615180899, 493.8833012561241];
+const NOTE_STEPS = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }; // each letter's place among the 12
+export const BEEP = { hertz: 880, seconds: 0.2 }; // `play a beep`: the A above A4, for a fifth of a second
+
+// A note's name, in hertz, or undefined if it isn't one: a letter from A to G in either case, maybe # (a
+// step up) or b (a step down), maybe an octave from 0 to 9 (4 if none), or "rest".
+export function noteHertz(name) {
+  if (name.toLowerCase() === "rest") return 0;
+  const m = /^([A-Ga-g])([#b]?)([0-9]?)$/.exec(name);
+  if (!m) return undefined;
+  let step = NOTE_STEPS[m[1].toLowerCase()] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
+  let octave = m[3] === "" ? 4 : Number(m[3]);
+  if (step < 0) [step, octave] = [step + 12, octave - 1]; // Cb4 is B3
+  if (step > 11) [step, octave] = [step - 12, octave + 1]; // B#4 is C5
+  let hertz = NOTE_HERTZ[step];
+  for (; octave > 4; octave--) hertz *= 2;
+  for (; octave < 4; octave++) hertz /= 2;
+  return hertz;
+}
+
+// `play note ... for ...`: the sound, from the note (a name or a number of hertz) and how long, which is
+// `time` units of `unit` milliseconds, as `every` takes them. A sound lasts at most a minute.
+export function soundOf(note, time, unit, error) {
+  let hertz;
+  if (typeof note === "number") {
+    if (!(note >= 20 && note <= 20000)) error(`a note's pitch is from 20 to 20000 hertz, not ${show(note)}`);
+    hertz = note;
+  } else if (typeof note === "string") {
+    hertz = noteHertz(note);
+    if (hertz === undefined) error(`there is no note called '${note}' (write A to G, maybe with # or b and an octave from 0 to 9, like "C#4", or "rest")`);
+  } else error(`'play note' needs a note like "C4" or a number, not ${kindOf(note)}`);
+  if (typeof time !== "number") error(`'play note ... for' needs a number, not ${kindOf(time)}`);
+  const ms = time * unit;
+  if (!(ms >= 0 && ms <= 60000)) error(`a sound lasts from 0 to 60 seconds, not ${show(ms / 1000)} seconds`);
+  return { hertz, seconds: ms / 1000 };
+}
+
+// A sound's samples, 44,100 a second, as 16-bit numbers, the way the playground and machine code play it:
+// close to a sine wave (two parabolas, refined), a quarter as loud as it could be, rising from silence over
+// its first 10 ms and falling back over its last 10, so it starts and stops without a click. Only + - * /
+// and floor go into each one, so machine code works out exactly the same numbers.
+export const SOUND_RATE = 44100;
+export function soundSamples({ hertz, seconds }) {
+  const n = Math.floor(seconds * SOUND_RATE + 0.5);
+  const step = hertz / SOUND_RATE;
+  const samples = new Int16Array(n);
+  for (let k = 0; k < n; k++) {
+    const x = k * step;
+    const z = 2 * (x - Math.floor(x)) - 1; // where in its wave, from -1 to 1
+    let y = 4 * z * (1 - Math.abs(z));
+    y = 0.225 * (y * Math.abs(y) - y) + y; // about sin(pi z)
+    const loud = Math.min(1, k / 441, (n - 1 - k) / 441);
+    samples[k] = Math.floor(-y * loud * 8192 + 0.5);
+  }
+  return samples;
+}
+
+// Sounds, one after the other, as the bytes of a WAV file: what MOTH_SOUND=file.wav gets from machine code.
+export function soundWav(sounds) {
+  const parts = sounds.map(soundSamples);
+  const size = parts.reduce((n, p) => n + 2 * p.length, 0);
+  const bytes = new Uint8Array(44 + size);
+  const view = new DataView(bytes.buffer);
+  const text = (at, t) => [...t].forEach((c, i) => (bytes[at + i] = c.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + size, true);
+  text(8, "WAVEfmt ");
+  for (const [at, n, width] of [[16, 16, 4], [20, 1, 2], [22, 1, 2], [24, SOUND_RATE, 4], [28, 2 * SOUND_RATE, 4], [32, 2, 2], [34, 16, 2]]) {
+    if (width === 4) view.setUint32(at, n, true);
+    else view.setUint16(at, n, true);
+  }
+  text(36, "data");
+  view.setUint32(40, size, true);
+  let at = 44;
+  for (const p of parts) for (const s of p) (view.setInt16(at, s, true), (at += 2));
+  return bytes;
+}
+
 // ---------- the virtual machine ----------
 
 // Thrown inside the run loop; the loop's catch block turns it into a MothError at the instruction that was running.
@@ -1246,9 +1334,9 @@ export class Machine {
   // the files `read` and `write` use (see readFile), `args` is what `arguments` gives: a list of text, and
   // `random` gives the random numbers (see randomWhole). An app's handlers go in `listeners`, and `turtle`
   // keeps one picture going from one handler to the next (see callFunction). `printError` gets each line
-  // said to the error output.
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle, printError = console.error, clock = fakeClock() } = {}) {
-    Object.assign(this, { main, print, printError, maxSteps, ask, disk, args, random, clock, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // said to the error output, and `play` each sound (see soundOf).
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle, printError = console.error, clock = fakeClock(), play = () => {} } = {}) {
+    Object.assign(this, { main, print, printError, play, maxSteps, ask, disk, args, random, clock, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = turtle ?? new Turtle(draw);
@@ -1454,6 +1542,15 @@ export class Machine {
           case READ_FOLDER:
             stack.push(readFolder(stack.pop(), this.disk, oops));
             break;
+          case PLAY: {
+            const unit = code[ip++];
+            if (unit === 0) this.play({ ...BEEP });
+            else {
+              const time = stack.pop();
+              this.play(soundOf(stack.pop(), time, unit, oops));
+            }
+            break;
+          }
           case CHECK_REPEAT:
             stack[stack.length - 1] = checkRepeat(stack[stack.length - 1], oops); // to 15 digits: 0.1 * 30 is 3 times
             break;

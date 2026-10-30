@@ -18375,6 +18375,672 @@ to emit_why_tss with a
     ret(a)
 end
 
+# ---------- the runtime: sound ----------
+# `play note "C4" for 0.5 seconds`, `play note 440 for 1 second` and `play a beep`, as soundOf in vm.js has
+# them: the same checks, in the same words, and the same notes in hertz; and each sound's samples are the
+# ones soundSamples works out, 44,100 a second, 16 bits each, by the same steps. Sounds take turns: each
+# starts when the one before it ends, and the program doesn't wait for them, so a sound in an app's handler
+# never holds up its window. On Windows at a terminal, winmm.dll's waveOut plays them, and the program waits
+# for them before it ends, unless it showed its window, whose closing ends them too. Away from a terminal a
+# program makes no sound, as it opens no window, and Linux has no sound a program of its own can count on,
+# so there it makes none. MOTH_SOUND=file.wav instead writes every sound into that file, one after the
+# other, its sizes put right after each, so it's whole even if the program stops with a mistake: that's
+# how the tests hear it.
+
+set sound_imports to list of (list of "WINMM.dll", (list of "waveOutOpen", "waveOutPrepareHeader", "waveOutWrite",
+    "waveOutUnprepareHeader", "waveOutReset", "waveOutClose")), (list of "KERNEL32.dll", (list of "GetEnvironmentVariableW"))
+# NOTE_HERTZ in vm.js: C4 to B4, in hertz
+set note_hertz to list of 261.6255653005986, 277.1826309768721, 293.6647679174076, 311.1269837220809,
+    329.6275569128699, 349.2282314330039, 369.9944227116344, 391.99543598174927, 415.3046975799451, 440,
+    466.1637615180899, 493.8833012561241
+set note_steps to list of 9, 11, 0, 2, 4, 5, 7 # a to g: each letter's place among the 12
+
+# 32 bits into memory
+to store32i with a, at, v
+    enc(a, empty list, no, (list of 0xC7), 0, at, imm32(v))
+end
+
+# the low 16 bits of register src into memory
+to store16 with a, at, src
+    enc(a, (list of 0x66), no, (list of 0x89), src, at, empty list)
+end
+
+# `play note ... for ...`: the note into xmm0 and how long into xmm1, then rt_play. `play a beep` is 880
+# hertz for 0.2 seconds, as BEEP in vm.js has it, which can't go wrong.
+to gen_play with fc, s
+    set a to a of fc
+    set uses_sound of st of fc to yes
+    if note of s is nothing
+        load_bits(a, xmm0, double_bytes(880))
+        load_bits(a, xmm1, double_bytes(0.2))
+        call_to(a, "rt_sound")
+        return nothing
+    end
+    gen_expr(fc, note of s)
+    push_value(fc)
+    gen_expr(fc, time of s)
+    movapd(a, xmm1, xmm0)
+    pop_value(fc, xmm0)
+    movi(a, rcx, unit of s)
+    call_to(a, "rt_play")
+    why_stub(fc, at of s, "rt_why_sound")
+end
+
+to emit_sound with a, target, windowed
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "snd_notes")
+    for each hz in note_hertz
+        put_all(ro, double_bytes(hz))
+    end
+    rodata_here(a, "snd_steps")
+    for each place in note_steps
+        put64(ro, place)
+    end
+    rodata_here(a, "snd_fmt") # what waveOut is given to play: one channel of 16-bit numbers, 44,100 a second
+    for each half in list of 1, 1
+        put16(ro, half)
+    end
+    put32(ro, 44100)
+    put32(ro, 88200)
+    for each half in list of 2, 16, 0
+        put16(ro, half)
+    end
+
+    # rt_snd_start, before the program runs: MOTH_SOUND's file, made empty, if it names one (snd_mode 2);
+    # else, on Windows at a terminal, the device, opened at the first sound (0); else silence (3)
+    set made to new_label(a)
+    set silent to new_label(a)
+    mark(a, "rt_snd_start")
+    storei(a, rip("snd_mode"), 3)
+    if target is "windows"
+        set no_file to new_label(a)
+        win_enter(a)
+        lea(a, rcx, rip(wide_place(a, "MOTH_SOUND")))
+        lea(a, rdx, rip("snd_path"))
+        movi(a, r8, 1024)
+        call_import(a, "imp_GetEnvironmentVariableW")
+        win_leave(a)
+        mov32_rr(a, rax, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, no_file)
+        alui(a, "cmp", rax, 1024)
+        jcc(a, cc_ae, no_file)
+        win_enter(a)
+        lea(a, rcx, rip("snd_path"))
+        movi(a, rdx, 0x40000000) # to write
+        movi(a, r8, 1) # others may read it meanwhile
+        movi(a, r9, 0)
+        storei(a, arg_at(5), 2) # made anew
+        storei(a, arg_at(6), 0x80)
+        storei(a, arg_at(7), 0)
+        call_import(a, "imp_CreateFileW")
+        win_leave(a)
+        alui(a, "cmp", rax, -1)
+        jcc(a, cc_ne, made)
+        ret(a)
+        mark(a, no_file)
+        load32(a, rax, rip("out_tty"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, silent)
+        storei(a, rip("snd_mode"), 0)
+        ret(a)
+    else
+        set names_loop to new_label(a)
+        set next_name to new_label(a)
+        load(a, r8, rip("env_vector"))
+        mark(a, names_loop)
+        load(a, rsi, mem(r8, 0))
+        test_rr(a, rsi, rsi)
+        jcc(a, cc_e, silent)
+        set k to 0
+        for each c in "MOTH_SOUND=" as bytes
+            load8(a, rax, mem(rsi, k))
+            alui(a, "cmp", rax, c)
+            jcc(a, cc_ne, next_name)
+            set k to k + 1
+        end
+        lea(a, rdi, mem(rsi, 11))
+        movi(a, rsi, 0x241) # to write, made if it isn't there and emptied if it is
+        movi(a, rdx, 420) # rw-r--r--
+        sys_call(a, 2)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ns, made)
+        ret(a)
+        mark(a, next_name)
+        alui(a, "add", r8, 8)
+        jmp_to(a, names_loop)
+    end
+    mark(a, made)
+    store(a, rip("snd_file"), rax)
+    storei(a, rip("snd_mode"), 2)
+    storei(a, rip("snd_bytes"), 0)
+    jmp_to(a, "rt_snd_header")
+    mark(a, silent)
+    ret(a)
+
+    # rt_snd_header: the WAV file's first 44 bytes, with its sizes as they are now, at its start
+    mark(a, "rt_snd_header")
+    for each part in list of (list of 0, 0x46464952), (list of 8, 0x45564157), (list of 12, 0x20746D66), (list of 16, 16),
+        (list of 20, 0x00010001), (list of 24, 44100), (list of 28, 88200), (list of 32, 0x00100002), (list of 36, 0x61746164)
+        store32i(a, rip_plus("snd_head", item 1 of part), item 2 of part) # RIFF, WAVE, fmt and data
+    end
+    load(a, rax, rip("snd_bytes"))
+    store32(a, rip_plus("snd_head", 40), rax)
+    alui(a, "add", rax, 36)
+    store32(a, rip_plus("snd_head", 4), rax)
+    lea(a, rsi, rip("snd_head"))
+    movi(a, rdx, 44)
+    movi(a, r8, 0)
+    jmp_to(a, "rt_snd_write")
+
+    # rt_snd_write: rsi, rdx: these bytes, into the file, r8 bytes from its start
+    mark(a, "rt_snd_write")
+    if target is "windows"
+        win_enter(a)
+        storei(a, rip("snd_over"), 0)
+        storei(a, rip_plus("snd_over", 8), 0)
+        store(a, rip_plus("snd_over", 16), r8) # where, as two 32-bit halves
+        storei(a, rip_plus("snd_over", 24), 0)
+        load(a, rcx, rip("snd_file"))
+        mov_rr(a, r8, rdx)
+        mov_rr(a, rdx, rsi)
+        lea(a, r9, rip("snd_done"))
+        lea(a, rax, rip("snd_over"))
+        store(a, arg_at(5), rax)
+        call_import(a, "imp_WriteFile")
+        win_leave(a)
+    else
+        load(a, rdi, rip("snd_file"))
+        mov_rr(a, r10, r8)
+        sys_call(a, 18) # pwrite64
+    end
+    ret(a)
+
+    # rt_snd_samples: rdi: snd_count samples of a sound of snd_hertz, from there on, as soundSamples in
+    # vm.js works them out, step for step
+    set each_sample to new_label(a)
+    set samples_done to new_label(a)
+    mark(a, "rt_snd_samples")
+    load(a, r8, rip("snd_count"))
+    movsd_load(a, xmm0, rip("snd_hertz"))
+    sse_math(a, "/", xmm0, rip(number_place(a, double_bytes(44100))))
+    movsd_store(a, rip("snd_step"), xmm0)
+    mov_rr(a, rax, r8)
+    dec_r(a, rax)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("snd_last"), xmm0)
+    movi(a, r9, 0)
+    mark(a, each_sample)
+    alu(a, "cmp", r9, r8)
+    jcc(a, cc_ae, samples_done)
+    cvtsi2sd(a, xmm3, r9) # k
+    movapd(a, xmm0, xmm3)
+    sse_math(a, "*", xmm0, rip("snd_step")) # x
+    floor_sd(a, xmm1, xmm0)
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    sse_math(a, "*", xmm0, rip(number_place(a, double_bytes(2))))
+    sse_math(a, "-", xmm0, rip(number_place(a, double_bytes(1)))) # z, where in its wave, from -1 to 1
+    movapd(a, xmm1, xmm0)
+    abs_sd(a, xmm1)
+    load_bits(a, xmm2, double_bytes(1))
+    sse_math(a, "-", xmm2, reg_at(xmm1))
+    sse_math(a, "*", xmm0, rip(number_place(a, double_bytes(4))))
+    sse_math(a, "*", xmm0, reg_at(xmm2)) # y = 4z(1 - |z|)
+    movapd(a, xmm1, xmm0)
+    abs_sd(a, xmm1)
+    sse_math(a, "*", xmm1, reg_at(xmm0))
+    sse_math(a, "-", xmm1, reg_at(xmm0))
+    sse_math(a, "*", xmm1, rip(number_place(a, double_bytes(0.225))))
+    sse_math(a, "+", xmm1, reg_at(xmm0)) # y refined: about sin(pi z)
+    movapd(a, xmm2, xmm3)
+    sse_math(a, "/", xmm2, rip(number_place(a, double_bytes(441))))
+    movsd_load(a, xmm4, rip("snd_last"))
+    sse_math(a, "-", xmm4, reg_at(xmm3))
+    sse_math(a, "/", xmm4, rip(number_place(a, double_bytes(441))))
+    minsd(a, xmm2, xmm4)
+    load_bits(a, xmm4, double_bytes(1))
+    minsd(a, xmm2, xmm4) # how loud: rising over its first 441 samples and falling over its last
+    movq_rx(a, rax, xmm1)
+    bit_op(a, "btc", rax, 63)
+    movq_xr(a, xmm1, rax)
+    sse_math(a, "*", xmm1, reg_at(xmm2))
+    sse_math(a, "*", xmm1, rip(number_place(a, double_bytes(8192))))
+    sse_math(a, "+", xmm1, rip(number_place(a, double_bytes(0.5))))
+    floor_sd(a, xmm1, xmm1)
+    cvttsd2si(a, rax, xmm1)
+    store16(a, mem(rdi, 0), rax)
+    alui(a, "add", rdi, 2)
+    inc_r(a, r9)
+    jmp_to(a, each_sample)
+    mark(a, samples_done)
+    ret(a)
+
+    # rt_sound: xmm0 hertz and xmm1 seconds: the sound, after the ones before it, into the file or to the
+    # device; rax 0. Keeps every register but rax, rcx, rdx, rsi, rdi, r8 to r11 and xmm0 to xmm5.
+    set nothing_to_do to new_label(a)
+    set to_file to new_label(a)
+    set sound_done to new_label(a)
+    mark(a, "rt_sound")
+    load(a, rax, rip("snd_mode"))
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_e, nothing_to_do)
+    movsd_store(a, rip("snd_hertz"), xmm0)
+    sse_math(a, "*", xmm1, rip(number_place(a, double_bytes(44100)))) # floor(seconds * 44100 + 0.5) samples
+    sse_math(a, "+", xmm1, rip(number_place(a, double_bytes(0.5))))
+    floor_sd(a, xmm1, xmm1)
+    cvttsd2si(a, rax, xmm1)
+    store(a, rip("snd_count"), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, nothing_to_do)
+    push_r(a, rbx)
+    mov_rr(a, rcx, rax)
+    alu(a, "add", rcx, rcx)
+    alui(a, "add", rcx, 48) # room for a WAVEHDR first, for waveOut
+    call_to(a, "rt_alloc_raw")
+    mov_rr(a, rbx, rax)
+    push_r(a, rax) # where the collector sees it while more memory is found
+    lea(a, rdi, mem(rbx, 48))
+    call_to(a, "rt_snd_samples")
+    load(a, rax, rip("snd_mode"))
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, to_file)
+    if target is "windows"
+        set device_open to new_label(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, device_open)
+        call_to(a, "rt_snd_open")
+        load(a, rax, rip("snd_mode"))
+        alui(a, "cmp", rax, 3)
+        jcc(a, cc_e, sound_done)
+        mark(a, device_open)
+        call_to(a, "rt_snd_reclaim")
+        lea(a, rax, mem(rbx, 48))
+        store(a, mem(rbx, 0), rax) # where its samples are
+        load(a, rax, rip("snd_count"))
+        alu(a, "add", rax, rax)
+        store32(a, mem(rbx, 8), rax) # and how many bytes
+        mov_rr(a, rax, rbx)
+        call_to(a, "rt_snd_keep")
+        win_enter(a)
+        for each fn_name in list of "waveOutPrepareHeader", "waveOutWrite"
+            load(a, rcx, rip("snd_dev"))
+            mov_rr(a, rdx, rbx)
+            movi(a, r8, 48)
+            call_import(a, "imp_" + fn_name)
+        end
+        win_leave(a)
+    end
+    jmp_to(a, sound_done)
+    mark(a, to_file) # the samples after the others, then the file's sizes put right
+    lea(a, rsi, mem(rbx, 48))
+    load(a, rdx, rip("snd_count"))
+    alu(a, "add", rdx, rdx)
+    load(a, r8, rip("snd_bytes"))
+    alui(a, "add", r8, 44)
+    call_to(a, "rt_snd_write")
+    load(a, rax, rip("snd_count"))
+    alu(a, "add", rax, rax)
+    alu_store(a, "add", rip("snd_bytes"), rax)
+    call_to(a, "rt_snd_header")
+    mark(a, sound_done)
+    pop_r(a, rax)
+    pop_r(a, rbx)
+    mark(a, nothing_to_do)
+    movi(a, rax, 0)
+    ret(a)
+
+    if target is "windows"
+        # rt_snd_open: the device the system plays sound on, for snd_mode 1, or silence (3) if it has none
+        set open_failed to new_label(a)
+        mark(a, "rt_snd_open")
+        win_enter(a)
+        lea(a, rcx, rip("snd_dev"))
+        movi(a, rdx, 4294967295) # WAVE_MAPPER: whichever the system picks
+        lea(a, r8, rip("snd_fmt"))
+        movi(a, r9, 0)
+        storei(a, arg_at(5), 0)
+        storei(a, arg_at(6), 0)
+        call_import(a, "imp_waveOutOpen")
+        win_leave(a)
+        storei(a, rip("snd_mode"), 3)
+        test32(a, rax)
+        jcc(a, cc_ne, open_failed)
+        storei(a, rip("snd_mode"), 1)
+        mark(a, open_failed)
+        ret(a)
+
+        # rt_snd_reclaim: the sounds that have played, from the first on, given back to waveOut, and their
+        # memory to the collector
+        set reclaim_loop to new_label(a)
+        set reclaim_all to new_label(a)
+        set reclaim_stop to new_label(a)
+        mark(a, "rt_snd_reclaim")
+        push_r(a, rbx)
+        push_r(a, r12)
+        mark(a, reclaim_loop)
+        load(a, rax, rip("snd_first"))
+        alu_load(a, "cmp", rax, rip("snd_n"))
+        jcc(a, cc_ae, reclaim_all)
+        load(a, rbx, rip("snd_items"))
+        shifti(a, "shl", rax, 3)
+        alu(a, "add", rbx, rax)
+        load(a, r12, mem(rbx, 0))
+        load32(a, rax, mem(r12, 24)) # its flags: 1 once it has played
+        alui(a, "and", rax, 1)
+        jcc(a, cc_e, reclaim_stop)
+        win_enter(a)
+        load(a, rcx, rip("snd_dev"))
+        mov_rr(a, rdx, r12)
+        movi(a, r8, 48)
+        call_import(a, "imp_waveOutUnprepareHeader")
+        win_leave(a)
+        storei(a, mem(rbx, 0), 0)
+        alu_at(a, "add", rip("snd_first"), 1)
+        jmp_to(a, reclaim_loop)
+        mark(a, reclaim_all)
+        storei(a, rip("snd_first"), 0)
+        storei(a, rip("snd_n"), 0)
+        mark(a, reclaim_stop)
+        pop_r(a, r12)
+        pop_r(a, rbx)
+        ret(a)
+
+        # rt_snd_keep: rax: a sound's block, kept at the end of snd_items while it plays
+        set keep_room to new_label(a)
+        set keep_some to new_label(a)
+        mark(a, "rt_snd_keep")
+        for each r in list of rcx, rsi, rdi, rax
+            push_r(a, r)
+        end
+        load(a, rax, rip("snd_n"))
+        alu_load(a, "cmp", rax, rip("snd_cap"))
+        jcc(a, cc_b, keep_room)
+        load(a, rcx, rip("snd_cap"))
+        alu(a, "add", rcx, rcx)
+        jcc(a, cc_ne, keep_some)
+        movi(a, rcx, 16)
+        mark(a, keep_some)
+        store(a, rip("snd_cap"), rcx)
+        shifti(a, "shl", rcx, 3)
+        call_to(a, "rt_alloc")
+        mov_rr(a, rdi, rax)
+        load(a, rsi, rip("snd_items"))
+        load(a, rcx, rip("snd_n"))
+        rep_movsq(a)
+        store(a, rip("snd_items"), rax)
+        mark(a, keep_room)
+        load(a, rdi, rip("snd_n"))
+        shifti(a, "shl", rdi, 3)
+        alu_load(a, "add", rdi, rip("snd_items"))
+        pop_r(a, rax)
+        store(a, mem(rdi, 0), rax)
+        alu_at(a, "add", rip("snd_n"), 1)
+        for each r in list of rdi, rsi, rcx
+            pop_r(a, r)
+        end
+        ret(a)
+    end
+
+    # rt_snd_finish, as the program ends: its file closed; or on Windows, each sound waited for, unless the
+    # program showed its window, whose closing ends them
+    set finish_done to new_label(a)
+    set close_file to new_label(a)
+    mark(a, "rt_snd_finish")
+    load(a, rax, rip("snd_mode"))
+    storei(a, rip("snd_mode"), 3)
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, close_file)
+    if target is "windows"
+        set waiting to new_label(a)
+        set closing to new_label(a)
+        alui(a, "cmp", rax, 1)
+        jcc(a, cc_ne, finish_done)
+        if windowed # a window for the picture or the app, not just the pad
+            load(a, rax, rip("gui_hwnd"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, waiting)
+            load(a, rax, rip("gui_mode"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, waiting)
+            win_enter(a)
+            load(a, rcx, rip("snd_dev"))
+            call_import(a, "imp_waveOutReset") # each one stopped, and marked as played
+            win_leave(a)
+        end
+        mark(a, waiting)
+        call_to(a, "rt_snd_reclaim")
+        load(a, rax, rip("snd_n"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, closing)
+        win_enter(a)
+        movi(a, rcx, 10)
+        call_import(a, "imp_Sleep")
+        win_leave(a)
+        jmp_to(a, waiting)
+        mark(a, closing)
+        win_enter(a)
+        load(a, rcx, rip("snd_dev"))
+        call_import(a, "imp_waveOutClose")
+        win_leave(a)
+    end
+    jmp_to(a, finish_done)
+    mark(a, close_file)
+    if target is "windows"
+        win_enter(a)
+        load(a, rcx, rip("snd_file"))
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+    else
+        load(a, rdi, rip("snd_file"))
+        sys_call(a, 3)
+    end
+    mark(a, finish_done)
+    ret(a)
+
+    # rt_note_hertz: rax a text: rax 0 and its note in hertz in xmm0, as noteHertz in vm.js finds it, or
+    # rax 1 if it names none
+    set not_rest to new_label(a)
+    set unknown to new_label(a)
+    set no_sharp to new_label(a)
+    set after_sign to new_label(a)
+    set placed to new_label(a)
+    set not_below to new_label(a)
+    set not_above to new_label(a)
+    set octave_up to new_label(a)
+    set octave_down to new_label(a)
+    set settled to new_label(a)
+    mark(a, "rt_note_hertz")
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0)) # its bytes, and how many
+    load(a, rsi, mem(rax, 16))
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_ne, not_rest)
+    ascii_prefix(a, "rest", not_rest)
+    load_bits(a, xmm0, double_bytes(0))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_rest)
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_b, unknown)
+    alui(a, "cmp", rcx, 3)
+    jcc(a, cc_a, unknown)
+    mov_rr(a, rdi, rsi)
+    alu(a, "add", rdi, rcx) # where its bytes end
+    load8(a, rax, mem(rsi, 0)) # a letter from A to G, in either case
+    alui(a, "or", rax, 32)
+    alui(a, "sub", rax, 97)
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_a, unknown)
+    lea(a, rdx, rip("snd_steps"))
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rdx, rax)
+    load(a, rdx, mem(rdx, 0)) # its place among the 12
+    movi(a, r8, 4) # the octave, 4 unless it says
+    inc_r(a, rsi)
+    alu(a, "cmp", rsi, rdi)
+    jcc(a, cc_ae, placed)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 35) # #, a step up
+    jcc(a, cc_ne, no_sharp)
+    inc_r(a, rdx)
+    inc_r(a, rsi)
+    jmp_to(a, after_sign)
+    mark(a, no_sharp)
+    alui(a, "cmp", rax, 98) # b, a step down
+    jcc(a, cc_ne, after_sign)
+    dec_r(a, rdx)
+    inc_r(a, rsi)
+    mark(a, after_sign)
+    alu(a, "cmp", rsi, rdi)
+    jcc(a, cc_ae, placed)
+    load8(a, rax, mem(rsi, 0)) # the octave, from 0 to 9
+    alui(a, "sub", rax, 48)
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_a, unknown)
+    mov_rr(a, r8, rax)
+    inc_r(a, rsi)
+    alu(a, "cmp", rsi, rdi)
+    jcc(a, cc_ne, unknown) # and nothing after it
+    mark(a, placed)
+    alui(a, "cmp", rdx, 0) # Cb4 is B3, and B#4 is C5
+    jcc(a, cc_ge, not_below)
+    alui(a, "add", rdx, 12)
+    dec_r(a, r8)
+    mark(a, not_below)
+    alui(a, "cmp", rdx, 11)
+    jcc(a, cc_le, not_above)
+    alui(a, "sub", rdx, 12)
+    inc_r(a, r8)
+    mark(a, not_above)
+    lea(a, rax, rip("snd_notes"))
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rax, rdx)
+    movsd_load(a, xmm0, mem(rax, 0))
+    load_bits(a, xmm1, double_bytes(2))
+    mark(a, octave_up)
+    alui(a, "cmp", r8, 4)
+    jcc(a, cc_le, octave_down)
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    dec_r(a, r8)
+    jmp_to(a, octave_up)
+    mark(a, octave_down)
+    alui(a, "cmp", r8, 4)
+    jcc(a, cc_ge, settled)
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    inc_r(a, r8)
+    jmp_to(a, octave_down)
+    mark(a, settled)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, unknown)
+    movi(a, rax, 1)
+    ret(a)
+
+    # rt_play: xmm0 a note and xmm1 how long, in units of rcx milliseconds, checked as soundOf in vm.js
+    # checks them, then rt_sound; rax 0, or 2 with err_why 90 to 94 for rt_why_sound
+    set note_kind to new_label(a)
+    set note_text to new_label(a)
+    set note_pitch to new_label(a)
+    set note_unknown to new_label(a)
+    set time_check to new_label(a)
+    set time_kind to new_label(a)
+    set time_range to new_label(a)
+    mark(a, "rt_play")
+    movsd_store(a, rip("snd_time"), xmm1)
+    store(a, rip("snd_unit"), rcx)
+    movsd_store(a, rip("err_a"), xmm0)
+    special_jump(a, xmm0, note_kind)
+    pointer_jump(a, xmm0, note_text)
+    load_bits(a, xmm1, double_bytes(20)) # a number: from 20 to 20000 hertz
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_b, note_pitch)
+    load_bits(a, xmm1, double_bytes(20000))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_a, note_pitch)
+    movsd_store(a, rip("snd_hertz"), xmm0)
+    jmp_to(a, time_check)
+    mark(a, note_text)
+    movq_rx(a, rax, xmm0)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_text)
+    jcc(a, cc_ne, note_kind)
+    movq_rx(a, rax, xmm0)
+    call_to(a, "rt_note_hertz")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, note_unknown)
+    movsd_store(a, rip("snd_hertz"), xmm0)
+    mark(a, time_check)
+    movsd_load(a, xmm0, rip("snd_time"))
+    movsd_store(a, rip("err_a"), xmm0)
+    odd_jump(a, xmm0, time_kind)
+    load(a, rax, rip("snd_unit"))
+    cvtsi2sd(a, xmm1, rax)
+    sse_math(a, "*", xmm0, reg_at(xmm1)) # in milliseconds: from 0 to a minute
+    load_bits(a, xmm1, double_bytes(0))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_b, time_range)
+    load_bits(a, xmm1, double_bytes(60000))
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_a, time_range)
+    sse_math(a, "/", xmm0, rip(number_place(a, double_bytes(1000))))
+    movapd(a, xmm1, xmm0)
+    movsd_load(a, xmm0, rip("snd_hertz"))
+    jmp_to(a, "rt_sound")
+    mark(a, time_range)
+    sse_math(a, "/", xmm0, rip(number_place(a, double_bytes(1000))))
+    movsd_store(a, rip("err_a"), xmm0)
+    storei(a, rip("err_why"), 94)
+    movi(a, rax, 2)
+    ret(a)
+    for each pair in list of (list of note_kind, 90), (list of note_unknown, 91), (list of note_pitch, 92), (list of time_kind, 93)
+        mark(a, item 1 of pair)
+        storei(a, rip("err_why"), item 2 of pair)
+        movi(a, rax, 2)
+        ret(a)
+    end
+
+    # rt_why_sound: what was wrong, into the builder, as soundOf in vm.js says it
+    set w91 to new_label(a)
+    set w92 to new_label(a)
+    set w93 to new_label(a)
+    set w94 to new_label(a)
+    mark(a, "rt_why_sound")
+    load(a, rax, rip("err_why"))
+    for each pair in list of (list of 91, w91), (list of 92, w92), (list of 93, w93), (list of 94, w94)
+        alui(a, "cmp", rax, item 1 of pair)
+        jcc(a, cc_e, item 2 of pair)
+    end
+    b_text(a, "'play note' needs a note like \"C4\" or a number, not ") # 90
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w91)
+    b_text(a, "there is no note called '")
+    load(a, rax, rip("err_a"))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    b_text(a, "' (write A to G, maybe with # or b and an octave from 0 to 9, like \"C#4\", or \"rest\")")
+    ret(a)
+    mark(a, w92)
+    b_text(a, "a note's pitch is from 20 to 20000 hertz, not ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 0)
+    jmp_to(a, "rt_b_value")
+    mark(a, w93)
+    b_text(a, "'play note ... for' needs a number, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_e_kind")
+    mark(a, w94)
+    b_text(a, "a sound lasts from 0 to 60 seconds, not ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    b_text(a, " seconds")
+    ret(a)
+end
+
 # ---------- the runtime: the system ----------
 # rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
 # code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
@@ -18588,6 +19254,9 @@ to emit_runtime with st
     if uses_drawing of st or uses_app of st
         call_to(a, "rt_turtle_init")
     end
+    if uses_sound of st
+        call_to(a, "rt_snd_start")
+    end
     store(a, rip("stack_top"), rsp)
     movi(a, r15, 0)
     call_to(a, "moth_main")
@@ -18598,6 +19267,9 @@ to emit_runtime with st
     if windowed
         call_to(a, "rt_gui_finish")
         call_to(a, "rt_flush_out")
+    end
+    if uses_sound of st
+        call_to(a, "rt_snd_finish")
     end
     pop_r(a, rcx)
     jmp_to(a, "rt_exit")
@@ -18691,6 +19363,14 @@ to emit_runtime with st
     if uses_clock of st or uses_order of st or uses_saving of st
         emit_why_tss(a)
     end
+    if uses_sound of st
+        emit_sound(a, target of st, windowed)
+        if target of st is "windows"
+            for each group in sound_imports
+                add group to wanted
+            end
+        end
+    end
     set more_imports of a to wanted
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
     pad_to(ro, 8)
@@ -18738,6 +19418,17 @@ to emit_runtime with st
     if uses_clock of st or uses_order of st or uses_saving of st # rt_why_tss reads ord_rev and ord_field
         for each name in list of "ord_rev", "ord_field", "ord_kind", "ord_mid", "ord_end", "ord_out", "ld_rsp"
             reserve(a, name, 8, 8)
+        end
+    end
+    if uses_sound of st # never values either, but for snd_items, below
+        for each name in list of "snd_mode", "snd_file", "snd_dev", "snd_bytes", "snd_count", "snd_hertz", "snd_step",
+            "snd_last", "snd_time", "snd_unit", "snd_n", "snd_cap", "snd_first", "snd_done"
+            reserve(a, name, 8, 8)
+        end
+        reserve(a, "snd_head", 48, 16)
+        reserve(a, "snd_over", 32, 16)
+        if target of st is "windows"
+            reserve(a, "snd_path", 2048, 16)
         end
     end
     if windowed # the window's own, which are never values
@@ -18810,6 +19501,9 @@ to emit_runtime with st
         for each name in picture_roots
             reserve(a, name, 8, 8)
         end
+    end
+    if uses_sound of st
+        reserve(a, "snd_items", 8, 8) # the sounds playing, whose memory the collector must leave alone
     end
     for each name in list of "run_buf_0", "run_buf_1", "out_len", "out_tty", "err_tty", "out_handle", "err_handle", "err_site", "err_a", "err_b",
         "err_why", "err_len", "o_a", "o_b", "o_ma", "o_na", "t_prev",
@@ -24513,7 +25207,7 @@ to new_state with a, program_name, files, source, target
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
-        uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no
+        uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -25257,6 +25951,8 @@ to gen_statement with fc, s
         movi(a, rcx, unit of s)
         call_to(a, "rt_wait")
         why_stub(fc, at of s, "rt_why_tss")
+    else if what is "play"
+        gen_play(fc, s)
     else
         not_yet_node(s)
     end

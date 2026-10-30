@@ -509,6 +509,17 @@ to parse with tokens, reading
         return type of label_token is "word" and not contains(after_a_value, value of label_token)
     end
 
+    # `play note ...` and `play a beep`: `play` alone is still a name, and so are `note`, `a` and `beep`
+    to plays_sound
+        if not is_word("play") or nl of item (pos + 1) of tokens
+            return no
+        end
+        if word_at(pos + 1, "note")
+            return yes
+        end
+        return word_at(pos + 1, "a") and word_at(pos + 2, "beep") and not nl of item (pos + 2) of tokens
+    end
+
     to take_name with what
         set t to peek()
         if type of t is not "word"
@@ -928,6 +939,34 @@ to parse with tokens, reading
         end
         if word("expect") # `expect total(2, 3) is 5`
             return record with kind "expect", cond expression(), at t
+        end
+        if plays_sound() # `play note "C4" for 0.5 seconds`, `play note 440 for 200 milliseconds`, `play a beep`
+            set pos to pos + 1
+            if word("a")
+                set pos to pos + 1
+                return record with kind "play", note nothing, time nothing, unit 0, at t
+            end
+            set pos to pos + 1
+            set note to additive()
+            expect_word("for")
+            # how long, as `every` takes it: `for 2 seconds`, `for n milliseconds`; and `for n * 100 milliseconds`
+            # and `for -1 seconds` (which fails) too, the unit at the end counting what comes before it
+            set time to additive()
+            set unit to 0
+            set found to timed(time)
+            if found is not nothing
+                set time to item 1 of found
+                set unit to item 2 of found
+            end
+            if unit is 0
+                if unit_at(pos) and value of peek() is in time_units # `for n seconds`
+                    set unit to item (value of peek()) of time_units
+                    set pos to pos + 1
+                else
+                    expected("'milliseconds' or 'seconds'")
+                end
+            end
+            return record with kind "play", note note, time time, unit unit, at t
         end
         if word("write") # `write "hello" to "notes.txt"`
             set value to expression()
@@ -1518,6 +1557,33 @@ to parse with tokens, reading
         expected("a value")
     end
 
+    # `2 seconds`, `n * 100 milliseconds`, `-1 seconds`: the value with the amount of time at its end made its
+    # number, and how many milliseconds that amount's unit is; or nothing, if it doesn't end with an amount of time
+    to timed with e
+        if kind of e is "builtin" and name of e is "unit"
+            set unit_word to value of item 2 of args of e
+            if unit_word is in time_units
+                return list of item 1 of args of e, item unit_word of time_units
+            end
+            return nothing
+        end
+        if kind of e is not "negate" and kind of e is not "math"
+            return nothing
+        end
+        if kind of e is "negate"
+            set inner to timed(operand of e)
+            if inner is nothing
+                return nothing
+            end
+            return list of (record with kind "negate", operand item 1 of inner, at at of e), item 2 of inner
+        end
+        set inner to timed(right of e)
+        if inner is nothing
+            return nothing
+        end
+        return list of (record with kind "math", op op of e, left left of e, right item 1 of inner, at at of e), item 2 of inner
+    end
+
     # `n` values with commas between them, as a list: the x, y of `move to x, y` and the like
     to several with n, t
         set made to list of expression()
@@ -1719,6 +1785,10 @@ to rename with node, alias, hidden
     if what is "wait"
         rename(amount of node, alias, hidden)
     end
+    if what is "play"
+        rename(note of node, alias, hidden)
+        rename(time of node, alias, hidden)
+    end
 end
 
 # A scope is one function (or the whole program): item n of its names is the name in slot n. The last
@@ -1913,6 +1983,12 @@ end
 to undefined_message with scope, wanted, call, statement
     if call and wanted is in phrase_hints # a phrase missing its last part, like `wait 2`
         return "there is no function called '" + wanted + "' (" + item wanted of phrase_hints + ")"
+    end
+    if call and statement and wanted is "play" # `play beep`, `beep`: how a sound is made instead
+        return "there is no function called 'play' (to make a sound, write 'play note \"C\" for 1 second' or 'play a beep')"
+    end
+    if call and statement and wanted is "beep"
+        return "there is no function called 'beep' (to make one, write 'play a beep')"
     end
     set known to empty list
     set here to scope
@@ -2151,6 +2227,12 @@ to js_statement with scope, s
     end
     if what is "wait"
         return "wait(" + js_expr(scope, amount of s) + ", " + unit of s + ", " + remember(at of s) + ");"
+    end
+    if what is "play" # `play a beep` has no note, nothing that can go wrong, and no position
+        if note of s is nothing
+            return "beep();"
+        end
+        return "play(" + js_expr(scope, note of s) + ", " + js_expr(scope, time of s) + ", " + unit of s + ", " + remember(at of s) + ");"
     end
     if what is "expect"
         set c to cond of s
@@ -2406,6 +2488,7 @@ set op_remove_file to 57
 set op_now to 58
 set op_wait to 59
 set op_read_folder to 60
+set op_play to 61
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
@@ -2654,6 +2737,12 @@ to bytecode_statement with fc, s
     else if what is "wait"
         bytecode_expr(fc, amount of s)
         emit(fc, at of s, list of op_wait, unit of s)
+    else if what is "play" # the note, then how long, unless it's a beep
+        if note of s is not nothing
+            bytecode_expr(fc, note of s)
+            bytecode_expr(fc, time of s)
+        end
+        emit(fc, at of s, list of op_play, unit of s)
     else if what is "expect" # a comparison keeps both its sides, to say what they were
         set c to cond of s
         if kind of c is "compare"

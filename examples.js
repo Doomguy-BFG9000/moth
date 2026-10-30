@@ -144,6 +144,15 @@ repeat while yes
     end
 end`,
 
+  "Tune": `# each sound starts when the one before it ends, and the program doesn't wait for them
+say "Twinkle, twinkle, little star"
+set tune to list of "C", "C", "G", "G", "A", "A", "G", "rest", "F", "F", "E", "E", "D", "D", "C"
+for each pitch in tune
+    play note pitch for 0.3 seconds
+end
+play note 1046.5 for 600 milliseconds # a number is a pitch in hertz: this is a high C
+play a beep`,
+
   "Primes": `set primes to empty list
 for each n from 2 to 50
     set prime to yes

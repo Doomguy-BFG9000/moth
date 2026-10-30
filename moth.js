@@ -7,7 +7,7 @@ import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
-export { MothError, excerpt, describeTrail, seeded } from "./vm.js";
+export { MothError, excerpt, describeTrail, seeded, soundSamples, soundWav, SOUND_RATE } from "./vm.js";
 
 // ---------- tokens ----------
 
@@ -151,6 +151,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // a button's label can start at token i: a value there on the same line, where today `button` would end one
   const labelAt = (i) => !tokens[i].nl && (tokens[i].type === "string" || tokens[i].type === "number"
     || (tokens[i].type === "word" && !AFTER_A_VALUE.includes(tokens[i].value)));
+  // `play note ...` and `play a beep`: `play` alone is still a name, and so are `note`, `a` and `beep`
+  const playsSound = () => isWord("play") && !tokens[pos + 1].nl
+    && (wordAt(pos + 1, "note") || (wordAt(pos + 1, "a") && wordAt(pos + 2, "beep") && !tokens[pos + 2].nl));
 
   function name(what) {
     const t = peek();
@@ -382,6 +385,25 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "remove", key, target: unary(), at: t };
     }
     if (word("expect")) return { kind: "expect", cond: expression(), at: t }; // `expect total(2, 3) is 5`
+    if (playsSound()) { // `play note "C4" for 0.5 seconds`, `play note 440 for 200 milliseconds`, `play a beep`
+      pos++;
+      if (word("a")) {
+        pos++;
+        return { kind: "play", note: null, time: null, unit: 0, at: t };
+      }
+      pos++;
+      const note = additive();
+      expectWord("for");
+      // how long, as `every` takes it: `for 2 seconds`, `for n milliseconds`; and `for n * 100 milliseconds`
+      // and `for -1 seconds` (which fails) too, the unit at the end counting what comes before it
+      let time = additive();
+      let unit;
+      const found = timed(time);
+      if (found) [time, unit] = found;
+      else if (unitAt(pos) && UNITS[unitNamed(peek().value)][2] === 1) unit = unitNamed(tokens[pos++].value);
+      else expected("'milliseconds' or 'seconds'");
+      return { kind: "play", note, time, unit: UNITS[unit][3] * 1000, at: t };
+    }
     if (word("write")) { // `write "hello" to "notes.txt"`: the file's name is its target
       const value = expression();
       expectWord("to");
@@ -744,6 +766,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     expected("a value");
   }
 
+  // `2 seconds`, `n * 100 milliseconds`, `-1 seconds`: the value with the amount of time at its end made its
+  // number, and that amount's unit; or nothing, if it doesn't end with an amount of time
+  function timed(e) {
+    if (e.kind === "builtin" && e.name === "unit") return UNITS[unitNamed(e.args[1].value)][2] === 1 ? [e.args[0], unitNamed(e.args[1].value)] : null;
+    if (e.kind !== "negate" && e.kind !== "math") return null;
+    const inner = timed(e.kind === "negate" ? e.operand : e.right);
+    return inner && [e.kind === "negate" ? { ...e, operand: inner[0] } : { ...e, right: inner[0] }, inner[1]];
+  }
+
   // `n` values with commas between them, as a list: the x, y of `move to x, y` and the like
   function several(n, t) {
     const items = [expression()];
@@ -793,7 +824,7 @@ function prefixed(body, alias) {
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
-  READ_FOLDER } = OP;
+  READ_FOLDER, PLAY } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -1009,6 +1040,13 @@ class Compiler extends Scope {
       case "wait":
         this.expr(s.amount);
         this.emit(s.at, WAIT, s.unit);
+        return;
+      case "play": // the note, then how long, unless it's a beep
+        if (s.note) {
+          this.expr(s.note);
+          this.expr(s.time);
+        }
+        this.emit(s.at, PLAY, s.unit);
         return;
       case "expect": // a comparison keeps both its sides, to say what they were
         if (s.cond.kind === "compare") {
@@ -1328,7 +1366,8 @@ export function format(source) {
 // below), `args` is what `arguments` gives, `random` gives the random numbers (seeded() unless given), and
 // `clock` the time and the waiting (fakeClock() unless given: see vm.js).
 // A program that sets up handlers with `when` or `every` is an app: run() returns it, to be sent events.
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock() } = {}) {
+// Each sound the program makes goes to `play`, as { hertz, seconds } (see soundOf in vm.js).
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock(), play } = {}) {
   const reading = { files, file };
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
   // Kept, so that running it again (below) gets the same, and writes nothing twice.
@@ -1359,6 +1398,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   let said = 0;
   let complained = 0; // lines said to the error output
   let drawn = 0;
+  let played = 0;
   // each handler an app has called so far, as [handler, inputs], and each event its picture's buttons and text
   // boxes have seen, as [event, inputs]: a run on the VM does them all again, in order
   const sent = [];
@@ -1367,7 +1407,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   // over, getting everything from outside that the first run got, and passing on only what it hadn't said or
   // drawn already. The clock is from outside too, so a second run gets the same times, and doesn't wait again.
   function onVm(again) {
-    let [next, skipSaid, skipDrawn, skipComplained] = [0, again ? said : 0, again ? drawn : 0, again ? complained : 0];
+    let [next, skipSaid, skipDrawn, skipComplained, skipPlayed] = [0, again ? said : 0, again ? drawn : 0, again ? complained : 0, again ? played : 0];
     const replay = (f) => f && (!again ? f : (...inputs) => {
       if (next >= outside.length) return f(...inputs);
       const before = outside[next++];
@@ -1379,6 +1419,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove), folder: replay(drive.folder) }, args, random: replay(chance),
       clock: { now: replay(timer.now), since: replay(timer.since), sleep: replay(timer.sleep) },
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
+      play: (sound) => skipPlayed-- > 0 || play?.(sound),
     };
     new Machine(compile(source, reading), say, options).run();
     const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options), turtle: options.turtle };
@@ -1401,7 +1442,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       try {
         // counted once passed on, so a hand-over in the middle of passing one on can't lose it
         program.run((line) => (print(line), said++), (line) => (draw?.(line), drawn++), maxSteps, answer, drive, args, chance, host,
-          (line) => (printError(line), complained++), timer);
+          (line) => (printError(line), complained++), timer, (sound) => (play?.(sound), played++));
       } catch (err) {
         if (!handOver(err)) throw err;
         host = onVm(true);

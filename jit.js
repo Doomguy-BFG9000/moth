@@ -5,7 +5,7 @@ import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, numberOrder, atMost, divisible, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, LABELLED, everyInterval,
-  Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder } from "./vm.js";
+  Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -119,6 +119,9 @@ class JsCompiler extends Scope {
         return `removeFile(${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "wait":
         return `wait(${this.expr(s.amount)}, ${s.unit}, ${this.pos(s.at)});`;
+      case "play": // `play a beep` has no note, nothing that can go wrong, and no position
+        if (!s.note) return "beep();";
+        return `play(${this.expr(s.note)}, ${this.expr(s.time)}, ${s.unit}, ${this.pos(s.at)});`;
       case "expect": {
         const c = s.cond;
         if (c.kind !== "compare") return `expectYes(${this.expr(c)}, ${this.pos(s.at)});`;
@@ -217,8 +220,8 @@ const MAX_DEPTH = 2000;
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
 // `host` gets an app's handlers (see run() in moth.js), and a way to call one: with steps and depth from 0.
-// `printError` gets each line said to the error output.
-function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error, clock = fakeClock()) {
+// `printError` gets each line said to the error output, and `play` each sound.
+function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error, clock = fakeClock(), play = () => {}) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
     const calls = trail();
@@ -337,6 +340,8 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     every: (interval, unit, f, k) => void host.handlers.push({ event: "every", interval: everyInterval(interval, unit, errors[k]), closure: f }),
     expect: (op, negate, a, b, k) => expectThat(op, negate, a, b, errors[k]),
     expectYes: (value, k) => expectYes(value, errors[k]),
+    play: (note, time, unit, k) => play(soundOf(note, time, unit, errors[k])),
+    beep: () => play({ ...BEEP }),
   };
 }
 export const HELPER_NAMES = Object.keys(helpers([], () => {}, undefined, 0));
@@ -355,5 +360,5 @@ export function jit(program) {
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random, host, printError, clock) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random, host, printError, clock)) };
+  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random, host, printError, clock, play) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random, host, printError, clock, play)) };
 }

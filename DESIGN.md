@@ -1535,6 +1535,56 @@ hold them to agreeing.
   field by which text its name is, so `name of person` works on a record that
   `load` made.
 
+## 35. Sound
+
+- **Three phrases, no new reserved words.** `play note "C4" for 0.5 seconds`,
+  `play note 440 for 200 milliseconds` and `play a beep`. `play` starts a
+  phrase only when `note`, or `a beep`, follows it on the same line, so `play`,
+  `note`, `a` and `beep` stay names. `play beep` or `beep` alone, with no
+  function of that name, says how a sound is made, instead of guessing at a
+  name that's spelled alike.
+- **A note is a name or a pitch.** A to G in either case, maybe `#` or `b`,
+  maybe an octave from 0 to 9 (4 if none, so `"C"` is middle C), or `"rest"`
+  for silence; a number is a pitch in hertz, from 20 to 20,000. The twelve
+  notes from middle C up are written out in hertz rather than worked out with a
+  power of 2, so every engine and machine code have exactly the same numbers;
+  another octave is those doubled or halved, which is exact. A sound lasts
+  from 0 to 60 seconds, given as `wait` and `every` take a time.
+- **Sounds take turns, and the program goes on.** Each sound starts when the
+  one before it ends, and `play` returns at once, as `draw` does: a tune is
+  `play` after `play`, and `wait` is how a program waits for one to finish. So
+  a sound in an app's handler never holds up its picture.
+- **Sounds come out of a run, as drawings do.** An engine hands each sound, as
+  { hertz, seconds }, to whatever runs the program, in order, and never touches
+  a speaker itself. run() counts them, so a run handed over to the VM plays
+  nothing twice.
+- **One wave, worked out the same everywhere.** A sound's samples, 44,100 a
+  second and 16 bits each, are worked out by soundSamples with only + − × ÷ and
+  floor: close to a sine wave (two parabolas, refined), a quarter as loud as
+  it could be, and fading in and out over 10 ms so it starts and stops without
+  a click. JavaScript's Math.sin isn't the same to the last bit everywhere, and
+  machine code would need one of its own; this way machine code works out the
+  same numbers by the same steps, so a test can compare its sounds byte for
+  byte, and the playground and a built program sound alike.
+- **In the playground** the browser's Web Audio plays them, each made into
+  samples only shortly before its turn, so a long tune doesn't fill the page.
+  Stop and Run silence them.
+- **In machine code** a Windows program at a terminal plays them through
+  winmm.dll's waveOut, and waits for them before it ends, unless it showed its
+  window, whose closing ends them too. Only a program that makes a sound
+  imports winmm.dll. Away from a terminal it's silent, as it opens no window
+  there, and Linux has no sound a program of its own can count on, so there it
+  makes none. MOTH_SOUND=file.wav writes every sound into that WAV file
+  instead, with its sizes put right after each sound, so the file is whole
+  even when the program stops with a mistake.
+- **Tested.** Every way of writing a note, and every mistake, the same on all
+  three engines, in the checker and in the compiler written in Moth; a hand-over
+  to the VM; and 19 programs whose sounds machine code writes with MOTH_SOUND,
+  byte for byte the WAV of the sounds the JavaScript engine played, up to the
+  same mistakes, on Windows and on Linux, with each note's pitch measured where
+  its samples cross zero, and an app's handlers making theirs as its events
+  come.
+
 ## 36. Buttons and text boxes
 
 - **Six phrases, no new reserved words.** `draw button "Start" at 0, 0` and

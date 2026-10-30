@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk } from "./moth.js";
+import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
 import { FAKE_NOW } from "./vm.js";
@@ -1349,4 +1349,119 @@ test("apps/todo.moth builds, adds what's typed to its list, and draws it", { ski
   assert.equal(blue(105, 122), 0);
   assert.equal(at(-5, 225), "#ffffff"); // the box, empty again
   assert.equal(at(12, 202), "#4f8ff7"); // and the Add button
+});
+
+// ---------- sound ----------
+// With MOTH_SOUND=file.wav, a program's sounds go into that file instead of to the speakers: byte for byte the
+// WAV soundWav makes of the sounds the JavaScript engine played, and whole up to a mistake. Away from a
+// terminal, with no MOTH_SOUND, a program is silent, and says and fails just the same.
+const SOUND_PROGRAMS = [
+  'say "start"\nplay note "C" for 0.5 seconds\nplay a beep\nplay note 440 for 100 milliseconds\nsay "end"',
+  'for each n in list of "C", "C#", "Db", "D4", "d#3", "Eb5", "E", "F", "f#", "G", "G#", "Ab", "A", "A#", "Bb", "B", "Cb4", "B#4", "c0", "B9", "rest", "REST", "a", "bb", "Cb0", "B#9"\n    play note n for 10 milliseconds\nend',
+  'play note 20 for 1 second\nplay note 20000 for 0.1 seconds\nplay note 1000.5 for 1 minute\nplay note "rest" for 0 seconds\nplay note 30 for 1 millisecond',
+  'play note "C" for 0.25 seconds\nplay note "H" for 1 second',
+  'play note "C" for 0.25 seconds\nplay note "" for 1 second',
+  'play note "Cb" + "b" for 1 second',
+  'play note "é" for 1 second',
+  'play note 19.99 for 1 second',
+  'play note -5 for 1 second',
+  'play note yes for 1 second',
+  'play note list of 1 for 1 second',
+  'play note "C" for -5 milliseconds',
+  'play note "C" for 2 minutes',
+  'play note "C" for nothing seconds',
+  'play note "H" for "x" seconds',
+  'try\n    play note "Q" for 1 second\nif it fails with why\n    say why\nend\nplay a beep',
+  'to tone with n\n    play note n for 50 milliseconds\nend\nfor each i from 1 to 5\n    tone(200 * i)\nend\ntone("Z")',
+  'set t to 3\nplay note "A" for t * 100 milliseconds\nplay note "A" for -t seconds',
+  'say "a"\nplay note "E" for 0.2 seconds\nstop the program with 4',
+];
+
+function soundsOnEngine(source, name) {
+  let [stdout, stderr, status] = ["", "", 0];
+  const played = [];
+  try {
+    run(source, (line) => (stdout += `${line}\n`), { file: name, printError: (line) => (stderr += `${line}\n`), exit: (code) => (status = code), play: (sound) => played.push(sound) });
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    stderr += `${name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;
+    status = 1;
+  }
+  return { stdout, stderr, status, played };
+}
+
+// how many times a second the samples go up through 0, between the first `from` and the last `from`
+function pitchOf(samples, from = 441) {
+  let [first, last, ups] = [-1, -1, 0];
+  for (let k = from + 1; k < samples.length - from; k++) {
+    if (samples[k - 1] < 0 && samples[k] >= 0) {
+      const at = k - 1 - samples[k - 1] / (samples[k] - samples[k - 1]);
+      if (first < 0) first = at;
+      else ups++;
+      last = at;
+    }
+  }
+  return (ups * 44100) / (last - first);
+}
+
+test("machine code makes the sounds the JavaScript engine makes: MOTH_SOUND gets the same WAV, up to the same mistakes", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-sound-"));
+  try {
+    SOUND_PROGRAMS.forEach((source, i) => {
+      const name = `s${i}.moth`;
+      const want = soundsOnEngine(source, name);
+      const exe = executable(dir, `s${i}`);
+      writeFileSync(exe, machine(source, { target, name }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_SOUND: `s${i}.wav` } });
+      assert.deepEqual({ stdout: ran.stdout, stderr: ran.stderr, status: ran.status }, { stdout: want.stdout, stderr: want.stderr, status: want.status }, source);
+      assert.ok(Buffer.from(soundWav(want.played)).equals(readFileSync(join(dir, `s${i}.wav`))), `the WAV of ${source}`);
+      const silent = spawnSync(exe, [], { cwd: dir, encoding: "utf8" }); // away from a terminal: no sound, and the same words
+      assert.deepEqual({ stdout: silent.stdout, stderr: silent.stderr, status: silent.status }, { stdout: want.stdout, stderr: want.stderr, status: want.status }, source);
+    });
+    // and what's in a file is as any program reads a WAV: its header, then each note at its pitch, fading in and out
+    const wav = readFileSync(join(dir, "s0.wav"));
+    assert.deepEqual([wav.toString("latin1", 0, 4), wav.readUInt32LE(4), wav.toString("latin1", 8, 16), wav.readUInt16LE(20), wav.readUInt16LE(22),
+      wav.readUInt32LE(24), wav.readUInt32LE(28), wav.readUInt16LE(32), wav.readUInt16LE(34), wav.toString("latin1", 36, 40), wav.readUInt32LE(40)],
+    ["RIFF", wav.length - 8, "WAVEfmt ", 1, 1, 44100, 88200, 2, 16, "data", wav.length - 44]);
+    const samples = new Int16Array(wav.buffer.slice(wav.byteOffset + 44, wav.byteOffset + wav.length));
+    assert.equal(samples.length, 22050 + 8820 + 4410);
+    const pieces = [samples.subarray(0, 22050), samples.subarray(22050, 30870), samples.subarray(30870)];
+    for (const [piece, hertz] of [[pieces[0], 261.6255653005986], [pieces[1], 880], [pieces[2], 440]]) {
+      assert.ok(Math.abs(pitchOf(piece) - hertz) < 0.01, `${pitchOf(piece)} hertz, not ${hertz}`);
+      assert.deepEqual([piece[0], piece.at(-1), Math.max(...piece.map(Math.abs))], [0, 0, 8192]);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// An app's handlers, sent MOTH_EVENTS with MOTH_PICTURE as the picture tests do, make their sounds as each
+// event comes, into MOTH_SOUND's file; one that stops the program ends its sounds there too.
+test("an app's handlers make their sounds as its events come, and only a program that makes a sound has it in it", { skip: onWindows }, () => {
+  const source = 'set n to 0\nwhen a key is pressed with key\n    add 1 to n\n    play note key for n * 100 milliseconds\n    if key is "c"\n        stop the program with 2\n    end\nend\nevery 1 second\n    play a beep\nend\nplay note "rest" for 1 second';
+  const events = "key e;tick 0;key g;key c;key d";
+  const played = [];
+  const app = run(source, () => {}, { play: (sound) => played.push(sound) });
+  for (const event of events.split(";")) {
+    const [what, key] = event.split(" ");
+    if (what === "key") app.send("key", [key]);
+    else app.handle(1);
+  }
+  assert.equal(played.length, 5);
+  const dir = mkdtempSync(join(tmpdir(), "moth-sound-"));
+  try {
+    const exe = join(dir, "app.exe");
+    const bytes = machine(source, { target, name: "app.moth" });
+    writeFileSync(exe, bytes);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: join(dir, "app.bmp"), MOTH_EVENTS: events, MOTH_SOUND: "app.wav" } });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["", "", 2]);
+    assert.ok(Buffer.from(soundWav(played)).equals(readFileSync(join(dir, "app.wav"))));
+    // winmm.dll, which plays sounds, only goes into a program that makes one
+    const imports = (b) => Buffer.from(b).includes("WINMM.dll");
+    assert.ok(imports(bytes));
+    assert.ok(!imports(machine('say "quiet"\nmove forward 10', { target, name: "q.moth" })));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
-  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile, NOW_WORDS, waitFor, fakeClock, readFolder } from "./vm.js";
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile, NOW_WORDS, waitFor, fakeClock, readFolder, soundOf } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -316,6 +316,23 @@ class Checker extends Scope {
       case "call":
         this.call(s, true);
         return;
+      case "play": { // a note or a time of the wrong kind fails, and so does one written out wrong
+        if (!s.note) return; // a beep
+        this.expr(s.note);
+        this.expr(s.time);
+        const [note, time] = [this.type(s.note), this.type(s.time)];
+        // the value written out (`"H"`, `-1`), or one of the type that can't fail
+        const written = (e, type, fine) => (e.kind === "value" ? e.value
+          : e.kind === "negate" && e.operand.kind === "value" && typeof e.operand.value === "number" ? -e.operand.value
+          : Object.hasOwn(fine, type) ? fine[type] : SAMPLES[type]);
+        this.willFail(s.at, () => {
+          if (!this.known(note())) return;
+          const sound = written(s.note, note(), { text: "C", number: 440 });
+          if (!this.known(time())) return soundOf(sound, 1, 1000, found); // the note can still be wrong on its own
+          soundOf(sound, written(s.time, time(), { number: 1 }), s.unit, found);
+        });
+        return;
+      }
       case "turtle": {
         if (!s.value) return;
         this.expr(s.value);

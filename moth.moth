@@ -859,6 +859,9 @@ to cli_check_statement with cli_state, cli_frame, cli_s
         cli_check_expr(cli_state, cli_frame, target of cli_s)
     else if cli_what is "wait"
         cli_check_expr(cli_state, cli_frame, amount of cli_s)
+    else if cli_what is "play" # a beep has neither
+        cli_check_expr(cli_state, cli_frame, note of cli_s)
+        cli_check_expr(cli_state, cli_frame, time of cli_s)
     else if cli_what is "write"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
         cli_check_expr(cli_state, cli_frame, target of cli_s)

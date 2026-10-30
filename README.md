@@ -210,7 +210,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (12,850,688 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -468,6 +468,11 @@ end
 
 save scores to "scores.txt"                 # any number, text, list, record or dictionary
 set scores to load "scores.txt"             # and back again, as it was
+
+play note "C" for 0.5 seconds               # middle C; also "C#5", "Bb3", or "rest"
+play note 440 for 200 milliseconds          # or a pitch, in hertz
+play a beep                                 # each sound starts when the one before ends,
+                                            # and the program goes on at once
 ```
 
 Apps: pictures that answer keys, clicks and time, with buttons and boxes to
@@ -587,8 +592,8 @@ nothing to install.
   clicks and drags go to the program, or to its buttons and the text box you
   clicked. Try **Snake**, **Paint** and **To-do**.
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
-  number-guessing game that asks for answers), **Neural network**, and **Moth's
-  own compiler**, running in your browser.
+  number-guessing game that asks for answers), **Tune**, **Neural network**,
+  and **Moth's own compiler**, running in your browser.
 
 ## Command line
 
@@ -684,10 +689,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (11,426,816 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (12,850,688 bytes)
 ```
 
-That's the same 11,426,816 bytes Node.js made of it, and the moth.exe they make
+That's the same 12,850,688 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -806,6 +811,11 @@ calls that led there.
   tests in Moth here, said exactly as `test()` says them; and `moth test` on
   its own, finding the tests in a folder in the order the Node.js command line
   found them
+- sound: every way of writing a note, its pitch and how long it lasts, and the
+  mistakes, on all three engines and in the compiler written in Moth; a run
+  handed over to the VM playing nothing twice; and machine code's sounds,
+  written to a file with MOTH_SOUND, byte for byte the WAV of the JavaScript
+  engine's, with each note's pitch measured in its samples
 - going online in machine code, against a server of the tests' own on
   127.0.0.1: a page's text and bytes, moves to other addresses, the answers
   that are mistakes, a refused connection, a big page and the `--allow-net`
@@ -832,6 +842,11 @@ unboxed numbers were all caught, some only by the fuzzer.
   can be an hour out in summer.
 - `save` can't save functions, bytes or amounts with units, and numbers come
   back to 15 digits, as Moth shows and compares them.
+- A sound is one plain tone, from 20 to 20,000 hertz, for up to a minute: no
+  chords, instruments or sound files. A program `moth build` makes plays its
+  sounds on Windows, at a terminal or started from Explorer; on Linux, or with
+  its output going to a file or another program, it's silent, and
+  `MOTH_SOUND=tune.wav` writes its sounds into that file instead.
 - `draw picture` reads PNG and BMP files, up to 4096 by 4096 pixels, not JPEG
   or GIF. In the playground, a program reads the files picked with Files or
   dropped on the page; they stay on the page and aren't kept once it's closed.

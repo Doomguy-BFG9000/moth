@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError } from "./moth.js";
-import { Machine } from "./vm.js";
+import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError, soundSamples, soundWav } from "./moth.js";
+import { Machine, BEEP } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
@@ -37,6 +37,7 @@ const EXAMPLES = {
   "Counter": "Ticked 3 times",
   "Records": 'Sam is 20\nAna is 31\n(record with name "Sam", age 21)',
   "Data": "Trip: 5.3 km, or 3.29326731885787 miles\nTime: 165 minutes\n0.1 + 0.2 is 0.3\nTue was a good day\nWed was a good day\nAverage: 7425 steps",
+  "Tune": "Twinkle, twinkle, little star",
   "Primes": "Primes up to 50: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]",
   "Guess": "Guess my number (1 to 100): 50\nLower\nGuess my number (1 to 100): 25\nHigher\nGuess my number (1 to 100): 37\nYes! 37 in 3 tries",
 };
@@ -1124,6 +1125,157 @@ test("random number from uses the randomness it's given, and a hand-over to the 
     assert.equal(i, 2, `${engine} asked for ${i} random numbers`); // the VM's second run got them again, not new ones
   }
   assert.notEqual(output("say random number from 1 to 1000000000", { random: real }), output("say random number from 1 to 1000000000", { random: real }));
+});
+
+// ---------- sound ----------
+
+// What each engine hands to `play`, in order, and what it says and stops with, as `streams` has it.
+function sounds(source, options = {}) {
+  const played = [];
+  const { log } = streams(source, { ...options, play: (sound) => played.push(sound) });
+  return { played, log };
+}
+const NOTE = (hertz, seconds) => ({ hertz, seconds });
+
+test("play note and play a beep make the same sounds on all three engines, and in the compiler written in Moth", () => {
+  const source = [
+    'play note "C" for 0.5 seconds', // middle C: octave 4 unless it says
+    'play note "A4" for 200 milliseconds',
+    "play a beep",
+    "play note 440 for 1 second", // a number is a pitch in hertz
+    'play note "rest" for 0.25 seconds', // silence, which still takes its turn
+    'play note "Bb3" for 1 minute',
+    'play note "c#5" for 10 milliseconds',
+    'play note "Cb4" for 0 seconds', // B3, the B below
+    'play note "B#9" for 1 millisecond', // C10
+    'play note "A0" for 0.1 seconds',
+    "set tune to list of \"E\", \"D\", 523.25",
+    "for each pitch in tune",
+    "    play note pitch for 3 * 100 milliseconds", // the unit at the end counts what comes before it
+    "end",
+  ].join("\n");
+  const want = [NOTE(261.6255653005986, 0.5), NOTE(440, 0.2), NOTE(880, 0.2), NOTE(440, 1), NOTE(0, 0.25), NOTE(233.08188075904496, 60),
+    NOTE(554.3652619537442, 0.01), NOTE(246.94165062806206, 0), NOTE(16744.036179238312, 0.001), NOTE(27.5, 0.1),
+    NOTE(329.6275569128699, 0.3), NOTE(293.6647679174076, 0.3), NOTE(523.25, 0.3)];
+  for (const engine of ENGINES) assert.deepEqual(sounds(source, { engine }), { played: want, log: [] }, engine);
+  const moth = mothCompiler(COMPILER);
+  const cases = [
+    source,
+    // the words a sound is made of are still names, and the phrases only start where nothing else could
+    'set play to "a"\nset note to 2\nset beep to 3\nset a to 4\nsay play + note + beep + a\nto play_it with note\n    play note note for 1 second\nend\nplay_it(30)',
+    'to play with a\n    say "my own " a\nend\nplay 3\nplay(4)',
+    'play note "H" for 1 second',
+    'play note "C" for -1 seconds',
+    'play note "C" for -n seconds',
+    'play note "C" for 1',
+    'play note "C"',
+    "play note",
+    "play beep",
+    "beep",
+    'play note "C" for 2 km',
+    'when a key is pressed with key\n    play note key for 100 milliseconds\nend\nevery 1 second\n    play a beep\nend',
+  ];
+  for (const s of cases) {
+    assert.deepEqual(compiled(moth, s), compiled(compileToJs, s), s);
+    try {
+      assert.equal(format(format(s)), format(s), s);
+    } catch (err) {
+      if (!(err instanceof MothError)) throw err;
+    }
+  }
+  assert.deepEqual(sounds(cases[1]).log, [["out", "a234"]]);
+  assert.deepEqual(sounds(cases[1]).played, [NOTE(30, 1)]);
+  assert.deepEqual(sounds(cases[2]).log, [["out", "my own 3"], ["out", "my own 4"]]);
+  // tidying: one space between the pieces, as everywhere
+  assert.equal(format('play   note  "C"   for 0.5   seconds\n  play  a   beep\nif yes\nplay note -1 for - 2 seconds\nend'),
+    'play note "C" for 0.5 seconds\nplay a beep\nif yes\n    play note -1 for -2 seconds\nend\n');
+});
+
+test("a sound's mistakes say what's wrong, the same on all three engines, and the checker finds them without running", () => {
+  const hint = '(write A to G, maybe with # or b and an octave from 0 to 9, like "C#4", or "rest")';
+  const mistakes = [
+    ['play note "H" for 1 second', `there is no note called 'H' ${hint}`],
+    ['play note "C10" for 1 second', `there is no note called 'C10' ${hint}`],
+    ['play note "C4 " for 1 second', `there is no note called 'C4 ' ${hint}`],
+    ['play note "Cbb" for 1 second', `there is no note called 'Cbb' ${hint}`],
+    ['play note "" for 1 second', `there is no note called '' ${hint}`],
+    ["play note 5 for 1 second", "a note's pitch is from 20 to 20000 hertz, not 5"],
+    ["play note -440 for 1 second", "a note's pitch is from 20 to 20000 hertz, not -440"],
+    ["play note 20000.5 for 1 second", "a note's pitch is from 20 to 20000 hertz, not 20000.5"],
+    ["play note yes for 1 second", "'play note' needs a note like \"C4\" or a number, not yes/no"],
+    ["play note list of 1 for 1 second", "'play note' needs a note like \"C4\" or a number, not a list"],
+    ['play note "C" for -1 seconds', "a sound lasts from 0 to 60 seconds, not -1 seconds"],
+    ['play note "C" for -5 milliseconds', "a sound lasts from 0 to 60 seconds, not -0.005 seconds"],
+    ['play note "C" for 2 minutes', "a sound lasts from 0 to 60 seconds, not 120 seconds"],
+    ['play note "C" for "a" seconds', "'play note ... for' needs a number, not text"],
+    ['play note "H" for -1 seconds', `there is no note called 'H' ${hint}`], // the note first
+    ['play note "C" for 1', "expected 'milliseconds' or 'seconds' but found the end of the code"],
+    ['play note "C"', "expected 'for' but found the end of the code"],
+    ['play note "C" for 1 km', "expected 'milliseconds' or 'seconds' but found the end of the code"],
+    ["play beep", "there is no function called 'play' (to make a sound, write 'play note \"C\" for 1 second' or 'play a beep')"],
+    ["beep", "there is no function called 'beep' (to make one, write 'play a beep')"],
+  ];
+  for (const [source, message] of mistakes) {
+    for (const engine of ENGINES) assert.deepEqual(sounds(source, { engine }), { played: [], log: [["mistake", `line 1: ${message}`]] }, `${engine}: ${source}`);
+    const found = check(source);
+    assert.deepEqual(found.map((p) => p.message), [message], source);
+  }
+  // a try catches one, and the sounds before a mistake were played
+  for (const engine of ENGINES) {
+    assert.deepEqual(sounds('try\n    play note "Q" for 1 second\nif it fails with why\n    say why\nend\nplay a beep', { engine }),
+      { played: [BEEP], log: [["out", `there is no note called 'Q' ${hint}`]] }, engine);
+    assert.deepEqual(sounds('play note "C" for 1 second\nplay note "C" for -1 seconds\nplay a beep', { engine }),
+      { played: [NOTE(261.6255653005986, 1)], log: [["mistake", "line 2: a sound lasts from 0 to 60 seconds, not -1 seconds"]] }, engine);
+  }
+  // the checker only speaks when it's sure: of a note or a time written out, or of a kind that can't be one
+  assert.deepEqual(problems('set n to "C"\nplay note n for 0.5 seconds\nset t to "x"\nplay note 440 for t seconds\nset l to list of 1\nplay note l for 1 second'),
+    ["4:1 fails: 'play note ... for' needs a number, not text", "6:1 fails: 'play note' needs a note like \"C4\" or a number, not a list"]);
+  assert.deepEqual(problems('to f\n    return 1\nend\nplay note "Q" for f() seconds\nplay note f() for -1 seconds'), [`4:1 fails: there is no note called 'Q' ${hint}`]);
+});
+
+test("a hand-over to the VM plays nothing twice, and an app's handlers make sounds as events come", () => {
+  const deep = 'play note "C" for 0.5 seconds\nto deep with n\n    if n is 0\n        play a beep\n        return 0\n    end\n    return deep(n - 1)\nend\nsay deep(5000)\nplay note "E" for 0.5 seconds';
+  const app = 'set n to 0\nwhen a key is pressed with key\n    add 1 to n\n    play note key for n * 100 milliseconds\nend\nevery 1 second\n    play a beep\nend\nplay note "rest" for 1 second';
+  for (const engine of ENGINES) {
+    assert.deepEqual(sounds(deep, { engine }), { played: [NOTE(261.6255653005986, 0.5), BEEP, NOTE(329.6275569128699, 0.5)], log: [["out", "0"]] }, engine);
+    const played = [];
+    const running = run(app, () => {}, { engine, play: (sound) => played.push(sound) });
+    running.send("key", ["e"]);
+    running.handle(1);
+    running.send("key", ["g"]);
+    assert.throws(() => running.send("key", ["x"]), { message: `line 4: there is no note called 'x' (write A to G, maybe with # or b and an octave from 0 to 9, like "C#4", or "rest")` });
+    assert.deepEqual(played, [NOTE(0, 1), NOTE(329.6275569128699, 0.1), BEEP, NOTE(391.99543598174927, 0.2)], engine);
+  }
+});
+
+// The samples the playground plays, and machine code too: close to a sine wave at the note's pitch, a quarter
+// as loud as it could be, starting and ending at 0 with no click, and as a WAV file what MOTH_SOUND gets.
+test("a sound's samples are a wave at its pitch that fades in and out, and a WAV file holds them one after the other", () => {
+  const samples = soundSamples(NOTE(440, 0.5));
+  assert.equal(samples.length, 22050);
+  assert.deepEqual([samples[0], samples.at(-1)], [0, 0]);
+  assert.equal(Math.max(...samples.map(Math.abs)), 8192);
+  for (let k = 1; k < 441; k++) assert.ok(Math.abs(samples[k]) <= Math.ceil((8192 * k) / 441), `sample ${k} is too loud for its fade`);
+  let [first, last, ups] = [-1, -1, 0]; // where it goes up through 0, between the fades
+  for (let k = 442; k < samples.length - 441; k++) {
+    if (samples[k - 1] < 0 && samples[k] >= 0) {
+      const at = k - 1 - samples[k - 1] / (samples[k] - samples[k - 1]);
+      if (first < 0) first = at;
+      else ups++;
+      last = at;
+    }
+  }
+  assert.ok(Math.abs((ups * 44100) / (last - first) - 440) < 0.01, `${(ups * 44100) / (last - first)} hertz`);
+  for (let k = 0; k < 100; k++) assert.ok(Math.abs(samples[1000 + k] / 8192 - Math.sin((2 * Math.PI * 440 * (1000 + k)) / 44100)) < 0.002, "a sine wave, near enough");
+  assert.deepEqual([...soundSamples(NOTE(0, 0.1))], new Array(4410).fill(0)); // a rest is silence
+  assert.equal(soundSamples(NOTE(440, 0)).length, 0);
+  const wav = soundWav([NOTE(440, 0.5), BEEP]);
+  const view = new DataView(wav.buffer);
+  const text = (at) => String.fromCharCode(...wav.slice(at, at + 4));
+  assert.deepEqual([text(0), view.getUint32(4, true), text(8), text(12), view.getUint16(20, true), view.getUint16(22, true), view.getUint32(24, true),
+    view.getUint16(34, true), text(36), view.getUint32(40, true)], ["RIFF", 36 + 2 * (22050 + 8820), "WAVE", "fmt ", 1, 1, 44100, 16, "data", 2 * (22050 + 8820)]);
+  assert.equal(view.getInt16(44 + 2 * 100, true), samples[100]);
+  assert.equal(soundWav([]).length, 44);
 });
 
 // ---------- apps ----------
