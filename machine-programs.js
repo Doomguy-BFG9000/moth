@@ -309,6 +309,8 @@ export const MACHINE_CASES = [
   "set the slider \"S\" to \"loud\"",
   "set the slider \"S\" to nothing",
   "set f to choose a file to open\nsay f",
+  // a record made with its fields in its own block, then given more than it has room for (DESIGN §43)
+  "set p to record with a 1, b 2\nset c of p to 3\nset d of p to 4\nset e of p to 5\nsay p\nsay a of p + e of p\nset q to record with a 1, b 2, c 3, d 4, e 5\nsay p is q\nset r to record with x 1, x 2\nsay r\nset big to record with f1 1, f2 2, f3 3, f4 4, f5 5, f6 6, f7 7, f8 8, f9 9\nset f10 of big to 10\nsay big\nset items to empty list\nfor each i from 1 to 2000\n    set item_record to record with n i, half i / 2\n    set extra of item_record to i * 3\n    add item_record to items\nend\nsay extra of item 2000 of items + n of item 1 of items",
 ];
 
 export function machinePrograms(seed, count) {

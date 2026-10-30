@@ -5,3 +5,5 @@ apps/*.html
 # moth.moth built into a program of its own: moth.exe on Windows, moth on Linux
 /moth.exe
 /moth
+# where npm run bench and npm run versus put the programs they time, while they do
+/.bench-*

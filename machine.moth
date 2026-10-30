@@ -5289,6 +5289,50 @@ to emit_records with a
     pop_r(a, rbx)
     ret(a)
 
+    # rt_record_new: the same, for fields whose names all differ, as a record made in the program's own words
+    # has them: one block, the record and room for its fields after it, which are put straight in
+    set new_filling to new_label(a)
+    set new_filled to new_label(a)
+    mark(a, "rt_record_new")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, rbx, rcx)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rdx)
+    inc_r(a, rcx) # room for one more, as a field's often added; more, and they move to a block of their own
+    shifti(a, "shl", rcx, 4)
+    alui(a, "add", rcx, 32)
+    call_to(a, "rt_alloc")
+    store(a, mem(rax, 0), rbx)
+    mov_rr(a, rcx, rbx)
+    inc_r(a, rcx)
+    store(a, mem(rax, 8), rcx)
+    lea(a, rdi, mem(rax, 32))
+    store(a, mem(rax, 16), rdi)
+    mov_rr(a, rcx, rbx) # the values, first to last
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", r12, rcx)
+    mark(a, new_filling)
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, new_filled)
+    alui(a, "sub", r12, 8)
+    load(a, rcx, mem(r13, 0))
+    store(a, mem(rdi, 0), rcx)
+    load(a, rcx, mem(r12, 0))
+    store(a, mem(rdi, 8), rcx)
+    alui(a, "add", r13, 8)
+    alui(a, "add", rdi, 16)
+    dec_r(a, rbx)
+    jmp_to(a, new_filling)
+    mark(a, new_filled)
+    movi64(a, rcx, tag_record)
+    alu(a, "or", rax, rcx)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
     # rt_record_find: rax a record (untagged), rdx a field's name: where that field's pair is, in rax, or 0
     set seek to new_label(a)
     set none to new_label(a)
@@ -32706,7 +32750,19 @@ to gen_expr with fc, e
         movi(a, rcx, n)
         mov_rr(a, rsi, rsp)
         lea(a, rdx, rip(names_at))
-        call_to(a, "rt_record_make")
+        set each_differs to yes # as they all do, but in `record with a 1, a 2`
+        for each field_k from 1 to n
+            for each field_j from field_k + 1 to n
+                if item field_k of fields of e is item field_j of fields of e
+                    set each_differs to no
+                end
+            end
+        end
+        if each_differs
+            call_to(a, "rt_record_new")
+        else
+            call_to(a, "rt_record_make")
+        end
         movq_xr(a, xmm0, rax)
         if n is greater than 0
             alui(a, "add", rsp, 8 * n)

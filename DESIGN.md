@@ -1921,3 +1921,31 @@ hold them to agreeing.
   choices and every mistake in what's drawn, on Windows and Linux; the
   playground's picker; and Windows' Open and Save boxes in a real window: a file
   chosen, a name to save with an é in it, and both cancelled.
+
+## 43. Faster records, and timing machine code fairly
+
+- **What was slow.** The README said machine code was slower than the
+  JavaScript engines at lists, records and dictionaries, from `npm run bench`,
+  whose runs are short. Made ten times as big and more, with starting up taken
+  off, they say otherwise: machine code is two to five times as fast as the JIT
+  and WebAssembly at lists, dictionaries and text. Only making records was
+  slower than WebAssembly, which, seeing that a record made in a loop doesn't
+  outlive it, never makes it at all.
+- **Records in one block.** A record made in the program's own words, `record
+  with x 1, y 2`, whose fields' names all differ (as they do but in `record with
+  a 1, a 2`), is now one block: the record, then room for its fields and one
+  more, which go straight in, not looked for one by one first as a field set
+  later is. A record given more fields than that moves them to a block of their
+  own, as before. Two million records made and read went from 99 ms to 64 ms,
+  WebAssembly's 61. The collector finds a block from a pointer into its middle,
+  so fields inside their record's block need nothing new from it.
+- **Tried, and left out.** Finding a field in line, where it's read, rather than
+  in the runtime: 2% quicker, for code that's bigger at every `x of point`.
+- **Timing fairly.** On Windows the virus checker looks through a program the
+  first times it runs, and one in the temporary folder every time: a program
+  that only says 1 took 23 ms to start from there, and 6 to 15 ms from anywhere
+  else. `npm run bench` and `npm run versus` built their programs in the
+  temporary folder, and timed their first runs; they now build them in a folder
+  of the repo's and run each once or twice first, and the bench has a row for a
+  program that only starts, to read the rest against. Every compiled language
+  in `versus` got quicker for it, Moth's machine code with them.
