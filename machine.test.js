@@ -53,7 +53,8 @@ function onEngine(source, name) {
 test("machine code says, fails and exits exactly as the JavaScript engine does", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
   const sources = [...MACHINE_CASES, ...Object.values(examples), ...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s),
-    ...brokenPrograms(11, 300), ...machinePrograms(2026, 400)];
+    // half an emoji, which the fuzzer can make, can't be in a file: machine code shows it as U+FFFD
+    ...brokenPrograms(11, 300).filter((source) => !/[\ud800-\udfff]/u.test(source)), ...machinePrograms(2026, 400)];
   let made = 0;
   try {
     sources.forEach((source, i) => {
