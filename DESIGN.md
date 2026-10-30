@@ -1277,7 +1277,26 @@ hold them to agreeing.
 - **What's left.** `moth test` needs its files named: machine code can't look
   through a folder yet, so it doesn't find every `.test.moth` file itself.
   `moth check` leaves out the checker's type warnings. And `moth build` still
-  turns away units, tables, `random number` and `draw chart of`.
+  turns away units, tables, `random number` and `draw chart of` (random numbers
+  came next: §30).
+
+## 30. Random numbers in machine code
+
+- **The same numbers as the engines.** `random number from 1 to 6` in machine
+  code picks as `randomWhole` in vm.js does: both ends made whole to 15 digits
+  first, the same mistakes in the same words, and the number is
+  `low + floor(r * (high - low + 1))`. `r` comes from the same small generator
+  the engines use when they aren't given real randomness (mulberry32), worked
+  out in 32-bit steps, so a seed gives exactly the same numbers everywhere.
+- **Where they start.** If `MOTH_SEED` is set to a whole number, they start
+  there, which is how the tests compare machine code with the JavaScript
+  engine: both start from 1. Otherwise they start from the processor's cycle
+  count, so each run of a game is different. That's random enough for games
+  and dice, not for secrets.
+- **Only a program that uses it pays.** The generator, and on Windows the
+  import it needs to read `MOTH_SEED`, go only into programs with a
+  `random number`. With it, apps/snake.moth builds into a program of its own
+  and plays in the window.
 
 ## 33. Going online in machine code
 

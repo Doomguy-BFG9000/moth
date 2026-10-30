@@ -71,7 +71,8 @@ test("machine code says, fails and exits exactly as the JavaScript engine does",
       const exe = executable(dir, `p${i}`);
       writeFileSync(exe, bytes);
       if (target === "linux") chmodSync(exe, 0o755);
-      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 * 1024 });
+      // random numbers from the seed the JavaScript engine uses when it isn't given real ones
+      const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, MOTH_SEED: "1" } });
       assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, want, `${name}:\n${source}`);
       made++;
     });
@@ -364,6 +365,8 @@ test("moth.exe runs a program, passing its arguments, input, output and exit cod
   // a program in a folder of its own, and `run` with no file at all
   const deep = spawnSync(exe, ["run", join("deeper", "deep.moth")], { cwd: dir, encoding: "utf8" });
   assert.deepEqual([deep.status, deep.stdout], [0, "deep\n"]);
+  const slashed = spawnSync(exe, ["run", "deeper/deep.moth"], { cwd: dir, encoding: "utf8" }); // a / on Windows too
+  assert.deepEqual([slashed.status, slashed.stdout, slashed.stderr], [0, "deep\n", ""]);
   assert.deepEqual(readdirSync(join(dir, "deeper")).filter((name) => name.includes("-run")), []);
   for (const bad of [["run"], ["run", "--target", "linux", "tool.moth"], ["walk", "tool.moth"]]) {
     const said = spawnSync(exe, bad, { cwd: dir, encoding: "utf8" });
