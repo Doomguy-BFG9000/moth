@@ -1368,6 +1368,38 @@ hold them to agreeing.
   `MOTH_PICTURE`; and `moth test` with no files is held to the old command
   line's own way of finding them.
 
+## 32. Faster machine code
+
+- **Where the time went.** Before, every variable lived in memory, every value
+  went through the value stack, and every `+` checked both sides were numbers.
+  On the counting loop that made Moth 8 times as slow as C.
+- **What the compiler knows.** As machine.moth writes a function's code, it
+  keeps what each variable is sure to hold: a whole number, a number, or at
+  least a value. It works this out in the order the code runs: a branch keeps
+  what both sides agree on, a loop or a `try` only what stays true all through
+  it, and a call forgets main's variables. A check that can't fail is left out:
+  a variable sure to have a value, a sum of two numbers, a number negated.
+- **Loops in registers.** A loop that calls no function and has no `try` keeps
+  the variables it uses most in xmm8 to xmm15 as well as in memory, and its
+  count and limit in registers alone. Two numbers compare right there, as the
+  runtime would (it still settles two so close that 15 digits can't tell them
+  apart), and `is divisible by` on two whole numbers is one division.
+- **Whole numbers as whole numbers.** A loop whose body only works out whole
+  numbers (`set`, `add`, `if` and `stop`, with `+`, `-`, `*`, comparisons and
+  `is divisible by`) also runs as 64-bit whole numbers in rsi, rdi and r8 to
+  r11, scaled by 1024 so that a sum past 2^53 sets the processor's overflow
+  flag. Every variable must be a whole number from -2^53 to 2^53 on the way in;
+  a sum that goes past, or dividing by 0, puts the registers back in their
+  variables and carries on in the loop's ordinary code from the start of that
+  statement, so the answer and any mistake are what they always were.
+- **Calls.** `return` goes straight back, and a function whose frame holds
+  nothing needs no room made for it.
+- **What it gave.** About as fast as C on the counting loop, primes and decimal
+  maths, and 1.4 times as slow on function calls (see the README). The tests
+  hold it to the JavaScript engine on programs written to break it: a variable
+  that is a number and then isn't, sums past 2^53, dividing by 0 inside a fast
+  loop, more variables than registers, close numbers, infinities, NaN and -0.
+
 ## 33. Going online in machine code
 
 - **What was missing.** A program built with `--allow-net` got past the

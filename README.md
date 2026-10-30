@@ -181,22 +181,25 @@ $ ./fib.exe
 ```
 
 Against C and Python, with the same four programs written in each
-([`versus/`](versus)), every one timed from start to finish, it's 9 to 32 times
-as fast as Python, and 2.3 to 8 times as slow as C:
+([`versus/`](versus)), every one timed from start to finish, it's about as fast
+as C on three of them and 1.4 times as slow on function calls, and 10 to 210
+times as fast as Python:
 
 | `npm run versus` | C | Moth, machine code | JavaScript engine | Python |
 |:--|--:|--:|--:|--:|
-| fib(32): 7 million calls | 25 ms | 58 ms | 272 ms | 508 ms |
-| adding 1 to 100,000,000 | 42 ms | 341 ms | 703 ms | 9.5 s |
-| primes up to 300,000 | 78 ms | 182 ms | 252 ms | 2.0 s |
-| 30,000,000 steps of decimal maths | 55 ms | 138 ms | 337 ms | 4.4 s |
+| fib(32): 7 million calls | 34 ms | 49 ms | 282 ms | 522 ms |
+| adding 1 to 100,000,000 | 51 ms | 50 ms | 739 ms | 10.5 s |
+| primes up to 300,000 | 86 ms | 85 ms | 260 ms | 2.0 s |
+| 30,000,000 steps of decimal maths | 61 ms | 62 ms | 348 ms | 4.7 s |
 
-On Windows 11, with MSVC's `cl /O2` and Python 3.13. Some of C's lead is what
-Moth promises and C doesn't: C works in whole numbers here, where Moth's
-numbers are decimals compared to 15 digits, and Moth checks every step for a
-mistake, like adding `nothing` to a number. The rest is room to grow: machine.moth
-keeps every value in memory rather than in the processor's registers, and
-always works in decimals, even for a count that is only ever whole.
+On Windows 11, with MSVC's `cl /O2` and Python 3.13. Moth still keeps its
+promises in these: numbers are decimals compared to 15 digits, and every step
+that could go wrong is checked. machine.moth gets there by knowing, as it
+writes the code, what each variable is sure to hold, and leaving out the
+checks that can't fail; by keeping a loop's busiest variables in the
+processor's registers; and by running a loop that only works out whole
+numbers as 64-bit whole numbers, which goes back to decimals the moment a sum
+gets too big to be exact.
 
 **Is Moth standalone yet?** Yes. [`moth.moth`](moth.moth) is Moth's command
 line, written in Moth: it reads a program and the files it uses, compiles it
