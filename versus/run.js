@@ -1,6 +1,7 @@
-// Moth against C and Python: the same four programs in each, every one run as a whole process from start to
-// finish, the best of three. Moth runs as the machine code machine.moth makes, and on the JavaScript engine. C needs cc,
-// gcc or clang, or MSVC's cl in a developer prompt; Python needs python3 or python. Run with `npm run versus`.
+// Moth against C, Rust and Python: the same four programs in each, every one run as a whole process from start
+// to finish, the best of three. Moth runs as the machine code machine.moth makes, and on the JavaScript engine. C
+// needs cc, gcc or clang, or MSVC's cl in a developer prompt; Rust needs rustc; Python needs python3 or python. Run
+// with `npm run versus`.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,9 @@ const compilers = [["cc", ["-O2", "-o", cExe, source]], ["gcc", ["-O2", "-o", cE
   ["cl", ["/O2", "/nologo", source, `/Fe:${cExe}`]]];
 const compiler = compilers.find(([command, args]) => works(command, args));
 if (compiler) ways[`C (${compiler[0]})`] = (p) => [cExe, [p]];
+const rustExe = join(dir, windows ? "versus-rs.exe" : "versus-rs");
+const rust = works("rustc", ["-O", "-o", rustExe, here("versus.rs")]);
+if (rust) ways["Rust"] = (p) => [rustExe, [p]];
 const target = { win32: "windows", linux: "linux" }[process.platform];
 if (target) {
   const machine = machineCompiler(readFileSync(here("../machine.moth"), "utf8"), readFileSync(here("../compiler.moth"), "utf8"));
@@ -70,4 +74,5 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 if (!compiler) console.log("(no C compiler found: cc, gcc, clang or cl)");
+if (!rust) console.log("(no Rust found: rustc)");
 if (!python) console.log("(no Python found: python3 or python)");
