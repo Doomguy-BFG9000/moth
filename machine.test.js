@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, machineCompiler, excerpt, describeTrail, MothError } from "./moth.js";
+import { run, machineCompiler, excerpt, describeTrail, format, MothError } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, brokenPrograms } from "./cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -335,6 +335,66 @@ test("moth.exe runs a program, passing its arguments, input, output and exit cod
     const said = spawnSync(exe, bad, { cwd: dir, encoding: "utf8" });
     assert.deepEqual([said.status, said.stdout], [2, ""], bad.join(" "));
     assert.match(said.stderr, /^usage: moth /, bad.join(" "));
+  }
+});
+
+// `moth tidy`: the one way Moth writes code, which is what format() in moth.js writes. Every Moth file
+// here is tidy already, so --check must say so; then messy and randomly broken programs, each tidied to
+// exactly the bytes format() makes of it.
+test("moth.exe tidies code to the same bytes format() does, and --check only says which files need it", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "tidying");
+  mkdirSync(sub, { recursive: true });
+  const tidy = (names) => spawnSync(exe, ["tidy", ...names], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  const mine = new Map(); // what every Moth file here holds, by the name it gets in the folder
+  for (const folder of [".", "tools", "apps"]) {
+    for (const file of readdirSync(new URL(`./${folder}/`, import.meta.url)).filter((f) => f.endsWith(".moth"))) {
+      mine.set(file, readFileSync(new URL(`./${folder}/${file}`, import.meta.url), "utf8"));
+    }
+  }
+  for (const [name, text] of mine) writeFileSync(join(sub, name), text);
+  const checked = spawnSync(exe, ["tidy", "--check", ...mine.keys()], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  assert.equal(checked.stderr, "");
+  assert.equal(checked.stdout, [...mine.keys()].map((name) => `${name} is tidy\n`).join(""));
+  assert.equal(checked.status, 0);
+  for (const [name, text] of mine) assert.equal(readFileSync(join(sub, name), "utf8"), text, `${name} was changed by --check`);
+
+  // the messy example from moth.test.js, and programs broken on purpose: byte for byte what format() makes
+  const messy = ["to   area with w,h", "return w*h", "  end", "", "", "", "if area( 2,3 ) is 6   # check", '        say "six"',
+    "# a note before else", "else", 'say  "no"', "end", "set l to list of 1 ,2,", " 3", "say - 5", "try", "say 1/0",
+    "if it fails with why", " say why", "end", "set r to record with label -1, x (2 + 3)", "move forward (1 + 2)", "", ""].join("\n");
+  const wide = 'say  "é😀"   # a comment with 😀 in it\nsay   item  1  of   "héllo"\n'; // columns counted as JavaScript counts them
+  const sources = [messy, wide, ...brokenPrograms(7, 150)];
+  const names = [];
+  const wanted = [];
+  sources.forEach((source, i) => {
+    let want;
+    try {
+      want = format(source);
+    } catch (err) {
+      if (err instanceof MothError) return; // code that can't be read: below
+      throw err;
+    }
+    const name = `t${i}.moth`;
+    writeFileSync(join(sub, name), source);
+    names.push(name);
+    wanted.push(want);
+  });
+  assert.ok(names.length > 40, `only ${names.length} could be tidied`);
+  const tidied = tidy(names);
+  assert.equal(tidied.status, 0, tidied.stdout + tidied.stderr);
+  names.forEach((name, i) => assert.equal(readFileSync(join(sub, name), "utf8"), wanted[i], name));
+  assert.equal(tidy(names).stdout, names.map((name) => `${name} is tidy\n`).join("")); // and tidy the second time
+  // code with a mistake in it can't be tidied: the mistake, where it is, and 1
+  writeFileSync(join(sub, "wrong.moth"), "if yes\n    say 1\n");
+  const wrong = tidy(["wrong.moth"]);
+  assert.deepEqual([wrong.status, wrong.stdout, wrong.stderr], [1, "", "wrong.moth:3:1: 'if' from line 1 is missing its 'end'\n\n^\n"]);
+  assert.equal(readFileSync(join(sub, "wrong.moth"), "utf8"), "if yes\n    say 1\n");
+  const missing = tidy(["nowhere.moth"]);
+  assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
+  for (const bad of [["tidy"], ["tidy", "--check"]]) {
+    const said = spawnSync(exe, bad, { cwd: sub, encoding: "utf8" });
+    assert.deepEqual([said.status, said.stdout], [2, ""], bad.join(" "));
   }
 });
 

@@ -297,6 +297,10 @@ set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
+# `reading` also carries, for tidying code, `layout`: how deep in blocks each statement starts, and each
+# end, else and if it fails, by "line:col"; and `tight`: the pieces written with no space after them, a
+# negating minus and a call's bracket, which only the parser can tell from the others. Both are
+# dictionaries, or nothing when nothing is being tidied, and only the program's own file goes in them.
 # `reading` is shared with the files the program uses: `files` (a list of records with a name and a text),
 # `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
 to parse with tokens, reading
@@ -306,6 +310,22 @@ to parse with tokens, reading
     set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
     set converting to yes # `trip in miles`; not in `position of ... in`, whose `in` is its own
+    set nesting to 0 # blocks around the statement being read, for `lay`
+
+    # where a statement starts, and how deep it is, for tidying
+    to lay with t
+        if layout of reading is not nothing and file of t is ""
+            set item (line of t + ":" + col of t) of (layout of reading) to nesting
+        end
+    end
+
+    # a piece with no space after it, for tidying; gives it back, so it can mark one as it takes it
+    to tight with t
+        if t and tight of reading is not nothing and file of t is ""
+            set item (line of t + ":" + col of t) of (tight of reading) to yes
+        end
+        return t
+    end
 
     # whether token i is a unit's word (`km`, `hours`), on the same line as what's before it
     to unit_at with i
@@ -408,10 +428,14 @@ to parse with tokens, reading
         set body to empty list
         set outside_top to at_top
         set at_top to opener is nothing
+        if opener is not nothing
+            set nesting to nesting + 1
+        end
         repeat while more(opener) and not (in_try and is_if_it_fails())
             if check("eof")
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
+            lay(peek())
             set made to statement()
             if kind of made is "use" # the file's code, in its place
                 for each inner in body of made
@@ -423,6 +447,10 @@ to parse with tokens, reading
             if not nl of peek()
                 expected("a new line")
             end
+        end
+        if opener is not nothing
+            set nesting to nesting - 1
+            lay(peek()) # the end, else or if it fails that closes the block
         end
         set at_top to outside_top
         return body
@@ -852,7 +880,7 @@ to parse with tokens, reading
                 fail with problem(t, "to give '" + called + "' a value write 'set " + called + " to ...'")
             end
             set args to empty list
-            if match("(")
+            if tight(match("("))
                 set args to arg_list()
             else if not nl of peek()
                 add expression() to args
@@ -1063,7 +1091,7 @@ to parse with tokens, reading
     end
 
     to unary
-        set t to match("-")
+        set t to tight(match("-"))
         if t
             return record with kind "negate", operand unary(), at t
         end
@@ -1235,7 +1263,7 @@ to parse with tokens, reading
         if type of t is "word" and not contains(reserved, value of t)
             set pos to pos + 1
             set full to member(value of t)
-            if match("(")
+            if tight(match("("))
                 return record with kind "call", name full, args arg_list(), at t
             end
             if full is value of t and not indexing and word("of") # `name of person`
@@ -1967,7 +1995,7 @@ end
 # values the JavaScript returns.
 to compile with source, files
     set ats to empty list
-    set reading to record with files files, loaded empty list, open empty list, within ""
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading))
     set slots to empty list
     for each slot from 1 to length of names of scope of main
@@ -2487,7 +2515,7 @@ end
 
 # Moth source, and the files it may use (records with a name and a text); out comes its bytecode, as text
 to compile_bytecode with source, files
-    set reading to record with files files, loaded empty list, open empty list, within ""
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set main to bytecode_function(nothing, "main", empty list, empty list, parse(tokenize(source, ""), reading))
     set lines to list of "moth bytecode 2"
     function_lines(main, lines)

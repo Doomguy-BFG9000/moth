@@ -3,6 +3,7 @@
 #
 #     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
 #     moth run [--allow-...] program.moth [arguments...]
+#     moth tidy program.moth [--check]
 #
 # The first moth.exe comes from GitHub's releases, or from Node.js (`node bootstrap.mjs`); after that it
 # builds itself, into the same bytes:
@@ -14,7 +15,7 @@
 
 use "machine.moth" as machine
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those"
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites or start programs without asking:\n  --allow-read, --allow-write, --allow-net, --allow-run or --allow-all, and --allow-read=data,notes.txt\n  (or --allow-write=..., --allow-net=...) only those.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -270,7 +271,349 @@ to cli_allow_flag with cli_flag
     return no
 end
 
-# the arguments: `build` or `run`, the file, any --allow flags, --target for a build, and for a run
+# ---------- tidying ----------
+# Moth code is written one way, and `moth tidy` writes it that way: `cli_format` is `format()` in moth.js,
+# in Moth. The parser says where each statement starts and how deep it is (`layout`), and which pieces are
+# written with no space after them (`tight`), so nothing is guessed; the pieces of a line come from
+# `cli_pieces_of`, which reads one line as the tokenizer does but keeps every piece as it was written.
+
+to cli_is_digit with cli_c
+    return cli_c is at least "0" and cli_c is at most "9"
+end
+
+to cli_starts_word with cli_c
+    return (cli_c is at least "a" and cli_c is at most "z") or (cli_c is at least "A" and cli_c is at most "Z") or cli_c is "_"
+end
+
+to cli_in_word with cli_c
+    return cli_starts_word(cli_c) or cli_is_digit(cli_c)
+end
+
+# a digit of a number written after 0x or 0b
+to cli_is_digit_of with cli_c, cli_mark
+    if cli_mark is "b"
+        return cli_c is "0" or cli_c is "1"
+    end
+    return cli_is_digit(cli_c) or (cli_c is at least "a" and cli_c is at most "f") or (cli_c is at least "A" and cli_c is at most "F")
+end
+
+# how many columns a piece takes, counted as JavaScript counts them: 2 for a character past the first
+# 65,536, which run from the first below to the second
+to cli_width_of with cli_text
+    set cli_wide to 0
+    for each cli_c in cli_text
+        add 1 to cli_wide
+        if cli_c is at least "𐀀" and cli_c is at most "􏿿"
+            add 1 to cli_wide
+        end
+    end
+    return cli_wide
+end
+
+# a text without the spaces (and other control characters) at its end
+to cli_trimmed with cli_text
+    set cli_upto to length of cli_text
+    repeat while cli_upto is greater than 0 and item cli_upto of cli_text is at most " "
+        set cli_upto to cli_upto - 1
+    end
+    return cli_first(cli_text, cli_upto)
+end
+
+to cli_spaces with cli_many
+    set cli_room to ""
+    repeat cli_many times
+        add " " to cli_room
+    end
+    return cli_room
+end
+
+# One line of code as its pieces, as written: for each, what it is, its text, the column it starts at and
+# the column just past it, counted as the parser counts columns; then the line's comment, or nothing, and
+# the column that starts. Only lines the parser has read already come here, so nothing here is a mistake.
+to cli_pieces_of with cli_line
+    set cli_chars to split cli_line by ""
+    add "" to cli_chars
+    set cli_pieces to empty list
+    set cli_note to nothing
+    set cli_note_col to 0
+    set cli_i to 1
+    set cli_col to 1
+    repeat while item cli_i of cli_chars is not ""
+        set cli_c to item cli_i of cli_chars
+        if cli_c is at most " " # every control character counts as a space
+            add 1 to cli_col
+            add 1 to cli_i
+        else if cli_c is "#" # a comment, and the rest of the line with it
+            set cli_note_col to cli_col
+            set cli_note to ""
+            repeat while item cli_i of cli_chars is not ""
+                add item cli_i of cli_chars to cli_note
+                add 1 to cli_i
+            end
+            set cli_note to cli_trimmed(cli_note)
+        else
+            set cli_start to cli_col
+            set cli_text to ""
+            set cli_what to cli_c
+            if cli_is_digit(cli_c)
+                set cli_what to "number"
+                set cli_mark to item (cli_i + 1) of cli_chars
+                if cli_c is "0" and (cli_mark is "x" or cli_mark is "b") and cli_is_digit_of(item (cli_i + 2) of cli_chars, cli_mark)
+                    set cli_text to cli_c + cli_mark
+                    set cli_i to cli_i + 2
+                    repeat while cli_is_digit_of(item cli_i of cli_chars, cli_mark)
+                        add item cli_i of cli_chars to cli_text
+                        add 1 to cli_i
+                    end
+                else
+                    repeat while cli_is_digit(item cli_i of cli_chars)
+                        add item cli_i of cli_chars to cli_text
+                        add 1 to cli_i
+                    end
+                    if item cli_i of cli_chars is "." and cli_is_digit(item (cli_i + 1) of cli_chars)
+                        add "." to cli_text
+                        add 1 to cli_i
+                        repeat while cli_is_digit(item cli_i of cli_chars)
+                            add item cli_i of cli_chars to cli_text
+                            add 1 to cli_i
+                        end
+                    end
+                end
+            else if cli_starts_word(cli_c)
+                set cli_what to "word"
+                repeat while cli_in_word(item cli_i of cli_chars)
+                    add item cli_i of cli_chars to cli_text
+                    add 1 to cli_i
+                end
+            else if cli_c is "\""
+                set cli_what to "string"
+                add "\"" to cli_text
+                add 1 to cli_i
+                repeat while item cli_i of cli_chars is not "\""
+                    set cli_d to item cli_i of cli_chars
+                    add cli_d to cli_text
+                    add 1 to cli_i
+                    if cli_d is "\\" # what follows a backslash is the text's own, even a quote
+                        add item cli_i of cli_chars to cli_text
+                        add 1 to cli_i
+                    end
+                end
+                add "\"" to cli_text
+                add 1 to cli_i
+            else if cli_c is "'" # `math's sine`
+                set cli_what to "'s"
+                set cli_text to "'s"
+                set cli_i to cli_i + 2
+            else
+                set cli_text to cli_c
+                add 1 to cli_i
+            end
+            set cli_col to cli_start + cli_width_of(cli_text)
+            add record with what cli_what, text cli_text, col cli_start, over cli_col to cli_pieces
+        end
+    end
+    return record with pieces cli_pieces, note cli_note, col cli_note_col
+end
+
+# whether a piece is one the parser marked as written with no space after it
+to cli_marked with cli_tight, cli_at, cli_piece
+    return (cli_at + ":" + col of cli_piece) is in cli_tight
+end
+
+# The pieces of line `cli_at` joined the one way Moth writes them: a space between each, but none inside
+# brackets, before a comma or 's, before a call's bracket, or after a minus that makes a number negative.
+to cli_joined with cli_pieces, cli_at, cli_tight
+    set cli_out to ""
+    set cli_before to nothing
+    for each cli_piece in cli_pieces
+        set cli_close to cli_before is nothing or what of cli_before is "(" or what of cli_piece is ")" or
+            what of cli_piece is "," or what of cli_piece is "'s"
+        if not cli_close and what of cli_before is "-" and cli_marked(cli_tight, cli_at, cli_before)
+            set cli_close to yes
+        end
+        if not cli_close and what of cli_piece is "(" and cli_marked(cli_tight, cli_at, cli_piece)
+            set cli_close to yes
+        end
+        if not cli_close
+            add " " to cli_out
+        end
+        add text of cli_piece to cli_out
+        set cli_before to cli_piece
+    end
+    return cli_out
+end
+
+# whether a line closes a block, so a comment just before it belongs to the block instead
+to cli_closes with cli_pieces
+    set cli_word to lowercase of text of item 1 of cli_pieces
+    if cli_word is "end" or cli_word is "else"
+        return yes
+    end
+    if length of cli_pieces is less than 3
+        return no
+    end
+    set cli_start_words to ""
+    for each cli_which from 1 to 3
+        if cli_which is greater than 1
+            add " " to cli_start_words
+        end
+        add lowercase of text of item cli_which of cli_pieces to cli_start_words
+    end
+    return cli_start_words is "if it fails"
+end
+
+# every file the code says it uses, each with an empty text: only the file in front of it is tidied
+to cli_empty_files with cli_source
+    set cli_made to empty list
+    for each cli_name in cli_used_by(cli_source)
+        add record with name cli_name, text "" to cli_made
+    end
+    return cli_made
+end
+
+# Moth code, tidied: each line indented four spaces for each block it is in (and four more if it carries
+# on the statement from the line before), single spaces between the pieces of a line, comments kept where
+# they are, at most one blank line in a row, and one new line at the end. Code with a mistake in it can't
+# be tidied: it fails as compiling it would.
+to cli_format with cli_source
+    set cli_read to machine's read_layout(cli_source, cli_empty_files(cli_source))
+    set cli_layout to layout of cli_read
+    set cli_tight to tight of cli_read
+    set cli_lines to empty list
+    set cli_indent to 0 # the indent of the statement being written, for the lines that carry it on
+    set cli_waiting to empty list # lines with only a comment, which take the indent of the code after them
+    set cli_at to 0
+    for each cli_line in split cli_source by "\n"
+        add 1 to cli_at
+        set cli_got to cli_pieces_of(cli_line)
+        set cli_pieces to pieces of cli_got
+        if length of cli_pieces is 0
+            if note of cli_got is not nothing
+                add note of cli_got to cli_lines
+                add length of cli_lines to cli_waiting
+            else if length of cli_lines is greater than 0 and item (length of cli_lines) of cli_lines is not ""
+                add "" to cli_lines
+            end
+        else
+            set cli_key to cli_at + ":" + col of item 1 of cli_pieces
+            set cli_here to cli_indent + 4
+            if cli_key is in cli_layout
+                set cli_here to (item cli_key of cli_layout) * 4
+                set cli_indent to cli_here
+            end
+            set cli_under to cli_here # a comment just before an end, else or if it fails goes inside the block
+            if cli_closes(cli_pieces)
+                set cli_under to cli_here + 4
+            end
+            for each cli_which in cli_waiting
+                set item cli_which of cli_lines to cli_spaces(cli_under) + item cli_which of cli_lines
+            end
+            set cli_waiting to empty list
+            set cli_text to cli_spaces(cli_here) + cli_joined(cli_pieces, cli_at, cli_tight)
+            if note of cli_got is not nothing
+                set cli_gap to (col of cli_got) - (over of item (length of cli_pieces) of cli_pieces)
+                if cli_gap is less than 1
+                    set cli_gap to 1
+                end
+                set cli_text to cli_text + cli_spaces(cli_gap) + note of cli_got
+            end
+            add cli_text to cli_lines
+        end
+    end
+    set cli_upto to length of cli_lines # no blank lines at the end, and one new line after the last
+    repeat while cli_upto is greater than 0 and item cli_upto of cli_lines is ""
+        set cli_upto to cli_upto - 1
+    end
+    set cli_out to ""
+    for each cli_which from 1 to cli_upto
+        add item cli_which of cli_lines to cli_out
+        add "\n" to cli_out
+    end
+    return cli_out
+end
+
+# whether tidying kept every piece: the same pieces, of the same kinds, in the same order. A no here would
+# be a bug in the tidying, never a mistake in the code.
+to cli_same_pieces with cli_before, cli_after
+    set cli_one to machine's read_tokens(cli_before)
+    set cli_two to machine's read_tokens(cli_after)
+    if length of cli_one is not length of cli_two
+        return no
+    end
+    for each cli_which from 1 to length of cli_one
+        set cli_x to item cli_which of cli_one
+        set cli_y to item cli_which of cli_two
+        if type of cli_x is not type of cli_y or value of cli_x is not value of cli_y
+            return no
+        end
+    end
+    return yes
+end
+
+# whether a mistake caught from the compiler is one of its own: a record that says where and why
+to cli_is_problem with cli_why
+    try
+        if reason of cli_why is nothing
+            return yes
+        end
+    if it fails
+        return no
+    end
+    return yes
+end
+
+# `moth tidy file.moth`: the file tidied in place, or with --check only said to need it. Gives whether it
+# is tidy now (or was already), and says what it did.
+to cli_tidy_one with cli_path, cli_checking
+    set cli_source to cli_text_of(cli_path)
+    if cli_source is nothing
+        return no
+    end
+    set cli_tidied to nothing
+    try
+        set cli_tidied to cli_format(cli_source)
+    if it fails with cli_whytidy
+        if cli_is_problem(cli_whytidy)
+            cli_report(cli_whytidy, cli_path, cli_source, empty list, empty list)
+        else
+            say "moth: " + cli_path + ": " + cli_whytidy to the error output
+        end
+        return no
+    end
+    if not cli_same_pieces(cli_source, cli_tidied)
+        say "moth: " + cli_path + ": tidying would have changed the code" to the error output
+        return no
+    end
+    if cli_tidied is cli_source
+        say cli_path + " is tidy"
+        return yes
+    end
+    if cli_checking
+        say cli_path + " needs tidying"
+        return no
+    end
+    try
+        write cli_tidied to cli_path
+    if it fails with cli_whywrite
+        say "moth: " + cli_whywrite to the error output
+        return no
+    end
+    say "tidied " + cli_path
+    return yes
+end
+
+# every file named, each tidied: 0 if they all are tidy now, 1 if any wasn't tidied
+to cli_tidy_all with cli_paths, cli_checking
+    set cli_wrong to 0
+    for each cli_path in cli_paths
+        if not cli_tidy_one(cli_path, cli_checking)
+            set cli_wrong to 1
+        end
+    end
+    return cli_wrong
+end
+
+# the arguments: `build`, `run` or `tidy`, the file, any --allow flags, --target for a build, and for a run
 # whatever comes after the file, which is the program's own. In a function, as anything a function sets
 # that the top level sets too is the top level's, and the other functions here count with cli_k as well.
 to cli_main
@@ -279,22 +622,30 @@ to cli_main
     set cli_flags to empty list
     set cli_file to nothing
     set cli_passed to empty list
+    set cli_paths to empty list # for a tidy, every file named
+    set cli_checking to no
     set cli_command to ""
     if length of cli_given is at least 1
         set cli_command to item 1 of cli_given
     end
-    set cli_fine to length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run")
+    set cli_fine to length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "tidy")
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
         if cli_file is not nothing and cli_command is "run" # after the file, everything is the program's own
             add cli_arg to cli_passed
             add 1 to cli_k
+        else if cli_command is "tidy" and cli_arg is "--check"
+            set cli_checking to yes
+            add 1 to cli_k
+        else if cli_command is "tidy" and not (length of cli_arg is greater than 1 and cli_first(cli_arg, 2) is "--")
+            add cli_arg to cli_paths
+            add 1 to cli_k
         else if cli_arg is "--target" and cli_command is "build" and cli_k is less than length of cli_given and cli_target is nothing
             set cli_target to item (cli_k + 1) of cli_given
             set cli_fine to cli_target is "windows" or cli_target is "linux"
             add 2 to cli_k
-        else if cli_allow_flag(cli_arg)
+        else if cli_command is not "tidy" and cli_allow_flag(cli_arg)
             add cli_arg to cli_flags
             add 1 to cli_k
         else if cli_file is nothing and not (length of cli_arg is greater than 1 and cli_first(cli_arg, 2) is "--")
@@ -304,12 +655,18 @@ to cli_main
             set cli_fine to no
         end
     end
-    if cli_file is nothing
+    if cli_file is nothing and cli_command is not "tidy"
+        set cli_fine to no
+    end
+    if cli_command is "tidy" and length of cli_paths is 0
         set cli_fine to no
     end
     if not cli_fine # wrong usage: how to use it, and 2
         say cli_usage to the error output
         stop the program with 2
+    end
+    if cli_command is "tidy"
+        stop the program with cli_tidy_all(cli_paths, cli_checking)
     end
     if cli_target is nothing
         set cli_target to cli_host()

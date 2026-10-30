@@ -12438,6 +12438,21 @@ to function_at with fc, found
     return nothing
 end
 
+# For a command line that tidies a file: its code read, and with it `layout`, how deep in blocks each
+# statement starts, and `tight`, the pieces written with no space after them (see parse in compiler.moth).
+# `files` are the files it uses, each with an empty text, as nothing in them is being tidied.
+to read_layout with source, files
+    set reading to record with files files, loaded empty list, open empty list, within "",
+        layout empty dictionary, tight empty dictionary
+    front's parse(front's tokenize(source, ""), reading)
+    return reading
+end
+
+# the pieces of some code, for checking that tidying changed none of them
+to read_tokens with source
+    return front's tokenize(source, "")
+end
+
 to compile_machine with source, file_names, file_texts, target, program_name
     return compile_allowing(source, file_names, file_texts, target, program_name, empty list)
 end
@@ -12449,7 +12464,7 @@ to compile_allowing with source, file_names, file_texts, target, program_name, f
     for each i from 1 to length of file_names
         add record with name item i of file_names, text item i of file_texts to files
     end
-    set reading to record with files files, loaded empty list, open empty list, within ""
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set body to front's parse(front's tokenize(source, ""), reading)
     set a to new_asm()
     set st to new_state(a, program_name, files, source, target)
