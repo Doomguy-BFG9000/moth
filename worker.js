@@ -2,7 +2,8 @@
 // the page just ends this worker when Stop is pressed. An app (a program with `when` or `every`) keeps the
 // worker going after it has set up: the worker runs its timers, and the page sends it keys and clicks.
 // A line said to the error output goes to the page as { error: line }, among the others, and `stop the
-// program` ends the run (or the app) with the number it gave, which the page shows.
+// program` ends the run (or the app) with the number it gave, which the page shows. Each sound goes to the
+// page too, which plays them one after the other.
 import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./moth.js";
 
 // shortcut: past these, output and drawing are dropped rather than paged; raise them if programs need more.
@@ -10,6 +11,9 @@ import { run, memoryDisk, seeded, excerpt, describeTrail, MothError } from "./mo
 const MAX_LINES = 10_000;
 const MAX_DRAWN = 100_000;
 const FASTEST = 10; // milliseconds: an `every` faster than this runs this often
+// shortcut: a sound that would start more than this many seconds from now is dropped, so a loop that never
+// stops making sounds can't fill the page; each counts as at least a hundredth of a second
+const SOUNDS_AHEAD = 600;
 
 // Thrown by `ask` when the page hasn't answered yet: this run stops, the page asks the person, and runs the
 // program again from the start with every answer so far. It says and draws the same things up to there.
@@ -18,13 +22,16 @@ class Waiting {}
 let app = null; // the running app, once the program has set it up
 let lines = [];
 let drawn = [];
+let played = [];
 let sent = 0;
 const flush = () => {
-  if (lines.length || drawn.length) postMessage({ lines, drawn });
+  if (lines.length || drawn.length || played.length) postMessage({ lines, drawn, played });
   lines = [];
   drawn = [];
+  played = [];
   sent = performance.now();
 };
+let soundsEnd = 0; // about when, by performance.now(), the page will have played every sound so far
 const due = () => performance.now() - sent > 50 && flush(); // stream while the program keeps running
 
 let source = "";
@@ -93,6 +100,7 @@ onmessage = ({ data }) => {
   let said = 0;
   let total = 0;
   let pictured = 0; // drawn since the last clear
+  let sounds = 0;
   const say = (line) => {
     if (++said <= MAX_LINES) lines.push(line);
     else if (said === MAX_LINES + 1) lines.push(`(only the first ${MAX_LINES.toLocaleString("en")} lines are shown)`);
@@ -132,9 +140,18 @@ onmessage = ({ data }) => {
       random: seeded(seed), // the page picks a seed for each Run, so running again for an answer gets the same numbers
       printError: sayError,
       exit: (code) => (stopped = code),
+      play: (sound) => {
+        sounds++;
+        const now = performance.now();
+        if (Math.max(soundsEnd, now) - now <= SOUNDS_AHEAD * 1000) {
+          soundsEnd = Math.max(soundsEnd, now) + 1000 * Math.max(sound.seconds, 0.01);
+          played.push(sound);
+        }
+        due();
+      },
     }) ?? null;
     flush();
-    postMessage({ done: true, app: app?.waits, empty: said === 0 && total === 0, ms: performance.now() - start, stopped });
+    postMessage({ done: true, app: app?.waits, empty: said === 0 && total === 0 && sounds === 0, ms: performance.now() - start, stopped });
     app?.waits.forEach((wait, i) => wait.event === "every" && setInterval(() => handle(() => app.handle(i)), Math.max(FASTEST, wait.interval)));
   } catch (err) {
     if (err instanceof Waiting) return; // the page asks, and runs it again

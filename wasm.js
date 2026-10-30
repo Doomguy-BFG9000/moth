@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, soundOf, BEEP } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -91,6 +91,8 @@ const IMPORTS = {
   tryStart: [[], []], // a `try` begins: forget the last mistake
   caught: [[], [I32]], // 1 if what was thrown is a mistake a `try` catches
   caughtValue: [[], [EQ]],
+  play: [[EQ, EQ, F64, I32], []], // `play note`: the note, how long, in units of so many milliseconds, and a position
+  beep: [[], []], // `play a beep`
 };
 
 // ---------- the module's types and runtime ----------
@@ -956,6 +958,15 @@ class WasmCompiler extends Scope {
         this.expr(s.target);
         this.e("i32.const", this.pos(s.at)).e("call", im.removeFile);
         return;
+      case "play":
+        if (!s.note) {
+          this.e("call", im.beep);
+          return;
+        }
+        this.expr(s.note);
+        this.expr(s.time);
+        this.e("f64.const", s.unit).e("i32.const", this.pos(s.at)).e("call", im.play);
+        return;
       case "expect":
         if (s.cond.kind !== "compare") {
           this.expr(s.cond);
@@ -1283,11 +1294,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError, play) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError, play).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error) {
+function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error, play = () => {}) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1468,6 +1479,8 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     every: (interval, unit, closure, k) => void host.handlers.push({ event: "every", interval: everyInterval(toJs(interval), unit, errors[k]), closure }),
     expect: (op, negate, a, b, k) => expectThat(COMPARE_OPS[op], negate === 1, toJs(a), toJs(b), errors[k]),
     expectYes: (value, k) => expectYes(toJs(value), errors[k]),
+    play: (note, time, unit, k) => play(soundOf(toJs(note), toJs(time), unit, errors[k])),
+    beep: () => play({ ...BEEP }),
   };
   x = new WebAssembly.Instance(module, { moth: imports }).exports;
   host.call = (handler, inputs) => {

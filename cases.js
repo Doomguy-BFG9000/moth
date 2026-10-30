@@ -130,6 +130,9 @@ export const PROGRAMS = [
   ["to random\n    return 4\nend\nsay random() \" \" random number from 1 to 1", "4 1"],
   // when and every: the program sets them up, and run() returns an app that waits for them
   ["say \"set up\"\nwhen a key is pressed\n    say \"never, until a key comes\"\nend\nevery 1 second\n    say \"nor this\"\nend\nsay \"done\"", "set up\ndone"],
+  // sound: each one takes its turn, and the program goes on at once
+  ["say \"before\"\nplay note \"C\" for 0.5 seconds\nplay note 440 for 200 milliseconds\nplay a beep\nfor each n in list of \"E\", \"rest\", \"G#3\"\n    play note n for 50 milliseconds\nend\nsay \"after\"", "before\nafter"],
+  ["set play to 1\nset note to 2\nset beep to 3\nsay play + note + beep\nto play_twice with note\n    play note note for 1 second\n    play note note for 1 second\nend\nplay_twice(\"A\")", "6"],
 ];
 
 export const ERRORS = [
@@ -321,6 +324,17 @@ export const ERRORS = [
   ["set c to run program 5 with (list of \"a\")", "line 1: 'run program' needs text, not a number"],
   ["remove the file list of \"a\"", "line 1: a file name is text, not a list"],
   ["run program \"x\"", "line 1: 'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'"],
+  // sound: a note's name, a pitch in hertz, and how long, from 0 to a minute
+  ["play note \"H\" for 1 second", "line 1: there is no note called 'H' (write A to G, maybe with # or b and an octave from 0 to 9, like \"C#4\", or \"rest\")"],
+  ["play note \"C\" for 1 second\nplay note \"c#\" + 12 for 1 second", "line 2: there is no note called 'c#12' (write A to G, maybe with # or b and an octave from 0 to 9, like \"C#4\", or \"rest\")"],
+  ["play note 10 for 1 second", "line 1: a note's pitch is from 20 to 20000 hertz, not 10"],
+  ["play note list of \"C\" for 1 second", "line 1: 'play note' needs a note like \"C4\" or a number, not a list"],
+  ["play note \"C\" for -1 seconds", "line 1: a sound lasts from 0 to 60 seconds, not -1 seconds"],
+  ["set t to 2\nplay note \"C\" for t minutes", "line 2: a sound lasts from 0 to 60 seconds, not 120 seconds"],
+  ["play note \"C\" for yes seconds", "line 1: 'play note ... for' needs a number, not yes/no"],
+  ["play note \"C\" for 1", "line 1: expected 'milliseconds' or 'seconds' but found the end of the code"],
+  ["play note \"C\"", "line 1: expected 'for' but found the end of the code"],
+  ["play beep", "line 1: there is no function called 'play' (to make a sound, write 'play note \"C\" for 1 second' or 'play a beep')"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

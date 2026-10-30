@@ -2,6 +2,7 @@
 // the JavaScript compiler (jit.js), so the two can't disagree about what a name refers to.
 import { noValue, closest } from "./vm.js";
 
+const SOUND_HINTS = { play: "to make a sound, write 'play note \"C\" for 1 second' or 'play a beep'", beep: "to make one, write 'play a beep'" };
 const STATEMENT_WORDS = ["set", "add", "say", "if", "repeat", "for", "to", "return", "move", "turn", "pen", "fail", "stop", "use", "try", "remove", "write", "expect", "when", "every"];
 
 // Names each function changes. Inputs and functions made with `to` always belong to the function itself;
@@ -80,6 +81,8 @@ export class Scope {
   // What to say when a name nothing ever sets is used: suggest the closest name that does exist. A line
   // that starts with an unknown name may be a misspelled Moth word instead, like `sya "hi"`.
   undefinedMessage(name, { call = false, statement = false } = {}) {
+    const hint = call && statement && Object.hasOwn(SOUND_HINTS, name) && SOUND_HINTS[name]; // `play beep`, `beep`: how a sound is made instead
+    if (hint) return `there is no function called '${name}' (${hint})`;
     const known = [];
     for (let c = this; c; c = c.parent) known.push(...c.slots.keys());
     const guess = closest(name, statement ? [...known, ...STATEMENT_WORDS] : known);

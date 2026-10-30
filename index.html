@@ -371,7 +371,7 @@ Did you mean 'total'?</pre></div>
 
   <script type="module">
     import examples from "./examples.js";
-    import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, suggestedFix, MothError } from "./moth.js";
+    import { run, compile, compileToJs, compileToWasmBytes, mothCompiler, disassemble, check, timeline, memoryDisk, format, seeded, excerpt, suggestedFix, MothError, soundSamples, SOUND_RATE } from "./moth.js";
 
     const $ = (id) => document.getElementById(id);
     const [code, output, picker, stopButton, status] = ["code", "output", "example", "stop", "status"].map($);
@@ -380,13 +380,14 @@ Did you mean 'total'?</pre></div>
     let at = 0; // which of its steps is showing
     let drawing = []; // what the program has drawn since its last `clear` (which stays first, so the view stays open)
     let shownDrawn = 0; // how much it has drawn in all, counting what a `clear` wiped
+    let shownPlayed = 0; // how many sounds it has made, which a run after an answer makes again
     let appRunning = false; // an app is running: its picture stays put, and takes keys and clicks
 
     // Moth's own words, for colouring. Every piece of the code is escaped before it goes in as HTML,
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
       + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width "
-      + "table total average largest smallest chart").split(" "));
+      + "table total average largest smallest chart play note beep").split(" "));
     // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -530,6 +531,55 @@ Did you mean 'total'?</pre></div>
       }
     }
 
+    // Sounds (see soundOf in vm.js) take turns, as in machine code: each starts when the one before it ends,
+    // and the program doesn't wait for them. Each becomes samples (soundSamples, the numbers machine code
+    // plays) only shortly before its turn, so a long tune doesn't fill the page. Stop and Run silence them.
+    let audio = null;
+    let soundsEnd = 0; // when, on the audio clock, the last sound so far ends
+    let waitingSounds = []; // { sound, at }, in turn, from `nextSound` on: not yet handed to the browser
+    let nextSound = 0;
+    let soundTimer = null;
+    const sounding = new Set();
+    function queueSounds(sounds) {
+      try {
+        audio ??= new AudioContext();
+        audio.resume();
+      } catch {
+        return; // a browser that can't make sound
+      }
+      for (const sound of sounds) {
+        const at = Math.max(soundsEnd, audio.currentTime + 0.05);
+        soundsEnd = at + Math.floor(sound.seconds * SOUND_RATE + 0.5) / SOUND_RATE;
+        if (sound.hertz > 0) waitingSounds.push({ sound, at }); // a rest is only the wait
+      }
+      soundsSoon();
+    }
+    function soundsSoon() {
+      while (nextSound < waitingSounds.length && waitingSounds[nextSound].at < audio.currentTime + 1) {
+        const { sound, at } = waitingSounds[nextSound++];
+        const samples = soundSamples(sound);
+        if (!samples.length) continue;
+        const buffer = audio.createBuffer(1, samples.length, SOUND_RATE);
+        const wave = buffer.getChannelData(0);
+        for (let i = 0; i < samples.length; i++) wave[i] = samples[i] / 32768;
+        const source = audio.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audio.destination);
+        source.onended = () => sounding.delete(source);
+        source.start(at);
+        sounding.add(source);
+      }
+      if (nextSound === waitingSounds.length) [waitingSounds, nextSound] = [[], 0];
+      clearTimeout(soundTimer);
+      soundTimer = waitingSounds.length ? setTimeout(soundsSoon, 250) : null;
+    }
+    function silence() {
+      for (const source of sounding) source.stop();
+      sounding.clear();
+      [waitingSounds, nextSound, soundsEnd] = [[], 0, 0];
+      clearTimeout(soundTimer);
+    }
+
     // at most once a frame, however fast an app draws
     let painting = false;
     function paintSoon() {
@@ -645,6 +695,8 @@ Did you mean 'total'?</pre></div>
       drawing = [];
       shownDrawn = 0;
       render();
+      silence();
+      shownPlayed = 0;
       answers = [];
       shownLines = 0;
       startRun();
@@ -654,7 +706,7 @@ Did you mean 'total'?</pre></div>
       document.querySelector(".answer")?.remove();
       finish("Running…");
       stopButton.disabled = false;
-      let [skipLines, skipDrawn] = [shownLines, shownDrawn]; // shown by the runs before this one
+      let [skipLines, skipDrawn, skipPlayed] = [shownLines, shownDrawn, shownPlayed]; // shown (and played) by the runs before this one
       const current = (worker = new Worker("./worker.js", { type: "module" }));
       current.onmessage = ({ data }) => {
         if (worker !== current) return; // a message from a run that was already replaced
@@ -678,6 +730,14 @@ Did you mean 'total'?</pre></div>
             drawing = drawing.concat(fresh);
             drawing = drawing.slice(Math.max(0, drawing.findLastIndex((d) => d.clear))); // nothing before a clear is seen again
             paintSoon();
+          }
+        }
+        if (data.played?.length) {
+          const skip = Math.min(skipPlayed, data.played.length);
+          skipPlayed -= skip;
+          if (data.played.length > skip) {
+            shownPlayed += data.played.length - skip;
+            queueSounds(data.played.slice(skip));
           }
         }
         if (data.question !== undefined) return waitForAnswer(data.question);
@@ -897,6 +957,7 @@ Did you mean 'total'?</pre></div>
     stopButton.onclick = () => {
       if (trace) return stopDebugging("");
       output.append("(stopped)");
+      silence();
       finish("Stopped");
     };
 
