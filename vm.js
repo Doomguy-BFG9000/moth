@@ -1200,7 +1200,7 @@ export const BOX_LETTERS = 40;
 export const AREA_LETTERS = 2000;
 // how high a line of a list is, and of a text area; and what can have the focus (DESIGN §40)
 export const LIST_ROW = 24;
-export const AREA_LINE = 18;
+export const AREA_LINE = 20;
 const FOCUSABLE = new Set(["box", "area", "list"]);
 
 // The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`

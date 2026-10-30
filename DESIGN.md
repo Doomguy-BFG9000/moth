@@ -1768,3 +1768,64 @@ hold them to agreeing.
   a move and a failing site as mistakes, a megabyte sent and 20,000 records sent
   as JSON and read back, and every mistake in what's asked.
 
+## 40. Checkboxes, text areas and lists
+
+- **The phrases.** `draw checkbox "Dark" at x, y`, `tick the checkbox "Dark"`
+  and `untick` it, `the checkbox "Dark" is ticked` (or `is not ticked`) and
+  `when the checkbox "Dark" is clicked`; `draw text area "Notes" at x, y size w
+  by h`, read and emptied as a text box is, with `the text in the text area` and
+  `clear the text area`; `draw list "Fruits" showing fruits at x, y size w by
+  h`, `the choice in the list "Fruits"` and `when an item is chosen in the list
+  "Fruits" with fruit`. As with buttons, each is a run of words that meant
+  nothing before, so `checkbox`, `tick`, `area`, `showing` and `choice` are
+  still names: `set tick to 3` still works.
+- **Sizes.** A checkbox is a box 20 by 20 with its label after it, and for
+  clicks it's 28 wide and 10 more for each letter, as a button's size comes from
+  its label. A text area is 300 by 120 and a list 200 by 144, six rows, unless
+  they're given a size, which must be above 0.
+- **Checkboxes.** A click ticks or unticks one, then runs its handlers, which
+  see it as it is now; the focus stays where it was, as for a button. Ticks are
+  kept by label through `clear`, as what's typed is, so an app that draws its
+  picture again shows the same ticks, and `tick` works before it's drawn.
+- **Text areas.** A text box with lines: Enter starts a new line instead of
+  running handlers, it holds up to 2,000 letters, and it shows as many of its
+  last lines as fit, a line every 20, so what's being typed is always in view.
+  Long lines aren't wrapped. A text box and a text area with the same label
+  share their text, as two boxes do.
+- **Lists.** A list shows its items as `say` shows them, a row every 24 from its
+  top. They're copied when it's drawn, so changing the program's list changes
+  what's shown when it's drawn again, which an app does after each event, and a
+  list never shows something half changed. A click on a row chooses that item,
+  gives the list the focus and runs `when an item is chosen` with the item
+  itself, not its text: a number stays a number. While a list has the focus,
+  up and down choose the item before or after (down from none chosen is the
+  first) and scroll to keep it in view; every other key is the list's, and goes
+  nowhere. The mouse wheel scrolls the list under it without choosing. What's
+  chosen and what's first in view are kept by label through `clear`; `the
+  choice in the list` is nothing until something's chosen, and when the items
+  drawn no longer reach it.
+- **A new event, `scroll`.** Hosts send it with x, y and a number of rows,
+  down: the playground for a turn of the wheel (a row for each 24 pixels it
+  would have scrolled the page), the window for each 40 of a turn (3 rows a
+  notch, as Windows scrolls), and MOTH_EVENTS as `scroll x y rows`. Like `type`,
+  it's only ever for the picture's controls: no handler waits for it.
+- **Where the rules live.** The Turtle in vm.js again: `route()` decides, and
+  it tells the host what changed without the program drawing anything with
+  items of their own, `{ checkbox, ticked }` and `{ list, chosen, top, focused
+  }`, as a text box's `{ textbox, ... }`. machine.moth keeps an entry by label
+  for each, 16 bytes for a checkbox and 64 for a list (its items, them as
+  shown, what's chosen and what's first in view), a text area's being a text
+  box's, and decides the same way.
+- **What's drawn.** A checkbox in the pen's colour, white inside, with a box of
+  the pen's colour in the middle while it's ticked. A text area as a text box,
+  its lines 16 pixels high, the size the window's font is everywhere, so that
+  machine code and the playground line up. A list white in a border of the
+  pen's colour, 3 wide while it has the focus, the chosen row in the pen's
+  colour with its text in white, and while its items don't all fit, a bar at
+  its right for where the rows in view are among them.
+- **Linux.** As for buttons: drawn and read, never clicked.
+- **Tested.** The phrases and their near misses on all three engines, through a
+  hand-over to the VM, and in compiler.moth against the JIT; machine code's
+  window against the JavaScript engine on three runs of events, clicks, keys,
+  the wheel and lines typed, and its pixels; and on Windows and Linux, ticks and
+  choices read before anything's clicked, and every mistake in what's drawn.

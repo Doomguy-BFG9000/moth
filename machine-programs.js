@@ -292,6 +292,15 @@ export const MACHINE_CASES = [
   // read the folder, refused as reading a file is, and its words still names
   "for each name in list of \"data\", 5, nothing, \"\"\n    try\n        say read the folder name\n    if it fails with why\n        say why\n    end\nend\nsay length of read the folder \".\"",
   "set the to \"x.txt\"\nset folder to 3\nsay read the\nsay folder",
+  // checkboxes, text areas and lists, read before anything's clicked, and their mistakes (DESIGN §40)
+  "draw list \"L\" showing (list of 1, \"two\", yes, nothing, list of 3) at 0, 0\nsay the choice in the list \"L\"\nsay the choice in the list \"M\"\nsay the checkbox \"x\" is ticked\ntick the checkbox \"x\"\nsay the checkbox \"x\" is ticked\nsay the checkbox \"x\" is not ticked\nuntick the checkbox \"x\"\nsay the checkbox \"x\" is ticked\nsay \"[\" + the text in the text area \"T\" + \"]\"\ndraw text area \"T\" at 0, 0\nclear\ndraw checkbox \"x\" at 10, 10\nsay the checkbox \"x\" is ticked",
+  "set things to list of \"a\", \"b\"\ndraw list 5 showing things at 0, 0 size 100 by 48\nadd \"c\" to things\nsay the choice in the list 5\ndraw checkbox 2 at 0, 0\ndraw list 5 showing empty list at 0, 0 size 1 by 1\nsay \"done\"",
+  "draw list \"L\" showing 5 at 0, 0",
+  "draw list \"L\" showing (list of 1) at 0, 0 size 0 by 10",
+  "draw list \"L\" showing (list of 1) at 0, 0 size 10 by -3.5",
+  "draw text area \"T\" at 0, \"x\"",
+  "draw text area \"T\" at 0, 0 size 0.001 by 5",
+  "draw checkbox \"C\" at yes, 0",
 ];
 
 export function machinePrograms(seed, count) {

@@ -211,7 +211,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (13,553,152 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (14,112,768 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -481,8 +481,8 @@ play a beep                                 # each sound starts when the one bef
                                             # and the program goes on at once
 ```
 
-Apps: pictures that answer keys, clicks and time, with buttons and boxes to
-type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
+Apps: pictures that answer keys, clicks and time, with buttons, checkboxes,
+lists and boxes to type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
 [`apps/paint.moth`](apps/paint.moth) a paint program in 54, and
 [`apps/todo.moth`](apps/todo.moth) a to-do list in 38.
 
@@ -515,6 +515,19 @@ end
 when enter is pressed in the text box "Name" with words
     say "Hello, " words
 end
+
+set fruits to list of "apple", "banana", "cherry"
+draw checkbox "Dark" at -200, 150           # 20 by 20, its label after it
+draw text area "Notes" at -200, -60 size 250 by 100   # lines; 300 by 120 with no size
+draw list "Fruits" showing fruits at 100, 0 # a row each; 200 by 144 with no size
+tick the checkbox "Dark"                    # or untick it
+when the checkbox "Dark" is clicked
+    say the checkbox "Dark" is ticked       # yes or no; also: is not ticked
+end
+when an item is chosen in the list "Fruits" with fruit   # a click, or up and down
+    say fruit " " the choice in the list "Fruits"   # the choice is nothing until there is one
+end
+say the text in the text area "Notes"       # its lines, a new line between each
 ```
 
 - **Values:** numbers, amounts like `5 km`, `"text"`, `yes`, `no`, `nothing`,
@@ -595,8 +608,8 @@ nothing to install.
 - **Share** puts the code in the link, and **Tidy** lays it out the one way
   Moth writes it (Undo brings it back).
 - **Apps** keep running once they've set up: click the picture, and your keys,
-  clicks and drags go to the program, or to its buttons and the text box you
-  clicked. Try **Snake**, **Paint** and **To-do**.
+  clicks and drags go to the program, or to its buttons, checkboxes and lists
+  and the box you clicked; the mouse wheel scrolls a list. Try **Snake**, **Paint** and **To-do**.
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
   number-guessing game that asks for answers), **Tune**, **Neural network**,
   and **Moth's own compiler**, running in your browser.
@@ -702,10 +715,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (13,553,152 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (14,112,768 bytes)
 ```
 
-That's the same 13,553,152 bytes Node.js made of it, and the moth.exe they make
+That's the same 14,112,768 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -802,6 +815,10 @@ calls that led there.
   engines, an app moved to the VM in the middle keeping what was typed, and the
   same in machine code, whose window must say, fail and draw as the JavaScript
   engine does, with [`apps/todo.moth`](apps/todo.moth) built and driven
+- checkboxes, text areas and lists: ticks, choices, the arrow keys, the wheel
+  and lines typed on all three engines and through a move to the VM, and in
+  machine code's window, which must say, fail and draw as the JavaScript engine
+  does
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
@@ -876,6 +893,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   keys, selecting, copying or pasting inside it. A button's size comes from how
   many letters its label has, not how wide they are, so a label of wide letters
   can reach its edges.
+- A text area holds up to 2,000 letters, typed at its end, and shows its last
+  lines without wrapping long ones. A list chooses one item at a time.
 - `use` without `as` puts a file's names in with the program's, where they can
   collide; `use ... as` keeps the file to itself, as if it ran alone, so its
   functions' variables are theirs and the program reaches it only through
@@ -891,8 +910,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
-  showing its picture, and an app's handlers never run: its buttons and text
-  boxes are only drawn, and nothing can be typed into them. The window knows
+  showing its picture, and an app's handlers never run: its buttons, boxes,
+  checkboxes and lists are only drawn, and nothing can be typed into them. The window knows
   CSS's colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but
   not `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
   when started from Explorer: with its output going to a file or another

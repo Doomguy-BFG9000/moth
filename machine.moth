@@ -230,7 +230,7 @@ to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
-        charts no, pictures no, widgets no, sends no
+        charts no, pictures no, widgets no, sends no, controls no
     set code of made to hot of made
     return made
 end
@@ -10012,7 +10012,11 @@ to emit_turtle with a
     end
     set widget_acts to empty list
     if widgets of a # `draw button`, `draw text box`, `clear the text box`, by where compiler.moth has them
-        for each widget_name in list of "button", "text box", "clear text box"
+        set widget_names to list of "button", "text box", "clear text box"
+        if controls of a # and checkboxes, text areas and lists
+            set widget_names to list of "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list"
+        end
+        for each widget_name in widget_names
             add new_label(a) to widget_acts
             alui(a, "cmp", rcx, slot_of_word(front's turtle_actions, widget_name) - 1)
             jcc(a, cc_e, item (length of widget_acts) of widget_acts)
@@ -10274,6 +10278,9 @@ to emit_turtle with a
         alu(a, "or", rcx, rdx)
         store(a, mem(rax, 8), rcx)
         jmp_to(a, done_ok)
+        if controls of a
+            emit_control_acts(a, widget_acts, wrong_numbers, done_ok)
+        end
     end
     mark(a, wrong_kind)
     movsd_store(a, rip("err_a"), xmm0)
@@ -10300,6 +10307,15 @@ to emit_turtle with a
     for each pair in list of (list of 71, w71), (list of 72, w72), (list of 73, w73), (list of 74, w74), (list of 75, w75), (list of 77, w77)
         alui(a, "cmp", rax, item 1 of pair)
         jcc(a, cc_e, item 2 of pair)
+    end
+    set w82 to new_label(a)
+    set w83 to new_label(a)
+    set w84 to new_label(a)
+    if controls of a
+        for each pair in list of (list of 82, w82), (list of 83, w83), (list of 84, w84)
+            alui(a, "cmp", rax, item 1 of pair)
+            jcc(a, cc_e, item 2 of pair)
+        end
     end
     set w78 to new_label(a)
     set w79 to new_label(a)
@@ -10348,6 +10364,20 @@ to emit_turtle with a
         jmp_to(a, "rt_e_kind")
         mark(a, w79)
         b_text(a, "'draw chart of' needs numbers, or amounts of one measure, not ")
+        load(a, rax, rip("err_a"))
+        jmp_to(a, "rt_e_kind")
+    end
+    if controls of a
+        for each pair in list of (list of w82, "a text area's size is a number above 0, not "),
+            (list of w83, "a list's size is a number above 0, not ")
+            mark(a, item 1 of pair)
+            b_text(a, item 2 of pair)
+            load(a, rax, rip("err_a"))
+            movi(a, rdx, 0)
+            jmp_to(a, "rt_b_value")
+        end
+        mark(a, w84)
+        b_text(a, "'draw list ... showing' needs a list, not ")
         load(a, rax, rip("err_a"))
         jmp_to(a, "rt_e_kind")
     end
@@ -10765,6 +10795,395 @@ to emit_boxes with a
     load_text(a, xmm0, "")
     movi(a, rax, 0)
     ret(a)
+    if controls of a
+        emit_controls(a)
+    end
+end
+
+# ---------- the runtime: checkboxes, text areas and lists ----------
+# A checkbox is a thing drawn (10), as are a text area (11) and a list (12), whose fifth number says which it
+# is. Each checkbox, by its label, has an entry of 16 bytes in a list of its own: its label, and 1 if it's
+# ticked. Each list has one of 64: its label, a copy of its items, those as `say` shows them, the place of
+# the one chosen (from 0, or -1 for none), and the place of the first in view. A text area's entry is a text
+# box's, so the two share what's typed in them by their labels, as vm.js has it. `clear` leaves them all
+# alone, as DESIGN §40 says. list_focus is the entry of the list that has the focus, from 1, or 0.
+
+to emit_controls with a
+    emit_entries(a, "tk", 4)
+    emit_entries(a, "ls", 6)
+
+    # rt_ls_rows: xmm0 a list's height: how many rows it shows, a row every 24 and at least 1, in rax; uses xmm1
+    set rows_some to new_label(a)
+    mark(a, "rt_ls_rows")
+    load_bits(a, xmm1, double_bytes(24))
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    cvttsd2si(a, rax, xmm0)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ge, rows_some)
+    movi(a, rax, 1)
+    mark(a, rows_some)
+    ret(a)
+
+    # rt_ls_fill: rax a list of items, tn3 a list's height: the list at entry pi_w gets a copy of the items,
+    # and them as `say` shows them, and its first row in view stays as near to where it was as they allow
+    set fill_loop to new_label(a)
+    set fill_done to new_label(a)
+    mark(a, "rt_ls_fill")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    push_r(a, rax) # where the collector sees it
+    for each field in list of 8, 16 # a copy of them, then another, which becomes them shown
+        load(a, rax, mem(rsp, 0))
+        untag(a, rax)
+        load(a, r13, mem(rax, 0))
+        mov_rr(a, rcx, r13)
+        shifti(a, "shl", rcx, 3)
+        call_to(a, "rt_alloc")
+        mov_rr(a, rdi, rax)
+        load(a, rsi, mem(rsp, 0))
+        untag(a, rsi)
+        load(a, rsi, mem(rsi, 16))
+        mov_rr(a, rcx, r13)
+        rep_movsq(a)
+        mov_rr(a, rdx, rax)
+        mov_rr(a, rcx, r13)
+        call_to(a, "rt_list_of")
+        load(a, rbx, rip("pi_w"))
+        dec_r(a, rbx)
+        shifti(a, "shl", rbx, 6)
+        alu_load(a, "add", rbx, rip("ls_items"))
+        movsd_store(a, mem(rbx, field), xmm0)
+    end
+    movi(a, r12, 0)
+    mark(a, fill_loop)
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, fill_done)
+    load(a, rax, mem(rbx, 16))
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    mov_rr(a, rcx, r12)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    movsd_load(a, xmm0, mem(rax, 0))
+    call_to(a, "rt_show_text")
+    load(a, rdx, mem(rbx, 16))
+    untag(a, rdx)
+    load(a, rdx, mem(rdx, 16))
+    mov_rr(a, rcx, r12)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rdx, rcx)
+    store(a, mem(rdx, 0), rax)
+    inc_r(a, r12)
+    jmp_to(a, fill_loop)
+    mark(a, fill_done)
+    movsd_load(a, xmm0, rip("tn3"))
+    call_to(a, "rt_ls_rows")
+    load(a, rcx, mem(rbx, 32))
+    ls_keep_in_view(a)
+    pop_r(a, rax)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_ticked: xmm0 a label: whether the checkbox with that label is ticked, into xmm0, with rax 0 (`the
+    # checkbox "Done" is ticked`)
+    set not_ticked to new_label(a)
+    mark(a, "rt_ticked")
+    call_to(a, "rt_show_text")
+    call_to(a, "rt_tk_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, not_ticked)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("tk_items"))
+    load(a, rax, mem(rax, 8))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, not_ticked)
+    load_bits(a, xmm0, bits_yes)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_ticked)
+    load_bits(a, xmm0, bits_no)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_choice: xmm0 a label: the item chosen in the list with that label, or nothing, into xmm0, with rax
+    # 0 (`the choice in the list "Fruits"`)
+    set no_choice to new_label(a)
+    mark(a, "rt_choice")
+    call_to(a, "rt_show_text")
+    call_to(a, "rt_ls_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_choice)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 6)
+    alu_load(a, "add", rax, rip("ls_items"))
+    load(a, rcx, mem(rax, 24))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_s, no_choice)
+    load(a, rdx, mem(rax, 8))
+    untag(a, rdx)
+    alu_load(a, "cmp", rcx, mem(rdx, 0))
+    jcc(a, cc_ae, no_choice)
+    load(a, rdx, mem(rdx, 16))
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rdx, rcx)
+    movsd_load(a, xmm0, mem(rdx, 0))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, no_choice)
+    load_bits(a, xmm0, bits_nothing)
+    movi(a, rax, 0)
+    ret(a)
+end
+
+# rt_tk_find or rt_ls_find: rax a label, as text: the entry with that label, from 1, in rax, or 0 for none;
+# and rt_tk_entry or rt_ls_entry: its entry, made if there isn't one yet. Each entry is 2 to the `size_bits`
+# bytes, its label first, then nothing but 0s, but a list's -1 for none chosen.
+to emit_entries with a, prefix, size_bits
+    set entry_items to prefix + "_items"
+    set entry_n to prefix + "_n"
+    set entry_cap to prefix + "_cap"
+    set entry_loop to new_label(a)
+    set entry_none to new_label(a)
+    set entry_found to new_label(a)
+    mark(a, "rt_" + prefix + "_find")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rax)
+    movi(a, r13, 0)
+    mark(a, entry_loop)
+    alu_load(a, "cmp", r13, rip(entry_n))
+    jcc(a, cc_ae, entry_none)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, size_bits)
+    alu_load(a, "add", rbx, rip(entry_items))
+    load(a, rax, mem(rbx, 0))
+    mov_rr(a, rdx, r12)
+    call_to(a, "rt_equal")
+    inc_r(a, r13)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, entry_found)
+    jmp_to(a, entry_loop)
+    mark(a, entry_none)
+    movi(a, r13, 0)
+    mark(a, entry_found)
+    mov_rr(a, rax, r13)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    set entry_have to new_label(a)
+    set entry_room to new_label(a)
+    set entry_some to new_label(a)
+    mark(a, "rt_" + prefix + "_entry")
+    push_r(a, rax) # where the collector sees it
+    call_to(a, "rt_" + prefix + "_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, entry_have)
+    load(a, rax, rip(entry_n))
+    alu_load(a, "cmp", rax, rip(entry_cap))
+    jcc(a, cc_b, entry_room)
+    load(a, rcx, rip(entry_cap))
+    alu(a, "add", rcx, rcx)
+    jcc(a, cc_ne, entry_some)
+    movi(a, rcx, 8)
+    mark(a, entry_some)
+    store(a, rip(entry_cap), rcx)
+    shifti(a, "shl", rcx, size_bits)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip(entry_items))
+    load(a, rcx, rip(entry_n))
+    shifti(a, "shl", rcx, size_bits - 3)
+    rep_movsq(a)
+    store(a, rip(entry_items), rax)
+    mark(a, entry_room)
+    load(a, rdi, rip(entry_n))
+    shifti(a, "shl", rdi, size_bits)
+    alu_load(a, "add", rdi, rip(entry_items))
+    load(a, rax, mem(rsp, 0))
+    store(a, mem(rdi, 0), rax)
+    if prefix is "ls" # none chosen yet
+        storei(a, mem(rdi, 24), -1)
+    end
+    alu_at(a, "add", rip(entry_n), 1)
+    load(a, rax, rip(entry_n))
+    mark(a, entry_have)
+    pop_r(a, rcx)
+    ret(a)
+end
+
+# rbx a list's entry, rcx where its first row in view might go, rax how many rows it shows: there, as near as
+# its items allow, from 0 to however many more there are than rows; uses rdx
+to ls_keep_in_view with a
+    set view_high to new_label(a)
+    set view_low to new_label(a)
+    load(a, rdx, mem(rbx, 8))
+    untag(a, rdx)
+    load(a, rdx, mem(rdx, 0))
+    alu(a, "sub", rdx, rax)
+    alu(a, "cmp", rcx, rdx)
+    jcc(a, cc_le, view_high)
+    mov_rr(a, rcx, rdx)
+    mark(a, view_high)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ns, view_low)
+    movi(a, rcx, 0)
+    mark(a, view_low)
+    store(a, mem(rbx, 32), rcx)
+end
+
+# rt_turtle's numbers for a control: the value in xmm0 a list whose first `skip` items come before them,
+# `count` of them, into tn0 on (or to `wrong`, err_a the one that isn't a number, err_what `what`); rcx the
+# list, untagged, after
+to control_numbers with a, what, skip, count, wrong
+    lea(a, rax, rip(text_object(a, what)))
+    store(a, rip("err_what"), rax)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    push_r(a, rax)
+    load(a, rcx, mem(rax, 16))
+    alui(a, "add", rcx, 8 * skip)
+    store(a, rip("t_list"), rcx)
+    lea(a, rax, rip("t_list"))
+    alui(a, "sub", rax, 16)
+    movi(a, rcx, count)
+    movi(a, rdx, -1)
+    call_to(a, "rt_turtle_numbers")
+    pop_r(a, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, wrong)
+end
+
+# rt_turtle's checkboxes, text areas and lists, by their places in `acts` (see emit_controls): each thing
+# drawn gets its label as `say` shows it in pi_text, and its entry in pi_w
+to emit_control_acts with a, acts, wrong_numbers, done_ok
+    mark(a, item 4 of acts) # a checkbox: label, x, y; 20 high, and 28 wide and 10 more for each letter
+    control_numbers(a, "'draw checkbox'", 1, 2, wrong_numbers)
+    load(a, rcx, mem(rcx, 16))
+    movsd_load(a, xmm0, mem(rcx, 0))
+    call_to(a, "rt_show_text")
+    store(a, rip("pi_text"), rax)
+    call_to(a, "rt_tk_entry")
+    store(a, rip("pi_w"), rax)
+    load(a, rax, rip("pi_text"))
+    untag(a, rax)
+    load(a, rax, mem(rax, 8))
+    imul_ri(a, rax, rax, 10)
+    alui(a, "add", rax, 28)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("pi_c"), xmm0)
+    load_bits(a, xmm0, double_bytes(20))
+    movsd_store(a, rip("pi_d"), xmm0)
+    for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b")
+        load(a, rax, rip(item 1 of pair))
+        store(a, rip(item 2 of pair), rax)
+    end
+    storei(a, rip("pi_kind"), 10)
+    call_to(a, "rt_pic_add")
+    jmp_to(a, done_ok)
+
+    for each ticking in list of 5, 6 # tick or untick the checkbox with that label, drawn yet or not
+        mark(a, item ticking of acts)
+        call_to(a, "rt_show_text")
+        call_to(a, "rt_tk_entry")
+        dec_r(a, rax)
+        shifti(a, "shl", rax, 4)
+        alu_load(a, "add", rax, rip("tk_items"))
+        storei(a, mem(rax, 8), 6 - ticking)
+        jmp_to(a, done_ok)
+    end
+
+    # a text area: label, x, y, and its width and height or nothing for the usual ones; a list: label, its
+    # items, then the same. Its items must be a list, then the numbers numbers, then its size above 0.
+    for each tall in list of 7, 8
+        set tall_skip to tall - 6
+        set tall_what to "'draw text area'"
+        set tall_why to 82
+        set tall_usual to list of 300, 120
+        if tall is 8
+            set tall_what to "'draw list'"
+            set tall_why to 83
+            set tall_usual to list of 200, 144
+        end
+        mark(a, item tall of acts)
+        if tall is 8
+            set items_fine to new_label(a)
+            movq_rx(a, rax, xmm0)
+            untag(a, rax)
+            load(a, rax, mem(rax, 16))
+            movsd_load(a, xmm1, mem(rax, 8))
+            movq_rx(a, rax, xmm1)
+            shifti(a, "shr", rax, 48)
+            alui(a, "cmp", rax, kind_list)
+            jcc(a, cc_e, items_fine)
+            movsd_store(a, rip("err_a"), xmm1)
+            storei(a, rip("err_why"), 84)
+            movi(a, rax, 2)
+            ret(a)
+            mark(a, items_fine)
+        end
+        set tall_sized to new_label(a)
+        set tall_numbered to new_label(a)
+        movq_rx(a, rax, xmm0) # sized, unless its width and height are both nothing
+        untag(a, rax)
+        load(a, rax, mem(rax, 16))
+        movi64(a, rdx, bits_nothing)
+        for each place in list of tall_skip + 2, tall_skip + 3
+            alu_load(a, "cmp", rdx, mem(rax, 8 * place))
+            jcc(a, cc_ne, tall_sized)
+        end
+        control_numbers(a, tall_what, tall_skip, 2, wrong_numbers)
+        load_bits(a, xmm1, double_bytes(item 1 of tall_usual))
+        movsd_store(a, rip("tn2"), xmm1)
+        load_bits(a, xmm1, double_bytes(item 2 of tall_usual))
+        movsd_store(a, rip("tn3"), xmm1)
+        jmp_to(a, tall_numbered)
+        mark(a, tall_sized)
+        control_numbers(a, tall_what, tall_skip, 4, wrong_numbers)
+        mark(a, tall_numbered)
+        for each side in list of "tn2", "tn3"
+            set side_fine to new_label(a)
+            movsd_load(a, xmm1, rip(side))
+            load_bits(a, xmm2, double_bytes(0))
+            ucomisd(a, xmm1, reg_at(xmm2))
+            jcc(a, cc_a, side_fine)
+            movsd_store(a, rip("err_a"), xmm1)
+            storei(a, rip("err_why"), tall_why)
+            movi(a, rax, 2)
+            ret(a)
+            mark(a, side_fine)
+        end
+        push_r(a, rcx)
+        load(a, rax, mem(rcx, 16))
+        movsd_load(a, xmm0, mem(rax, 0))
+        call_to(a, "rt_show_text")
+        store(a, rip("pi_text"), rax)
+        if tall is 7
+            call_to(a, "rt_box_entry")
+            store(a, rip("pi_w"), rax)
+        else
+            call_to(a, "rt_ls_entry")
+            store(a, rip("pi_w"), rax)
+            load(a, rcx, mem(rsp, 0))
+            load(a, rax, mem(rcx, 16))
+            load(a, rax, mem(rax, 8))
+            call_to(a, "rt_ls_fill")
+        end
+        pop_r(a, rcx)
+        for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b"), (list of "tn2", "pi_c"), (list of "tn3", "pi_d")
+            load(a, rax, rip(item 1 of pair))
+            store(a, rip(item 2 of pair), rax)
+        end
+        storei(a, rip("pi_kind"), tall + 4)
+        call_to(a, "rt_pic_add")
+        jmp_to(a, done_ok)
+    end
 end
 
 # ---------- the runtime: apps ----------
@@ -11910,6 +12329,12 @@ to emit_gui with a, title
         alui(a, "cmp", rdx, 6)
         jcc(a, cc_e, as_box)
     end
+    if controls of a # and so do checkboxes, text areas and lists
+        for each control_kind in list of 10, 11, 12
+            alui(a, "cmp", rdx, control_kind)
+            jcc(a, cc_e, as_box)
+        end
+    end
     alui(a, "cmp", rdx, 2)
     jcc(a, cc_ne, not_box)
     mark(a, as_box)
@@ -12026,6 +12451,14 @@ to emit_gui with a, title
         jcc(a, cc_e, a_button)
         alui(a, "cmp", rax, 6)
         jcc(a, cc_e, a_textbox)
+    end
+    set control_draws to list of (list of new_label(a), 10, "rt_gui_check"), (list of new_label(a), 11, "rt_gui_area"),
+        (list of new_label(a), 12, "rt_gui_list")
+    if controls of a # see emit_gui_controls
+        for each drawn_kind in control_draws
+            alui(a, "cmp", rax, item 2 of drawn_kind)
+            jcc(a, cc_e, item 1 of drawn_kind)
+        end
     end
     # a line, with round ends; one that goes nowhere is a dot, as on a canvas
     movsd_load(a, xmm0, mem(rbx, 8))
@@ -12204,6 +12637,13 @@ to emit_gui with a, title
     if widgets of a
         jmp_to(a, item_next)
         render_widgets(a, a_button, a_textbox, item_next)
+        if controls of a
+            for each drawn_kind in control_draws
+                mark(a, item 1 of drawn_kind)
+                call_to(a, item 3 of drawn_kind)
+                jmp_to(a, item_next)
+            end
+        end
     end
     mark(a, item_next)
     inc_r(a, r15)
@@ -12817,6 +13257,7 @@ to emit_gui with a, title
     set w_zero to new_label(a)
     set w_back to new_label(a)
     set w_redraw to new_label(a)
+    set w_wheel to new_label(a)
     mark(a, "rt_wndproc")
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
@@ -12836,6 +13277,10 @@ to emit_gui with a, title
         (list of 0x0201, w_down), (list of 0x0200, w_move), (list of 0x0202, w_up)
         alui(a, "cmp", r12, item 1 of pair)
         jcc(a, cc_e, item 2 of pair)
+    end
+    if controls of a # the mouse's wheel
+        alui(a, "cmp", r12, 0x020A)
+        jcc(a, cc_e, w_wheel)
     end
     win_enter(a) # anything else, as Windows does it
     mov_rr(a, rcx, rbx)
@@ -13038,6 +13483,54 @@ to emit_gui with a, title
     w_call(a, "ReleaseCapture")
     win_leave(a)
     jmp_to(a, w_zero)
+    if controls of a
+        # In an app, a wheel scrolls the list under it: a row for each 40 it turns (3 a notch, as Windows
+        # scrolls), down for a turn towards you, and a row for less.
+        set wheel_some to new_label(a)
+        mark(a, w_wheel)
+        load(a, rax, rip("gui_mode"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, w_zero)
+        mov_rr(a, rax, r13)
+        shifti(a, "shr", rax, 16)
+        movsx16(a, rax, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, w_zero)
+        unary(a, "neg", rax)
+        mov_rr(a, r15, rax)
+        cqo(a)
+        movi(a, rcx, 40)
+        unary(a, "idiv", rcx)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, wheel_some)
+        movi(a, rax, 1)
+        test_rr(a, r15, r15)
+        jcc(a, cc_ns, wheel_some)
+        movi(a, rax, -1)
+        mark(a, wheel_some)
+        store(a, rip("ev_c"), rax)
+        movsx16(a, rax, r14) # where it is: on the screen, then in the window
+        store32(a, rip("gui_pt"), rax)
+        mov_rr(a, rax, r14)
+        shifti(a, "shr", rax, 16)
+        movsx16(a, rax, rax)
+        store32(a, rip_plus("gui_pt", 4), rax)
+        win_enter(a)
+        mov_rr(a, rcx, rbx)
+        lea(a, rdx, rip("gui_pt"))
+        w_call(a, "ScreenToClient")
+        win_leave(a)
+        load32(a, rcx, rip("gui_pt"))
+        shifti(a, "shl", rcx, 32)
+        shifti(a, "sar", rcx, 32)
+        load32(a, rdx, rip_plus("gui_pt", 4))
+        shifti(a, "shl", rdx, 32)
+        shifti(a, "sar", rdx, 32)
+        call_to(a, "rt_ev_spot")
+        movi(a, rcx, 6)
+        app_send(a)
+        jmp_to(a, w_redraw)
+    end
     mark(a, w_redraw) # what happened may have drawn something: the window, drawn again
     win_enter(a)
     mov_rr(a, rcx, rbx)
@@ -13136,6 +13629,16 @@ to emit_gui with a, title
     alu(a, "sub", rax, rdx)
     mov_rr(a, rdx, rax)
     call_to(a, "rt_ev_spot")
+    if controls of a # s: a wheel, how many rows after where it is
+        set not_wheel to new_label(a)
+        alui(a, "cmp", r15, 115)
+        jcc(a, cc_ne, not_wheel)
+        call_to(a, "rt_ev_int")
+        store(a, rip("ev_c"), rax)
+        movi(a, rcx, 6)
+        jmp_to(a, ev_click)
+        mark(a, not_wheel)
+    end
     movi(a, rcx, 1)
     alui(a, "cmp", r15, 99) # c
     jcc(a, cc_e, ev_click)
@@ -13496,6 +13999,9 @@ to emit_gui with a, title
     if widgets of a
         emit_gui_widgets(a)
     end
+    if controls of a
+        emit_gui_controls(a)
+    end
 end
 
 # an event for the app's handlers: through its buttons and text boxes first, if it has any
@@ -13824,28 +14330,32 @@ to emit_gui_widgets with a
     set check_next to new_label(a)
     set check_gone to new_label(a)
     set check_done to new_label(a)
-    mark(a, "rt_focus_check")
-    load(a, rax, rip("box_focus"))
-    test_rr(a, rax, rax)
-    jcc(a, cc_e, check_done)
-    load(a, rcx, rip("pic_n"))
-    load(a, rsi, rip("pic_items"))
-    mark(a, check_loop)
-    test_rr(a, rcx, rcx)
-    jcc(a, cc_e, check_gone)
-    load(a, rdx, mem(rsi, 0))
-    alui(a, "cmp", rdx, 6)
-    jcc(a, cc_ne, check_next)
-    alu_load(a, "cmp", rax, mem(rsi, 40))
-    jcc(a, cc_e, check_done)
-    mark(a, check_next)
-    alui(a, "add", rsi, 64)
-    dec_r(a, rcx)
-    jmp_to(a, check_loop)
-    mark(a, check_gone)
-    storei(a, rip("box_focus"), 0)
-    mark(a, check_done)
-    ret(a)
+    if controls of a # see emit_focus_check
+        emit_focus_check(a)
+    else
+        mark(a, "rt_focus_check")
+        load(a, rax, rip("box_focus"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, check_done)
+        load(a, rcx, rip("pic_n"))
+        load(a, rsi, rip("pic_items"))
+        mark(a, check_loop)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, check_gone)
+        load(a, rdx, mem(rsi, 0))
+        alui(a, "cmp", rdx, 6)
+        jcc(a, cc_ne, check_next)
+        alu_load(a, "cmp", rax, mem(rsi, 40))
+        jcc(a, cc_e, check_done)
+        mark(a, check_next)
+        alui(a, "add", rsi, 64)
+        dec_r(a, rcx)
+        jmp_to(a, check_loop)
+        mark(a, check_gone)
+        storei(a, rip("box_focus"), 0)
+        mark(a, check_done)
+        ret(a)
+    end
 
     # rt_app_label: rcx what happened (3 a button clicked, 4 enter in a text box), r8 its label: each handler
     # of it that waits for that label, in order
@@ -13895,6 +14405,11 @@ to emit_gui_widgets with a
     set hit_loop to new_label(a)
     set hit_none to new_label(a)
     set hit_found to new_label(a)
+    set ev_list_key to new_label(a)
+    set ev_newline to new_label(a)
+    set hit_check to new_label(a)
+    set hit_list to new_label(a)
+    set scroll_hit to new_label(a)
     mark(a, "rt_app_event")
     for each r in list of rbx, r12, r13
         push_r(a, r)
@@ -13907,9 +14422,17 @@ to emit_gui_widgets with a
     jcc(a, cc_e, ev_typed)
     alui(a, "cmp", r12, 2)
     jcc(a, cc_e, ev_pass)
+    if controls of a # a wheel (6, ev_c rows at ev_a, ev_b): the list under it, as for a click
+        alui(a, "cmp", r12, 6)
+        jcc(a, cc_e, ev_click)
+    end
     load(a, rax, rip("box_focus")) # a key: the program's, unless a text box has the focus
     test_rr(a, rax, rax)
-    jcc(a, cc_e, ev_pass)
+    if controls of a # or a list
+        jcc(a, cc_e, ev_list_key)
+    else
+        jcc(a, cc_e, ev_pass)
+    end
     for each pair in list of (list of "backspace", ev_back), (list of "enter", ev_enter)
         lea(a, rdx, rip(text_object(a, item 1 of pair)))
         movi64(a, rcx, tag_text)
@@ -13921,6 +14444,11 @@ to emit_gui_widgets with a
     end
     jmp_to(a, ev_out)
     mark(a, ev_enter) # its handlers, with what's typed in it
+    if controls of a # unless it's a text area
+        load(a, rax, rip("box_most"))
+        alui(a, "cmp", rax, 40)
+        jcc(a, cc_ne, ev_newline)
+    end
     load(a, rax, rip("box_focus"))
     dec_r(a, rax)
     shifti(a, "shl", rax, 4)
@@ -13953,7 +14481,17 @@ to emit_gui_widgets with a
     alui(a, "cmp", rax, 5)
     jcc(a, cc_b, hit_loop)
     alui(a, "cmp", rax, 6)
-    jcc(a, cc_a, hit_loop)
+    if controls of a # or a checkbox, a text area or a list
+        set hit_kind to new_label(a)
+        jcc(a, cc_be, hit_kind)
+        alui(a, "cmp", rax, 10)
+        jcc(a, cc_b, hit_loop)
+        alui(a, "cmp", rax, 12)
+        jcc(a, cc_a, hit_loop)
+        mark(a, hit_kind)
+    else
+        jcc(a, cc_a, hit_loop)
+    end
     for each pair in list of (list of "ev_a", 8, 24), (list of "ev_b", 16, 32)
         movsd_load(a, xmm0, rip(item 1 of pair))
         ucomisd(a, xmm0, mem(rbx, item 2 of pair))
@@ -13963,9 +14501,21 @@ to emit_gui_widgets with a
         ucomisd(a, xmm0, reg_at(xmm1))
         jcc(a, cc_a, hit_loop)
     end
+    if controls of a
+        alui(a, "cmp", r12, 6)
+        jcc(a, cc_e, scroll_hit)
+    end
     load(a, rax, mem(rbx, 0))
     alui(a, "cmp", rax, 6)
     jcc(a, cc_e, hit_found)
+    if controls of a # a text area takes the focus as a text box does
+        alui(a, "cmp", rax, 11)
+        jcc(a, cc_e, hit_found)
+        alui(a, "cmp", rax, 10)
+        jcc(a, cc_e, hit_check)
+        alui(a, "cmp", rax, 12)
+        jcc(a, cc_e, hit_list)
+    end
     load(a, r8, mem(rbx, 56)) # a button: its handlers, and the focus stays where it is
     movi(a, rcx, 3)
     call_to(a, "rt_app_label")
@@ -13973,8 +14523,133 @@ to emit_gui_widgets with a
     mark(a, hit_found) # a text box: the focus
     load(a, rax, mem(rbx, 40))
     store(a, rip("box_focus"), rax)
+    if controls of a
+        storei(a, rip("list_focus"), 0)
+    end
     jmp_to(a, ev_out)
+    if controls of a
+        mark(a, hit_check) # a checkbox: ticked or unticked, then its handlers; the focus stays where it is
+        load(a, rax, mem(rbx, 40))
+        dec_r(a, rax)
+        shifti(a, "shl", rax, 4)
+        alu_load(a, "add", rax, rip("tk_items"))
+        load(a, rcx, mem(rax, 8))
+        alui(a, "xor", rcx, 1)
+        store(a, mem(rax, 8), rcx)
+        load(a, r8, mem(rbx, 56))
+        movi(a, rcx, 5)
+        call_to(a, "rt_app_label")
+        jmp_to(a, ev_out)
+        mark(a, hit_list) # a list: the focus, and the item there chosen, if there's one there
+        storei(a, rip("box_focus"), 0)
+        load(a, rcx, mem(rbx, 40))
+        store(a, rip("list_focus"), rcx)
+        movsd_load(a, xmm0, mem(rbx, 16)) # how many rows down from its top, from its first in view
+        sse_math(a, "+", xmm0, mem(rbx, 32))
+        sse_math(a, "-", xmm0, rip("ev_b"))
+        load_bits(a, xmm1, double_bytes(24))
+        sse_math(a, "/", xmm0, reg_at(xmm1))
+        cvttsd2si(a, rdx, xmm0)
+        dec_r(a, rcx)
+        shifti(a, "shl", rcx, 6)
+        alu_load(a, "add", rcx, rip("ls_items"))
+        alu_load(a, "add", rdx, mem(rcx, 32))
+        load(a, rax, mem(rcx, 8))
+        untag(a, rax)
+        alu_load(a, "cmp", rdx, mem(rax, 0))
+        jcc(a, cc_ae, ev_out)
+        load(a, rcx, mem(rbx, 40))
+        movsd_load(a, xmm0, mem(rbx, 32))
+        call_to(a, "rt_ls_choose")
+        movi(a, rcx, 6)
+        call_to(a, "rt_app_label")
+        jmp_to(a, ev_out)
+        mark(a, scroll_hit) # a wheel over a list scrolls it; over anything else, nothing
+        load(a, rax, mem(rbx, 0))
+        alui(a, "cmp", rax, 12)
+        jcc(a, cc_ne, ev_out)
+        load(a, rcx, mem(rbx, 40))
+        load(a, rdx, rip("ev_c"))
+        movsd_load(a, xmm0, mem(rbx, 32))
+        call_to(a, "rt_ls_scroll")
+        jmp_to(a, ev_out)
+        mark(a, ev_newline) # Enter in a text area: a new line in it, if there's room
+        load(a, rbx, rip("box_focus"))
+        dec_r(a, rbx)
+        shifti(a, "shl", rbx, 4)
+        alu_load(a, "add", rbx, rip("box_items"))
+        load(a, rax, mem(rbx, 8))
+        untag(a, rax)
+        load(a, rcx, mem(rax, 8))
+        alui(a, "cmp", rcx, 2000)
+        jcc(a, cc_ae, ev_out)
+        call_to(a, "rt_b_reset")
+        load(a, rax, mem(rbx, 8))
+        untag(a, rax)
+        load(a, rsi, mem(rax, 16))
+        load(a, rcx, mem(rax, 0))
+        call_to(a, "rt_b_bytes")
+        movi(a, rax, 10)
+        call_to(a, "rt_b_byte")
+        call_to(a, "rt_b_text")
+        store(a, mem(rbx, 8), rax)
+        jmp_to(a, ev_out)
+        mark(a, ev_list_key) # a list with the focus takes every key: up and down choose the item before or after
+        load(a, rax, rip("list_focus"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, ev_pass)
+        movi(a, r13, 0)
+        for each way in list of (list of "up", -1), (list of "down", 1)
+            set not_way to new_label(a)
+            lea(a, rdx, rip(text_object(a, item 1 of way)))
+            movi64(a, rcx, tag_text)
+            alu(a, "or", rdx, rcx)
+            load(a, rax, rip("ev_a"))
+            call_to(a, "rt_equal")
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, not_way)
+            movi(a, r13, item 2 of way)
+            mark(a, not_way)
+        end
+        test_rr(a, r13, r13)
+        jcc(a, cc_e, ev_out)
+        load(a, rbx, rip("list_focus"))
+        dec_r(a, rbx)
+        shifti(a, "shl", rbx, 6)
+        alu_load(a, "add", rbx, rip("ls_items"))
+        load(a, rcx, mem(rbx, 8)) # none, nothing to choose
+        untag(a, rcx)
+        load(a, rcx, mem(rcx, 0))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, ev_out)
+        set key_low to new_label(a)
+        set key_high to new_label(a)
+        load(a, rdx, mem(rbx, 24)) # from none chosen, before the first; no further than the first and the last
+        alu(a, "add", rdx, r13)
+        dec_r(a, rcx)
+        alu(a, "cmp", rdx, rcx)
+        jcc(a, cc_le, key_high)
+        mov_rr(a, rdx, rcx)
+        mark(a, key_high)
+        test_rr(a, rdx, rdx)
+        jcc(a, cc_ns, key_low)
+        movi(a, rdx, 0)
+        mark(a, key_low)
+        alu_load(a, "cmp", rdx, mem(rbx, 24))
+        jcc(a, cc_e, ev_out)
+        load(a, rcx, rip("list_focus"))
+        movsd_load(a, xmm0, rip("list_h"))
+        call_to(a, "rt_ls_choose")
+        movi(a, rcx, 6)
+        call_to(a, "rt_app_label")
+        jmp_to(a, ev_out)
+    end
     mark(a, hit_none) # neither: the focus goes, and the program gets the click
+    if controls of a # a wheel over none of them: nothing
+        alui(a, "cmp", r12, 6)
+        jcc(a, cc_e, ev_out)
+        storei(a, rip("list_focus"), 0)
+    end
     storei(a, rip("box_focus"), 0)
     mark(a, ev_pass)
     mov_rr(a, rcx, r12)
@@ -14033,7 +14708,11 @@ to emit_gui_widgets with a
     alui(a, "cmp", rax, 0x7F)
     jcc(a, cc_e, type_skip)
     mark(a, type_sized)
-    alui(a, "cmp", r14, 40)
+    if controls of a # 40, or 2000 in a text area
+        alu_load(a, "cmp", r14, rip("box_most"))
+    else
+        alui(a, "cmp", r14, 40)
+    end
     jcc(a, cc_ae, type_skip)
     inc_r(a, r14)
     mov_rr(a, rsi, r12)
@@ -14081,6 +14760,492 @@ to emit_gui_widgets with a
     store(a, mem(rbx, 8), rax)
     mark(a, back_done)
     pop_r(a, rbx)
+    ret(a)
+end
+
+# rt_focus_check, with checkboxes, text areas and lists (DESIGN §40): the focus goes if what has it isn't in
+# the picture any more. The last text box or text area drawn with the entry of the one with the focus says
+# how many letters it holds, in box_most: 40, or 2000 for a text area; the last list, how high it is, in
+# list_h.
+to emit_focus_check with a
+    mark(a, "rt_focus_check")
+    for each side in list of (list of "box_focus", 6, 11), (list of "list_focus", 12, 12)
+        set side_loop to new_label(a)
+        set side_kind to new_label(a)
+        set side_gone to new_label(a)
+        set side_done to new_label(a)
+        load(a, rax, rip(item 1 of side))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, side_done)
+        load(a, rcx, rip("pic_n"))
+        mov_rr(a, rsi, rcx)
+        shifti(a, "shl", rsi, 6)
+        alu_load(a, "add", rsi, rip("pic_items"))
+        mark(a, side_loop) # from the last drawn back
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, side_gone)
+        dec_r(a, rcx)
+        alui(a, "sub", rsi, 64)
+        load(a, rdx, mem(rsi, 0))
+        alui(a, "cmp", rdx, item 2 of side)
+        jcc(a, cc_e, side_kind)
+        alui(a, "cmp", rdx, item 3 of side)
+        jcc(a, cc_ne, side_loop)
+        mark(a, side_kind)
+        alu_load(a, "cmp", rax, mem(rsi, 40))
+        jcc(a, cc_ne, side_loop)
+        if item 2 of side is 6
+            storei(a, rip("box_most"), 40)
+            alui(a, "cmp", rdx, 11)
+            jcc(a, cc_ne, side_done)
+            storei(a, rip("box_most"), 2000)
+        else
+            load(a, rdx, mem(rsi, 32))
+            store(a, rip("list_h"), rdx)
+        end
+        jmp_to(a, side_done)
+        mark(a, side_gone)
+        storei(a, rip(item 1 of side), 0)
+        mark(a, side_done)
+    end
+    ret(a)
+end
+
+# xmm0 to xmm3, for rt_gui_px: the box of the thing drawn in rbx
+to item_box with a
+    for each pair in list of (list of xmm0, 8), (list of xmm1, 16), (list of xmm2, 24), (list of xmm3, 32)
+        movsd_load(a, item 1 of pair, mem(rbx, item 2 of pair))
+    end
+end
+
+# that box, xmm4 in from each side
+to inset_xmm4 with a
+    sse_math(a, "+", xmm0, reg_at(xmm4))
+    sse_math(a, "+", xmm1, reg_at(xmm4))
+    for each twice in list of 1, 2
+        sse_math(a, "-", xmm2, reg_at(xmm4))
+        sse_math(a, "-", xmm3, reg_at(xmm4))
+    end
+end
+
+# xmm0 to xmm3: a square `side` wide, `inset` in from the bottom left of the thing drawn in rbx
+to small_box with a, inset, side
+    movsd_load(a, xmm0, mem(rbx, 8))
+    movsd_load(a, xmm1, mem(rbx, 16))
+    if inset is not 0
+        load_bits(a, xmm4, double_bytes(inset))
+        sse_math(a, "+", xmm0, reg_at(xmm4))
+        sse_math(a, "+", xmm1, reg_at(xmm4))
+    end
+    load_bits(a, xmm2, double_bytes(side))
+    movapd(a, xmm3, xmm2)
+end
+
+# gui_t0, gui_t1: dx across and dy up from the bottom left of the thing drawn in rbx
+to item_spot with a, dx, dy
+    movsd_load(a, xmm0, mem(rbx, 8))
+    load_bits(a, xmm1, double_bytes(dx))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    load_bits(a, xmm1, double_bytes(dy))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+end
+
+# the text rt_gui_prep made ready, its left at gui_t0 and its baseline at gui_t1 in the picture's numbers, in
+# the colour in gui_tc (ARGB): drawn, with its left in the window in gui_tl, and its font let go
+to put_at with a
+    picture_x(a, xmm0, rip("gui_t0"))
+    movsd_store(a, rip("gui_tl"), xmm0)
+    picture_y(a, xmm1, rip("gui_t1"))
+    movsd_load(a, xmm0, rip("gui_tl"))
+    load32(a, rcx, rip("gui_tc"))
+    call_to(a, "rt_gui_put")
+    call_to(a, "rt_gui_unprep")
+end
+
+# What checkboxes, text areas and lists do in a window: chosen, scrolled and drawn.
+to emit_gui_controls with a
+    # rt_ls_choose: rcx a list's entry, from 1, rdx the place of one of its items, from 0, xmm0 the list's
+    # height: that item chosen, and in view; ev_a the item, and r8 the list's label, for its handlers
+    set choose_up to new_label(a)
+    set choose_kept to new_label(a)
+    mark(a, "rt_ls_choose")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    dec_r(a, rbx)
+    shifti(a, "shl", rbx, 6)
+    alu_load(a, "add", rbx, rip("ls_items"))
+    store(a, mem(rbx, 24), rdx)
+    push_r(a, rdx)
+    call_to(a, "rt_ls_rows")
+    pop_r(a, rdx)
+    load(a, rcx, mem(rbx, 32)) # above the first in view, it becomes the first; below the last, the last
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_l, choose_up)
+    mov_rr(a, r8, rcx)
+    alu(a, "add", r8, rax)
+    alu(a, "cmp", rdx, r8)
+    jcc(a, cc_l, choose_kept)
+    mov_rr(a, rcx, rdx)
+    alu(a, "sub", rcx, rax)
+    inc_r(a, rcx)
+    jmp_to(a, choose_kept)
+    mark(a, choose_up)
+    mov_rr(a, rcx, rdx)
+    mark(a, choose_kept)
+    push_r(a, rdx)
+    ls_keep_in_view(a)
+    pop_r(a, rdx)
+    load(a, rax, mem(rbx, 8))
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rax, rdx)
+    load(a, rax, mem(rax, 0))
+    store(a, rip("ev_a"), rax)
+    load(a, r8, mem(rbx, 0))
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_ls_scroll: rcx a list's entry, from 1, rdx how many rows to scroll it by, down, xmm0 its height
+    mark(a, "rt_ls_scroll")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    dec_r(a, rbx)
+    shifti(a, "shl", rbx, 6)
+    alu_load(a, "add", rbx, rip("ls_items"))
+    push_r(a, rdx)
+    call_to(a, "rt_ls_rows")
+    pop_r(a, rdx)
+    load(a, rcx, mem(rbx, 32))
+    alu(a, "add", rcx, rdx)
+    ls_keep_in_view(a)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_gui_check: the checkbox in rbx, as the playground draws one: a box 20 wide in the pen's colour, white
+    # inside, with a box 10 wide in the pen's colour in its middle while it's ticked, and its label after it
+    set no_tick to new_label(a)
+    mark(a, "rt_gui_check")
+    small_box(a, 0, 20)
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    small_box(a, 2, 16)
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    load(a, rax, mem(rbx, 40))
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("tk_items"))
+    load(a, rax, mem(rax, 8))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_tick)
+    small_box(a, 5, 10)
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    mark(a, no_tick)
+    load(a, rax, rip("gui_argb"))
+    store(a, rip("gui_tc"), rax)
+    load(a, rax, mem(rbx, 56))
+    call_to(a, "rt_gui_prep")
+    item_spot(a, 28, 4)
+    put_at(a)
+    ret(a)
+
+    # rt_gui_area: the text area in rbx, as the playground draws one: as a text box, but a line every 20 from
+    # 20 below its top, as many of its last lines as fit, and the cursor after the last
+    set has_words to new_label(a)
+    set count_loop to new_label(a)
+    set count_next to new_label(a)
+    set counted to new_label(a)
+    set fit_some to new_label(a)
+    set first_found to new_label(a)
+    set line_loop to new_label(a)
+    set end_loop to new_label(a)
+    set line_end to new_label(a)
+    set line_next to new_label(a)
+    set lines_done to new_label(a)
+    set cursor_after to new_label(a)
+    set no_cursor to new_label(a)
+    mark(a, "rt_gui_area")
+    for each r in list of rsi, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    item_box(a)
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    item_box(a) # inside the border, 2 wide
+    load_bits(a, xmm4, double_bytes(2))
+    inset_xmm4(a)
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    call_to(a, "rt_gui_clip")
+    load(a, rax, mem(rbx, 40)) # what's typed in it, in black, or its label in grey while it's empty
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("box_items"))
+    load(a, rax, mem(rax, 8))
+    mov_rr(a, rcx, rax)
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 0))
+    store(a, rip("gui_has"), rcx)
+    movi(a, rdx, 0xFF000000)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, has_words)
+    load(a, rax, mem(rbx, 56))
+    movi(a, rdx, 0xFF888888)
+    mark(a, has_words)
+    store(a, rip("gui_tc"), rdx)
+    untag(a, rax)
+    load(a, r12, mem(rax, 16)) # its bytes, from here
+    load(a, r13, mem(rax, 0))
+    alu(a, "add", r13, r12) # to here
+    movi(a, r14, 1) # its lines: one more than its new lines
+    mov_rr(a, rcx, r12)
+    mark(a, count_loop)
+    alu(a, "cmp", rcx, r13)
+    jcc(a, cc_ae, counted)
+    load8(a, rax, mem(rcx, 0))
+    alui(a, "cmp", rax, 10)
+    jcc(a, cc_ne, count_next)
+    inc_r(a, r14)
+    mark(a, count_next)
+    inc_r(a, rcx)
+    jmp_to(a, count_loop)
+    mark(a, counted)
+    movsd_load(a, xmm0, mem(rbx, 32)) # how many fit: its height less 8, over 20, and at least 1
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    load_bits(a, xmm1, double_bytes(20))
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    cvttsd2si(a, rax, xmm0)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ge, fit_some)
+    movi(a, rax, 1)
+    mark(a, fit_some)
+    alu(a, "sub", r14, rax) # the first line shown
+    jcc(a, cc_ns, first_found)
+    movi(a, r14, 0)
+    mark(a, first_found)
+    movi(a, r15, 0) # each line, from the first
+    storei(a, rip("gui_row"), 0) # and each one shown
+    storei(a, rip("gui_lw"), 0)
+    mark(a, line_loop)
+    mov_rr(a, rsi, r12)
+    mark(a, end_loop) # where it ends
+    alu(a, "cmp", rsi, r13)
+    jcc(a, cc_ae, line_end)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 10)
+    jcc(a, cc_e, line_end)
+    inc_r(a, rsi)
+    jmp_to(a, end_loop)
+    mark(a, line_end)
+    alu(a, "cmp", r15, r14)
+    jcc(a, cc_b, line_next)
+    mov_rr(a, rax, rsi) # it, as a text of its own
+    alu(a, "sub", rax, r12)
+    store(a, rip("gui_line"), rax)
+    storei(a, rip_plus("gui_line", 8), 0)
+    store(a, rip_plus("gui_line", 16), r12)
+    lea(a, rax, rip("gui_line"))
+    call_to(a, "rt_gui_prep")
+    movsd_load(a, xmm0, rip("gui_tw"))
+    movsd_store(a, rip("gui_lw"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 8)) # 8 in, its baseline 20 below the top and 20 more for each line above
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    load(a, rax, rip("gui_row"))
+    imul_ri(a, rax, rax, 20)
+    alui(a, "add", rax, 20)
+    cvtsi2sd(a, xmm1, rax)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    sse_math(a, "+", xmm0, mem(rbx, 32))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    put_at(a)
+    alu_at(a, "add", rip("gui_row"), 1)
+    mark(a, line_next)
+    inc_r(a, r15)
+    alu(a, "cmp", rsi, r13)
+    jcc(a, cc_ae, lines_done)
+    mov_rr(a, r12, rsi)
+    inc_r(a, r12)
+    jmp_to(a, line_loop)
+    mark(a, lines_done)
+    load(a, rax, mem(rbx, 40)) # the cursor, while it has the focus: 1 after the last line, 2 wide, 18 high
+    alu_load(a, "cmp", rax, rip("box_focus"))
+    jcc(a, cc_ne, no_cursor)
+    load(a, rax, rip("gui_has"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, cursor_after)
+    storei(a, rip("gui_row"), 1) # empty: where its first line starts
+    storei(a, rip("gui_lw"), 0)
+    mark(a, cursor_after)
+    movsd_load(a, xmm0, mem(rbx, 8))
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    picture_x(a, xmm0, rip("gui_t0"))
+    sse_math(a, "+", xmm0, rip("gui_lw"))
+    times_scale(a, xmm1, 1)
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_fx"), xmm0)
+    load(a, rax, rip("gui_row")) # its top: 6 below the area's top, and 20 more for each line above the last
+    dec_r(a, rax)
+    imul_ri(a, rax, rax, 20)
+    alui(a, "add", rax, 6)
+    cvtsi2sd(a, xmm1, rax)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    sse_math(a, "+", xmm0, mem(rbx, 32))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    picture_y(a, xmm0, rip("gui_t1"))
+    movsd_store(a, rip("gui_fy"), xmm0)
+    times_scale(a, xmm0, 2)
+    movsd_store(a, rip("gui_fw"), xmm0)
+    times_scale(a, xmm0, 18)
+    movsd_store(a, rip("gui_fh"), xmm0)
+    movi(a, rcx, 0xFF000000)
+    call_to(a, "rt_gui_fill")
+    mark(a, no_cursor)
+    call_to(a, "rt_gui_unclip")
+    for each r in list of r15, r14, r13, r12, rsi
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_gui_list: the list in rbx, as the playground draws one: white, in a border of the pen's colour, 3 wide
+    # while it has the focus and else 2; a row every 24 from its top, the chosen one in the pen's colour with
+    # its text in white; and while they don't all fit, a bar at its right for where the rows in view are
+    set thin to new_label(a)
+    set row_loop to new_label(a)
+    set not_chosen to new_label(a)
+    set rows_done to new_label(a)
+    set no_bar to new_label(a)
+    mark(a, "rt_gui_list")
+    for each r in list of r12, r13, r14, r15
+        push_r(a, r)
+    end
+    load(a, r12, mem(rbx, 40)) # its entry
+    dec_r(a, r12)
+    shifti(a, "shl", r12, 6)
+    alu_load(a, "add", r12, rip("ls_items"))
+    load(a, rax, mem(r12, 16))
+    untag(a, rax)
+    load(a, r13, mem(rax, 0)) # how many items
+    movsd_load(a, xmm0, mem(rbx, 32))
+    call_to(a, "rt_ls_rows")
+    mov_rr(a, r14, rax) # how many rows
+    item_box(a)
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    movi(a, rax, 2)
+    load(a, rcx, mem(rbx, 40))
+    alu_load(a, "cmp", rcx, rip("list_focus"))
+    jcc(a, cc_ne, thin)
+    movi(a, rax, 3)
+    mark(a, thin)
+    cvtsi2sd(a, xmm4, rax)
+    item_box(a)
+    inset_xmm4(a)
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    call_to(a, "rt_gui_clip")
+    movi(a, r15, 0)
+    mark(a, row_loop)
+    alu(a, "cmp", r15, r14)
+    jcc(a, cc_ae, rows_done)
+    load(a, rax, mem(r12, 32)) # the item's place: the first in view's, and the row's
+    alu(a, "add", rax, r15)
+    alu(a, "cmp", rax, r13)
+    jcc(a, cc_ae, rows_done)
+    store(a, rip("gui_row"), rax)
+    mov_rr(a, rax, r15) # the row's bottom: 24 below the top for each row down to it
+    inc_r(a, rax)
+    imul_ri(a, rax, rax, 24)
+    cvtsi2sd(a, xmm1, rax)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    sse_math(a, "+", xmm0, mem(rbx, 32))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    movi(a, rax, 0xFF000000)
+    store(a, rip("gui_tc"), rax)
+    load(a, rax, rip("gui_row"))
+    alu_load(a, "cmp", rax, mem(r12, 24))
+    jcc(a, cc_ne, not_chosen)
+    movsd_load(a, xmm0, mem(rbx, 8)) # the chosen one: its row in the pen's colour, its text in white
+    movsd_load(a, xmm1, rip("gui_t1"))
+    movsd_load(a, xmm2, mem(rbx, 24))
+    load_bits(a, xmm3, double_bytes(24))
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    movi(a, rax, 0xFFFFFFFF)
+    store(a, rip("gui_tc"), rax)
+    mark(a, not_chosen)
+    load(a, rax, mem(r12, 16)) # its text, 8 in, its baseline 7 up from the row's bottom
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    load(a, rcx, rip("gui_row"))
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    load(a, rax, mem(rax, 0))
+    call_to(a, "rt_gui_prep")
+    movsd_load(a, xmm0, mem(rbx, 8))
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    movsd_load(a, xmm0, rip("gui_t1"))
+    load_bits(a, xmm1, double_bytes(7))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    put_at(a)
+    inc_r(a, r15)
+    jmp_to(a, row_loop)
+    mark(a, rows_done)
+    alu(a, "cmp", r13, r14) # the bar: 3 wide, 6 in from the right, as long against the list's height as the
+    jcc(a, cc_be, no_bar) # rows are against the items, and as far down as the first in view is among them
+    movsd_load(a, xmm0, mem(rbx, 32))
+    cvtsi2sd(a, xmm1, r14)
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    cvtsi2sd(a, xmm1, r13)
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 32))
+    load(a, rax, mem(r12, 32))
+    cvtsi2sd(a, xmm1, rax)
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    cvtsi2sd(a, xmm1, r13)
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    movsd_load(a, xmm1, mem(rbx, 16))
+    sse_math(a, "+", xmm1, mem(rbx, 32))
+    sse_math(a, "-", xmm1, reg_at(xmm0))
+    sse_math(a, "-", xmm1, rip("gui_t0"))
+    movsd_load(a, xmm0, mem(rbx, 8))
+    sse_math(a, "+", xmm0, mem(rbx, 24))
+    load_bits(a, xmm2, double_bytes(6))
+    sse_math(a, "-", xmm0, reg_at(xmm2))
+    load_bits(a, xmm2, double_bytes(3))
+    movsd_load(a, xmm3, rip("gui_t0"))
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    mark(a, no_bar)
+    call_to(a, "rt_gui_unclip")
+    for each r in list of r15, r14, r13, r12
+        pop_r(a, r)
+    end
     ret(a)
 end
 
@@ -19824,6 +20989,7 @@ to emit_runtime with st
     set net of a to uses_read of st
     set pictures of a to uses_pictures of st
     set widgets of a to uses_widgets of st
+    set controls of a to uses_controls of st
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
     if uses_clock of st # the clock starts with the program
@@ -19908,6 +21074,9 @@ to emit_runtime with st
         end
         if uses_pictures of st
             add (list of "gdiplus.dll", picture_imports) to wanted
+        end
+        if controls of a # where a wheel turned, in the window
+            add (list of "USER32.dll", (list of "ScreenToClient")) to wanted
         end
     end
     if uses_random of st
@@ -20027,6 +21196,13 @@ to emit_runtime with st
                 reserve(a, name, 8, 8)
             end
             reserve(a, "gui_bbox", 16, 16)
+            if controls of a # and checkboxes, text areas and lists: a line of a text area as a text, and where a wheel is
+                for each name in list of "gui_tc", "gui_row", "gui_lw", "gui_has"
+                    reserve(a, name, 8, 8)
+                end
+                reserve(a, "gui_line", 24, 16)
+                reserve(a, "gui_pt", 16, 16)
+            end
         end
     end
     if uses_pictures of st # the decoder's numbers and tables, which are never values
@@ -20065,9 +21241,17 @@ to emit_runtime with st
             reserve(a, name, 8, 8)
         end
     end
+    if controls of a # each checkbox's label and tick, each list's, and the list with the focus (DESIGN §40)
+        for each name in list of "tk_items", "tk_n", "tk_cap", "ls_items", "ls_n", "ls_cap", "list_focus", "box_most", "list_h"
+            reserve(a, name, 8, 8)
+        end
+    end
     if windowed
         for each name in list of "ev_a", "ev_b", "pad_q", "pad_pts"
             reserve(a, name, 8, 8)
+        end
+        if controls of a # how many rows a wheel turned
+            reserve(a, "ev_c", 8, 8)
         end
     end
     if uses_order of st or uses_saving of st # values, and memory that holds them, while they're worked on
@@ -24825,13 +26009,14 @@ end
 
 # `move forward 10`, `pen color "red"`, `draw box at x, y size w by h` and the rest: the value, if there is
 # one, then what to do with it, as vm.js's TURTLE_ACTIONS counts them
-# the controls DESIGN §40 has, which machine code doesn't draw yet
-set later_widgets to dictionary where "checkbox" is yes, "tick" is yes, "untick" is yes, "text area" is yes, "list" is yes
+# the controls DESIGN §40 has: checkboxes, text areas and lists
+set control_actions to dictionary where "checkbox" is yes, "tick" is yes, "untick" is yes, "text area" is yes, "list" is yes
 
 to gen_turtle with fc, s
     set a to a of fc
-    if action of s is in later_widgets
-        not_yet(at of s, "a checkbox, a text area or a list")
+    if action of s is in control_actions
+        set uses_widgets of st of fc to yes
+        set uses_controls of st of fc to yes
     end
     if action of s is "chart"
         set charts of a to yes
@@ -24868,6 +26053,9 @@ to gen_handler with fc, s
     set labelled to kind of s is "when" and label of s is not nothing
     if labelled # the button or text box it waits for, as `say` shows it, worked out first
         set uses_widgets of st of fc to yes
+        if event of s is "checkbox" or event of s is "choice"
+            set uses_controls of st of fc to yes
+        end
         gen_expr(fc, label of s)
         call_to(a, "rt_show_text")
         movq_xr(a, xmm0, rax)
@@ -26767,7 +27955,8 @@ to new_state with a, program_name, files, source, target
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
-        uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no
+        uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
+        uses_controls no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -27503,8 +28692,6 @@ to gen_statement with fc, s
         gen_exit(fc, s)
     else if what is "turtle"
         gen_turtle(fc, s)
-    else if what is "when" and (event of s is "checkbox" or event of s is "choice")
-        not_yet(at of s, "a checkbox, a text area or a list")
     else if what is "when" or what is "every"
         gen_handler(fc, s)
     else if what is "wait"
@@ -29416,7 +30603,8 @@ set builtin_routines to dictionary where "position" is "rt_position", "split" is
     "number" is "rt_number", "bit and" is "rt_bit_and", "bit or" is "rt_bit_or", "bit xor" is "rt_bit_xor",
     "shift left" is "rt_shift_left", "shift right" is "rt_shift_right", "bytes" is "rt_bytes_of",
     "as bytes" is "rt_as_bytes", "as text" is "rt_as_text", "as hex" is "rt_as_hex", "as binary" is "rt_as_binary",
-    "uppercase" is "rt_upper", "lowercase" is "rt_lower", "text in box" is "rt_box_text"
+    "uppercase" is "rt_upper", "lowercase" is "rt_lower", "text in box" is "rt_box_text", "ticked" is "rt_ticked",
+    "choice in list" is "rt_choice"
 
 # Each also gives what kind of value it is when it works: "whole", "number" or "value" (see the facts,
 # above). What a function call does to what's known happens here as well, in the order the code runs.
@@ -29621,9 +30809,12 @@ to gen_expr with fc, e
         if name of e is "uppercase" or name of e is "lowercase"
             set uses_case of st of fc to yes
         end
-        if name of e is "text in box"
+        if name of e is "text in box" or name of e is "ticked" or name of e is "choice in list"
             set uses_widgets of st of fc to yes
             set uses_drawing of st of fc to yes
+            if name of e is not "text in box"
+                set uses_controls of st of fc to yes
+            end
         end
         set inputs to args of e
         if length of inputs is 1

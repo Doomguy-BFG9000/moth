@@ -574,7 +574,7 @@ Did you mean 'total'?</pre></div>
           pen.restore();
           if (ticks.get(d.label)) pen.fillRect(d.x + 5, d.y + 5, 10, 10);
           write(d.label, d.x + 28, d.y + 4, 16);
-        } else if (d.shape === "textarea") { // as a text box, a line every 18, showing its last lines
+        } else if (d.shape === "textarea") { // as a text box, a line every 20, showing its last lines
           const { text, focused } = boxes.get(d.label);
           pen.fillRect(d.x, d.y, d.width, d.height);
           pen.save();
@@ -583,15 +583,15 @@ Did you mean 'total'?</pre></div>
           pen.beginPath();
           pen.rect(d.x + 2, d.y + 2, d.width - 4, d.height - 4);
           pen.clip();
-          const rows = Math.max(1, Math.floor((d.height - 8) / 18));
+          const rows = Math.max(1, Math.floor((d.height - 8) / 20));
           const lines = (text || d.label).split("\n").slice(-rows);
           pen.fillStyle = text ? "#000000" : "#888888"; // its label in grey while it's empty
-          lines.forEach((line, i) => write(line, d.x + 8, d.y + d.height - 18 - 18 * i, 14));
+          lines.forEach((line, i) => write(line, d.x + 8, d.y + d.height - 20 - 20 * i, 16));
           if (focused) { // the cursor, after the last letter
-            pen.font = "14px system-ui, sans-serif";
+            pen.font = "16px system-ui, sans-serif";
             const last = text ? lines.at(-1) : "";
             pen.fillStyle = "#000000";
-            pen.fillRect(d.x + 9 + pen.measureText(last).width, d.y + d.height - 22 - 18 * (text ? lines.length - 1 : 0), 2, 16);
+            pen.fillRect(d.x + 9 + pen.measureText(last).width, d.y + d.height - 24 - 20 * (text ? lines.length - 1 : 0), 2, 18);
           }
           pen.restore();
         } else if (d.shape === "list") { // a row every 24 from the top, the chosen one in the pen's colour

@@ -1351,6 +1351,50 @@ test("apps/todo.moth builds, adds what's typed to its list, and draws it", { ski
   assert.equal(at(12, 202), "#4f8ff7"); // and the Add button
 });
 
+// ---------- checkboxes, text areas and lists ----------
+
+// moth.test.js's program with each of them (DESIGN §40), and another whose list's items change after it's
+// drawn and whose picture is drawn again; "scroll x y rows" is a wheel, as app.send("scroll", ...) has it
+const CONTROLS = "set fruits to list of \"apple\", \"banana\", \"cherry\", \"date\", \"elderberry\", \"fig\", \"grape\", \"kiwi\"\nto show\n    clear\n    draw checkbox \"Dark\" at -200, 200\n    draw text area \"Notes\" at -200, 50 size 250 by 100\n    draw list \"Fruits\" showing fruits at 100, 0 size 150 by 96\n    draw button \"Save\" at -200, 0\n    draw button \"Deep\" at -100, 0\nend\nto deep with n\n    if n is 0\n        return 0\n    end\n    return deep(n - 1)\nend\nshow()\ntick the checkbox \"Dark\"\nsay \"at the start \" the checkbox \"Dark\" is ticked \" \" the choice in the list \"Fruits\"\nwhen the checkbox \"Dark\" is clicked\n    say \"dark \" the checkbox \"Dark\" is ticked \" \" the checkbox \"Dark\" is not ticked\n    show()\nend\nwhen an item is chosen in the list \"Fruits\" with fruit\n    say \"chose \" fruit \" \" the choice in the list \"Fruits\"\n    show()\nend\nwhen the button \"Save\" is clicked\n    say \"notes [\" the text in the text area \"Notes\" \"]\"\n    clear the text area \"Notes\"\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" deep(5000)\nend\nwhen the mouse is clicked with x and y\n    say \"click \" x \" \" y\nend\nwhen a key is pressed with key\n    say \"key \" key\nend";
+const CONTROL_EVENTS = [
+  [CONTROLS, "click -195 205;click -150 100;type Hello;key enter;type world;key backspace;click 110 90;key down;click -95 15;key down;key down;key down;scroll 110 50 10;scroll 0 -200 3;key up;key x;click -195 15;click 110 2;click 0 -200;key y;click -150 100;key enter;key enter;type z"],
+  ["set things to list of \"a\", \"b\"\ndraw list 5 showing things at 0, 0 size 100 by 48\nadd \"c\" to things\nwhen an item is chosen in the list \"5\" with it\n    say \"chose \" + it + \" \" + (the choice in the list 5)\nend\nwhen the checkbox 2 is clicked\n    say \"ticked \" + (the checkbox 2 is ticked)\nend\ndraw checkbox 2 at -100, -100\ndraw text area \"A\" at -200, 100 size 150 by 30\nwhen a key is pressed with key\n    say \"key \" + key\nend\nwhen the mouse is clicked with x and y\n    say \"click \" + x + \" \" + y\n    if x is greater than 200\n        clear\n        draw list 5 showing things at 0, 0 size 100 by 24\n        draw text box \"A\" at -200, -200\n    end\nend\nwhen enter is pressed in the text box \"A\" with words\n    say \"enter [\" + words + \"]\"\nend", "click 10 5;click 10 40;key up;key up;key down;key down;key down;click -95 -95;click -95 -95;scroll 10 10 -5;scroll 10 10 5;click 220 0;key down;key down;key up;scroll 10 10 -1;click -190 110;type one two;key enter;type three;key enter;key enter;type four;click 210 0;key enter;click -190 -190;key enter;type x;key enter"],
+  [CONTROLS, "click 110 90;key up;key up;scroll 110 50 -2;scroll 110 50 100;key down;click 110 1;click -150 60;type aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;key enter;key enter;key enter;type bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;click -95 15"],
+];
+
+test("checkboxes, text areas and lists in the window take clicks, keys and the wheel as app.send does on the JavaScript engine", { skip: onWindows }, () => {
+  for (const [source, events] of CONTROL_EVENTS) {
+    const got = picture(source, events);
+    assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, appOnEngine(source, events), events);
+  }
+});
+
+test("checkboxes, text areas and lists are drawn as the playground draws them", { skip: onWindows }, () => {
+  const BLUE = "#4f8ff7";
+  const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+  const dark = (c) => rgb(c).every((v) => v < 64);
+  const count = (at, x0, x1, y0, y1, test) => {
+    let n = 0;
+    for (let x = x0; x < x1; x++) for (let y = y0; y < y1; y++) if (test(at(x, y))) n++;
+    return n;
+  };
+  const start = picture(CONTROLS).at;
+  assert.deepEqual([start(-199, 201), start(-197, 203), start(-190, 210), start(-181, 201)], [BLUE, "#ffffff", BLUE, BLUE]); // ticked
+  assert.ok(count(start, -172, -130, 202, 222, (c) => c === BLUE) > 10, "the checkbox's label, in the pen's colour");
+  assert.deepEqual([start(-199, 51), start(49, 149), start(-190, 60), start(51, 100)], [BLUE, BLUE, "#ffffff", BACKGROUND]); // the text area
+  assert.ok(count(start, -192, -140, 126, 146, (c) => rgb(c).every((v) => v > 100 && v < 200)) > 10, "its label in grey while it's empty");
+  assert.deepEqual([start(101, 1), start(103, 50), start(245, 90), start(245, 30)], [BLUE, "#ffffff", BLUE, "#ffffff"]); // the list, and where its rows are
+  assert.ok(count(start, 108, 160, 74, 92, dark) > 10, "its first item, in black");
+
+  const after = picture(CONTROLS, "click -195 205;click -150 100;type Hello;key enter;type world;click 110 90;key down;key down;key down;key down;key down;key down;key down").at;
+  assert.equal(after(-190, 210), "#ffffff"); // unticked
+  assert.ok(count(after, -192, -140, 126, 146, dark) > 10, "the first line typed");
+  assert.ok(count(after, -192, -140, 106, 126, dark) > 10, "and the second, below it");
+  assert.equal(after(102, 50), BLUE); // the list has the focus: a border 3 wide
+  assert.deepEqual([after(200, 10), after(200, 30), after(245, 40), after(245, 60)], [BLUE, "#ffffff", BLUE, "#ffffff"]); // kiwi, chosen, in the last row; the bar lower down
+  assert.ok(count(after, 108, 160, 4, 20, (c) => c === "#ffffff") > 10, "the chosen item's text, in white");
+});
+
 // ---------- sound ----------
 // With MOTH_SOUND=file.wav, a program's sounds go into that file instead of to the speakers: byte for byte the
 // WAV soundWav makes of the sounds the JavaScript engine played, and whole up to a mistake. Away from a
