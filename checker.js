@@ -319,6 +319,11 @@ class Checker extends Scope {
         if (!s.value) return;
         this.expr(s.value);
         const action = TURTLE_ACTIONS.indexOf(s.action);
+        if (s.action === "picture") { // whether a file is a picture isn't known: only what is neither a name nor bytes is sure to fail
+          const type = this.type(s.value.items[0]);
+          this.willFail(s.at, () => this.known(type()) && type() !== "text" && type() !== "bytes" && new Turtle().act(action, [SAMPLES[type()], 0, 0, null, null], found));
+          return;
+        }
         if (s.value.kind === "list" && s.action !== "forward") return; // `move to`, `draw ...`: what's in the list isn't known
         const value = this.type(s.value);
         // the width check depends on the value, so it only runs when the width is written out

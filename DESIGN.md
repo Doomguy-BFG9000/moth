@@ -1534,3 +1534,33 @@ hold them to agreeing.
   uses the program's own text for each field's name, since machine code finds a
   field by which text its name is, so `name of person` works on a record that
   `load` made.
+
+## 37. Pictures from files
+
+- **The phrase.** `draw picture "cat.png" at x, y` draws a PNG or BMP with its
+  bottom left corner at x, y, as `draw box` puts a box, and `size w by h`
+  stretches it. It can draw bytes the program already has, too:
+  `draw picture read bytes "cat.png" at 0, 0`. `picture` is still a name:
+  `draw picture at 0, 0` draws the text a variable called `picture` holds.
+  A picture is drawn with its pixels sharp, however big, which suits sprites.
+- **One decoder of Moth's own.** pictures.js reads PNGs (zlib, every filter,
+  every colour type and bit depth, palettes, transparency and interlacing) and
+  BMPs (1 to 32 bits, with masks), so the playground, every engine and the tests
+  get the same pixels whatever the browser is. machine.moth has the same decoder
+  in machine code, written step for step as the JavaScript one, so a broken file
+  stops at the same mistake in the same words: "'x.png' is a broken PNG: a
+  chunk's checksum is wrong". Windows' GDI+ could have read the files, but then
+  Linux, the tests and the playground would each read them their own way.
+- **Reading is reading.** A picture is read as `read bytes` reads a file, with
+  the same `--allow-read` rules, questions and refusals.
+- **In the window.** A picture is drawn with its see-through pixels blended over
+  what's under it, and made smaller with the rest of a drawing that doesn't fit.
+- **The playground's files.** Files picks pictures (or any file) for a program
+  to read by name, and they can be dropped on the playground too; a picture gets
+  a button that puts a line drawing it in the code. They stay on the page.
+- **Tested.** Small PNGs and BMPs are made in the tests, in every colour type,
+  depth and kind of BMP, with the pixels each must come out as worked out apart
+  from the decoder: every engine draws exactly those, machine code draws them
+  pixel for pixel (blended where they can be seen through), and 350 broken
+  files stop at the same mistake everywhere, on Windows and on Linux.
+

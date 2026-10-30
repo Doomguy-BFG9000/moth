@@ -169,6 +169,11 @@
     #canvas { display: block; width: min(100% - 28px, 440px); aspect-ratio: 1; margin: 14px auto; background: radial-gradient(circle at 50% 45%, #10172d, #080c18 75%); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 0 46px -20px #f4b54a55; touch-action: none; }
     #canvas:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
     #bytecode { color: #9aa1ba; }
+    #files { margin: 0; padding: 6px 0; list-style: none; font: 13px/1.5 var(--mono); }
+    #files li { display: flex; align-items: center; gap: 8px; padding: 2px 14px; }
+    #files li span { flex: 1; overflow-wrap: anywhere; } #files small { color: var(--faint); }
+    #files button { padding: 1px 9px; font-size: 12px; }
+    .playground.dropping { outline: 2px dashed var(--amber); outline-offset: -6px; }
 
     /* status bar: quiet normally, lamp-lit while debugging */
     .status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 28px; padding: 3px 14px; background: var(--panel); border-top: 1px solid var(--border); color: var(--dim); font-size: 12.5px; }
@@ -298,6 +303,8 @@ Did you mean 'total'?</pre></div>
     <button id="stop" type="button" disabled>■ Stop</button>
     <button id="share" type="button">⤴ Share</button>
     <button id="tidy" type="button" title="Indents, spaces and blank lines, the one way Moth writes them">✎ Tidy</button>
+    <button id="add-files" type="button" title="Files a program can read by name, like pictures for draw picture: pick them here, or drop them on the playground">🗀 Files</button>
+    <input id="file-picker" type="file" multiple hidden>
     <label class="toggle">Engine
       <select id="engine" title="All three run the same program the same way, at different speeds">
         <option value="jit">JIT (JavaScript)</option>
@@ -345,6 +352,10 @@ Did you mean 'total'?</pre></div>
         <div class="title">Problems · found without running</div>
         <ul id="problems"></ul>
       </div>
+      <div id="files-view" hidden>
+        <div class="title">Files · a program reads them by name</div>
+        <ul id="files"></ul>
+      </div>
       <div>
         <div class="title">Output</div>
         <pre id="output" aria-live="polite"></pre>
@@ -386,7 +397,7 @@ Did you mean 'total'?</pre></div>
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
       + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width "
-      + "table total average largest smallest chart").split(" "));
+      + "table total average largest smallest chart picture").split(" "));
     // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
@@ -491,7 +502,7 @@ Did you mean 'total'?</pre></div>
     // Draws what the program drew (lines, filled shapes and text: see Turtle in vm.js) from its last `clear`
     // on, with Moth's (0, 0) in the middle and y going up, zoomed out if `fitTo` reaches past the edge.
     const sinceClear = (items) => items.slice(items.findLastIndex((d) => d.clear) + 1);
-    const reachOf = (d) => (d.shape === "box" ? Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.x + d.width), Math.abs(d.y + d.height))
+    const reachOf = (d) => (d.shape === "box" || d.shape === "picture" ? Math.max(Math.abs(d.x), Math.abs(d.y), Math.abs(d.x + d.width), Math.abs(d.y + d.height))
       : d.shape === "circle" ? Math.max(Math.abs(d.x), Math.abs(d.y)) + d.radius
       : d.shape === "text" ? Math.max(Math.abs(d.x), Math.abs(d.y) + d.size)
       : d.clear ? 0 : Math.max(Math.abs(d.x1), Math.abs(d.y1), Math.abs(d.x2), Math.abs(d.y2)));
@@ -520,6 +531,13 @@ Did you mean 'total'?</pre></div>
           pen.font = `${d.size}px system-ui, sans-serif`;
           pen.fillText(d.text, 0, 0);
           pen.restore();
+        } else if (d.shape === "picture") { // the right way up too, its pixels sharp however big it's drawn
+          pen.save();
+          pen.translate(d.x, d.y + d.height);
+          pen.scale(1, -1);
+          pen.imageSmoothingEnabled = false;
+          pen.drawImage(drawable(d.image), 0, 0, d.width, d.height);
+          pen.restore();
         } else {
           pen.beginPath();
           pen.lineWidth = d.width;
@@ -528,6 +546,19 @@ Did you mean 'total'?</pre></div>
           pen.stroke();
         }
       }
+    }
+
+    // A picture from a file (see decodePicture in pictures.js), on a canvas of its own, made the first time
+    // it's drawn: a sprite a game draws every frame is the same image each time.
+    const drawables = new WeakMap();
+    function drawable(image) {
+      if (!drawables.has(image)) {
+        const canvas = Object.assign(document.createElement("canvas"), { width: image.width, height: image.height });
+        const pixels = new Uint8ClampedArray(image.pixels.buffer, image.pixels.byteOffset, image.pixels.length);
+        canvas.getContext("2d").putImageData(new ImageData(pixels, image.width, image.height), 0, 0);
+        drawables.set(image, canvas);
+      }
+      return drawables.get(image);
     }
 
     // at most once a frame, however fast an app draws
@@ -656,8 +687,11 @@ Did you mean 'total'?</pre></div>
       stopButton.disabled = false;
       let [skipLines, skipDrawn] = [shownLines, shownDrawn]; // shown by the runs before this one
       const current = (worker = new Worker("./worker.js", { type: "module" }));
+      const pictures = new Map(); // each picture this run drew, by the number its drawing has (see worker.js)
       current.onmessage = ({ data }) => {
         if (worker !== current) return; // a message from a run that was already replaced
+        for (const [id, image] of data.pictures ?? []) pictures.set(id, image);
+        if (data.drawn) data.drawn = data.drawn.map((d) => (d.shape === "picture" ? { ...d, image: pictures.get(d.image) } : d));
         if (data.lines?.length) {
           const skip = Math.min(skipLines, data.lines.length);
           skipLines -= skip;
@@ -695,7 +729,7 @@ Did you mean 'total'?</pre></div>
       current.onerror = (e) => fail(`Error: ${e.message || "the program stopped unexpectedly"}`); // e.g. it ran out of memory
       const source = code.value;
       fetchUses(source).then(() => {
-        if (worker === current) current.postMessage({ source, engine: $("engine").value, answers, files: Object.fromEntries(usedFiles), seed });
+        if (worker === current) current.postMessage({ source, engine: $("engine").value, answers, files: Object.fromEntries(usedFiles), seed, disk: Object.fromEntries(pageFiles) });
       });
     }
 
@@ -821,7 +855,7 @@ Did you mean 'total'?</pre></div>
       output.classList.remove("error");
       render((drawing = []));
       try {
-        trace = timeline(code.value, { answers: answers.map((a) => a.text), files, disk: memoryDisk(), random: seeded(seed) }); // the answers given when it last ran
+        trace = timeline(code.value, { answers: answers.map((a) => a.text), files, disk: memoryDisk(Object.fromEntries(pageFiles)), random: seeded(seed) }); // the answers given when it last ran
       } catch (err) {
         if (!(err instanceof MothError)) throw err;
         output.classList.add("error");
@@ -944,6 +978,59 @@ Did you mean 'total'?</pre></div>
     }
     $("compiled").onchange = showCompiled;
     $("engine").onchange = runCode;
+
+    // Files a program can read, by name, as if they were in its folder: picked with Files, or dropped on the
+    // playground. Each run gets them as they are here, and what it writes lasts only that run. They stay on
+    // this page: nothing is sent anywhere, and a shared link has only the code.
+    const pageFiles = new Map(); // name: bytes
+    const sizeOf = (n) => (n < 1024 ? `${n} bytes` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+    function showFiles() {
+      $("files-view").hidden = !pageFiles.size;
+      $("files").replaceChildren(...[...pageFiles].map(([name, bytes]) => {
+        const li = document.createElement("li");
+        const label = Object.assign(document.createElement("span"), { textContent: `${name} ` });
+        label.append(Object.assign(document.createElement("small"), { textContent: sizeOf(bytes.length) }));
+        li.append(label);
+        if (/\.(png|bmp)$/i.test(name)) { // a picture: a button that puts a line drawing it in the code
+          const line = `draw picture ${JSON.stringify(name)} at 0, 0`;
+          li.append(Object.assign(document.createElement("button"), { type: "button", textContent: "+ draw", title: `Put '${line}' in the code`, onclick: () => {
+            code.focus();
+            const text = (code.selectionStart && code.value[code.selectionStart - 1] !== "\n" ? "\n" : "") + line + "\n";
+            if (!document.execCommand("insertText", false, text)) {
+              code.setRangeText(text, code.selectionStart, code.selectionEnd, "end");
+              refreshEditor();
+            }
+          } }));
+        }
+        li.append(Object.assign(document.createElement("button"), { type: "button", textContent: "✕", title: `Take ${name} away`, onclick: () => {
+          pageFiles.delete(name);
+          showFiles();
+        } }));
+        return li;
+      }));
+    }
+    async function addFiles(list) {
+      const added = [...list];
+      for (const file of added) pageFiles.set(file.name, new Uint8Array(await file.arrayBuffer()));
+      showFiles();
+      if (added.length) status.textContent = `${added.length === 1 ? added[0].name : `${added.length} files`} added: a program reads ${added.length === 1 ? "it" : "them"} by name`;
+    }
+    $("add-files").onclick = () => $("file-picker").click();
+    $("file-picker").onchange = () => addFiles($("file-picker").files).finally(() => ($("file-picker").value = ""));
+    const dragsFiles = (e) => e.dataTransfer?.types.includes("Files");
+    $("playground").ondragover = (e) => {
+      if (!dragsFiles(e)) return; // text dragged into the code goes in as it always did
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      $("playground").classList.add("dropping");
+    };
+    $("playground").ondragleave = (e) => $("playground").contains(e.relatedTarget) || $("playground").classList.remove("dropping");
+    $("playground").ondrop = (e) => {
+      $("playground").classList.remove("dropping");
+      if (!dragsFiles(e)) return;
+      e.preventDefault();
+      addFiles(e.dataTransfer.files);
+    };
 
     // Some examples are files: two apps, a neural network that learns, the handwriting reader, and the
     // compiler written in Moth, with a line at the end that uses it.

@@ -6,6 +6,7 @@ import { Machine } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
+import { pngCases, bmpCases, brokenPictures, handmadeBroken } from "./picture-cases.js";
 
 const ENGINES = ["jit", "wasm", "vm"];
 
@@ -228,6 +229,9 @@ test("the checker finds mistakes without running the program", () => {
     "19:1 fails: can only go through a list, text, dictionary or bytes, not a number",
     "21:1 fails: 'move forward' needs a number, not text",
     "22:7 fails: can't divide by zero",
+  ]);
+  assert.deepEqual(problems('draw picture 5 at 0, 0\ndraw picture "cat.png" at 0, 0\nset b to "x" as bytes\ndraw picture b at "a", 0'), [
+    "1:1 fails: 'draw picture' needs a file's name or its bytes, not a number", // whether a file is a picture isn't known
   ]);
   assert.deepEqual(problems("say (1"), ["1:7 error: expected ')' but found the end of the code"]);
   assert.deepEqual(problems('set n to 5\nsay name of n\nfail with "stop"\nsay "after"'), [
@@ -1224,4 +1228,82 @@ test("suggestedFix puts a misspelled name or a symbol from another language righ
   assert.equal(fixOf("set x = 5"), null); // set, or is? Only the person knows
   assert.equal(suggestedFix("say totals", { line: 1, col: 5, reason: "'totl' has no value yet. Did you mean 'total'?" }), null); // not what the code has there
   assert.equal(suggestedFix("say x", { line: 3, col: 1, reason: "'x' has no value yet. Did you mean 'y'?" }), null); // no such line
+});
+
+// ---------- pictures from files ----------
+
+// Small PNGs and BMPs made by picture-cases.js: every PNG colour type at every bit depth, interlaced or not,
+// with every filter and every kind of compressed block, and transparency where the type has it; BMPs of every
+// bit count, header and mask. The pixels each must come out as are worked out there, apart from the decoder.
+test("draw picture draws PNGs of every colour type and depth, and BMPs, as they are, on all three engines", () => {
+  const cases = [...pngCases(1), ...pngCases(2), ...bmpCases(1)];
+  const files = Object.fromEntries(cases.map((c, i) => [`c${i}.${c.bytes[0] === 137 ? "png" : "bmp"}`, c.bytes]));
+  const source = Object.keys(files).map((name, i) => `draw picture "${name}" at ${i}, 0 - ${i}\nset b to read bytes "${name}"\ndraw picture b at 0, 0 size 2.5 by 1 / 3`).join("\n");
+  for (const engine of ENGINES) {
+    const drawn = [];
+    run(source, () => {}, { engine, disk: memoryDisk(files), draw: (d) => drawn.push(d) });
+    assert.equal(drawn.length, 2 * cases.length, engine);
+    cases.forEach((c, i) => {
+      const image = { width: c.width, height: c.height, pixels: c.pixels };
+      assert.deepEqual(drawn[2 * i], { shape: "picture", x: i, y: 0 - i, width: c.width, height: c.height, image }, `${engine}: case ${i}`);
+      assert.deepEqual(drawn[2 * i + 1], { shape: "picture", x: 0, y: 0, width: 2.5, height: 0.33, image }, `${engine}: case ${i}, from its bytes`);
+      assert.equal(drawn[2 * i].image, drawn[2 * i + 1].image, "a picture drawn again is the same image"); // so a page draws it from one canvas
+    });
+  }
+});
+
+// Each broken file must stop at the same mistake on every engine: the ones broken by hand at the one each
+// names, and the ones cut short or with a byte changed at whatever it is.
+test("a broken picture, or a file that isn't one, is a mistake that says what's wrong, the same on all three engines", () => {
+  const fails = (source, files, engine) => error(source, { engine, disk: memoryDisk(files) }).message;
+  for (const [bytes, says] of handmadeBroken()) {
+    for (const engine of ENGINES) {
+      assert.equal(fails('draw picture "x.png" at 0, 0', { "x.png": bytes }, engine), `line 1: 'x.png' ${says}`, `${engine}: ${says}`);
+      const plural = says.replace(/^is /, "are ").replace(/^isn't /, "aren't ");
+      assert.equal(fails('draw picture read bytes "x.png" at 0, 0', { "x.png": bytes }, engine), `line 1: these bytes ${plural}`, `${engine}: ${says}`);
+    }
+  }
+  const broken = brokenPictures(1);
+  const reasons = new Set();
+  broken.forEach((bytes, i) => {
+    const said = ENGINES.map((engine) => {
+      try {
+        run('draw picture "b" at 0, 0', () => {}, { engine, disk: memoryDisk({ b: bytes }) });
+        return "drawn";
+      } catch (err) {
+        if (!(err instanceof MothError)) throw err;
+        return err.message;
+      }
+    });
+    assert.deepEqual(said, [said[0], said[0], said[0]], `broken picture ${i}`);
+    reasons.add(said[0].replace(/^line 1: 'b' /, ""));
+  });
+  assert.ok(reasons.size >= 7, [...reasons].join("\n")); // most ways of being broken, and some that still draw
+});
+
+test("draw picture reads a file as read bytes does, and keeps picture a name", () => {
+  const png = pngCases(1)[0];
+  const disk = { "cat.png": png.bytes };
+  const drawn = (source) => {
+    const made = [];
+    run(source, () => {}, { disk: memoryDisk(disk), draw: (d) => made.push(d) });
+    return made.map((d) => (d.shape === "picture" ? `picture ${d.x},${d.y} ${d.width}x${d.height}` : `${d.shape} ${d.text}`));
+  };
+  assert.deepEqual(drawn('draw picture "cat" + ".png" at 1, 2'), [`picture 1,2 ${png.width}x${png.height}`]);
+  assert.deepEqual(drawn('draw picture item 1 of (list of "cat.png") at 1, 2 size 3 by 4'), ["picture 1,2 3x4"]);
+  assert.deepEqual(drawn('draw picture (read bytes "cat.png") at 1, 2'), [`picture 1,2 ${png.width}x${png.height}`]); // a bracket with a space before it
+  assert.deepEqual(drawn('set picture to "hi"\ndraw picture at 0, 0'), ["text hi"]); // `picture` alone is a name, as it was
+  assert.deepEqual(drawn('set sprite to record with picture "cat"\ndraw picture of sprite at 0, 0'), ["text cat"]);
+  assert.deepEqual(drawn("to picture with n\n    return n * 2\nend\ndraw picture(4) at 0, 0"), ["text 8"]);
+  assert.deepEqual(drawn('set picture to 2\ndraw picture + 1 at 0, 0\ndraw picture is 2 at 0, 0'), ["text 3", "text yes"]);
+  // a file that can't be read is the mistake reading it would be
+  assert.equal(error('draw picture "dog.png" at 0, 0', { disk: memoryDisk(disk) }).message, "line 1: there is no file called 'dog.png'");
+  const refusing = { read: () => { throw new Error("this program isn't allowed to read files (start it with --allow-read)"); } };
+  assert.equal(error('draw picture "cat.png" at 0, 0', { disk: refusing }).message, "line 1: can't read 'cat.png': this program isn't allowed to read files (start it with --allow-read)");
+  // and tidying and the compiler written in Moth read it as the parser does
+  const moth = mothCompiler(COMPILER);
+  for (const source of ['draw picture "cat.png" at 1, 2 size 3 by 4', 'draw picture  (read bytes "cat.png")  at 1, 2', "set picture to 2\ndraw picture + 1 at 0, 0"]) {
+    assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+    assert.equal(format(source), `${source.replace(/ {2}/g, " ")}\n`, source);
+  }
 });

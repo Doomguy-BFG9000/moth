@@ -479,6 +479,8 @@ move to 50, -20                             # straight to a spot, drawing if the
 draw box at 0, 0 size 40 by 20              # filled with the pen's color
 draw circle at 0, 0 size 10
 draw "Score: 3" at -200, 220 size 16
+draw picture "cat.png" at 0, 0              # a PNG or BMP, its bottom left corner at 0, 0
+draw picture "cat.png" at 50, 0 size 32 by 32    # made bigger or smaller
 clear                                       # wipe the picture
 say random number from 1 to 6               # a whole number, different each run
 
@@ -814,6 +816,9 @@ unboxed numbers were all caught, some only by the fuzzer.
   can be an hour out in summer.
 - `save` can't save functions, bytes or amounts with units, and numbers come
   back to 15 digits, as Moth shows and compares them.
+- `draw picture` reads PNG and BMP files, up to 4096 by 4096 pixels, not JPEG
+  or GIF. In the playground, a program reads the files picked with Files or
+  dropped on the page; they stay on the page and aren't kept once it's closed.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.

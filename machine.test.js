@@ -12,6 +12,7 @@ import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, 
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
 import { FAKE_NOW } from "./vm.js";
+import { pngCases, bmpCases, brokenPictures, handmadeBroken } from "./picture-cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
 
 const here = (file) => readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
@@ -1162,6 +1163,64 @@ test("machine code reads the real clock, and really waits", { skip }, () => {
     assert.ok(Number(start) < 0.1, start);
     assert.ok(Number(after) >= 0.29 && Number(after) < 5, after);
     assert.ok(took >= 290, `it took ${took} ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Pictures from files: machine code reads every PNG and BMP the JavaScript engine reads, and stops at the same
+// mistake at a broken one; each program is built once and run on each file in turn
+test("machine code reads pictures, and stops at a broken one as the JavaScript engine does", { skip }, () => {
+  const files = [...handmadeBroken().map(([bytes]) => bytes), ...brokenPictures(1).slice(0, 60), ...pngCases(1).map((c) => c.bytes), ...bmpCases(1).map((c) => c.bytes)];
+  for (const source of ['draw picture "x.png" at 0, 0\nsay "drawn"', 'draw picture read bytes "x.png" at 0, 0 size 3 by 4\nsay "drawn"']) {
+    const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+    try {
+      const exe = executable(dir, "p");
+      writeFileSync(exe, machine(source, { target, name: "p.moth", allow: ["--allow-read"] }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      files.forEach((bytes, i) => {
+        let stdout = "";
+        let stderr = "";
+        let status = 0;
+        try {
+          run(source, (line) => (stdout += `${line}\n`), { file: "p.moth", disk: memoryDisk({ "x.png": bytes }) });
+        } catch (err) {
+          if (!(err instanceof MothError)) throw err;
+          stderr = `p.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n`;
+          status = 1;
+        }
+        writeFileSync(join(dir, "x.png"), bytes);
+        const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+        assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout, stderr, status }, `file ${i}: ${source}`);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+// and the window draws each one's pixels as they are, over the background where they can be seen through
+test("a picture from a file is drawn pixel for pixel, blended where it's see-through", { skip: onWindows }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-picture-"));
+  try {
+    const exe = join(dir, "p.exe");
+    writeFileSync(exe, machine('draw picture "c" at -100, -100', { target, name: "p.moth", allow: ["--allow-read"] }));
+    const back = [0x0b, 0x11, 0x22];
+    for (const [i, c] of [...pngCases(1), ...bmpCases(1)].entries()) {
+      writeFileSync(join(dir, "c"), c.bytes);
+      const file = join(dir, "p.bmp");
+      spawnSync(exe, [], { cwd: dir, env: { ...process.env, MOTH_PICTURE: file } });
+      const bmp = readFileSync(file);
+      for (let y = 0; y < c.height; y++) {
+        for (let x = 0; x < c.width; x++) {
+          const [r, g, b, alpha] = c.pixels.slice((y * c.width + x) * 4, (y * c.width + x) * 4 + 4);
+          const want = [r, g, b].map((v, k) => Math.round((v * alpha + back[k] * (255 - alpha)) / 255));
+          const at = 54 + ((350 - c.height + y) * 500 + 150 + x) * 4;
+          const have = [bmp[at + 2], bmp[at + 1], bmp[at]];
+          assert.ok(have.every((v, k) => Math.abs(v - want[k]) <= 2), `case ${i} at (${x}, ${y}): ${have} for ${want}`);
+        }
+      }
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

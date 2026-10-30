@@ -240,6 +240,10 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
     "not", "is", "yes", "no", "nothing", "list", "empty", "length", "item", "move", "turn", "pen", "record", "fail", "stop",
     "uppercase", "lowercase", "split", "join", "number", "position", "ask", "use", "try", "dictionary", "remove", "keys", "in",
     "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"
+# the words that can carry a value on, as in `draw picture at 0, 0` (which draws the text `picture` holds):
+# `draw picture` followed by any other word, or by text, a number or a bracket with a space before it (one
+# with none calls `picture`), draws a picture from a file
+set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
@@ -917,6 +921,38 @@ to parse with tokens, reading
             if is_word("chart") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "of" # `draw chart of sales`
                 set pos to pos + 2
                 return record with kind "turtle", action "chart", value column_or(yes), at t
+            end
+            set a_picture to no
+            if is_word("picture")
+                set next_one to item (pos + 1) of tokens
+                set a_picture to type of next_one is "string" or type of next_one is "number"
+                if type of next_one is "word" and not contains(carry_on, value of next_one)
+                    set a_picture to yes
+                end
+                if type of next_one is "(" and col of next_one is greater than col of peek() + 7
+                    set a_picture to yes
+                end
+                set a_picture to a_picture and not nl of next_one
+            end
+            if a_picture
+                set pos to pos + 1 # `draw picture "cat.png" at x, y size w by h`: a file's name, or its bytes
+                set coords to list of expression()
+                expect_word("at")
+                set spot to several(2, t)
+                for each n in items of spot
+                    add n to coords
+                end
+                if word("size")
+                    add additive() to coords
+                    expect_word("by")
+                    add expression() to coords
+                else
+                    repeat 2 times
+                        add record with kind "value", type "nothing", value nothing, at t to coords # no size: as big as it is
+                    end
+                end
+                set listed to record with kind "list", items coords, at t
+                return record with kind "turtle", action "picture", value listed, at t
             end
             set shape to ""
             for each w in list of "box", "circle"
@@ -1846,7 +1882,7 @@ end
 set ats to empty list # every token an error can point at; a position in the code is its number here
 set event_names to list of "key", "click", "drag" # in the order of EVENTS in vm.js
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text",
-    "chart"
+    "chart", "picture"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"
