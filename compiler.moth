@@ -248,7 +248,7 @@ set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
-    "save", "load"
+    "save", "load", "text in box"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -304,6 +304,11 @@ set now_words to list of "time", "date", "year", "month", "day", "hour", "minute
 set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
     (list of "a", "record"), (list of "a", "dictionary"), (list of "bytes"), (list of "a", "function")
 set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
+# buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
+# "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
+set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
+set text_in_box to list of "the", "text", "in", "the", "text", "box"
+set after_a_value to list of "at", "of", "bytes", "as", "in", "bit", "is", "and", "or"
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
 # Each function the parser makes gets the next number (`order`), so the functions are numbered in the order
@@ -478,6 +483,30 @@ to parse with tokens, reading
         set save_args to list of value
         set saved to record with kind "builtin", name "save", args save_args, at t
         return record with kind "write", value saved, target expression(), at t
+    end
+
+    # these words from token i on, on the line before them
+    to words_at with i, wanted
+        set ahead_at to i
+        for each wanted_word in wanted
+            if not word_at(ahead_at, wanted_word) or nl of item ahead_at of tokens
+                return no
+            end
+            set ahead_at to ahead_at + 1
+        end
+        return yes
+    end
+
+    # a button's label can start at token i: a value there on the same line, where today `button` would end one
+    to label_at with i
+        set label_token to item i of tokens
+        if nl of label_token
+            return no
+        end
+        if type of label_token is "string" or type of label_token is "number"
+            return yes
+        end
+        return type of label_token is "word" and not contains(after_a_value, value of label_token)
     end
 
     to take_name with what
@@ -750,30 +779,46 @@ to parse with tokens, reading
         end
         if word("when") # `when a key is pressed with key`, `when the mouse is clicked with x and y`
             set start to pos
-            set words to empty list
-            repeat while check("word") and not is_word("with") and not nl of peek()
-                add value of peek() to words
-                set pos to pos + 1
-            end
-            set phrase to joined(words, " ")
             set event to ""
             set gives to 0
-            if phrase is "a key is pressed"
-                set event to "key"
+            set label to nothing # the button or text box it waits for, worked out once, when it's set up
+            if words_at(pos, list of "the", "button") # `when the button "Start" is clicked`
+                set pos to pos + 2
+                set label to additive()
+                expect_word("is")
+                expect_word("clicked")
+                set phrase to "the button is clicked"
+                set event to "button"
+            else if words_at(pos, enter_phrase) # `when enter is pressed in the text box "Name" with words`
+                set pos to pos + length of enter_phrase
+                set label to additive()
+                set phrase to "enter is pressed in the text box"
+                set event to "enter"
                 set gives to 1
-            else if phrase is "the mouse is clicked"
-                set event to "click"
-                set gives to 2
-            else if phrase is "the mouse is dragged"
-                set event to "drag"
-                set gives to 2
+            else
+                set words to empty list
+                repeat while check("word") and not is_word("with") and not nl of peek()
+                    add value of peek() to words
+                    set pos to pos + 1
+                end
+                set phrase to joined(words, " ")
+                if phrase is "a key is pressed"
+                    set event to "key"
+                    set gives to 1
+                else if phrase is "the mouse is clicked"
+                    set event to "click"
+                    set gives to 2
+                else if phrase is "the mouse is dragged"
+                    set event to "drag"
+                    set gives to 2
+                end
             end
             if event is ""
                 set pos to start
-                expected("'a key is pressed', 'the mouse is clicked' or 'the mouse is dragged'")
+                expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked' or 'enter is pressed in the text box ...'")
             end
             set params to empty list
-            if word("with")
+            if gives is not 0 and word("with")
                 add take_name("an input name") to params
                 repeat while match(",") or word("and")
                     add take_name("an input name") to params
@@ -791,7 +836,7 @@ to parse with tokens, reading
             if not at_top
                 fail with problem(t, "'when' only works at the top level of a program")
             end
-            return record with kind "when", event event, fn func("when " + phrase, params, t), at t
+            return record with kind "when", event event, label label, fn func("when " + phrase, params, t), at t
         end
         if word("every") # `every 100 milliseconds`, `every 2 seconds`, `every 1 minute`: in milliseconds
             set interval to additive()
@@ -914,8 +959,12 @@ to parse with tokens, reading
             end
             return record with kind "turtle", action action, value expression(), at t
         end
-        if word("clear") # wipe the picture
-            return record with kind "turtle", action "clear", value nothing, at t
+        if word("clear")
+            if words_at(pos, list of "the", "text", "box") # `clear the text box "Name"`: empties it
+                set pos to pos + 3
+                return record with kind "turtle", action "clear text box", value additive(), at t
+            end
+            return record with kind "turtle", action "clear", value nothing, at t # wipe the picture
         end
         if word("draw") # `draw box at x, y size w by h`, `draw circle at x, y size r`, `draw "hi" at x, y size 20`
             if is_word("chart") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "of" # `draw chart of sales`
@@ -953,6 +1002,27 @@ to parse with tokens, reading
                 end
                 set listed to record with kind "list", items coords, at t
                 return record with kind "turtle", action "picture", value listed, at t
+            end
+            # `draw button "Start" at x, y`, `draw text box "Name" at x, y`: a value straight after `button` (which
+            # a name couldn't have) or `text box`
+            set widget to ""
+            if is_word("button") and label_at(pos + 1)
+                set widget to "button"
+            else if words_at(pos, list of "text", "box")
+                set widget to "text box"
+            end
+            if widget is not ""
+                set pos to pos + 1
+                if widget is "text box"
+                    set pos to pos + 1
+                end
+                set widget_items to list of additive()
+                expect_word("at")
+                set spot to several(2, t)
+                for each n in items of spot
+                    add n to widget_items
+                end
+                return record with kind "turtle", action widget, value (record with kind "list", items widget_items, at t), at t
             end
             set shape to ""
             for each w in list of "box", "circle"
@@ -1341,6 +1411,10 @@ to parse with tokens, reading
         if word("arguments")
             return record with kind "arguments", at t
         end
+        if words_at(pos, text_in_box) # `the text in the text box "Name"`: what's typed in it
+            set pos to pos + length of text_in_box
+            return record with kind "builtin", name "text in box", args (list of unary()), at t
+        end
         # `total of prices`, `average of price in sales`, `largest of`, `smallest of`
         if type of t is "word" and contains(aggregates, value of t) and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "of"
             set pos to pos + 2
@@ -1585,6 +1659,9 @@ to rename with node, alias, hidden
     end
     if what is "every"
         rename(interval of node, alias, hidden)
+    end
+    if what is "when"
+        rename(label of node, alias, hidden)
     end
     if what is "while"
         rename(cond of node, alias, hidden)
@@ -1880,9 +1957,9 @@ end
 # ---------- JavaScript ----------
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
-set event_names to list of "key", "click", "drag" # in the order of EVENTS in vm.js
+set event_names to list of "key", "click", "drag", "button", "enter" # in the order of EVENTS in vm.js
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text",
-    "chart", "picture"
+    "chart", "picture", "button", "text box", "clear text box"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"
@@ -2026,6 +2103,11 @@ to js_statement with scope, s
         return ref(scope, name of s) + " = " + closure_code(scope, s) + ";"
     end
     if what is "when" # a handler is a function of its own, made and handed over, not kept in a variable
+        if label of s is not nothing # and what it waits for
+            set handler_code to closure_code(scope, fn of s)
+            set handler_at to remember(at of s)
+            return "handle(" + (slot_of(event_names, event of s) - 1) + ", " + handler_code + ", " + handler_at + ", " + js_expr(scope, label of s) + ");"
+        end
         return "handle(" + (slot_of(event_names, event of s) - 1) + ", " + closure_code(scope, fn of s) + ", " + remember(at of s) + ");"
     end
     if what is "every"
@@ -2520,6 +2602,12 @@ to bytecode_statement with fc, s
     else if what is "define"
         emit(fc, at of s, list of op_make_fn, bytecode_child(fc, s))
         store(fc, name of s, at of s)
+    else if what is "when" and label of s is not nothing # the button or text box it waits for, under it
+        set d to fn of s
+        set made to bytecode_function(fc, name of d, params of d, kinds of d, body of d, order of d)
+        bytecode_expr(fc, label of s)
+        emit(fc, at of s, list of op_make_fn, constant(fc, record with what "function", value made))
+        emit(fc, at of s, list of op_handle, slot_of(event_names, event of s) - 1)
     else if what is "when" # a handler is a function of its own, made and handed over, not kept in a variable
         emit(fc, at of s, list of op_make_fn, bytecode_child(fc, fn of s))
         emit(fc, at of s, list of op_handle, slot_of(event_names, event of s) - 1)

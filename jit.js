@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, numberOrder, atMost, divisible, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, LABELLED, everyInterval,
   Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
@@ -93,6 +93,7 @@ class JsCompiler extends Scope {
       case "define":
         return `${this.ref(s.name)} = ${this.closure(s)};`;
       case "when": // a handler is a function of its own, made and handed over, not kept in a variable
+        if (s.label) return `handle(${EVENTS.indexOf(s.event)}, ${this.closure(s.fn)}, ${this.pos(s.at)}, ${this.expr(s.label)});`; // and what it waits for
         return `handle(${EVENTS.indexOf(s.event)}, ${this.closure(s.fn)}, ${this.pos(s.at)});`;
       case "every": {
         const interval = this.expr(s.interval);
@@ -225,6 +226,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     fail(at, message, value, false, calls);
   });
   const turtle = new Turtle(draw);
+  host.turtle = turtle;
   let steps = 0;
   let depth = 0; // a failed call needs no undoing: any error ends the run
   const running = []; // for each call in progress, the function it runs, and where it was called (a position)
@@ -314,7 +316,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     },
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
-    builtin: (i, args, k) => BUILTINS[i].run(args, errors[k]),
+    builtin: (i, args, k) => BUILTINS[i].run(args, errors[k], turtle),
     depthNow: () => depth,
     // a mistake an `if it fails` handles; anything else (going too deep, a value too big) goes on to run()
     caught: (err, at) => {
@@ -331,7 +333,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     random: (low, high, k) => randomWhole(low, high, chance, errors[k]),
     now: (which) => nowValue(which, clock),
     wait: (amount, unit, k) => waitFor(amount, unit, clock, errors[k]),
-    handle: (event, f) => void host.handlers.push({ event: EVENTS[event], closure: f }),
+    handle: (event, f, k, label) => void host.handlers.push(LABELLED.has(event) ? { event: EVENTS[event], label: show(label), closure: f } : { event: EVENTS[event], closure: f }),
     every: (interval, unit, f, k) => void host.handlers.push({ event: "every", interval: everyInterval(interval, unit, errors[k]), closure: f }),
     expect: (op, negate, a, b, k) => expectThat(op, negate, a, b, errors[k]),
     expectYes: (value, k) => expectYes(value, errors[k]),

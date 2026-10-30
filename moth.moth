@@ -836,6 +836,7 @@ to cli_check_statement with cli_state, cli_frame, cli_s
         end
         cli_check_function(cli_state, cli_frame, cli_s)
     else if cli_what is "when"
+        cli_check_expr(cli_state, cli_frame, label of cli_s) # the button or text box it waits for, if any
         cli_check_function(cli_state, cli_frame, fn of cli_s)
     else if cli_what is "every"
         cli_check_expr(cli_state, cli_frame, interval of cli_s)

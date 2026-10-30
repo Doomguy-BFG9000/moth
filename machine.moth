@@ -230,7 +230,7 @@ to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
-        charts no, pictures no
+        charts no, pictures no, widgets no
     set code of made to hot of made
     return made
 end
@@ -10010,6 +10010,14 @@ to emit_turtle with a
         alui(a, "cmp", rcx, 13)
         jcc(a, cc_e, "rt_chart")
     end
+    set widget_acts to empty list
+    if widgets of a # `draw button`, `draw text box`, `clear the text box`, by where compiler.moth has them
+        for each widget_name in list of "button", "text box", "clear text box"
+            add new_label(a) to widget_acts
+            alui(a, "cmp", rcx, slot_of_word(front's turtle_actions, widget_name) - 1)
+            jcc(a, cc_e, item (length of widget_acts) of widget_acts)
+        end
+    end
     jmp_to(a, done_ok)
     for each k from 0 to 3 # forward, back, left, right: a number
         mark(a, item (k + 1) of acts)
@@ -10199,6 +10207,74 @@ to emit_turtle with a
     storei(a, rip("pi_kind"), 4)
     call_to(a, "rt_pic_add")
     jmp_to(a, done_ok)
+    if widgets of a
+        for each widget in list of 1, 2 # a button (5), then a text box (6): label, x, y, the label as `say` shows it
+            mark(a, item widget of widget_acts)
+            if widget is 1
+                lea(a, rax, rip(text_object(a, "'draw button'")))
+            else
+                lea(a, rax, rip(text_object(a, "'draw text box'")))
+            end
+            store(a, rip("err_what"), rax)
+            movq_rx(a, rax, xmm0)
+            untag(a, rax)
+            push_r(a, rax)
+            load(a, rcx, mem(rax, 16))
+            alui(a, "add", rcx, 8)
+            store(a, rip("t_list"), rcx)
+            lea(a, rax, rip("t_list"))
+            alui(a, "sub", rax, 16)
+            movi(a, rcx, 2)
+            movi(a, rdx, -1)
+            call_to(a, "rt_turtle_numbers")
+            pop_r(a, rcx)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, wrong_numbers)
+            load(a, rcx, mem(rcx, 16))
+            movsd_load(a, xmm0, mem(rcx, 0))
+            call_to(a, "rt_show_text")
+            store(a, rip("pi_text"), rax)
+            for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b")
+                load(a, rax, rip(item 1 of pair))
+                store(a, rip(item 2 of pair), rax)
+            end
+            load_bits(a, xmm0, double_bytes(30))
+            movsd_store(a, rip("pi_d"), xmm0)
+            if widget is 1 # 20 wide, and 10 more for each letter
+                load(a, rax, rip("pi_text"))
+                untag(a, rax)
+                load(a, rax, mem(rax, 8))
+                imul_ri(a, rax, rax, 10)
+                alui(a, "add", rax, 20)
+                cvtsi2sd(a, xmm0, rax)
+                movsd_store(a, rip("pi_c"), xmm0)
+                storei(a, rip("pi_w"), 0)
+                storei(a, rip("pi_kind"), 5)
+            else # 200 wide, and which box it is, by its label
+                load(a, rax, rip("pi_text"))
+                call_to(a, "rt_box_entry")
+                store(a, rip("pi_w"), rax)
+                load_bits(a, xmm0, double_bytes(200))
+                movsd_store(a, rip("pi_c"), xmm0)
+                storei(a, rip("pi_kind"), 6)
+            end
+            call_to(a, "rt_pic_add")
+            jmp_to(a, done_ok)
+        end
+        mark(a, item 3 of widget_acts) # clear the text box: what's typed in it, if anything, goes
+        call_to(a, "rt_show_text")
+        call_to(a, "rt_box_find")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, done_ok)
+        dec_r(a, rax)
+        shifti(a, "shl", rax, 4)
+        alu_load(a, "add", rax, rip("box_items"))
+        lea(a, rcx, rip(text_object(a, "")))
+        movi64(a, rdx, tag_text)
+        alu(a, "or", rcx, rdx)
+        store(a, mem(rax, 8), rcx)
+        jmp_to(a, done_ok)
+    end
     mark(a, wrong_kind)
     movsd_store(a, rip("err_a"), xmm0)
     storei(a, rip("err_why"), 70)
@@ -10274,6 +10350,9 @@ to emit_turtle with a
         b_text(a, "'draw chart of' needs numbers, or amounts of one measure, not ")
         load(a, rax, rip("err_a"))
         jmp_to(a, "rt_e_kind")
+    end
+    if widgets of a
+        emit_boxes(a)
     end
 end
 
@@ -10580,6 +10659,114 @@ to emit_chart with a
     ret(a)
 end
 
+# ---------- the runtime: buttons and text boxes ----------
+# A button is a thing drawn (5), as is a text box (6), whose fourth number says which box it is: each box, by
+# its label, has an entry of 16 bytes in a list of its own, its label and what's typed in it, which `clear`
+# leaves alone, as DESIGN §36 has it. box_focus is the entry of the box that has the focus, from 1, or 0.
+
+to emit_boxes with a
+    # rt_show_text: xmm0 a value: as `say` shows it, as a new text, in rax
+    mark(a, "rt_show_text")
+    call_to(a, "rt_b_reset")
+    movq_rx(a, rax, xmm0)
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    jmp_to(a, "rt_b_text")
+
+    # rt_box_find: rax a label, as text: the entry of the box with that label, from 1, in rax, or 0 for none
+    set find_loop to new_label(a)
+    set find_none to new_label(a)
+    set find_done to new_label(a)
+    mark(a, "rt_box_find")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rax)
+    movi(a, r13, 0)
+    mark(a, find_loop)
+    alu_load(a, "cmp", r13, rip("box_n"))
+    jcc(a, cc_ae, find_none)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, 4)
+    alu_load(a, "add", rbx, rip("box_items"))
+    load(a, rax, mem(rbx, 0))
+    mov_rr(a, rdx, r12)
+    call_to(a, "rt_equal")
+    inc_r(a, r13)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, find_done)
+    jmp_to(a, find_loop)
+    mark(a, find_none)
+    movi(a, r13, 0)
+    mark(a, find_done)
+    mov_rr(a, rax, r13)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_box_entry: rax a label, as text: its entry, as rt_box_find has it, made if there isn't one yet
+    set have_one to new_label(a)
+    set room to new_label(a)
+    set some to new_label(a)
+    mark(a, "rt_box_entry")
+    push_r(a, rax) # where the collector sees it
+    call_to(a, "rt_box_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_one)
+    load(a, rax, rip("box_n"))
+    alu_load(a, "cmp", rax, rip("box_cap"))
+    jcc(a, cc_b, room)
+    load(a, rcx, rip("box_cap"))
+    alu(a, "add", rcx, rcx)
+    jcc(a, cc_ne, some)
+    movi(a, rcx, 8)
+    mark(a, some)
+    store(a, rip("box_cap"), rcx)
+    shifti(a, "shl", rcx, 4)
+    call_to(a, "rt_alloc")
+    mov_rr(a, rdi, rax)
+    load(a, rsi, rip("box_items"))
+    load(a, rcx, rip("box_n"))
+    alu(a, "add", rcx, rcx)
+    rep_movsq(a)
+    store(a, rip("box_items"), rax)
+    mark(a, room)
+    load(a, rdi, rip("box_n"))
+    shifti(a, "shl", rdi, 4)
+    alu_load(a, "add", rdi, rip("box_items"))
+    load(a, rax, mem(rsp, 0))
+    store(a, mem(rdi, 0), rax)
+    lea(a, rax, rip(text_object(a, "")))
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    store(a, mem(rdi, 8), rax)
+    alu_at(a, "add", rip("box_n"), 1)
+    load(a, rax, rip("box_n"))
+    mark(a, have_one)
+    pop_r(a, rcx)
+    ret(a)
+
+    # rt_box_text: xmm0 a label: what's typed in the box with that label, into xmm0, with rax 0 (`the text in
+    # the text box`)
+    set no_box to new_label(a)
+    mark(a, "rt_box_text")
+    call_to(a, "rt_show_text")
+    call_to(a, "rt_box_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_box)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("box_items"))
+    movsd_load(a, xmm0, mem(rax, 8))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, no_box)
+    load_text(a, xmm0, "")
+    movi(a, rax, 0)
+    ret(a)
+end
+
 # ---------- the runtime: apps ----------
 # `when a key is pressed`, `when the mouse is clicked` or dragged, and `every 2 seconds`: each handler, in
 # the order the program made them, 32 bytes: what it waits for (0 a key, 1 a click, 2 a drag, 3 a timer),
@@ -10615,6 +10802,11 @@ to emit_app_setup with a
     storei(a, rip("err_why"), 77)
     movi(a, rax, 2)
     ret(a)
+    if widgets of a # rt_on_label: as rt_on, and r8 the label of the button or text box it waits for, as text
+        mark(a, "rt_on_label")
+        store(a, rip("ev_ms"), r8)
+        jmp_to(a, put)
+    end
     mark(a, "rt_on")
     storei(a, rip("ev_ms"), 0)
     mark(a, put)
@@ -11712,6 +11904,12 @@ to emit_gui with a, title
         alui(a, "cmp", rdx, 9)
         jcc(a, cc_e, as_box)
     end
+    if widgets of a # a button or a text box reaches as a box does
+        alui(a, "cmp", rdx, 5)
+        jcc(a, cc_e, as_box)
+        alui(a, "cmp", rdx, 6)
+        jcc(a, cc_e, as_box)
+    end
     alui(a, "cmp", rdx, 2)
     jcc(a, cc_ne, not_box)
     mark(a, as_box)
@@ -11774,6 +11972,9 @@ to emit_gui with a, title
         push_r(a, r)
     end
     mov_rr(a, r14, rcx)
+    if widgets of a
+        store(a, rip("gui_gfx"), rcx)
+    end
     win_enter(a)
     mov_rr(a, rcx, r14)
     movi(a, rdx, 4) # smoothed
@@ -11817,6 +12018,14 @@ to emit_gui with a, title
     if pictures of a
         alui(a, "cmp", rax, 9)
         jcc(a, cc_e, a_picture)
+    end
+    set a_button to new_label(a)
+    set a_textbox to new_label(a)
+    if widgets of a
+        alui(a, "cmp", rax, 5)
+        jcc(a, cc_e, a_button)
+        alui(a, "cmp", rax, 6)
+        jcc(a, cc_e, a_textbox)
     end
     # a line, with round ends; one that goes nowhere is a dot, as on a canvas
     movsd_load(a, xmm0, mem(rbx, 8))
@@ -11992,6 +12201,10 @@ to emit_gui with a, title
     w_call(a, "GdipDeleteFont")
     load(a, rcx, rip("gui_brush"))
     w_call(a, "GdipDeleteBrush")
+    if widgets of a
+        jmp_to(a, item_next)
+        render_widgets(a, a_button, a_textbox, item_next)
+    end
     mark(a, item_next)
     inc_r(a, r15)
     jmp_to(a, item_loop)
@@ -12721,7 +12934,7 @@ to emit_gui with a, title
     alu(a, "or", rax, rcx)
     store(a, rip("ev_a"), rax)
     movi(a, rcx, 0)
-    call_to(a, "rt_app_send")
+    app_send(a)
     jmp_to(a, w_redraw)
     mark(a, key_none)
     jmp_to(a, w_zero)
@@ -12730,7 +12943,11 @@ to emit_gui with a, title
     test_rr(a, rax, rax)
     jcc(a, cc_ne, w_zero)
     alui(a, "cmp", r13, 0x20)
-    jcc(a, cc_be, w_zero)
+    if widgets of a # a space is typed too, though its key came with WM_KEYDOWN
+        jcc(a, cc_b, w_zero)
+    else
+        jcc(a, cc_be, w_zero)
+    end
     alui(a, "cmp", r13, 0x7F)
     jcc(a, cc_e, w_zero)
     mov_rr(a, rax, r13)
@@ -12743,6 +12960,11 @@ to emit_gui with a, title
     win_leave(a)
     alui(a, "and", rax, 0x8000)
     jcc(a, cc_ne, w_zero)
+    set char_typed to new_label(a)
+    if widgets of a
+        alui(a, "cmp", r13, 0x20)
+        jcc(a, cc_e, char_typed)
+    end
     win_enter(a)
     mov_rr(a, rcx, r13)
     w_call(a, "CharLowerW")
@@ -12753,7 +12975,17 @@ to emit_gui with a, title
     call_to(a, "rt_b_text")
     store(a, rip("ev_a"), rax)
     movi(a, rcx, 0)
-    call_to(a, "rt_app_send")
+    app_send(a)
+    if widgets of a # then the character as it was typed, for a text box
+        mark(a, char_typed)
+        call_to(a, "rt_b_reset")
+        mov_rr(a, rax, r13)
+        call_to(a, "rt_b_code")
+        call_to(a, "rt_b_text")
+        store(a, rip("ev_a"), rax)
+        movi(a, rcx, 5)
+        call_to(a, "rt_app_event")
+    end
     jmp_to(a, w_redraw)
     mark(a, w_down)
     win_enter(a)
@@ -12775,7 +13007,7 @@ to emit_gui with a, title
     mark(a, down_app)
     call_to(a, "rt_ev_spot")
     movi(a, rcx, 1)
-    call_to(a, "rt_app_send")
+    app_send(a)
     jmp_to(a, w_redraw)
     mark(a, w_move) # with the button down: a drag, or more of a stroke
     mov_rr(a, rax, r13)
@@ -12798,7 +13030,7 @@ to emit_gui with a, title
     mark(a, move_app)
     call_to(a, "rt_ev_spot")
     movi(a, rcx, 2)
-    call_to(a, "rt_app_send")
+    app_send(a)
     jmp_to(a, w_redraw)
     mark(a, w_up)
     storei(a, rip("pad_down"), 0)
@@ -12865,6 +13097,16 @@ to emit_gui with a, title
     alui(a, "cmp", rax, 59)
     jcc(a, cc_e, ev_skip)
     mov_rr(a, r15, rax) # what it is, by its first letter: k, c, d or t
+    if widgets of a # or "ty" for type, which goes as y
+        set not_typing to new_label(a)
+        alui(a, "cmp", r15, 116)
+        jcc(a, cc_ne, not_typing)
+        load16(a, rax, mem(r12, 2))
+        alui(a, "cmp", rax, 121)
+        jcc(a, cc_ne, not_typing)
+        movi(a, r15, 121)
+        mark(a, not_typing)
+    end
     mark(a, "rt_ev_word")
     alu(a, "cmp", r12, r13)
     jcc(a, cc_ae, ev_done)
@@ -12878,6 +13120,10 @@ to emit_gui with a, title
     alui(a, "add", r12, 2)
     alui(a, "cmp", r15, 107) # k
     jcc(a, cc_e, ev_key)
+    if widgets of a
+        alui(a, "cmp", r15, 121) # y: the text typed, up to the next ;, as a key's name is read
+        jcc(a, cc_e, ev_key)
+    end
     call_to(a, "rt_ev_int")
     mov_rr(a, r14, rax)
     alui(a, "cmp", r15, 116) # t
@@ -12895,7 +13141,7 @@ to emit_gui with a, title
     jcc(a, cc_e, ev_click)
     movi(a, rcx, 2)
     mark(a, ev_click)
-    call_to(a, "rt_app_send")
+    app_send(a)
     jmp_to(a, ev_loop)
     mark(a, ev_tick)
     mov_rr(a, rcx, r14)
@@ -12918,7 +13164,14 @@ to emit_gui with a, title
     call_to(a, "rt_b_text")
     store(a, rip("ev_a"), rax)
     movi(a, rcx, 0)
-    call_to(a, "rt_app_send")
+    if widgets of a
+        alui(a, "cmp", r15, 121)
+        set as_key to new_label(a)
+        jcc(a, cc_ne, as_key)
+        movi(a, rcx, 5)
+        mark(a, as_key)
+    end
+    app_send(a)
     jmp_to(a, ev_loop)
     mark(a, ev_skip)
     alui(a, "add", r12, 2)
@@ -13239,6 +13492,595 @@ to emit_gui with a, title
     movsd_load(a, xmm0, rip("pad_q"))
     mark(a, not_pad)
     movi(a, rax, 0)
+    ret(a)
+    if widgets of a
+        emit_gui_widgets(a)
+    end
+end
+
+# an event for the app's handlers: through its buttons and text boxes first, if it has any
+to app_send with a
+    if widgets of a
+        call_to(a, "rt_app_event")
+    else
+        call_to(a, "rt_app_send")
+    end
+end
+
+# xmm0 1 times the scale; uses nothing else
+to times_scale with a, x, n
+    load_bits(a, x, double_bytes(n))
+    sse_math(a, "*", x, rip("gui_scale"))
+end
+
+# A button and a text box in rt_render_picture, rbx the thing drawn, as the playground draws them: a button
+# in the pen's colour with its label in white in the middle; a text box white, in a border of the pen's
+# colour, with its text in black (its end, if it's too long to fit), or its label in grey while it's empty,
+# and a cursor at its end while it has the focus.
+to render_widgets with a, a_button, a_textbox, item_next
+    mark(a, a_button)
+    for each pair in list of (list of xmm0, 8), (list of xmm1, 16), (list of xmm2, 24), (list of xmm3, 32)
+        movsd_load(a, item 1 of pair, mem(rbx, item 2 of pair))
+    end
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    load(a, rax, mem(rbx, 56))
+    call_to(a, "rt_gui_prep")
+    movsd_load(a, xmm0, mem(rbx, 24)) # its middle, less half the label
+    load_bits(a, xmm1, double_bytes(0.5))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    sse_math(a, "+", xmm0, mem(rbx, 8))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    picture_x(a, xmm0, rip("gui_t0"))
+    movsd_load(a, xmm1, rip("gui_tw"))
+    load_bits(a, xmm2, double_bytes(0.5))
+    sse_math(a, "*", xmm1, reg_at(xmm2))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_tl"), xmm0)
+    baseline(a)
+    movsd_load(a, xmm0, rip("gui_tl"))
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_put")
+    call_to(a, "rt_gui_unprep")
+    jmp_to(a, item_next)
+
+    mark(a, a_textbox)
+    for each pair in list of (list of xmm0, 8), (list of xmm1, 16), (list of xmm2, 24), (list of xmm3, 32)
+        movsd_load(a, item 1 of pair, mem(rbx, item 2 of pair))
+    end
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    load_bits(a, xmm4, double_bytes(2)) # inside the border, 2 wide
+    movsd_load(a, xmm0, mem(rbx, 8))
+    sse_math(a, "+", xmm0, reg_at(xmm4))
+    movsd_load(a, xmm1, mem(rbx, 16))
+    sse_math(a, "+", xmm1, reg_at(xmm4))
+    load_bits(a, xmm4, double_bytes(4))
+    movsd_load(a, xmm2, mem(rbx, 24))
+    sse_math(a, "-", xmm2, reg_at(xmm4))
+    movsd_load(a, xmm3, mem(rbx, 32))
+    sse_math(a, "-", xmm3, reg_at(xmm4))
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    call_to(a, "rt_gui_clip")
+    set has_text to new_label(a)
+    set text_done to new_label(a)
+    load(a, rax, mem(rbx, 40)) # what's typed in it
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("box_items"))
+    load(a, rax, mem(rax, 8))
+    mov_rr(a, rcx, rax)
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 0))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, has_text)
+    load(a, rax, mem(rbx, 56)) # empty: its label, in grey, 8 in
+    call_to(a, "rt_gui_prep")
+    movsd_load(a, xmm0, mem(rbx, 8))
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t0"), xmm0)
+    picture_x(a, xmm0, rip("gui_t0"))
+    movsd_store(a, rip("gui_tl"), xmm0)
+    baseline(a)
+    movsd_load(a, xmm0, rip("gui_tl"))
+    movi(a, rcx, 0xFF888888)
+    call_to(a, "rt_gui_put")
+    jmp_to(a, text_done)
+    mark(a, has_text) # 8 in, or ending 8 from the right if that's further left
+    call_to(a, "rt_gui_prep")
+    movsd_load(a, xmm0, mem(rbx, 24))
+    load_bits(a, xmm1, double_bytes(8))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    sse_math(a, "*", xmm0, rip("gui_scale"))
+    sse_math(a, "-", xmm0, rip("gui_tw"))
+    times_scale(a, xmm1, 8)
+    minsd(a, xmm1, xmm0)
+    picture_x(a, xmm0, mem(rbx, 8))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_tl"), xmm0)
+    baseline(a)
+    movsd_load(a, xmm0, rip("gui_tl"))
+    movi(a, rcx, 0xFF000000)
+    call_to(a, "rt_gui_put")
+    movsd_load(a, xmm0, rip("gui_tl"))
+    sse_math(a, "+", xmm0, rip("gui_tw"))
+    movsd_store(a, rip("gui_tl"), xmm0)
+    mark(a, text_done)
+    call_to(a, "rt_gui_unprep")
+    set no_cursor to new_label(a)
+    load(a, rax, mem(rbx, 40))
+    alu_load(a, "cmp", rax, rip("box_focus"))
+    jcc(a, cc_ne, no_cursor)
+    movsd_load(a, xmm0, rip("gui_tl")) # the cursor: 1 after the text, 2 wide, from 6 to 24 up
+    times_scale(a, xmm1, 1)
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_fx"), xmm0)
+    movsd_load(a, xmm0, mem(rbx, 16))
+    load_bits(a, xmm1, double_bytes(24))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    movsd_store(a, rip("gui_t1"), xmm0)
+    picture_y(a, xmm0, rip("gui_t1"))
+    movsd_store(a, rip("gui_fy"), xmm0)
+    times_scale(a, xmm0, 2)
+    movsd_store(a, rip("gui_fw"), xmm0)
+    times_scale(a, xmm0, 18)
+    movsd_store(a, rip("gui_fh"), xmm0)
+    movi(a, rcx, 0xFF000000)
+    call_to(a, "rt_gui_fill")
+    mark(a, no_cursor)
+    call_to(a, "rt_gui_unclip")
+    jmp_to(a, item_next)
+end
+
+# xmm1: where the baseline of a button's or a text box's text goes, 10 up from its bottom (rbx the thing drawn)
+to baseline with a
+    movsd_load(a, xmm1, mem(rbx, 16))
+    load_bits(a, xmm2, double_bytes(10))
+    sse_math(a, "+", xmm1, reg_at(xmm2))
+    movsd_store(a, rip("gui_t1"), xmm1)
+    picture_y(a, xmm1, rip("gui_t1"))
+end
+
+to cvtss2sd with a, x, at
+    sse(a, 0xF3, 0x5A, x, at)
+end
+
+to emit_gui_widgets with a
+    # rt_gui_px: xmm0 to xmm3 a box in the picture's numbers (x, y its bottom left, a width and height above
+    # 0): where it goes in the window, in pixels, into gui_fx, gui_fy (its top), gui_fw and gui_fh
+    mark(a, "rt_gui_px")
+    sse_math(a, "+", xmm1, reg_at(xmm3))
+    movsd_store(a, rip("gui_fx"), xmm0)
+    picture_x(a, xmm0, rip("gui_fx"))
+    movsd_store(a, rip("gui_fx"), xmm0)
+    movsd_store(a, rip("gui_fy"), xmm1)
+    picture_y(a, xmm1, rip("gui_fy"))
+    movsd_store(a, rip("gui_fy"), xmm1)
+    sse_math(a, "*", xmm2, rip("gui_scale"))
+    movsd_store(a, rip("gui_fw"), xmm2)
+    sse_math(a, "*", xmm3, rip("gui_scale"))
+    movsd_store(a, rip("gui_fh"), xmm3)
+    ret(a)
+
+    # rt_gui_fill: rcx a colour, ARGB: the box at gui_fx to gui_fh, filled with it
+    mark(a, "rt_gui_fill")
+    win_enter(a)
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    for each pair in list of (list of "gui_fw", 5), (list of "gui_fh", 6)
+        movsd_load(a, xmm0, rip(item 1 of pair))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, arg_at(item 2 of pair), xmm4)
+    end
+    movsd_load(a, xmm2, rip("gui_fx"))
+    cvtsd2ss(a, xmm2, xmm2)
+    movsd_load(a, xmm3, rip("gui_fy"))
+    cvtsd2ss(a, xmm3, xmm3)
+    load(a, rcx, rip("gui_gfx"))
+    load(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipFillRectangle")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    win_leave(a)
+    ret(a)
+
+    # rt_gui_clip, rt_gui_unclip: drawing kept to the box at gui_fx to gui_fh, and let go again
+    mark(a, "rt_gui_clip")
+    win_enter(a)
+    movsd_load(a, xmm0, rip("gui_fh"))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, arg_at(5), xmm4)
+    storei(a, arg_at(6), 0) # instead of what was there
+    movsd_load(a, xmm1, rip("gui_fx"))
+    cvtsd2ss(a, xmm1, xmm1)
+    movsd_load(a, xmm2, rip("gui_fy"))
+    cvtsd2ss(a, xmm2, xmm2)
+    movsd_load(a, xmm3, rip("gui_fw"))
+    cvtsd2ss(a, xmm3, xmm3)
+    load(a, rcx, rip("gui_gfx"))
+    w_call(a, "GdipSetClipRect")
+    win_leave(a)
+    ret(a)
+    mark(a, "rt_gui_unclip")
+    win_enter(a)
+    load(a, rcx, rip("gui_gfx"))
+    w_call(a, "GdipResetClip")
+    win_leave(a)
+    ret(a)
+
+    # rt_gui_prep: rax a text: it as UTF-16 in wbuf (gui_units long), a 16 font in gui_font, and how wide the
+    # text is in it, in pixels, in gui_tw
+    set measured to new_label(a)
+    mark(a, "rt_gui_prep")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rax)
+    untag(a, rbx)
+    win_enter(a)
+    load(a, rcx, rip("gui_family"))
+    times_scale(a, xmm0, 16)
+    cvtsd2ss(a, xmm1, xmm0)
+    movi(a, r8, 0)
+    movi(a, r9, 2)
+    lea(a, rax, rip("gui_font"))
+    store(a, arg_at(5), rax)
+    w_call(a, "GdipCreateFont")
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    load(a, r8, mem(rbx, 16))
+    load32(a, r9, mem(rbx, 0))
+    lea(a, rax, rip("wbuf"))
+    store(a, arg_at(5), rax)
+    storei(a, arg_at(6), wide_cap)
+    w_call(a, "MultiByteToWideChar")
+    store(a, rip("gui_units"), rax)
+    storei(a, rip("gui_tw"), 0)
+    mov32_rr(a, rax, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, measured)
+    storei(a, rip("gui_bbox"), 0)
+    storei(a, rip_plus("gui_bbox", 8), 0)
+    for each pair in list of (list of 0, 0), (list of 4, 0), (list of 8, 100000), (list of 12, 100000)
+        load_bits(a, xmm0, double_bytes(item 2 of pair))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, rip_plus("gui_rectf", item 1 of pair), xmm4)
+    end
+    load(a, rcx, rip("gui_gfx"))
+    lea(a, rdx, rip("wbuf"))
+    load32(a, r8, rip("gui_units"))
+    load(a, r9, rip("gui_font"))
+    lea(a, rax, rip("gui_rectf"))
+    store(a, arg_at(5), rax)
+    load(a, rax, rip("gui_format"))
+    store(a, arg_at(6), rax)
+    lea(a, rax, rip("gui_bbox"))
+    store(a, arg_at(7), rax)
+    storei(a, arg_at(8), 0)
+    storei(a, arg_at(9), 0)
+    w_call(a, "GdipMeasureString")
+    cvtss2sd(a, xmm0, rip_plus("gui_bbox", 8))
+    movsd_store(a, rip("gui_tw"), xmm0)
+    mark(a, measured)
+    win_leave(a)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_gui_put: rcx a colour, ARGB, xmm0 and xmm1 where in the window, in pixels: the text rt_gui_prep made
+    # ready, its baseline there
+    set nothing_to_put to new_label(a)
+    mark(a, "rt_gui_put")
+    movsd_store(a, rip("gui_tx"), xmm0)
+    movsd_store(a, rip("gui_ty"), xmm1)
+    load(a, rax, rip("gui_units"))
+    mov32_rr(a, rax, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, nothing_to_put)
+    win_enter(a)
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    movsd_load(a, xmm0, rip("gui_tx"))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip("gui_rectf"), xmm4)
+    movsd_load(a, xmm0, rip("gui_ty"))
+    times_scale(a, xmm1, 16)
+    sse_math(a, "*", xmm1, rip("gui_ascent"))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip_plus("gui_rectf", 4), xmm4)
+    load_bits(a, xmm0, double_bytes(100000))
+    cvtsd2ss(a, xmm4, xmm0)
+    movss_store(a, rip_plus("gui_rectf", 8), xmm4)
+    movss_store(a, rip_plus("gui_rectf", 12), xmm4)
+    load(a, rcx, rip("gui_gfx"))
+    lea(a, rdx, rip("wbuf"))
+    load32(a, r8, rip("gui_units"))
+    load(a, r9, rip("gui_font"))
+    lea(a, rax, rip("gui_rectf"))
+    store(a, arg_at(5), rax)
+    load(a, rax, rip("gui_format"))
+    store(a, arg_at(6), rax)
+    load(a, rax, rip("gui_brush"))
+    store(a, arg_at(7), rax)
+    w_call(a, "GdipDrawString")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    win_leave(a)
+    mark(a, nothing_to_put)
+    ret(a)
+
+    mark(a, "rt_gui_unprep") # the font rt_gui_prep made
+    win_enter(a)
+    load(a, rcx, rip("gui_font"))
+    w_call(a, "GdipDeleteFont")
+    win_leave(a)
+    ret(a)
+
+    # rt_focus_check: the focus goes if its text box isn't in the picture any more
+    set check_loop to new_label(a)
+    set check_next to new_label(a)
+    set check_gone to new_label(a)
+    set check_done to new_label(a)
+    mark(a, "rt_focus_check")
+    load(a, rax, rip("box_focus"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, check_done)
+    load(a, rcx, rip("pic_n"))
+    load(a, rsi, rip("pic_items"))
+    mark(a, check_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, check_gone)
+    load(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 6)
+    jcc(a, cc_ne, check_next)
+    alu_load(a, "cmp", rax, mem(rsi, 40))
+    jcc(a, cc_e, check_done)
+    mark(a, check_next)
+    alui(a, "add", rsi, 64)
+    dec_r(a, rcx)
+    jmp_to(a, check_loop)
+    mark(a, check_gone)
+    storei(a, rip("box_focus"), 0)
+    mark(a, check_done)
+    ret(a)
+
+    # rt_app_label: rcx what happened (3 a button clicked, 4 enter in a text box), r8 its label: each handler
+    # of it that waits for that label, in order
+    set label_loop to new_label(a)
+    set label_next to new_label(a)
+    set labels_done to new_label(a)
+    mark(a, "rt_app_label")
+    for each r in list of rbx, r12, r13, r14
+        push_r(a, r)
+    end
+    push_r(a, r8) # where the collector sees it
+    mov_rr(a, r12, rcx)
+    mov_rr(a, r14, r8)
+    movi(a, r13, 0)
+    mark(a, label_loop)
+    alu_load(a, "cmp", r13, rip("app_n"))
+    jcc(a, cc_ae, labels_done)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, 5)
+    alu_load(a, "add", rbx, rip("app_items"))
+    alu_load(a, "cmp", r12, mem(rbx, 0))
+    jcc(a, cc_ne, label_next)
+    load(a, rax, mem(rbx, 24))
+    mov_rr(a, rdx, r14)
+    call_to(a, "rt_equal")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, label_next)
+    call_to(a, "rt_app_call")
+    mark(a, label_next)
+    inc_r(a, r13)
+    jmp_to(a, label_loop)
+    mark(a, labels_done)
+    pop_r(a, r8)
+    for each r in list of r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_app_event: rcx what happened (0 a key, ev_a its name; 1 a click and 2 a drag, at ev_a, ev_b; 5 text
+    # typed, ev_a): through the picture's buttons and text boxes first, as Turtle.route in vm.js has it
+    set ev_pass to new_label(a)
+    set ev_out to new_label(a)
+    set ev_click to new_label(a)
+    set ev_typed to new_label(a)
+    set ev_enter to new_label(a)
+    set ev_back to new_label(a)
+    set hit_loop to new_label(a)
+    set hit_none to new_label(a)
+    set hit_found to new_label(a)
+    mark(a, "rt_app_event")
+    for each r in list of rbx, r12, r13
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rcx)
+    call_to(a, "rt_focus_check")
+    alui(a, "cmp", r12, 1)
+    jcc(a, cc_e, ev_click)
+    alui(a, "cmp", r12, 5)
+    jcc(a, cc_e, ev_typed)
+    alui(a, "cmp", r12, 2)
+    jcc(a, cc_e, ev_pass)
+    load(a, rax, rip("box_focus")) # a key: the program's, unless a text box has the focus
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, ev_pass)
+    for each pair in list of (list of "backspace", ev_back), (list of "enter", ev_enter)
+        lea(a, rdx, rip(text_object(a, item 1 of pair)))
+        movi64(a, rcx, tag_text)
+        alu(a, "or", rdx, rcx)
+        load(a, rax, rip("ev_a"))
+        call_to(a, "rt_equal")
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, item 2 of pair)
+    end
+    jmp_to(a, ev_out)
+    mark(a, ev_enter) # its handlers, with what's typed in it
+    load(a, rax, rip("box_focus"))
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 4)
+    alu_load(a, "add", rax, rip("box_items"))
+    load(a, rcx, mem(rax, 8))
+    store(a, rip("ev_a"), rcx)
+    load(a, r8, mem(rax, 0))
+    movi(a, rcx, 4)
+    call_to(a, "rt_app_label")
+    jmp_to(a, ev_out)
+    mark(a, ev_back)
+    call_to(a, "rt_box_backspace")
+    jmp_to(a, ev_out)
+    mark(a, ev_typed)
+    load(a, rax, rip("box_focus"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, ev_out)
+    call_to(a, "rt_box_type")
+    jmp_to(a, ev_out)
+    mark(a, ev_click) # the last button or text box drawn that it's in, if any
+    load(a, r13, rip("pic_n"))
+    mark(a, hit_loop)
+    test_rr(a, r13, r13)
+    jcc(a, cc_e, hit_none)
+    dec_r(a, r13)
+    mov_rr(a, rbx, r13)
+    shifti(a, "shl", rbx, 6)
+    alu_load(a, "add", rbx, rip("pic_items"))
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 5)
+    jcc(a, cc_b, hit_loop)
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_a, hit_loop)
+    for each pair in list of (list of "ev_a", 8, 24), (list of "ev_b", 16, 32)
+        movsd_load(a, xmm0, rip(item 1 of pair))
+        ucomisd(a, xmm0, mem(rbx, item 2 of pair))
+        jcc(a, cc_b, hit_loop)
+        movsd_load(a, xmm1, mem(rbx, item 2 of pair))
+        sse_math(a, "+", xmm1, mem(rbx, item 3 of pair))
+        ucomisd(a, xmm0, reg_at(xmm1))
+        jcc(a, cc_a, hit_loop)
+    end
+    load(a, rax, mem(rbx, 0))
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_e, hit_found)
+    load(a, r8, mem(rbx, 56)) # a button: its handlers, and the focus stays where it is
+    movi(a, rcx, 3)
+    call_to(a, "rt_app_label")
+    jmp_to(a, ev_out)
+    mark(a, hit_found) # a text box: the focus
+    load(a, rax, mem(rbx, 40))
+    store(a, rip("box_focus"), rax)
+    jmp_to(a, ev_out)
+    mark(a, hit_none) # neither: the focus goes, and the program gets the click
+    storei(a, rip("box_focus"), 0)
+    mark(a, ev_pass)
+    mov_rr(a, rcx, r12)
+    call_to(a, "rt_app_send")
+    mark(a, ev_out)
+    for each r in list of r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_box_type: the text in ev_a, typed into the box with the focus: each character but a control one, up
+    # to 40 in the box
+    set type_loop to new_label(a)
+    set type_one to new_label(a)
+    set type_sized to new_label(a)
+    set type_skip to new_label(a)
+    set type_done to new_label(a)
+    mark(a, "rt_box_type")
+    for each r in list of rbx, r12, r13, r14
+        push_r(a, r)
+    end
+    load(a, rbx, rip("box_focus"))
+    dec_r(a, rbx)
+    shifti(a, "shl", rbx, 4)
+    alu_load(a, "add", rbx, rip("box_items"))
+    call_to(a, "rt_b_reset")
+    load(a, rax, mem(rbx, 8))
+    untag(a, rax)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    load(a, r14, mem(rax, 8)) # how many characters it has
+    call_to(a, "rt_b_bytes")
+    load(a, rax, rip("ev_a"))
+    untag(a, rax)
+    load(a, r12, mem(rax, 16))
+    load(a, r13, mem(rax, 0))
+    alu(a, "add", r13, r12)
+    mark(a, type_loop)
+    alu(a, "cmp", r12, r13)
+    jcc(a, cc_ae, type_done)
+    load8(a, rax, mem(r12, 0))
+    movi(a, rcx, 1)
+    alui(a, "cmp", rax, 0x80)
+    jcc(a, cc_b, type_one)
+    movi(a, rcx, 2)
+    alui(a, "cmp", rax, 0xE0)
+    jcc(a, cc_b, type_sized)
+    movi(a, rcx, 3)
+    alui(a, "cmp", rax, 0xF0)
+    jcc(a, cc_b, type_sized)
+    movi(a, rcx, 4)
+    jmp_to(a, type_sized)
+    mark(a, type_one)
+    alui(a, "cmp", rax, 0x20)
+    jcc(a, cc_b, type_skip)
+    alui(a, "cmp", rax, 0x7F)
+    jcc(a, cc_e, type_skip)
+    mark(a, type_sized)
+    alui(a, "cmp", r14, 40)
+    jcc(a, cc_ae, type_skip)
+    inc_r(a, r14)
+    mov_rr(a, rsi, r12)
+    push_r(a, rcx)
+    call_to(a, "rt_b_bytes")
+    pop_r(a, rcx)
+    mark(a, type_skip)
+    alu(a, "add", r12, rcx)
+    jmp_to(a, type_loop)
+    mark(a, type_done)
+    call_to(a, "rt_b_text")
+    store(a, mem(rbx, 8), rax)
+    for each r in list of r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_box_backspace: the last character of the text in the box with the focus, gone
+    set back_loop to new_label(a)
+    set back_cut to new_label(a)
+    set back_done to new_label(a)
+    mark(a, "rt_box_backspace")
+    push_r(a, rbx)
+    load(a, rbx, rip("box_focus"))
+    dec_r(a, rbx)
+    shifti(a, "shl", rbx, 4)
+    alu_load(a, "add", rbx, rip("box_items"))
+    load(a, rax, mem(rbx, 8))
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, back_done)
+    load(a, rsi, mem(rax, 16))
+    mark(a, back_loop) # back to where the last character starts
+    dec_r(a, rcx)
+    jcc(a, cc_e, back_cut)
+    mov_rr(a, rdx, rsi)
+    alu(a, "add", rdx, rcx)
+    load8(a, rdx, mem(rdx, 0))
+    alui(a, "and", rdx, 0xC0)
+    alui(a, "cmp", rdx, 0x80)
+    jcc(a, cc_e, back_loop)
+    mark(a, back_cut)
+    call_to(a, "rt_text_from")
+    store(a, mem(rbx, 8), rax)
+    mark(a, back_done)
+    pop_r(a, rbx)
     ret(a)
 end
 
@@ -17737,6 +18579,7 @@ to emit_runtime with st
     set pad of a to windowed and uses_pad of st
     set net of a to uses_read of st
     set pictures of a to uses_pictures of st
+    set widgets of a to uses_widgets of st
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
     if uses_clock of st # the clock starts with the program
@@ -17800,7 +18643,18 @@ to emit_runtime with st
         emit_gui(a, name of st)
         emit_gui_keys(a)
         for each group in gui_imports
-            add group to wanted
+            if widgets of a and item 1 of group is "gdiplus.dll" # and what buttons and text boxes need
+                set gdi_names to empty list
+                for each gdi_name in item 2 of group
+                    add gdi_name to gdi_names
+                end
+                for each gdi_name in list of "GdipMeasureString", "GdipSetClipRect", "GdipResetClip"
+                    add gdi_name to gdi_names
+                end
+                add (list of item 1 of group, gdi_names) to wanted
+            else
+                add group to wanted
+            end
         end
         if uses_pictures of st
             add (list of "gdiplus.dll", picture_imports) to wanted
@@ -17899,6 +18753,12 @@ to emit_runtime with st
             (list of "css_vals", 32), (list of "css_types", 32)
             reserve(a, item 1 of pair, item 2 of pair, 16)
         end
+        if widgets of a # where buttons and text boxes are drawn, and how wide their text is
+            for each name in list of "gui_gfx", "gui_tw", "gui_tl", "gui_tx", "gui_ty", "gui_fx", "gui_fy", "gui_fw", "gui_fh"
+                reserve(a, name, 8, 8)
+            end
+            reserve(a, "gui_bbox", 16, 16)
+        end
     end
     if uses_pictures of st # the decoder's numbers and tables, which are never values
         for each name in picture_numbers
@@ -17930,6 +18790,11 @@ to emit_runtime with st
         "t_cos", "t_sin", "t_list", "tn0", "tn1", "tn2", "tn3", "pi_kind", "pi_a", "pi_b", "pi_c", "pi_d", "pi_w", "pi_text",
         "pic_items", "pic_n", "pic_cap", "app_items", "app_n", "app_cap", "ev_ms"
         reserve(a, name, 8, 8)
+    end
+    if widgets of a # each text box's label and text, and the one with the focus
+        for each name in list of "box_items", "box_n", "box_cap", "box_focus"
+            reserve(a, name, 8, 8)
+        end
     end
     if windowed
         for each name in list of "ev_a", "ev_b", "pad_q", "pad_pts"
@@ -22020,6 +22885,9 @@ to gen_turtle with fc, s
         why_stub(fc, at of s, "rt_why_picture")
         return nothing
     end
+    if action of s is "button" or action of s is "text box" or action of s is "clear text box"
+        set uses_widgets of st of fc to yes
+    end
     if value of s is nothing
         load_bits(a, xmm0, bits_nothing)
     else
@@ -22038,6 +22906,14 @@ to gen_handler with fc, s
     set handler to new_function(st of fc, fn of s, scope of fc, level of fc + 1)
     set waiting to pending of st of fc
     add handler to waiting
+    set labelled to kind of s is "when" and label of s is not nothing
+    if labelled # the button or text box it waits for, as `say` shows it, worked out first
+        set uses_widgets of st of fc to yes
+        gen_expr(fc, label of s)
+        call_to(a, "rt_show_text")
+        movq_xr(a, xmm0, rax)
+        push_value(fc)
+    end
     if kind of s is "every"
         gen_expr(fc, interval of s)
         push_value(fc)
@@ -22054,6 +22930,14 @@ to gen_handler with fc, s
         movi(a, rdx, 0)
         call_to(a, "rt_every")
         why_stub(fc, at of s, "rt_why_turtle")
+    else if labelled
+        mov_rr(a, r9, rax)
+        pop_value(fc, xmm0)
+        movq_rx(a, r8, xmm0)
+        mov_rr(a, rax, r9)
+        movi(a, rcx, slot_of_word(front's event_names, event of s) - 1)
+        movi(a, rdx, length of params of fn of s)
+        call_to(a, "rt_on_label")
     else
         movi(a, rcx, slot_of_word(front's event_names, event of s) - 1)
         movi(a, rdx, length of params of fn of s)
@@ -23629,7 +24513,7 @@ to new_state with a, program_name, files, source, target
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
-        uses_saving no, literal_kinds empty dictionary, uses_pictures no
+        uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -26274,7 +27158,7 @@ set builtin_routines to dictionary where "position" is "rt_position", "split" is
     "number" is "rt_number", "bit and" is "rt_bit_and", "bit or" is "rt_bit_or", "bit xor" is "rt_bit_xor",
     "shift left" is "rt_shift_left", "shift right" is "rt_shift_right", "bytes" is "rt_bytes_of",
     "as bytes" is "rt_as_bytes", "as text" is "rt_as_text", "as hex" is "rt_as_hex", "as binary" is "rt_as_binary",
-    "uppercase" is "rt_upper", "lowercase" is "rt_lower"
+    "uppercase" is "rt_upper", "lowercase" is "rt_lower", "text in box" is "rt_box_text"
 
 # Each also gives what kind of value it is when it works: "whole", "number" or "value" (see the facts,
 # above). What a function call does to what's known happens here as well, in the order the code runs.
@@ -26451,6 +27335,10 @@ to gen_expr with fc, e
     else if what is "builtin" and name of e is in builtin_routines
         if name of e is "uppercase" or name of e is "lowercase"
             set uses_case of st of fc to yes
+        end
+        if name of e is "text in box"
+            set uses_widgets of st of fc to yes
+            set uses_drawing of st of fc to yes
         end
         set inputs to args of e
         if length of inputs is 1

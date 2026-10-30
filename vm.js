@@ -161,7 +161,8 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
   READ_FOLDER } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
-  "to", "clear", "box", "circle", "text", "chart", "picture"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
+  "to", "clear", "box", "circle", "text", "chart", "picture", // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
+  "button", "text box", "clear text box"]; // `draw button "Start" at ...`, `draw text box "Name" at ...`, `clear the text box "Name"`
 // the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
 export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
@@ -732,6 +733,8 @@ export const BUILTINS = [
   // `save scores to "scores.txt"` writes what this makes; `load "scores.txt"` reads it back (see savedText)
   { name: "save", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary"]], gives: "text", run: ([value], error) => savedText(value, error) },
   { name: "load", needs: [["text"]], gives: null, run: ([text], error) => loadedValue(text, error) },
+  // `the text in the text box "Name"`: what's typed in it so far (see Turtle). The checker has no turtle.
+  { name: "text in box", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "text", run: ([label], error, turtle) => turtle?.texts.get(show(label)) ?? "" },
 ];
 
 // `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
@@ -926,9 +929,12 @@ export function askFor(question, answer, error) {
   return String(reply);
 }
 
-// What an app's handlers wait for: `when a key is pressed`, `when the mouse is clicked`, `... is dragged`.
-// A handler is { event, closure }, or for `every`, { event: "every", interval (in milliseconds), closure }.
-export const EVENTS = ["key", "click", "drag"];
+// What an app's handlers wait for: `when a key is pressed`, `when the mouse is clicked`, `... is dragged`,
+// `when the button "Start" is clicked` and `when enter is pressed in the text box "Name"`. A handler is
+// { event, closure }, with the label it waits for as `label` for the last two, or for `every`, { event:
+// "every", interval (in milliseconds), closure }.
+export const EVENTS = ["key", "click", "drag", "button", "enter"];
+export const LABELLED = new Set([EVENTS.indexOf("button"), EVENTS.indexOf("enter")]);
 
 // `every 100 milliseconds`: how often, in milliseconds (`unit` is 1000 for seconds)
 export function everyInterval(interval, unit, error) {
@@ -1030,18 +1036,67 @@ export function failWith(value, error) {
   error(show(value), value);
 }
 
+// how many letters a text box holds
+export const BOX_LETTERS = 40;
+
 // The turtle: starts in the middle, facing up, with its pen down, and reports each line it draws to `draw`
 // as { x1, y1, x2, y2, color, width }, with y going up.
 export class Turtle {
   constructor(draw = () => {}) {
     Object.assign(this, { draw, x: 0, y: 0, heading: 90, pen: true, color: "#4f8ff7", width: 2 });
+    // buttons and text boxes (DESIGN §36): those on the picture since the last `clear`, in the order drawn,
+    // as { kind: "button" or "box", label, x, y, width, height }; what's typed in each box, by its label,
+    // kept through `clear`; and the label of the box that has the focus, or null
+    Object.assign(this, { widgets: [], texts: new Map(), focus: null });
+  }
+
+  // Where an event goes once the picture's buttons and text boxes have seen it: [the event the handlers wait
+  // for, the label they wait for (or undefined), their inputs], or null for none. A click inside a button is
+  // its own, one inside a text box gives it the focus, and one anywhere else takes the focus away. While a box
+  // has the focus, every key is its: Backspace takes off the last letter and Enter is the box's; and "type"
+  // (the text typed, as it was typed) goes into it, up to BOX_LETTERS letters.
+  route(event, inputs) {
+    if (this.focus !== null && !this.widgets.some((w) => w.kind === "box" && w.label === this.focus)) this.focus = null; // its box is gone
+    if (event === "click") {
+      const [x, y] = inputs;
+      const hit = this.widgets.findLast((w) => x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height);
+      if (hit?.kind === "button") return ["button", hit.label, []];
+      this.focusOn(hit ? hit.label : null);
+      return hit ? null : [event, undefined, inputs];
+    }
+    if (this.focus === null) return event === "type" ? null : [event, undefined, inputs];
+    const letters = [...(this.texts.get(this.focus) ?? "")];
+    if (event === "type") {
+      for (const c of show(inputs[0])) if (c >= " " && c !== "\x7f" && letters.length < BOX_LETTERS) letters.push(c);
+      this.typed(this.focus, letters.join(""));
+    } else if (event === "key" && inputs[0] === "backspace") this.typed(this.focus, letters.slice(0, -1).join(""));
+    else if (event === "key" && inputs[0] === "enter") return ["enter", this.focus, [letters.join("")]];
+    else if (event !== "key") return [event, undefined, inputs];
+    return null;
+  }
+
+  // the focus, to the box with this label (or none): each box whose focus changed is drawn again
+  focusOn(label) {
+    const before = this.focus;
+    if (label === before) return;
+    this.focus = label;
+    for (const box of [before, label]) if (box !== null) this.draw({ textbox: box, text: this.texts.get(box) ?? "", focused: box === label });
+  }
+
+  // the text in the box with this label, changed: drawn again
+  typed(label, text) {
+    if ((this.texts.get(label) ?? "") === text) return;
+    this.texts.set(label, text);
+    this.draw({ textbox: label, text, focused: this.focus === label });
   }
 
   // Besides lines, the turtle reports { clear: true } when the picture is wiped, and filled shapes:
   // { shape: "box", x, y, width, height, color } (x, y its bottom left corner), { shape: "circle", x, y,
-  // radius, color } and { shape: "text", text, x, y, size, color }; and pictures from files, { shape:
-  // "picture", x, y, width, height, image }, where the image is what decodePicture gives. `disk` has the
-  // files `draw picture` reads, as for readFile.
+  // radius, color } and { shape: "text", text, x, y, size, color }; pictures from files, { shape: "picture", x,
+  // y, width, height, image }, where the image is what decodePicture gives; and { shape: "button", text, x, y,
+  // width, height, color }, { shape: "textbox", label, text, focused, x, y, width, height, color }, and
+  // { textbox: label, text, focused } when what a text box shows changes without it being drawn again. `disk`
+  // has the files `draw picture` reads, as for readFile.
   act(action, value, error = oops, disk = null) {
     const name = TURTLE_ACTIONS[action];
     if (action < 4 && typeof value !== "number") error(`'${action < 2 ? "move" : "turn"} ${name}' needs a number, not ${kindOf(value)}`);
@@ -1063,7 +1118,21 @@ export class Turtle {
       if (this.pen) this.draw({ x1: round(this.x), y1: round(this.y), x2: round(x), y2: round(y), color: this.color, width: this.width });
       Object.assign(this, { x, y });
     } else if (name === "clear") {
+      this.widgets = [];
       this.draw({ clear: true });
+    } else if (name === "button" || name === "text box") { // [label, x, y]: the label as `say` shows it
+      const [x, y] = numbers(`'draw ${name}'`, value.slice(1));
+      const label = show(value[0]);
+      if (name === "button") {
+        const width = 20 + 10 * [...label].length;
+        this.widgets.push({ kind: "button", label, x, y, width, height: 30 });
+        this.draw({ shape: "button", text: label, x, y, width, height: 30, color: this.color });
+      } else {
+        this.widgets.push({ kind: "box", label, x, y, width: 200, height: 30 });
+        this.draw({ shape: "textbox", label, text: this.texts.get(label) ?? "", focused: this.focus === label, x, y, width: 200, height: 30, color: this.color });
+      }
+    } else if (name === "clear text box") {
+      this.typed(show(value), "");
     } else if (name === "box") {
       const [x, y, width, height] = numbers("'draw box'", value);
       this.draw({ shape: "box", x, y, width, height, color: this.color });
@@ -1460,9 +1529,13 @@ export class Machine {
             writeFile(stack.pop(), name, this.disk, oops);
             break;
           }
-          case HANDLE:
-            this.listeners.push({ event: EVENTS[code[ip++]], closure: stack.pop() });
+          case HANDLE: {
+            const event = code[ip++];
+            const closure = stack.pop();
+            if (LABELLED.has(event)) this.listeners.push({ event: EVENTS[event], label: show(stack.pop()), closure }); // the label under it
+            else this.listeners.push({ event: EVENTS[event], closure });
             break;
+          }
           case EVERY: {
             const closure = stack.pop();
             this.listeners.push({ event: "every", interval: everyInterval(stack.pop(), code[ip++], oops), closure });
@@ -1503,7 +1576,7 @@ export class Machine {
             break;
           case BUILTIN: {
             const builtin = BUILTINS[code[ip++]];
-            stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops));
+            stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops, this.turtle));
             break;
           }
           case FAIL:

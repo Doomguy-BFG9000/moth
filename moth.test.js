@@ -1203,6 +1203,123 @@ test("a handler's mistake says where, each event gets its own steps, and going t
   }
 });
 
+// ---------- buttons and text boxes ----------
+
+// A list to add to: a text box, and buttons that read it. "Deep" goes too deep for the JIT and WebAssembly, so
+// the app moves to the VM in the middle, which must have what was typed in the box by then.
+const FORM = [
+  "set items to empty list",
+  "to show",
+  "    clear",
+  '    draw text box "Item" at -100, 100',
+  '    draw button "Add" at 110, 100',
+  '    draw button "Deep" at 110, 60',
+  "    for each i from 1 to length of items",
+  "        draw item i of items at -100, 80 - 20 * i",
+  "    end",
+  "end",
+  "to deep with n",
+  "    if n is 0",
+  '        return the text in the text box "Item"',
+  "    end",
+  "    return deep(n - 1)",
+  "end",
+  'when the button "Add" is clicked',
+  '    add the text in the text box "Item" to items',
+  '    say "added " the text in the text box "Item"',
+  '    clear the text box "Item"',
+  "    show()",
+  "end",
+  'when the button "Deep" is clicked',
+  '    say "deep " deep(3000)',
+  "end",
+  'when enter is pressed in the text box "Item" with words',
+  '    say "enter " words',
+  "end",
+  "when the mouse is clicked with x and y",
+  '    say "click " x " " y',
+  "end",
+  "when a key is pressed with key",
+  '    say "key " key',
+  "end",
+  "show()",
+].join("\n");
+
+test("buttons and text boxes take their clicks and keys, and keep what's typed through a move to the VM, on all three engines", () => {
+  const drawings = [];
+  for (const engine of ENGINES) {
+    const said = [];
+    const drawn = [];
+    const app = run(FORM, (line) => said.push(line), { engine, draw: (d) => drawn.push(d) });
+    assert.deepEqual(app.waits, [{ event: "button", label: "Add" }, { event: "button", label: "Deep" }, { event: "enter", label: "Item" },
+      { event: "click" }, { event: "key" }], engine);
+    app.send("key", ["a"]); // nothing has the focus: the key is the program's
+    app.send("type", ["zz"]); // and typing goes nowhere
+    app.send("click", [0, 110]); // the box: the focus, and not a click for the program
+    app.send("key", ["h"]);
+    app.send("type", ["H"]);
+    app.send("type", ["i\n"]); // a control character is dropped
+    app.send("key", ["x"]);
+    app.send("key", ["enter"]);
+    app.send("click", [120, 110]); // "Add", which leaves the focus where it was
+    app.send("type", ["Yo"]);
+    app.send("click", [115, 70]); // "Deep", too deep for the JIT and WebAssembly
+    app.send("key", ["backspace"]);
+    app.send("click", [0, -200]); // nothing there: the focus goes, and the program gets the click
+    app.send("key", ["b"]);
+    app.send("type", ["q"]);
+    app.send("click", [160, 130]); // the corner of "Add" is inside it
+    assert.deepEqual(said, ["key a", "enter Hi", "added Hi", "deep Yo", "click 0 -200", "key b", "added Y"], engine);
+    assert.deepEqual(drawn.slice(0, 5), [
+      { clear: true },
+      { shape: "textbox", label: "Item", text: "", focused: false, x: -100, y: 100, width: 200, height: 30, color: "#4f8ff7" },
+      { shape: "button", text: "Add", x: 110, y: 100, width: 50, height: 30, color: "#4f8ff7" },
+      { shape: "button", text: "Deep", x: 110, y: 60, width: 60, height: 30, color: "#4f8ff7" },
+      { textbox: "Item", text: "", focused: true },
+    ], engine);
+    drawings.push(drawn);
+  }
+  assert.deepEqual(drawings[1], drawings[0]);
+  assert.deepEqual(drawings[2], drawings[0]);
+  const said = [];
+  const full = run(FORM.replace('say "enter " words', 'say length of words'), (line) => said.push(line), { engine: "vm" });
+  full.send("click", [0, 110]);
+  full.send("type", ["x".repeat(50)]);
+  full.send("key", ["enter"]);
+  full.send("key", ["backspace"]);
+  full.send("type", ["😀"]);
+  full.send("key", ["enter"]);
+  assert.deepEqual(said, ["40", "40"]); // a box holds 40 letters, an emoji counted as one
+});
+
+test("a button or text box is its label, the one drawn last is on top, and clear leaves what's typed", () => {
+  const source = [
+    'draw button "A" at 0, 0',
+    'draw text box 7 at 0, 0', // on top of "A", and called "7"
+    'when the button "A" is clicked',
+    '    say "A"',
+    "end",
+    "when enter is pressed in the text box 3 + 4",
+    '    say "entered " the text in the text box "7"',
+    '    clear',
+    '    draw button "A" at 100, 100',
+    '    draw button "A" at -100, -100',
+    "end",
+  ].join("\n");
+  for (const engine of ENGINES) {
+    const said = [];
+    const app = run(source, (line) => said.push(line), { engine });
+    app.send("click", [5, 5]); // the box, which is on top
+    app.send("type", ["ok"]);
+    app.send("key", ["enter"]);
+    app.send("type", ["more"]); // its box is gone, and the focus with it
+    app.send("click", [105, 105]);
+    app.send("click", [-95, -95]);
+    app.send("click", [5, 5]);
+    assert.deepEqual(said, ["entered ok", "A", "A"], engine);
+  }
+});
+
 // ---------- fixing ----------
 
 test("suggestedFix puts a misspelled name or a symbol from another language right, and only where the code has it", () => {

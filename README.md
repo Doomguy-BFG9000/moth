@@ -470,9 +470,10 @@ save scores to "scores.txt"                 # any number, text, list, record or 
 set scores to load "scores.txt"             # and back again, as it was
 ```
 
-Apps: pictures that answer keys, clicks and time.
-[`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines, and
-[`apps/paint.moth`](apps/paint.moth) a paint program in 54.
+Apps: pictures that answer keys, clicks and time, with buttons and boxes to
+type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
+[`apps/paint.moth`](apps/paint.moth) a paint program in 54, and
+[`apps/todo.moth`](apps/todo.moth) a to-do list in 38.
 
 ```
 move to 50, -20                             # straight to a spot, drawing if the pen is down
@@ -492,6 +493,16 @@ when the mouse is clicked with x and y      # also: when the mouse is dragged
 end
 every 100 milliseconds                      # or: every 2 seconds, every 1 minute
     move forward 1
+end
+
+draw button "Add" at 10, 200                # its size comes from its label
+draw text box "Name" at -200, 200           # 200 by 30; click it, then type
+when the button "Add" is clicked            # a click on a button is its own
+    say the text in the text box "Name"
+    clear the text box "Name"               # empties it; plain `clear` keeps it
+end
+when enter is pressed in the text box "Name" with words
+    say "Hello, " words
 end
 ```
 
@@ -573,7 +584,8 @@ nothing to install.
 - **Share** puts the code in the link, and **Tidy** lays it out the one way
   Moth writes it (Undo brings it back).
 - **Apps** keep running once they've set up: click the picture, and your keys,
-  clicks and drags go to the program. Try **Snake** and **Paint**.
+  clicks and drags go to the program, or to its buttons and the text box you
+  clicked. Try **Snake**, **Paint** and **To-do**.
 - **Examples** include **Handwriting** (draw on a pad), **Guess** (a
   number-guessing game that asks for answers), **Neural network**, and **Moth's
   own compiler**, running in your browser.
@@ -768,6 +780,10 @@ calls that led there.
   without changing a piece, and tidy the second time); and the three tools,
   whose pictures must match byte for byte on every engine
 - the WebAssembly encoder against the spec's examples, and the playground's script
+- buttons and text boxes: clicks, focus, typing, Backspace and Enter on all three
+  engines, an app moved to the VM in the middle keeping what was typed, and the
+  same in machine code, whose window must say, fail and draw as the JavaScript
+  engine does, with [`apps/todo.moth`](apps/todo.moth) built and driven
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for
@@ -823,6 +839,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
 - An app runs in the playground, and can't `ask` once it's running.
+- A text box holds one line of up to 40 letters, typed at its end: no arrow
+  keys, selecting, copying or pasting inside it. A button's size comes from how
+  many letters its label has, not how wide they are, so a label of wide letters
+  can reach its edges.
 - `use` without `as` puts a file's names in with the program's, where they can
   collide; `use ... as` keeps the file to itself, as if it ran alone, so its
   functions' variables are theirs and the program reaches it only through
@@ -838,9 +858,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
-  showing its picture, and an app's handlers never run. The window knows CSS's
-  colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but not
-  `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
+  showing its picture, and an app's handlers never run: its buttons and text
+  boxes are only drawn, and nothing can be typed into them. The window knows
+  CSS's colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but
+  not `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
   when started from Explorer: with its output going to a file or another
   program, a program runs as it would on Linux.
 - `say ... to the error output`, `stop the program`, `run program` (with or
