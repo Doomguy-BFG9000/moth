@@ -222,8 +222,11 @@ or `--target linux`, and a Linux moth.exe and a Windows one build each other
 byte for byte too. The first one comes from Node.js
 (`node bootstrap.mjs`) or from
 [the releases](https://github.com/samyyy2423/moth/releases); after that, each
-builds the next. It takes the part of Moth machine.moth takes; the playground,
-drawing and apps still run on the JavaScript engine.
+builds the next. It takes the part of Moth machine.moth takes, drawing and
+apps included. On Windows, a program that draws shows its picture in a window
+when it ends, an app runs in one, and a question that starts with "Draw" opens a
+pad to draw the answer on, so `moth build handwriting.moth` makes the
+handwriting demo a program of its own.
 
 **Neural networks, written in Moth.** [`neural.moth`](neural.moth) learns to
 tell apart two moons of dots, after Andrej Karpathy's
@@ -725,10 +728,15 @@ unboxed numbers were all caught, some only by the fuzzer.
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
 - `moth build` takes only part of Moth so far: no units, tables,
-  `random number`, drawing, apps or `expect`; anything else stops with a
+  `random number`, `draw chart of` or `expect`; anything else stops with a
   mistake that says it can't become machine code yet. What it makes can't go
   online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
+- The window is Windows only. On Linux a program that draws runs without
+  showing its picture, and an app's handlers never run. The window knows CSS's
+  colour names and `#` colours, but not `rgb(...)` or `hsl(...)`, and only
+  opens at a terminal or when started from Explorer: with its output going to
+  a file or another program, a program runs as it would on Linux.
 - moth.exe can't write to the error output or end with a code of its own, as
   Moth has no way to yet, so a mistake in the program it builds is shown on the
   normal output, and a line from moth.moth after it.

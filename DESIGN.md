@@ -1048,3 +1048,49 @@ hold them to agreeing.
   the JavaScript engine, the same bytes moth.exe makes of itself; the release
   starter-1 has one for Windows and one for Linux.
 
+
+## 27. Drawing, apps and the pad in machine code: a window on Windows
+
+- **The same picture as the playground's.** The turtle and its shapes run in
+  machine code as Turtle in vm.js runs them, numbers to hundredths and mistakes
+  word for word, so the list of things drawn is the same on every engine. At
+  the end of a program that drew something, the window draws that list as the
+  playground's canvas does: 500 by 500, (0, 0) in the middle and y going up,
+  made smaller when a drawing reaches past 240 from the middle but never for an
+  app, lines with round ends, text with its baseline on the point. GDI+ draws
+  it, smoothed, because it ships with every Windows and needs no font or image
+  code of Moth's own; text is Segoe UI, which is what the playground's
+  system-ui is on Windows.
+- **Colours as a canvas reads them.** The CSS names, all 148, are a table in
+  the program, and `#rgb`, `#rgba`, `#rrggbb` and `#rrggbbaa` are read in the
+  runtime. A colour a canvas wouldn't know keeps the one before, as the canvas
+  does. `rgb(...)` and `hsl(...)` aren't read yet.
+- **Apps call their handlers from the window.** Windows calls the window's
+  procedure with each key, click, drag and timer, and the procedure calls the
+  handlers waiting for it, in the order the program set them up. A handler's
+  call is the first in progress, so a mistake in it lists only the calls under
+  it, as on the JavaScript engine. Keys get the playground's names: arrows,
+  space, enter and the rest by key code, other keys as the character typed, in
+  lower case, and none while Ctrl or Alt is down. Timers go off every so many
+  milliseconds, 10 at the fastest, as the playground's do.
+- **The pad.** `ask` with a question that starts with "Draw", as the
+  playground decides it, opens a 440 by 440 pad at a terminal. Each stroke
+  comes back as the playground's pad gives it: points from 0 to 100, y going
+  down, none closer than 1.5 to the one before, so handwriting.moth reads the
+  same text from both. Enter answers, Escape wipes the pad, and closing it ends
+  the program. Away from a terminal, the question is asked as any other is.
+  Only a program that may ask for a drawing gets the pad: one whose questions
+  are all texts that don't start with "Draw" doesn't.
+- **Only a program that needs it pays.** The window's code, GDI+ and the
+  colour table go into a Windows program that draws, sets up an app, or may
+  ask for a drawing. Any other is the same bytes as before.
+- **How it's tested.** With `MOTH_PICTURE=file.bmp`, the window isn't opened:
+  the program draws into that file instead, after the events `MOTH_EVENTS`
+  lists (`key left;click 10 20;drag 11 21;tick 0`). The tests check the colour
+  of the picture at chosen points, and that an app given the same events says
+  and fails exactly as the JavaScript engine's `app.send` makes it. The window
+  itself was tried by sending it Windows' own mouse and key messages and
+  reading back what it showed: the paint app, a timer, and handwriting.moth,
+  which read a drawn 1 and a drawn 2.
+- **Linux has no window yet.** A program there draws into the list and shows
+  nothing, and an app sets up and ends.
