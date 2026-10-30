@@ -1125,7 +1125,7 @@ hold them to agreeing.
 - **Colours as a canvas reads them.** The CSS names, all 148, are a table in
   the program, and `#rgb`, `#rgba`, `#rrggbb` and `#rrggbbaa` are read in the
   runtime. A colour a canvas wouldn't know keeps the one before, as the canvas
-  does. `rgb(...)` and `hsl(...)` aren't read yet.
+  does. `rgb(...)` and `hsl(...)` weren't read yet; §31 reads them.
 - **Apps call their handlers from the window.** Windows calls the window's
   procedure with each key, click, drag and timer, and the procedure calls the
   handlers waiting for it, in the order the program set them up. A handler's
@@ -1277,7 +1277,8 @@ hold them to agreeing.
   through a folder yet, so it doesn't find every `.test.moth` file itself.
   `moth check` leaves out the checker's type warnings. And `moth build` still
   turns away units, tables, `random number` and `draw chart of` (random numbers
-  came next: §30).
+  came next, §30, and the rest after them, §31, with `moth test` finding its
+  files).
 
 ## 30. Random numbers in machine code
 
@@ -1296,3 +1297,71 @@ hold them to agreeing.
   import it needs to read `MOTH_SEED`, go only into programs with a
   `random number`. With it, apps/snake.moth builds into a program of its own
   and plays in the window.
+
+## 31. The rest of Moth in machine code
+
+- **What was left.** `moth build` turned away amounts with units, tables and
+  `draw chart of`; the window didn't read `rgb(...)` or `hsl(...)`; and
+  `moth test` needed its files named, because a program in machine code
+  couldn't look in a folder. Now machine code takes all of Moth, and each of
+  these says, fails and ends exactly as the JavaScript engine does.
+- **An amount is a value of its own.** `5 km` is 16 bytes, the number and which
+  of vm.js's units it is, and its kind is a seventh one beside text, lists and
+  the rest, so the collector keeps it and `say`, `is`, the comparisons, `+`,
+  `-`, `*`, `/`, `add ... to`, `number of` and `in` all know it. A unit's
+  factor is the same double the engines use, and a conversion multiplies and
+  then divides, as theirs does, so `1 mile in km` is the same number, digit for
+  digit. An amount the program writes is kept with the program's own texts and
+  numbers, so `5 km` costs nothing when it runs.
+- **Only a program with amounts pays.** The arithmetic is quick because a sum
+  of two numbers is one instruction, and only a result that isn't a number
+  goes the slow way. The slow way has to look for amounts, but code is written
+  before the compiler has seen every line, so it can't know yet whether the
+  program has any. So it writes the program once, and if it found an amount,
+  writes it again, knowing. A program with none is the same bytes as before,
+  and so is everything else that doesn't use what's new: tables, charts and
+  folders each bring their code only into the programs that use them.
+- **Tables.** `read table` parses the CSV text as vm.js's `tableOf` does, cell
+  by cell: quotes, `""` for a quote, line breaks in quotes, blank lines, `\r\n`,
+  and the header made into field names the same way, `column_` and `_2` and
+  all. One thing was harder in machine code: a record finds a field by its
+  name's text being the very same text, not text with the same letters, which
+  is what makes `price of row` one comparison. A table's names come from a
+  file, so each is looked up among the program's own texts first, and if the
+  program never wrote it, it is made once and kept, so two tables read from
+  the same file have the same fields, and `is` says they're the same.
+  `total of`, `average of`, `largest of`, `smallest of` and `price in sales`
+  work on any list, amounts and text included, as the engines' do.
+- **Charts.** `draw chart of` draws what vm.js's Turtle draws for it: a bar and
+  its value for each number or amount, a label for each, the longest bar 200
+  long. It was checked by drawing the same things one by one, with
+  `draw box` and `draw ... at`, and comparing the two pictures byte for byte.
+- **Colours.** The window reads `rgb()`, `rgba()`, `hsl()` and `hsla()` as a
+  browser's canvas does: the old way with commas, the new way with spaces,
+  `none` and an alpha after a slash, percentages, exponents and the angle
+  units, each part held to its range and rounded, and `hsl` worked out as
+  Chrome works it out. White space either side of any colour is let go, as CSS
+  lets it go.
+- **Looking in a folder, in words Moth already has.** `read the folder "tests"`
+  gives the names of what's in a folder, in Moth's order for text, a folder's
+  name with `/` after it, so `folder + name` is the path either way, and a
+  program can tell what to go into. It is `read`, followed by words that could
+  never have meant anything else after it, as `remove the file` is: `the` and
+  `folder` are still names. It works in every engine, through whatever holds
+  the files (in memory, the files' names are the folders), in the compiler
+  written in Moth, the checker and the moth command's checking, and in machine
+  code with `FindFirstFileW` on Windows and `getdents64` on Linux, the names
+  sorted by a merge sort. It is reading, so it needs `--allow-read` or a yes,
+  as reading a file does.
+- **`moth test` on its own.** It finds the tests as the Node.js command line
+  did: every file ending in `.test.moth` here and in the folders inside, but
+  not hidden ones or `node_modules`, each folder's in turn, sorted as
+  JavaScript's `localeCompare` sorts them (case after the letters themselves,
+  marks before digits before letters), with `\` between folders on Windows.
+  A failing test's mistake names its file's path, as that command line did.
+- **Checked.** Every new phrase and helper is in the programs machine.test.js
+  holds to the JavaScript engine, mistakes included, on Windows and on Linux;
+  tables and folders are read from real files in a folder of their own;
+  colours and charts are checked pixel by pixel in pictures drawn through
+  `MOTH_PICTURE`; and `moth test` with no files is held to the old command
+  line's own way of finding them.
