@@ -5,7 +5,7 @@
 //
 // It makes the same bytes moth makes of itself, so after this moth builds moth:
 //
-//     moth build moth.moth --allow-read --allow-write
+//     moth build moth.moth --allow-read --allow-write --allow-run
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { machineCompiler } from "./moth.js";
 
@@ -14,7 +14,7 @@ const target = process.argv[2] ?? (process.platform === "win32" ? "windows" : "l
 if (target !== "windows" && target !== "linux") throw new Error("usage: node bootstrap.mjs [windows|linux]");
 const machine = machineCompiler(here("machine.moth"), here("compiler.moth"));
 const files = { "machine.moth": here("machine.moth"), "compiler.moth": here("compiler.moth") };
-const bytes = machine(here("moth.moth"), { files, target, name: "moth.moth", allow: ["--allow-read", "--allow-write"] });
+const bytes = machine(here("moth.moth"), { files, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"] });
 const out = new URL(target === "windows" ? "./moth.exe" : "./moth", import.meta.url);
 writeFileSync(out, bytes);
 if (target === "linux") chmodSync(out, 0o755);

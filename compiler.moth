@@ -243,7 +243,7 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
-    "average", "largest", "smallest"
+    "average", "largest", "smallest", "run program", "run program keeping"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -301,6 +301,10 @@ set comparison_phrases to list of "less than", "greater than", "at least", "at m
 set functions_made to 0
 
 # Every node is a record that keeps the token it came from (`at`), so mistakes can point at it.
+# `reading` also carries, for tidying code, `layout`: how deep in blocks each statement starts, and each
+# end, else and if it fails, by "line:col"; and `tight`: the pieces written with no space after them, a
+# negating minus and a call's bracket, which only the parser can tell from the others. Both are
+# dictionaries, or nothing when nothing is being tidied, and only the program's own file goes in them.
 # `reading` is shared with the files the program uses: `files` (a list of records with a name and a text),
 # `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
 to parse with tokens, reading
@@ -310,6 +314,22 @@ to parse with tokens, reading
     set loop_depth to 0 # loops around this spot, in this function: `stop` needs one
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
     set converting to yes # `trip in miles`; not in `position of ... in`, whose `in` is its own
+    set nesting to 0 # blocks around the statement being read, for `lay`
+
+    # where a statement starts, and how deep it is, for tidying
+    to lay with t
+        if layout of reading is not nothing and file of t is ""
+            set item (line of t + ":" + col of t) of (layout of reading) to nesting
+        end
+    end
+
+    # a piece with no space after it, for tidying; gives it back, so it can mark one as it takes it
+    to tight with t
+        if t and tight of reading is not nothing and file of t is ""
+            set item (line of t + ":" + col of t) of (tight of reading) to yes
+        end
+        return t
+    end
 
     # whether token i is a unit's word (`km`, `hours`), on the same line as what's before it
     to unit_at with i
@@ -367,6 +387,17 @@ to parse with tokens, reading
         return t
     end
 
+    to word_at with i, w
+        set ahead to item i of tokens
+        return type of ahead is "word" and value of ahead is w
+    end
+
+    # `run program "git" with (list of "status")`: `run` alone is still a name
+    to runs_program
+        set after to item (pos + 1) of tokens
+        return type of after is "word" and value of after is "program" and not nl of after
+    end
+
     to take_name with what
         set t to peek()
         if type of t is not "word"
@@ -401,10 +432,14 @@ to parse with tokens, reading
         set body to empty list
         set outside_top to at_top
         set at_top to opener is nothing
+        if opener is not nothing
+            set nesting to nesting + 1
+        end
         repeat while more(opener) and not (in_try and is_if_it_fails())
             if check("eof")
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
+            lay(peek())
             set made to statement()
             if kind of made is "use" # the file's code, in its place
                 for each inner in body of made
@@ -416,6 +451,10 @@ to parse with tokens, reading
             if not nl of peek()
                 expected("a new line")
             end
+        end
+        if opener is not nothing
+            set nesting to nesting - 1
+            lay(peek()) # the end, else or if it fails that closes the block
         end
         set at_top to outside_top
         return body
@@ -557,13 +596,20 @@ to parse with tokens, reading
             expect_word("to")
             return record with kind "add", value value, name take_name("a variable name"), at t
         end
-        if word("say")
+        if word("say") # `say "oops" to the error output`
             set parts to empty list
             add expression() to parts
-            repeat while not nl of peek()
+            repeat while not nl of peek() and not is_word("to")
                 add expression() to parts
             end
-            return record with kind "say", parts parts, at t
+            if nl of peek() or not word("to")
+                return record with kind "say", parts parts, errors no, at t
+            end
+            if not (is_word("the") and word_at(pos + 1, "error") and word_at(pos + 2, "output"))
+                expected("'the error output'")
+            end
+            set pos to pos + 3
+            return record with kind "say", parts parts, errors yes, at t
         end
         if word("if")
             return if_rest(t)
@@ -731,12 +777,24 @@ to parse with tokens, reading
             return record with kind "use", body use_file(name_token, alias), at t
         end
         if word("stop")
+            if is_word("the") and not nl of peek() and word_at(pos + 1, "program") # `stop the program`, `stop the program with 2`
+                set pos to pos + 2
+                set value to nothing
+                if not nl of peek() and word("with")
+                    set value to expression()
+                end
+                return record with kind "exit", value value, at t
+            end
             if loop_depth is 0
                 fail with problem(t, "'stop' only works inside a loop (one made with 'repeat' or 'for each')")
             end
             return record with kind "stop", at t
         end
-        if word("remove") # `remove "Sam" from ages`
+        if word("remove") # `remove "Sam" from ages`, `remove the file "old.txt"`
+            if is_word("the") and not nl of peek() and word_at(pos + 1, "file")
+                set pos to pos + 2
+                return record with kind "removeFile", target additive(), at t
+            end
             set key to additive()
             expect_word("from")
             return record with kind "remove", key key, target unary(), at t
@@ -815,6 +873,9 @@ to parse with tokens, reading
             set listed to record with kind "list", items coords, at t
             return record with kind "turtle", action "text", value listed, at t
         end
+        if is_word("run") and runs_program()
+            fail with problem(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'")
+        end
         if type of t is "word" and not contains(reserved, value of t)
             # a line that starts with a name calls it: `greet "Sam"` or `greet("Sam")`
             set pos to pos + 1
@@ -823,7 +884,7 @@ to parse with tokens, reading
                 fail with problem(t, "to give '" + called + "' a value write 'set " + called + " to ...'")
             end
             set args to empty list
-            if match("(")
+            if tight(match("("))
                 set args to arg_list()
             else if not nl of peek()
                 add expression() to args
@@ -1036,7 +1097,7 @@ to parse with tokens, reading
     end
 
     to unary
-        set t to match("-")
+        set t to tight(match("-"))
         if t
             return record with kind "negate", operand unary(), at t
         end
@@ -1137,6 +1198,21 @@ to parse with tokens, reading
             set aggregate_args to list of column_or(no)
             return record with kind "builtin", name value of t, args aggregate_args, at t
         end
+        if is_word("run") and runs_program() # `run program "tool.exe" with (list of "a") keeping its output`
+            set pos to pos + 2
+            set program to additive()
+            set inputs to record with kind "list", items empty list, at t
+            if not nl of peek() and word("with")
+                set inputs to additive()
+            end
+            set run_name to "run program"
+            if not nl of peek() and is_word("keeping") and word_at(pos + 1, "its") and word_at(pos + 2, "output")
+                set pos to pos + 3
+                set run_name to "run program keeping"
+            end
+            set run_args to list of program, inputs
+            return record with kind "builtin", name run_name, args run_args, at t
+        end
         # `random number from 1 to 6`: `random` alone is still a name (math.moth makes a function of it)
         if is_word("random") and type of item (pos + 1) of tokens is "word" and value of item (pos + 1) of tokens is "number" and type of item (pos + 2) of tokens is "word" and value of item (pos + 2) of tokens is "from"
             set pos to pos + 3
@@ -1198,7 +1274,7 @@ to parse with tokens, reading
         if type of t is "word" and not contains(reserved, value of t)
             set pos to pos + 1
             set full to member(value of t)
-            if match("(")
+            if tight(match("("))
                 return record with kind "call", name full, args arg_list(), at t
             end
             if full is value of t and not indexing and word("of") # `name of person`
@@ -1397,6 +1473,12 @@ to rename with node, alias, hidden
     end
     if what is "ask"
         rename(question of node, alias, hidden)
+    end
+    if what is "exit"
+        rename(value of node, alias, hidden)
+    end
+    if what is "removeFile"
+        rename(target of node, alias, hidden)
     end
 end
 
@@ -1743,7 +1825,18 @@ to js_statement with scope, s
         return "{ const $v = " + value + "; " + variable + " = addInto(" + variable + ", $v, " + quote(name of s) + ", " + remember(at of s) + "); }"
     end
     if what is "say"
-        return "say([" + js_list(scope, parts of s) + "]);"
+        set helper to "say"
+        if errors of s
+            set helper to "sayError"
+        end
+        return helper + "([" + js_list(scope, parts of s) + "]);"
+    end
+    if what is "exit"
+        set exit_code to "0"
+        if value of s is not nothing
+            set exit_code to js_expr(scope, value of s)
+        end
+        return "exit(" + exit_code + ", " + remember(at of s) + ");"
     end
     if what is "if"
         return "if (truthy(" + js_expr(scope, cond of s) + ")) {\n" + js_block(scope, then of s) + "\n} else {\n" + js_block(scope, otherwise of s) + "\n}"
@@ -1805,6 +1898,9 @@ to js_statement with scope, s
     end
     if what is "write"
         return "write(" + js_expr(scope, value of s) + ", " + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
+    end
+    if what is "removeFile"
+        return "removeFile(" + js_expr(scope, target of s) + ", " + remember(at of s) + ");"
     end
     if what is "expect"
         set c to cond of s
@@ -1978,7 +2074,7 @@ end
 # values the JavaScript returns.
 to compile with source, files
     set ats to empty list
-    set reading to record with files files, loaded empty list, open empty list, within ""
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading), 0)
     set slots to empty list
     for each slot from 1 to length of names of scope of main
@@ -2048,6 +2144,9 @@ set op_expect to 51
 set op_random to 52
 set op_handle to 53
 set op_every to 54
+set op_say_error to 55
+set op_exit to 56
+set op_remove_file to 57
 set math_ops to list of op_add, op_sub, op_mul, op_div # for math_signs
 
 # The function being compiled: its scope (as the JavaScript back end has it), its code, its constants,
@@ -2196,7 +2295,18 @@ to bytecode_statement with fc, s
         for each part in parts of s
             bytecode_expr(fc, part)
         end
-        emit(fc, at of s, list of op_say, length of parts of s)
+        set say_op to op_say
+        if errors of s
+            set say_op to op_say_error
+        end
+        emit(fc, at of s, list of say_op, length of parts of s)
+    else if what is "exit"
+        if value of s is nothing
+            emit(fc, at of s, list of op_const, constant(fc, record with what "number", value "0"))
+        else
+            bytecode_expr(fc, value of s)
+        end
+        emit(fc, at of s, list of op_exit)
     else if what is "if"
         bytecode_expr(fc, cond of s)
         set to_else to jump(fc, at of s, op_jump_if_false, -1)
@@ -2273,6 +2383,9 @@ to bytecode_statement with fc, s
         bytecode_expr(fc, value of s)
         bytecode_expr(fc, target of s)
         emit(fc, at of s, list of op_write)
+    else if what is "removeFile"
+        bytecode_expr(fc, target of s)
+        emit(fc, at of s, list of op_remove_file)
     else if what is "expect" # a comparison keeps both its sides, to say what they were
         set c to cond of s
         if kind of c is "compare"
@@ -2481,7 +2594,7 @@ end
 
 # Moth source, and the files it may use (records with a name and a text); out comes its bytecode, as text
 to compile_bytecode with source, files
-    set reading to record with files files, loaded empty list, open empty list, within ""
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set main to bytecode_function(nothing, "main", empty list, empty list, parse(tokenize(source, ""), reading), 0)
     set lines to list of "moth bytecode 2"
     function_lines(main, lines)

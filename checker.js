@@ -4,7 +4,7 @@
 import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
-  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES } from "./vm.js";
+  Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, exitCode, removeFile } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
@@ -19,6 +19,8 @@ const unitType = (word) => MEASURE_TYPES[UNITS[unitNamed(word)][2]];
 // what an input that says what it is (`as a number`) holds, by its number in vm.js's KINDS
 const KIND_TYPES = ["number", "text", "yes/no", "list", "record", "dictionary", "bytes", "function"];
 const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : "number");
+// the statements after which nothing in the same block runs, as a warning names them
+const ENDINGS = new Map([["return", "return"], ["fail", "fail"], ["stop", "stop"], ["exit", "stop the program"]]);
 
 class Found {
   constructor(message) {
@@ -146,8 +148,8 @@ class Checker extends Scope {
   block(body) {
     for (const [i, s] of body.entries()) {
       this.statement(s);
-      if ((s.kind === "return" || s.kind === "fail" || s.kind === "stop") && body[i + 1]) {
-        this.warn(body[i + 1].at, "never runs", `this line can never run, because '${s.kind}' comes first`);
+      if (ENDINGS.has(s.kind) && body[i + 1]) {
+        this.warn(body[i + 1].at, "never runs", `this line can never run, because '${ENDINGS.get(s.kind)}' comes first`);
         break;
       }
     }
@@ -251,6 +253,13 @@ class Checker extends Scope {
         return;
       case "stop":
         return;
+      case "exit": { // the number it stops with must be a whole number from 0 to 255
+        if (!s.value) return;
+        this.expr(s.value);
+        const type = this.type(s.value);
+        this.willFail(s.at, () => this.known(type()) && exitCode(this.sample(s.value), found));
+        return;
+      }
       case "remove": { // which keys a dictionary has isn't known, so only removing from something else is certain to fail
         this.expr(s.key);
         this.expr(s.target);
@@ -272,6 +281,12 @@ class Checker extends Scope {
         this.expr(s.target);
         const type = this.type(s.target);
         this.willFail(s.at, () => this.known(type()) && type() !== "text" && writeFile(null, SAMPLES[type()], null, found));
+        return;
+      }
+      case "removeFile": { // as with `write`, only a name that isn't text is certain to fail
+        this.expr(s.target);
+        const type = this.type(s.target);
+        this.willFail(s.at, () => this.known(type()) && type() !== "text" && removeFile(SAMPLES[type()], null, found));
         return;
       }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program

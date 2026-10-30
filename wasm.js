@@ -13,7 +13,7 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -37,6 +37,8 @@ const KIND_TAGS = ["a number", "text", "yes/no", "a list", "a record", "a dictio
 // What the module imports: the checks and actions it leaves to JavaScript. Most only ever throw.
 const IMPORTS = {
   say: [[EQ], []],
+  sayError: [[EQ], []], // a line for the error output
+  exit: [[EQ, I32], []], // `stop the program with` this, and a position
   fail: [[I32, I32], []], // a message the compiler worked out (a name nothing sets), and a position
   unset: [[I32, I32], []],
   plus: [[EQ, EQ, I32], [EQ]],
@@ -79,6 +81,7 @@ const IMPORTS = {
   ask: [[EQ, I32], [EQ]],
   read: [[EQ, I32, I32], [EQ]], // the file's name, 1 for bytes or 0 for text, and a position
   write: [[EQ, EQ, I32], []],
+  removeFile: [[EQ, I32], []],
   args: [[], [EQ]],
   random: [[EQ, EQ, I32], [EQ]], // low, high, a position
   handle: [[I32, EQ, I32], []], // which event (EVENTS), its handler, a position
@@ -831,7 +834,11 @@ class WasmCompiler extends Scope {
       }
       case "say":
         for (const part of s.parts) this.expr(part);
-        this.e("array.new_fixed", T.items, s.parts.length).e("i32.const", s.parts.length).e("struct.new", T.list).e("call", im.say);
+        this.e("array.new_fixed", T.items, s.parts.length).e("i32.const", s.parts.length).e("struct.new", T.list).e("call", s.errors ? im.sayError : im.say);
+        return;
+      case "exit":
+        this.expr(s.value ?? { kind: "value", value: 0, at: s.at });
+        this.e("i32.const", this.pos(s.at)).e("call", im.exit).e("unreachable");
         return;
       case "if":
         this.expr(s.cond);
@@ -944,6 +951,10 @@ class WasmCompiler extends Scope {
         this.expr(s.value);
         this.expr(s.target);
         this.e("i32.const", this.pos(s.at)).e("call", im.write);
+        return;
+      case "removeFile":
+        this.expr(s.target);
+        this.e("i32.const", this.pos(s.at)).e("call", im.removeFile);
         return;
       case "expect":
         if (s.cond.kind !== "compare") {
@@ -1272,11 +1283,11 @@ export function compileToWasmModule(program) {
 export function wasm(program) {
   const made = compileToWasmModule(program);
   const module = new WebAssembly.Module(made.bytes);
-  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host).main(maxSteps) };
+  return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError).main(maxSteps) };
 }
 
 // The JavaScript side of a run: the imports, and moving values in and out of the module.
-function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
+function instantiate(module, { ats, names, messages, texts, kinds }, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error) {
   // Every mistake made is kept, for a `try`: JavaScript's exceptions cross WebAssembly, but only JavaScript can
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
@@ -1374,6 +1385,8 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
 
   const imports = {
     say: (parts) => print(toJs(parts).map((p) => show(p)).join("")),
+    sayError: (parts) => printError(toJs(parts).map((p) => show(p)).join("")),
+    exit: (code, k) => throwing(new Ended(exitCode(toJs(code), errors[k]))), // kept as the last thing thrown, which no `try` catches
     fail: (message, k) => errors[k](messages[message]),
     unset: (name, k) => errors[k](noValue(names[name])),
     plus: (a, b, k) => toWasm(plus(toJs(a), toJs(b), errors[k])),
@@ -1448,6 +1461,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),
+    removeFile: (name, k) => removeFile(toJs(name), disk, errors[k]),
     args: () => toWasm(args),
     random: (low, high, k) => toWasm(randomWhole(toJs(low), toJs(high), chance, errors[k])),
     handle: (event, closure) => void host.handlers.push({ event: EVENTS[event], closure }),

@@ -4,7 +4,8 @@
 import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, numberOrder, atMost, divisible, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
-  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval } from "./vm.js";
+  failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
+  Ended, exitCode, removeFile } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -69,7 +70,9 @@ class JsCompiler extends Scope {
         return `{ const $v = ${value}; ${v} = addInto(${v}, $v, ${q(s.name)}, ${this.pos(s.at)}); }`; // the value first, as the VM does
       }
       case "say":
-        return `say([${s.parts.map((p) => this.expr(p)).join(", ")}]);`;
+        return `${s.errors ? "sayError" : "say"}([${s.parts.map((p) => this.expr(p)).join(", ")}]);`;
+      case "exit":
+        return `exit(${s.value ? this.expr(s.value) : "0"}, ${this.pos(s.at)});`;
       case "if":
         return `if (truthy(${this.expr(s.cond)})) {\n${this.block(s.then)}\n} else {\n${this.block(s.otherwise)}\n}`;
       case "while":
@@ -111,6 +114,8 @@ class JsCompiler extends Scope {
         return `removeKey(${this.expr(s.key)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "write":
         return `write(${this.expr(s.value)}, ${this.expr(s.target)}, ${this.pos(s.at)});`;
+      case "removeFile":
+        return `removeFile(${this.expr(s.target)}, ${this.pos(s.at)});`;
       case "expect": {
         const c = s.cond;
         if (c.kind !== "compare") return `expectYes(${this.expr(c)}, ${this.pos(s.at)});`;
@@ -205,7 +210,8 @@ const MAX_DEPTH = 2000;
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
 // `host` gets an app's handlers (see run() in moth.js), and a way to call one: with steps and depth from 0.
-function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }) {
+// `printError` gets each line said to the error output.
+function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = seeded(), host = { handlers: [] }, printError = console.error) {
   // An error ends every Moth call in progress, so the depth goes back to 0: load() lets JavaScript call in again.
   const errors = ats.map((at) => (message, value) => {
     const calls = trail();
@@ -284,6 +290,13 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     removeKey: (key, target, k) => removeKey(key, target, errors[k]),
     addInto: (current, value, name, k) => (typeof current === "number" && typeof value === "number" ? current + value : addInto(current, value, name, errors[k])),
     say: (parts) => print(parts.map((p) => show(p)).join("")),
+    sayError: (parts) => printError(parts.map((p) => show(p)).join("")),
+    // `stop the program`: not a mistake, so caught() below lets it through, and run() takes it
+    exit: (code, k) => {
+      const ending = new Ended(exitCode(code, errors[k]));
+      depth = 0;
+      throw ending;
+    },
     checkRepeat: (n, k) => checkRepeat(n, errors[k]),
     checkRange: (from, to, k) => (checkRange(from, to, errors[k]), [from, to]),
     itemsOf: (v, k) => itemsOf(v, errors[k]),
@@ -306,6 +319,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     ask: (question, k) => askFor(question, answer, errors[k]),
     read: (name, asBytes, k) => readFile(name, asBytes, disk, errors[k]),
     write: (value, name, k) => writeFile(value, name, disk, errors[k]),
+    removeFile: (name, k) => removeFile(name, disk, errors[k]),
     args: () => [...args],
     random: (low, high, k) => randomWhole(low, high, chance, errors[k]),
     handle: (event, f) => void host.handlers.push({ event: EVENTS[event], closure: f }),
@@ -330,5 +344,5 @@ export function jit(program) {
 export function fromJs(code, ats, names) {
   const source = `"use strict";\nconst { ${HELPER_NAMES.join(", ")} } = R;\n${code}`;
   const compiled = new Function("R", source);
-  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random, host) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random, host)) };
+  return { source, names, ats, run: (print, draw, maxSteps, ask, disk, args, random, host, printError) => compiled(helpers(ats, print, draw, maxSteps, ask, disk, args, random, host, printError)) };
 }

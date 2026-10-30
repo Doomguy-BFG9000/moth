@@ -803,6 +803,91 @@ test("test() runs each test_ function on its own, and says why one failed, on al
   assert.throws(() => testMoth("to test_a\n    say 1"), /'to' from line 1 is missing its 'end'/);
 });
 
+// ---------- the error output, and the number a program ends with ----------
+
+// One log for both outputs and the end, so their order shows: "out", "err" or "end", then what came.
+function streams(source, options = {}) {
+  const log = [];
+  try {
+    const app = run(source, (line) => log.push(["out", line]), { ...options, printError: (line) => log.push(["err", line]), exit: (code) => log.push(["end", code]) });
+    return { log, app };
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    log.push(["mistake", err.message]);
+    return { log };
+  }
+}
+
+test("say ... to the error output and stop the program, on all three engines and in the compiler written in Moth", () => {
+  const cases = [
+    ['say "a"\nsay "oops: " 1 + 2 " " list of 1, "x" to the error output\nsay "b"', [["out", "a"], ["err", 'oops: 3 [1, "x"]'], ["out", "b"]]],
+    ['say "a"\nstop the program\nsay "b"', [["out", "a"], ["end", 0]]],
+    ['for each i from 1 to 3\n    say i\n    if i is 2\n        stop the program with 0.1 * 30\n    end\nend', [["out", "1"], ["out", "2"], ["end", 3]]],
+    // no try catches it, however deep
+    ["to f with n\n    try\n        if n is 0\n            stop the program with 4\n        end\n        f(n - 1)\n    if it fails\n        say \"caught\"\n    end\nend\nf(10)\nsay \"after\"", [["end", 4]]],
+    ["stop the program with 255", [["end", 255]]],
+    ["stop the program with 256", [["mistake", "line 1: 'stop the program with' needs a whole number from 0 to 255, not 256"]]],
+    ["stop the program with 1.5", [["mistake", "line 1: 'stop the program with' needs a whole number from 0 to 255, not 1.5"]]],
+    ["try\n    stop the program with \"2\"\nif it fails with why\n    say why\nend", [["out", "'stop the program with' needs a whole number from 0 to 255, not text"]]],
+    // too deep for the JIT and WebAssembly: the VM runs it again, and says nothing twice
+    ['say "a" to the error output\nsay "b"\nto deep with n\n    if n is 0\n        say "bottom" to the error output\n        stop the program with 5\n    end\n    deep(n - 1)\nend\ndeep(5000)',
+      [["err", "a"], ["out", "b"], ["err", "bottom"], ["end", 5]]],
+    ['set c to run program "tool" with (list of "a")', [["mistake", "line 1: can't run programs here: only a program made by moth build can"]]],
+    ['set c to run program "x" with (list of "a", "b")', [["mistake", "line 1: can't run programs here: only a program made by moth build can"]]],
+    ['set c to run program "x" with (list of 5)', [["mistake", "line 1: 'run program ... with' needs text, not a number"]]],
+    ["set c to run program 5", [["mistake", "line 1: 'run program' needs text, not a number"]]],
+    ['set c to run program "x" with "a"', [["mistake", "line 1: 'run program ... with' needs a list, not text"]]],
+    // words the phrases are made of are still names, and the phrases only start where they could never have
+    // meant anything else
+    ['set run to 1\nset program to 2\nset the to 3\nsay run + program + the\nto stop_it\n    return 0\nend\nset c to run\nsay c', [["out", "6"], ["out", "1"]]],
+    ['repeat 2 times\n    say "x"\n    stop\nend\nsay "y"', [["out", "x"], ["out", "y"]]],
+    ["say 1 to the errors", [["mistake", "line 1: expected 'the error output' but found 'the'"]]],
+    ["say 1 to", [["mistake", "line 1: expected 'the error output' but found the end of the code"]]],
+    ['run program "x"', [["mistake", "line 1: 'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'"]]],
+    ["stop the", [["mistake", "line 1: 'stop' only works inside a loop (one made with 'repeat' or 'for each')"]]],
+  ];
+  const moth = mothCompiler(COMPILER);
+  for (const [source, want] of cases) {
+    for (const engine of ENGINES) assert.deepEqual(streams(source, { engine }).log, want, `${engine}: ${source}`);
+    assert.deepEqual(compiled(moth, source), compiled(compileToJs, source), source);
+    if (want[0][0] !== "mistake" || !/expected|gives back|only works/.test(want[0][1])) assert.equal(format(format(source)), format(source));
+  }
+  // an app's handler can stop it: events after that do nothing
+  const app = 'say "ready"\nwhen a key is pressed with key\n    if key is "q"\n        say "bye" to the error output\n        stop the program with 3\n    end\n    say key\nend';
+  for (const engine of ENGINES) {
+    const { log, app: running } = streams(app, { engine });
+    for (const key of ["a", "q", "b"]) running.send("key", [key]);
+    assert.deepEqual(log, [["out", "ready"], ["out", "a"], ["err", "bye"], ["end", 3]], engine);
+    assert.equal(running.stopped, 3, engine);
+  }
+  // a file used `as` a name: the names in its code are renamed, `stop the program` and `remove the file` too
+  const files = { "runner.moth": 'set code to 3\nto quit\n    say "from the module" to the error output\n    stop the program with code\nend\nto clean with name\n    remove the file name\nend' };
+  const using = `use "runner.moth" as runner\nsay runner's code\nrunner's clean("gone.txt")\nrunner's quit()\nsay "never"`;
+  for (const engine of ENGINES) {
+    const disk = memoryDisk({ "gone.txt": "x" });
+    assert.deepEqual(streams(using, { engine, files: (name) => files[name], disk }).log, [["out", "3"], ["err", "from the module"], ["end", 3]], engine);
+    assert.deepEqual([...disk.files.keys()], [], engine);
+  }
+  assert.deepEqual(compiled((s) => moth(s, files), using), compiled((s) => compileToJs(s, { files: (name) => files[name] }), using));
+  // a test that stops the program with a number other than 0 fails; the debugger's timeline ends there
+  assert.deepEqual(testMoth("to test_a\n    stop the program with 4\nend\nto test_b\n    say 1\n    stop the program\n    say 2\nend", { printError: () => {} }),
+    [{ name: "test_a", said: [], stopped: 4 }, { name: "test_b", said: ["1"] }]);
+  const { steps } = timeline("say 1 to the error output\nstop the program with 6\nsay 2");
+  assert.deepEqual([steps.at(-1).done, steps.at(-1).stopped, steps.length], [true, 6, 3]);
+  assert.deepEqual(problems("stop the program with 300\nsay 1"), ["1:1 fails: 'stop the program with' needs a whole number from 0 to 255, not 300",
+    "2:1 never runs: this line can never run, because 'stop the program' comes first"]);
+  assert.deepEqual(problems('set c to run program 5 with (list of "a")\nsay c'), ["1:10 fails: 'run program' needs text, not a number"]);
+  // remove the file: on every engine, through what holds the files
+  for (const engine of ENGINES) {
+    const disk = memoryDisk({ "old.txt": "x", "keep.txt": "y" });
+    const removing = 'remove the file "old.txt"\nsay "gone"\ntry\n    remove the file "old.txt"\nif it fails with why\n    say why\nend\nremove the file 5';
+    assert.deepEqual(streams(removing, { engine, disk }).log, [["out", "gone"], ["out", "there is no file called 'old.txt'"], ["mistake", "line 8: a file name is text, not a number"]], engine);
+    assert.deepEqual([...disk.files.keys()], ["keep.txt"], engine);
+    assert.deepEqual(streams('remove the file "a"', { engine }).log, [["mistake", "line 1: this program removes a file, but there are no files here"]], engine);
+  }
+  assert.deepEqual(problems("remove the file 5"), ["1:1 fails: a file name is text, not a number"]);
+});
+
 // ---------- tidying ----------
 
 test("format() tidies code the one way, without changing a piece of it, and tidy code stays as it is", () => {

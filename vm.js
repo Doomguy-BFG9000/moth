@@ -22,6 +22,14 @@ export class MothError extends Error {
 export const catchable = (err) => err instanceof MothError && !err.final;
 export const caughtValue = (err) => (err.value !== undefined ? err.value : err.reason);
 
+// Thrown by `stop the program`, which ends a run on purpose with the number the program ends with (0 if it
+// gives none). It isn't a mistake, so no `try` catches it; run() in moth.js hands the number on.
+export class Ended {
+  constructor(code) {
+    this.code = code;
+  }
+}
+
 export const fail = (at, message, value, final = false, trail = []) => {
   const err = new MothError(at, message, value, trail);
   if (final) err.final = true;
@@ -138,11 +146,14 @@ export const OPCODES = [
   ["RANDOM", 0],
   ["HANDLE", 1], // the function on the stack handles an event, one of EVENTS
   ["EVERY", 1], // the function on the stack runs every so often: the number under it, times the operand (1 or 1000)
+  ["SAY_ERROR", 1], // as SAY, but the line goes to the error output
+  ["EXIT", 0], // `stop the program with` the number on the stack
+  ["REMOVE_FILE", 0], // `remove the file` named on the stack
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
-  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY } = OP;
+  MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart"]; // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`
@@ -696,7 +707,26 @@ export const BUILTINS = [
   },
   { name: "largest", needs: [["list"]], gives: null, run: ([list], error) => extreme("largest", list, error) },
   { name: "smallest", needs: [["list"]], gives: null, run: ([list], error) => extreme("smallest", list, error) },
+  // `run program "tool.exe" with (list of "a")`: starts it, waits for it, and gives the number it ended
+  // with; `... keeping its output` gives a record of that number and what it said instead. Only a program
+  // moth build makes can start one; anywhere else it's a mistake, once its inputs are what they must be.
+  ...["run program", "run program keeping"].map((name) => ({
+    name, needs: [["text"], ["list"]], gives: name === "run program" ? "number" : "record",
+    run: ([program, args], error) => {
+      needText("'run program'", program, error);
+      if (!isList(args)) error(`'run program ... with' needs a list, not ${kindOf(args)}`);
+      for (const arg of args) needText("'run program ... with'", arg, error);
+      error("can't run programs here: only a program made by moth build can");
+    },
+  })),
 ];
+
+// `stop the program with 2`: the number a program ends with, a whole number from 0 to 255 (all Linux keeps)
+export function exitCode(v, error) {
+  if (typeof v === "number") v = canon(v);
+  if (!Number.isInteger(v) || v < 0 || v > 255) error(`'stop the program with' needs a whole number from 0 to 255, not ${described(v)}`);
+  return v;
+}
 
 // `ask question`: the answer, as text. `answer` is whoever can answer (a person at a terminal, a page): it gets
 // the question as text and returns the answer, or null when there is no more input.
@@ -774,6 +804,20 @@ export function writeFile(value, name, disk, error) {
   } catch (err) {
     error(`can't write '${name}': ${err.message}`);
   }
+}
+
+// `remove the file "old.txt"`: there must be such a file. A disk that can remove files has remove(name), which
+// gives whether there was one, and may throw an Error, whose message is passed on.
+export function removeFile(name, disk, error) {
+  if (typeof name !== "string") error(`a file name is text, not ${kindOf(name)}`);
+  if (!disk?.remove) error("this program removes a file, but there are no files here");
+  let gone;
+  try {
+    gone = disk.remove(name);
+  } catch (err) {
+    error(`can't remove '${name}': ${err.message}`);
+  }
+  if (!gone) error(`there is no file called '${name}'`);
 }
 
 // `fail with value`: stops the program with the value as its message, and keeps the value for whoever ran it
@@ -894,9 +938,10 @@ export class Machine {
   // `draw` gets each line the turtle draws (see Turtle), `ask` answers questions (see askFor), `disk` holds
   // the files `read` and `write` use (see readFile), `args` is what `arguments` gives: a list of text, and
   // `random` gives the random numbers (see randomWhole). An app's handlers go in `listeners`, and `turtle`
-  // keeps one picture going from one handler to the next (see callFunction).
-  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle } = {}) {
-    Object.assign(this, { main, print, maxSteps, ask, disk, args, random, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
+  // keeps one picture going from one handler to the next (see callFunction). `printError` gets each line
+  // said to the error output.
+  constructor(main, print = console.log, { maxSteps = Infinity, env = newEnv(main, null), draw, ask, disk, args = [], random = seeded(), listeners = [], turtle, printError = console.error } = {}) {
+    Object.assign(this, { main, print, printError, maxSteps, ask, disk, args, random, listeners, fn: main, env, ip: 0, base: 0, steps: 0, stack: [], frames: [], line: 0, done: false });
     this.handlers = []; // the `try`s running, innermost last: where each one's `if it fails` is, and what to go back to
     this.caught = null; // the value of the mistake an `if it fails` is handling
     this.turtle = turtle ?? new Turtle(draw);
@@ -1089,6 +1134,16 @@ export class Machine {
             print(stack.splice(stack.length - n, n).map((v) => show(v)).join(""));
             break;
           }
+          case SAY_ERROR: {
+            const n = code[ip++];
+            this.printError(stack.splice(stack.length - n, n).map((v) => show(v)).join(""));
+            break;
+          }
+          case EXIT: // not a Failure, so no `try` catches it, and it isn't a mistake
+            throw new Ended(exitCode(stack.pop(), oops));
+          case REMOVE_FILE:
+            removeFile(stack.pop(), this.disk, oops);
+            break;
           case CHECK_REPEAT:
             stack[stack.length - 1] = checkRepeat(stack[stack.length - 1], oops); // to 15 digits: 0.1 * 30 is 3 times
             break;
