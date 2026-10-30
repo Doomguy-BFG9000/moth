@@ -164,7 +164,8 @@ const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL,
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart", "picture", // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
   "button", "text box", "clear text box", // `draw button "Start" at ...`, `draw text box "Name" at ...`, `clear the text box "Name"`
-  "checkbox", "tick", "untick", "text area", "list"]; // `draw checkbox "Done" at ...`, `tick the checkbox "Done"`, `untick ...`, `draw text area ...`, `draw list ...`
+  "checkbox", "tick", "untick", "text area", "list", // `draw checkbox "Done" at ...`, `tick the checkbox "Done"`, `untick ...`, `draw text area ...`, `draw list ...`
+  "dropdown", "slider", "set slider"]; // `draw dropdown "Size" showing ... at ...`, `draw slider "Volume" from 0 to 100 at ...`, `set the slider "Volume" to 50`
 // the drawing commands that take no value; the rest take one, which for the later ones is a list of numbers
 export const TURTLE_BARE = new Set(["up", "down", "clear"].map((name) => TURTLE_ACTIONS.indexOf(name)));
 
@@ -761,6 +762,10 @@ export const BUILTINS = [
   },
   // `the text in the text box "Name"`: what's typed in it so far (see Turtle). The checker has no turtle.
   { name: "text in box", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "text", run: ([label], error, turtle) => turtle?.texts.get(show(label)) ?? "" },
+  // `the value of the slider "Volume"`: a whole number, or nothing for one never drawn or set (DESIGN §42)
+  { name: "slider value", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: null, run: ([label], error, turtle) => turtle?.values.get(show(label)) ?? null },
+  // `choose a file to open`: what `ask "Which file to open?"` gives, or nothing for no answer (DESIGN §42)
+  { name: "chosen file", needs: [["text", "nothing"]], gives: null, run: ([answer]) => (answer === "" || answer === null ? null : answer) },
 ];
 
 // `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
@@ -1090,8 +1095,8 @@ export function askFor(question, answer, error) {
 // `when the button "Start" is clicked` and `when enter is pressed in the text box "Name"`. A handler is
 // { event, closure }, with the label it waits for as `label` for the last two, or for `every`, { event:
 // "every", interval (in milliseconds), closure }.
-export const EVENTS = ["key", "click", "drag", "button", "enter", "checkbox", "choice"];
-export const LABELLED = new Set(["button", "enter", "checkbox", "choice"].map((event) => EVENTS.indexOf(event)));
+export const EVENTS = ["key", "click", "drag", "button", "enter", "checkbox", "choice", "slider"];
+export const LABELLED = new Set(["button", "enter", "checkbox", "choice", "slider"].map((event) => EVENTS.indexOf(event)));
 
 // `every 100 milliseconds`: how often, in milliseconds (`unit` is 1000 for seconds)
 export function everyInterval(interval, unit, error) {
@@ -1201,7 +1206,9 @@ export const AREA_LETTERS = 2000;
 // how high a line of a list is, and of a text area; and what can have the focus (DESIGN §40)
 export const LIST_ROW = 24;
 export const AREA_LINE = 20;
-const FOCUSABLE = new Set(["box", "area", "list"]);
+const FOCUSABLE = new Set(["box", "area", "list", "dropdown", "slider"]);
+// how many of a dropdown's items show at once, in a list below it, while it's open (DESIGN §42)
+export const DROP_ROWS = 6;
 // What's typed in a box is drawn a letter to every LETTER_WIDE across, from 8 in, whatever the font, so a click
 // lands between the same two letters on every engine and in machine code (DESIGN §41)
 export const LETTER_WIDE = 10;
@@ -1246,6 +1253,9 @@ export class Turtle {
     // where the cursor is in each box, by its label, and what's selected (DESIGN §41); and the label of the
     // box a drag selects in, the one last clicked
     Object.assign(this, { edits: new Map(), selecting: null });
+    // each slider's value, by its label, kept through `clear`; and the label of the dropdown that's open, or
+    // null (DESIGN §42). A dropdown's items, what's chosen and what's first in view are kept as a list's.
+    Object.assign(this, { values: new Map(), open: null });
   }
 
   // Where an event goes once the picture's buttons and text boxes have seen it: [the event the handlers wait
@@ -1258,19 +1268,37 @@ export class Turtle {
   // text area has the focus, Enter starts a new line in it, up to AREA_LETTERS letters; while a list has it,
   // the up and down arrows choose the item before or after, and no key goes anywhere else. A key with Ctrl
   // goes nowhere but a box, and one with Shift goes to the program without it, as it always has.
+  // A dropdown is a list that's closed: a click on it opens it, and one on an item while it's open chooses
+  // that item; any click while it's open closes it, and does nothing else. While it has the focus, the up and
+  // down arrows choose, Enter and Space open and close it, and Escape closes it. A click on a slider gives it
+  // the focus and moves it there, as a drag from it does; the arrows, Home and End move it while it has the
+  // focus. Moving it to a new value goes to its handlers, with the value.
   route(event, inputs) {
     const focused = this.focus === null ? null : this.widgets.findLast((w) => w.label === this.focus && FOCUSABLE.has(w.kind));
     if (this.focus !== null && !focused) this.focus = null; // its box is gone
+    const opened = this.open === null ? null : this.widgets.findLast((w) => w.kind === "dropdown" && w.label === this.open);
+    if (this.open !== null && !opened) this.open = null; // and so is the dropdown that was open
+    const below = (x, y) => opened && x >= opened.x && x <= opened.x + opened.width && y < opened.y && y >= opened.y - LIST_ROW * this.rowsOf(opened);
     const at = (x, y) => this.widgets.findLast((w) => x >= w.x && x <= w.x + w.width && y >= w.y && y <= w.y + w.height);
     if (event === "scroll") {
+      if (below(inputs[0], inputs[1])) {
+        this.scrollTo(opened, (this.tops.get(opened.label) ?? 0) + inputs[2]);
+        return null;
+      }
       const hit = at(inputs[0], inputs[1]);
       if (hit?.kind === "list") this.scrollTo(hit, (this.tops.get(hit.label) ?? 0) + inputs[2]);
       return null;
     }
     if (event === "click") {
       const [x, y] = inputs;
-      const hit = at(x, y);
       this.selecting = null;
+      if (opened) { // closed, and the item clicked on, if any, chosen
+        this.setOpen(null);
+        if (!below(x, y)) return null;
+        const row = (this.tops.get(opened.label) ?? 0) + Math.floor((opened.y - y) / LIST_ROW);
+        return row < this.items.get(opened.label).length ? this.choose(opened, row) : null;
+      }
+      const hit = at(x, y);
       if (hit?.kind === "button") return ["button", hit.label, []];
       if (hit?.kind === "checkbox") {
         this.tick(hit.label, !this.ticks.get(hit.label));
@@ -1281,6 +1309,14 @@ export class Turtle {
         const row = (this.tops.get(hit.label) ?? 0) + Math.floor((hit.y + hit.height - y) / LIST_ROW);
         return row < this.items.get(hit.label).length ? this.choose(hit, row) : null;
       }
+      if (hit?.kind === "dropdown") {
+        this.setOpen(hit.label);
+        return null;
+      }
+      if (hit?.kind === "slider") {
+        this.selecting = hit.label;
+        return this.slide(hit, this.valueAt(hit, x));
+      }
       if (hit) { // a text box or a text area: its cursor where it was clicked
         const place = this.placeIn(hit, x, y);
         this.edited(hit.label, this.texts.get(hit.label) ?? "", place, place, hit);
@@ -1289,6 +1325,7 @@ export class Turtle {
       }
       return [event, undefined, inputs];
     }
+    if (event === "drag" && focused?.kind === "slider" && this.selecting === focused.label) return this.slide(focused, this.valueAt(focused, inputs[0]));
     if (event === "drag" && focused && focused.kind !== "list" && this.selecting === focused.label) { // selecting, from the click
       this.edited(focused.label, this.texts.get(focused.label) ?? "", this.placeIn(focused, inputs[0], inputs[1]), this.editOf(focused.label).anchor, focused);
       return null;
@@ -1296,14 +1333,24 @@ export class Turtle {
     const { ctrl, key } = keyParts(inputs[0]);
     if (!focused) return event === "type" || (event === "key" && ctrl) ? null : [event, undefined, event === "key" ? [key] : inputs];
     if (event !== "key" && event !== "type") return [event, undefined, inputs];
-    if (focused.kind === "list") {
+    if (focused.kind === "list" || focused.kind === "dropdown") {
       const count = this.items.get(focused.label).length;
       const now = this.choices.get(focused.label) ?? -1;
       if (event === "key" && !ctrl && (key === "up" || key === "down") && count) {
         const next = Math.max(0, Math.min(count - 1, key === "up" ? now - 1 : now + 1));
         if (next !== now) return this.choose(focused, next);
-      }
+      } else if (event === "key" && !ctrl && focused.kind === "dropdown" && (key === "enter" || key === "space")) {
+        this.setOpen(this.open === focused.label ? null : focused.label);
+      } else if (event === "key" && key === "escape") this.setOpen(null);
       return null;
+    }
+    if (focused.kind === "slider") {
+      const { from, to } = focused;
+      const step = to < from ? -1 : 1;
+      const now = this.values.get(focused.label);
+      const next = event !== "key" || ctrl ? null : key === "left" || key === "down" ? now - step : key === "right" || key === "up" ? now + step
+        : key === "home" ? from : key === "end" ? to : null;
+      return next === null ? null : this.slide(focused, Math.min(Math.max(from, to), Math.max(Math.min(from, to), next)));
     }
     return this.editIn(focused, event, inputs);
   }
@@ -1413,24 +1460,63 @@ export class Turtle {
   // the item at `row` of this list chosen, and in view: its handlers' event, with the item
   choose(list, row) {
     this.choices.set(list.label, row);
-    const top = this.tops.get(list.label) ?? 0;
-    const rows = Math.max(1, Math.floor(list.height / LIST_ROW));
-    this.scrollTo(list, row < top ? row : row >= top + rows ? row - rows + 1 : top, true);
+    this.scrollTo(list, this.inView(list, row), true);
     return ["choice", list.label, [this.items.get(list.label)[row]]];
+  }
+
+  // how many rows of a list are in view: as many as fit, a row every LIST_ROW; for a dropdown, as many as it
+  // has, up to DROP_ROWS
+  rowsOf(list) {
+    return list.kind === "dropdown" ? Math.max(1, Math.min(DROP_ROWS, this.items.get(list.label).length)) : Math.max(1, Math.floor(list.height / LIST_ROW));
+  }
+
+  // the first row of this list in view once `row` is: where it is if that's so already, else `row` first or last
+  inView(list, row) {
+    const top = this.tops.get(list.label) ?? 0;
+    const rows = this.rowsOf(list);
+    return row < top ? row : row >= top + rows ? row - rows + 1 : top;
   }
 
   // the first item in view of this list, as near to `top` as its items allow: drawn again
   scrollTo(list, top, always = false) {
-    const rows = Math.max(1, Math.floor(list.height / LIST_ROW));
-    const first = Math.max(0, Math.min(top, this.items.get(list.label).length - rows));
+    const first = Math.max(0, Math.min(top, this.items.get(list.label).length - this.rowsOf(list)));
     if (first === (this.tops.get(list.label) ?? 0) && !always) return;
     this.tops.set(list.label, first);
     this.listChanged(list.label);
   }
 
-  // what a list shows changed without it being drawn again: which item is chosen, which is first, its focus
+  // what a list or dropdown shows changed without it being drawn again: which item is chosen, which is first,
+  // its focus, and whether a dropdown is open
   listChanged(label) {
-    this.draw({ list: label, chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0, focused: this.focus === label });
+    const state = { chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0, focused: this.focus === label };
+    const dropdown = this.widgets.findLast((w) => w.label === label && (w.kind === "list" || w.kind === "dropdown"))?.kind === "dropdown";
+    this.draw(dropdown ? { dropdown: label, ...state, open: this.open === label } : { list: label, ...state });
+  }
+
+  // the dropdown with this label opened, with what's chosen in view, or none open: those that changed drawn again
+  setOpen(label) {
+    const before = this.open;
+    if (label === before || (label !== null && !this.items.get(label).length)) return;
+    this.open = label;
+    if (label !== null) {
+      const dropdown = this.widgets.findLast((w) => w.kind === "dropdown" && w.label === label);
+      this.tops.set(label, Math.max(0, Math.min(this.inView(dropdown, this.choices.get(label) ?? 0), this.items.get(label).length - this.rowsOf(dropdown))));
+    }
+    for (const changed of [before, label]) if (changed !== null) this.listChanged(changed);
+  }
+
+  // the value a click at x gives a slider: from its `from` 10 in to its `to` 10 from its other end, a whole number
+  valueAt(slider, x) {
+    const along = Math.min(1, Math.max(0, (x - slider.x - 10) / (slider.width - 20)));
+    return Math.floor(slider.from + along * (slider.to - slider.from) + 0.5);
+  }
+
+  // the slider moved to `value`: if that's new, drawn again, and its handlers' event, with the value
+  slide(slider, value) {
+    if (value === this.values.get(slider.label)) return null;
+    this.values.set(slider.label, value);
+    this.draw({ slider: slider.label, value, focused: this.focus === slider.label });
+    return ["slider", slider.label, [value]];
   }
 
   // the focus, to the box with this label (or none): each box whose focus changed is drawn again
@@ -1440,7 +1526,9 @@ export class Turtle {
     this.focus = label;
     for (const box of [before, label]) {
       if (box === null) continue;
-      if (this.widgets.findLast((w) => w.label === box && FOCUSABLE.has(w.kind))?.kind === "list") this.listChanged(box);
+      const kind = this.widgets.findLast((w) => w.label === box && FOCUSABLE.has(w.kind))?.kind;
+      if (kind === "list" || kind === "dropdown") this.listChanged(box);
+      else if (kind === "slider") this.draw({ slider: box, value: this.values.get(box), focused: box === label });
       else this.draw({ textbox: box, ...this.boxState(box) });
     }
   }
@@ -1456,7 +1544,10 @@ export class Turtle {
   // { shape: "checkbox", label, ticked, x, y, width, height, color }, { shape: "textarea", label, text,
   // focused, x, y, width, height, color }, { shape: "list", label, items, chosen, top, focused, x, y, width,
   // height, color }, items as `say` shows them and chosen -1 for none, with { checkbox: label, ticked } and
-  // { list: label, chosen, top, focused } when they change, and a text area's text as a text box's. `disk`
+  // { list: label, chosen, top, focused } when they change, and a text area's text as a text box's; and
+  // { shape: "dropdown", label, items, chosen, top, open, focused, x, y, width, height, color } with
+  // { dropdown: label, chosen, top, focused, open }, and { shape: "slider", label, value, from, to, focused, x,
+  // y, width, height, color } with { slider: label, value, focused } (DESIGN §42). `disk`
   // has the files `draw picture` reads, as for readFile.
   act(action, value, error = oops, disk = null) {
     const name = TURTLE_ACTIONS[action];
@@ -1520,6 +1611,34 @@ export class Turtle {
         this.scrollTo(list, this.tops.get(label) ?? 0); // as near to where it was as its items allow now
         this.draw({ shape: "list", label, items: items.map((item) => show(item)), chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0,
           focused: this.focus === label, x, y, width, height, color: this.color });
+      }
+    } else if (name === "dropdown") { // [label, items, x, y]: 200 by 30, its items in a list below it while it's open
+      const label = show(value[0]);
+      if (!isList(value[1])) error(`'draw dropdown ... showing' needs a list, not ${kindOf(value[1])}`);
+      const [x, y] = numbers("'draw dropdown'", value.slice(2));
+      this.items.set(label, value[1].slice());
+      this.widgets.push({ kind: "dropdown", label, x, y, width: 200, height: 30 });
+      if (this.open === label && !value[1].length) this.open = null;
+      this.scrollTo(this.widgets.at(-1), this.tops.get(label) ?? 0); // as near to where it was as its items allow now
+      this.draw({ shape: "dropdown", label, items: value[1].map((item) => show(item)), chosen: this.choices.get(label) ?? -1, top: this.tops.get(label) ?? 0,
+        open: this.open === label, focused: this.focus === label, x, y, width: 200, height: 30, color: this.color });
+    } else if (name === "slider") { // [label, from, to, x, y]: 200 by 20, its value a whole number from `from` to `to`
+      const label = show(value[0]);
+      const [low, high, x, y] = numbers("'draw slider'", value.slice(1));
+      const [from, to] = [Math.floor(low + 0.5), Math.floor(high + 0.5)];
+      const now = Math.min(Math.max(from, to), Math.max(Math.min(from, to), this.values.get(label) ?? from));
+      this.values.set(label, now);
+      this.widgets.push({ kind: "slider", label, x, y, width: 200, height: 20, from, to });
+      this.draw({ shape: "slider", label, value: now, from, to, focused: this.focus === label, x, y, width: 200, height: 20, color: this.color });
+    } else if (name === "set slider") { // [label, value]: a whole number, kept to the slider's range if it's drawn
+      const label = show(value[0]);
+      if (typeof value[1] !== "number") error(`'set the slider' needs a number, not ${kindOf(value[1])}`);
+      const slider = this.widgets.findLast((w) => w.kind === "slider" && w.label === label);
+      let now = Math.floor(value[1] + 0.5);
+      if (slider) now = Math.min(Math.max(slider.from, slider.to), Math.max(Math.min(slider.from, slider.to), now));
+      if (now !== this.values.get(label)) {
+        this.values.set(label, now);
+        if (slider) this.draw({ slider: label, value: now, focused: this.focus === label });
       }
     } else if (name === "box") {
       const [x, y, width, height] = numbers("'draw box'", value);

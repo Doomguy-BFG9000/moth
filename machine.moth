@@ -230,7 +230,7 @@ to new_asm
     set made to record with hot empty list, cold empty list, code nothing, buffer "hot", rodata empty list, data empty list,
         bss 0, labels empty dictionary, fixups empty list, count 0, texts empty dictionary, numbers empty dictionary,
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
-        charts no, pictures no, widgets no, sends no, controls no
+        charts no, pictures no, widgets no, sends no, controls no, files no, window no
     set code of made to hot of made
     return made
 end
@@ -10014,7 +10014,8 @@ to emit_turtle with a
     if widgets of a # `draw button`, `draw text box`, `clear the text box`, by where compiler.moth has them
         set widget_names to list of "button", "text box", "clear text box"
         if controls of a # and checkboxes, text areas and lists
-            set widget_names to list of "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list"
+            set widget_names to list of "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list", "dropdown",
+                "slider", "set slider"
         end
         for each widget_name in widget_names
             add new_label(a) to widget_acts
@@ -10314,8 +10315,10 @@ to emit_turtle with a
     set w82 to new_label(a)
     set w83 to new_label(a)
     set w84 to new_label(a)
+    set w85 to new_label(a)
+    set w86 to new_label(a)
     if controls of a
-        for each pair in list of (list of 82, w82), (list of 83, w83), (list of 84, w84)
+        for each pair in list of (list of 82, w82), (list of 83, w83), (list of 84, w84), (list of 85, w85), (list of 86, w86)
             alui(a, "cmp", rax, item 1 of pair)
             jcc(a, cc_e, item 2 of pair)
         end
@@ -10381,6 +10384,14 @@ to emit_turtle with a
         end
         mark(a, w84)
         b_text(a, "'draw list ... showing' needs a list, not ")
+        load(a, rax, rip("err_a"))
+        jmp_to(a, "rt_e_kind")
+        mark(a, w85)
+        b_text(a, "'draw dropdown ... showing' needs a list, not ")
+        load(a, rax, rip("err_a"))
+        jmp_to(a, "rt_e_kind")
+        mark(a, w86)
+        b_text(a, "'set the slider' needs a number, not ")
         load(a, rax, rip("err_a"))
         jmp_to(a, "rt_e_kind")
     end
@@ -10813,6 +10824,7 @@ end
 # alone, as DESIGN §40 says. list_focus is the entry of the list that has the focus, from 1, or 0.
 
 to emit_controls with a
+    emit_controls_more(a)
     emit_entries(a, "tk", 4)
     emit_entries(a, "ls", 6)
 
@@ -11015,6 +11027,10 @@ to emit_entries with a, prefix, size_bits
     if prefix is "ls" # none chosen yet
         storei(a, mem(rdi, 24), -1)
     end
+    if prefix is "sl" # no value yet
+        movi64(a, rcx, bits_nothing)
+        store(a, mem(rdi, 8), rcx)
+    end
     alu_at(a, "add", rip(entry_n), 1)
     load(a, rax, rip(entry_n))
     mark(a, entry_have)
@@ -11188,6 +11204,247 @@ to emit_control_acts with a, acts, wrong_numbers, done_ok
         call_to(a, "rt_pic_add")
         jmp_to(a, done_ok)
     end
+    emit_control_acts_more(a, acts, wrong_numbers, done_ok)
+end
+
+# Dropdowns (13) and sliders (14), DESIGN §42. A dropdown's entry is a list's: its items, them as shown, what's
+# chosen and what's first in view, by its label. A slider's entry is 32 bytes: its label, its value (nothing
+# until it's drawn or set), and the `from` and `to` it was last drawn with. drop_open is the entry of the
+# dropdown that's open, from 1, or 0.
+to emit_controls_more with a
+    emit_entries(a, "sl", 5)
+
+    # rt_slider_value: xmm0 a label: the value of the slider with that label, or nothing, into xmm0, with rax 0
+    set no_slider to new_label(a)
+    mark(a, "rt_slider_value")
+    call_to(a, "rt_show_text")
+    call_to(a, "rt_sl_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_slider)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 5)
+    alu_load(a, "add", rax, rip("sl_items"))
+    movsd_load(a, xmm0, mem(rax, 8))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, no_slider)
+    load_bits(a, xmm0, bits_nothing)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_drop_rows: rax a list's entry, its place: how many of its items a dropdown shows open, from 1 to 6,
+    # in rax, and that many rows high, in xmm0
+    set rows_few to new_label(a)
+    set rows_one to new_label(a)
+    mark(a, "rt_drop_rows")
+    load(a, rax, mem(rax, 8))
+    untag(a, rax)
+    load(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_le, rows_few)
+    movi(a, rax, 6)
+    mark(a, rows_few)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ge, rows_one)
+    movi(a, rax, 1)
+    mark(a, rows_one)
+    imul_ri(a, rcx, rax, 24)
+    cvtsi2sd(a, xmm0, rcx)
+    ret(a)
+end
+
+# rt_turtle's dropdowns and sliders, and `set the slider`, by their places in `acts`
+to emit_control_acts_more with a, acts, wrong_numbers, done_ok
+    set drop_items_fine to new_label(a)
+    mark(a, item 9 of acts) # a dropdown: label, its items, x, y; 200 by 30
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    movsd_load(a, xmm1, mem(rax, 8))
+    movq_rx(a, rax, xmm1)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_list)
+    jcc(a, cc_e, drop_items_fine)
+    movsd_store(a, rip("err_a"), xmm1)
+    storei(a, rip("err_why"), 85)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, drop_items_fine)
+    control_numbers(a, "'draw dropdown'", 2, 2, wrong_numbers)
+    push_r(a, rcx)
+    load(a, rax, mem(rcx, 16))
+    movsd_load(a, xmm0, mem(rax, 0))
+    call_to(a, "rt_show_text")
+    store(a, rip("pi_text"), rax)
+    call_to(a, "rt_ls_entry")
+    store(a, rip("pi_w"), rax)
+    load(a, rcx, mem(rsp, 0)) # its items: as many rows as it shows open, for what's first in view
+    load(a, rax, mem(rcx, 16))
+    load(a, rax, mem(rax, 8))
+    untag(a, rax)
+    set count_few to new_label(a)
+    set count_one to new_label(a)
+    load(a, rax, mem(rax, 0))
+    alui(a, "cmp", rax, 6)
+    jcc(a, cc_le, count_few)
+    movi(a, rax, 6)
+    mark(a, count_few)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ge, count_one)
+    movi(a, rax, 1)
+    mark(a, count_one)
+    imul_ri(a, rax, rax, 24)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("tn3"), xmm0)
+    load(a, rcx, mem(rsp, 0))
+    load(a, rax, mem(rcx, 16))
+    load(a, rax, mem(rax, 8))
+    call_to(a, "rt_ls_fill")
+    pop_r(a, rcx)
+    set still_open to new_label(a) # an open dropdown drawn with no items closes
+    load(a, rax, rip("drop_open"))
+    alu_load(a, "cmp", rax, rip("pi_w"))
+    jcc(a, cc_ne, still_open)
+    load(a, rcx, mem(rcx, 16))
+    load(a, rcx, mem(rcx, 8))
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 0))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, still_open)
+    storei(a, rip("drop_open"), 0)
+    mark(a, still_open)
+    for each pair in list of (list of "tn0", "pi_a"), (list of "tn1", "pi_b")
+        load(a, rax, rip(item 1 of pair))
+        store(a, rip(item 2 of pair), rax)
+    end
+    load_bits(a, xmm0, double_bytes(200))
+    movsd_store(a, rip("pi_c"), xmm0)
+    load_bits(a, xmm0, double_bytes(30))
+    movsd_store(a, rip("pi_d"), xmm0)
+    storei(a, rip("pi_kind"), 13)
+    call_to(a, "rt_pic_add")
+    jmp_to(a, done_ok)
+
+    mark(a, item 10 of acts) # a slider: label, from, to, x, y; 200 by 20, its value a whole number from `from` to `to`
+    control_numbers(a, "'draw slider'", 1, 4, wrong_numbers)
+    push_r(a, rcx)
+    for each ends in list of (list of "tn0", "sl_from"), (list of "tn1", "sl_to")
+        movsd_load(a, xmm0, rip(item 1 of ends))
+        load_bits(a, xmm1, double_bytes(0.5))
+        sse_math(a, "+", xmm0, reg_at(xmm1))
+        floor_sd(a, xmm0, xmm0)
+        movsd_store(a, rip(item 2 of ends), xmm0)
+    end
+    load(a, rax, mem(rcx, 16))
+    movsd_load(a, xmm0, mem(rax, 0))
+    call_to(a, "rt_show_text")
+    store(a, rip("pi_text"), rax)
+    call_to(a, "rt_sl_entry")
+    store(a, rip("pi_w"), rax)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 5)
+    alu_load(a, "add", rax, rip("sl_items"))
+    load(a, rcx, rip("sl_from"))
+    store(a, mem(rax, 16), rcx)
+    load(a, rcx, rip("sl_to"))
+    store(a, mem(rax, 24), rcx)
+    set has_value to new_label(a)
+    load(a, rcx, mem(rax, 8)) # its value, from `from` if it has none, kept to its range
+    movi64(a, rdx, bits_nothing)
+    alu(a, "cmp", rcx, rdx)
+    jcc(a, cc_ne, has_value)
+    load(a, rcx, rip("sl_from"))
+    mark(a, has_value)
+    movq_xr(a, xmm0, rcx)
+    sl_keep(a, rax)
+    movsd_store(a, mem(rax, 8), xmm0)
+    pop_r(a, rcx)
+    for each pair in list of (list of "tn2", "pi_a"), (list of "tn3", "pi_b")
+        load(a, rax, rip(item 1 of pair))
+        store(a, rip(item 2 of pair), rax)
+    end
+    load_bits(a, xmm0, double_bytes(200))
+    movsd_store(a, rip("pi_c"), xmm0)
+    load_bits(a, xmm0, double_bytes(20))
+    movsd_store(a, rip("pi_d"), xmm0)
+    storei(a, rip("pi_kind"), 14)
+    call_to(a, "rt_pic_add")
+    jmp_to(a, done_ok)
+
+    set set_number to new_label(a)
+    set set_drawn_loop to new_label(a)
+    set set_store to new_label(a)
+    set set_wrong to new_label(a)
+    mark(a, item 11 of acts) # set the slider: label, value: a whole number, kept to its range while it's drawn
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    movsd_load(a, xmm1, mem(rax, 8))
+    movsd_store(a, rip("sl_now"), xmm1)
+    odd_jump(a, xmm1, set_wrong)
+    jmp_to(a, set_number)
+    mark(a, set_wrong)
+    movsd_store(a, rip("err_a"), xmm1)
+    storei(a, rip("err_why"), 86)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, set_number)
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    load(a, rax, mem(rax, 16))
+    movsd_load(a, xmm1, rip("sl_now"))
+    load_bits(a, xmm2, double_bytes(0.5))
+    sse_math(a, "+", xmm1, reg_at(xmm2))
+    floor_sd(a, xmm1, xmm1)
+    movsd_store(a, rip("sl_now"), xmm1)
+    movsd_load(a, xmm0, mem(rax, 0))
+    call_to(a, "rt_show_text")
+    call_to(a, "rt_sl_entry")
+    mov_rr(a, rdx, rax) # drawn since the last `clear`?
+    load(a, rcx, rip("pic_n"))
+    load(a, rsi, rip("pic_items"))
+    mark(a, set_drawn_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, set_store)
+    load(a, r8, mem(rsi, 0))
+    alui(a, "cmp", r8, 14)
+    set set_next to new_label(a)
+    jcc(a, cc_ne, set_next)
+    alu_load(a, "cmp", rdx, mem(rsi, 40))
+    set set_kept to new_label(a)
+    jcc(a, cc_e, set_kept)
+    mark(a, set_next)
+    alui(a, "add", rsi, 64)
+    dec_r(a, rcx)
+    jmp_to(a, set_drawn_loop)
+    mark(a, set_kept)
+    mov_rr(a, rax, rdx)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 5)
+    alu_load(a, "add", rax, rip("sl_items"))
+    movsd_load(a, xmm0, rip("sl_now"))
+    sl_keep(a, rax)
+    movsd_store(a, rip("sl_now"), xmm0)
+    mark(a, set_store)
+    mov_rr(a, rax, rdx)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 5)
+    alu_load(a, "add", rax, rip("sl_items"))
+    load(a, rcx, rip("sl_now"))
+    store(a, mem(rax, 8), rcx)
+    jmp_to(a, done_ok)
+end
+
+# xmm0 a value, kept from the lesser to the greater of the `from` and `to` in the slider's entry at register
+# r; uses xmm1 to xmm3
+to sl_keep with a, r
+    movsd_load(a, xmm1, mem(r, 16))
+    movsd_load(a, xmm2, mem(r, 24))
+    movapd(a, xmm3, xmm1)
+    minsd(a, xmm3, xmm2)
+    sse_math(a, "max", xmm1, reg_at(xmm2))
+    minsd(a, xmm0, xmm1)
+    sse_math(a, "max", xmm0, reg_at(xmm3))
 end
 
 # ---------- the runtime: apps ----------
@@ -12338,7 +12595,7 @@ to emit_gui with a, title
         jcc(a, cc_e, as_box)
     end
     if controls of a # and so do checkboxes, text areas and lists
-        for each control_kind in list of 10, 11, 12
+        for each control_kind in list of 10, 11, 12, 13, 14
             alui(a, "cmp", rdx, control_kind)
             jcc(a, cc_e, as_box)
         end
@@ -12461,7 +12718,7 @@ to emit_gui with a, title
         jcc(a, cc_e, a_textbox)
     end
     set control_draws to list of (list of new_label(a), 10, "rt_gui_check"), (list of new_label(a), 11, "rt_gui_typed"),
-        (list of new_label(a), 12, "rt_gui_list")
+        (list of new_label(a), 12, "rt_gui_list"), (list of new_label(a), 13, "rt_gui_drop"), (list of new_label(a), 14, "rt_gui_slide")
     if controls of a # see emit_gui_controls
         for each drawn_kind in control_draws
             alui(a, "cmp", rax, item 2 of drawn_kind)
@@ -12657,6 +12914,9 @@ to emit_gui with a, title
     inc_r(a, r15)
     jmp_to(a, item_loop)
     mark(a, items_done)
+    if controls of a # an open dropdown's items, on top of everything
+        call_to(a, "rt_gui_popup")
+    end
     win_leave(a)
     for each r in list of r15, r14, r13, r12, rbx
         pop_r(a, r)
@@ -14397,6 +14657,11 @@ to emit_gui_widgets with a
     set hit_check to new_label(a)
     set hit_list to new_label(a)
     set scroll_hit to new_label(a)
+    set ev_dropped to new_label(a)
+    set hit_start to new_label(a)
+    set hit_drop to new_label(a)
+    set hit_slider to new_label(a)
+    set ev_slider_key to new_label(a)
     mark(a, "rt_app_event")
     for each r in list of rbx, r12, r13
         push_r(a, r)
@@ -14420,6 +14685,9 @@ to emit_gui_widgets with a
         load(a, rax, rip("list_focus"))
         test_rr(a, rax, rax)
         jcc(a, cc_ne, ev_list_key)
+        load(a, rax, rip("slider_focus"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, ev_slider_key)
     end
     call_to(a, "rt_key_parts") # or the program's: not with Ctrl, and without Shift
     load(a, rax, rip("key_ctrl"))
@@ -14461,6 +14729,21 @@ to emit_gui_widgets with a
     call_to(a, "rt_ed_replace")
     jmp_to(a, ev_out)
     mark(a, ev_drag) # a drag from a click in the box with the focus selects; any other is the program's
+    if controls of a # and one from a click on a slider moves it
+        set not_sliding to new_label(a)
+        load(a, rax, rip("slider_focus"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, not_sliding)
+        alu_load(a, "cmp", rax, rip("sl_sel"))
+        jcc(a, cc_ne, not_sliding)
+        load(a, rcx, rip("slider_item"))
+        movsd_load(a, xmm0, rip("ev_a"))
+        call_to(a, "rt_slider_at")
+        load(a, rcx, rip("slider_item"))
+        call_to(a, "rt_slide")
+        jmp_to(a, ev_out)
+        mark(a, not_sliding)
+    end
     load(a, rax, rip("box_focus"))
     test_rr(a, rax, rax)
     jcc(a, cc_e, ev_pass)
@@ -14480,7 +14763,16 @@ to emit_gui_widgets with a
     alui(a, "cmp", r12, 1)
     jcc(a, cc_ne, not_click)
     storei(a, rip("ed_sel"), 0)
+    if controls of a
+        storei(a, rip("sl_sel"), 0)
+    end
     mark(a, not_click)
+    if controls of a # a dropdown that's open has the click, and the wheel over its items
+        load(a, rax, rip("drop_open"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, ev_dropped)
+        mark(a, hit_start)
+    end
     load(a, r13, rip("pic_n"))
     mark(a, hit_loop)
     test_rr(a, r13, r13)
@@ -14498,7 +14790,7 @@ to emit_gui_widgets with a
         jcc(a, cc_be, hit_kind)
         alui(a, "cmp", rax, 10)
         jcc(a, cc_b, hit_loop)
-        alui(a, "cmp", rax, 12)
+        alui(a, "cmp", rax, 14)
         jcc(a, cc_a, hit_loop)
         mark(a, hit_kind)
     else
@@ -14527,6 +14819,10 @@ to emit_gui_widgets with a
         jcc(a, cc_e, hit_check)
         alui(a, "cmp", rax, 12)
         jcc(a, cc_e, hit_list)
+        alui(a, "cmp", rax, 13)
+        jcc(a, cc_e, hit_drop)
+        alui(a, "cmp", rax, 14)
+        jcc(a, cc_e, hit_slider)
     end
     load(a, r8, mem(rbx, 56)) # a button: its handlers, and the focus stays where it is
     movi(a, rcx, 3)
@@ -14538,6 +14834,7 @@ to emit_gui_widgets with a
     store(a, rip("ed_sel"), rax)
     if controls of a
         storei(a, rip("list_focus"), 0)
+        storei(a, rip("slider_focus"), 0)
     end
     store(a, rip("ed_item"), rbx)
     storei(a, rip("box_most"), 40)
@@ -14571,6 +14868,7 @@ to emit_gui_widgets with a
         jmp_to(a, ev_out)
         mark(a, hit_list) # a list: the focus, and the item there chosen, if there's one there
         storei(a, rip("box_focus"), 0)
+        storei(a, rip("slider_focus"), 0)
         load(a, rcx, mem(rbx, 40))
         store(a, rip("list_focus"), rcx)
         movsd_load(a, xmm0, mem(rbx, 16)) # how many rows down from its top, from its first in view
@@ -14602,25 +14900,40 @@ to emit_gui_widgets with a
         movsd_load(a, xmm0, mem(rbx, 32))
         call_to(a, "rt_ls_scroll")
         jmp_to(a, ev_out)
-        mark(a, ev_list_key) # a list with the focus takes every key: up and down choose the item before or after
-        load(a, rax, rip("list_focus"))
+        mark(a, ev_list_key) # a list or a dropdown with the focus takes every key: up and down choose the one before or after; Enter and Space open and close a dropdown, and Escape closes it
+        set way_up to new_label(a)
+        set way_down to new_label(a)
+        set way_found to new_label(a)
+        set drop_toggle to new_label(a)
+        set drop_close to new_label(a)
+        call_to(a, "rt_key_parts")
+        load(a, rax, rip("key_ctrl"))
         test_rr(a, rax, rax)
-        jcc(a, cc_e, ev_pass)
-        movi(a, r13, 0)
-        for each way in list of (list of "up", -1), (list of "down", 1)
-            set not_way to new_label(a)
-            lea(a, rdx, rip(text_object(a, item 1 of way)))
-            movi64(a, rcx, tag_text)
-            alu(a, "or", rdx, rcx)
-            load(a, rax, rip("ev_a"))
-            call_to(a, "rt_equal")
-            test_rr(a, rax, rax)
-            jcc(a, cc_e, not_way)
-            movi(a, r13, item 2 of way)
-            mark(a, not_way)
-        end
-        test_rr(a, r13, r13)
-        jcc(a, cc_e, ev_out)
+        jcc(a, cc_ne, ev_out)
+        key_is(a, "up", way_up)
+        key_is(a, "down", way_down)
+        key_is(a, "escape", drop_close)
+        load(a, rax, rip("list_kind"))
+        alui(a, "cmp", rax, 13)
+        jcc(a, cc_ne, ev_out)
+        key_is(a, "enter", drop_toggle)
+        key_is(a, "space", drop_toggle)
+        jmp_to(a, ev_out)
+        mark(a, drop_toggle)
+        load(a, rcx, rip("list_focus"))
+        alu_load(a, "cmp", rcx, rip("drop_open"))
+        jcc(a, cc_e, drop_close)
+        call_to(a, "rt_drop_open")
+        jmp_to(a, ev_out)
+        mark(a, drop_close)
+        storei(a, rip("drop_open"), 0)
+        jmp_to(a, ev_out)
+        mark(a, way_up)
+        movi(a, r13, -1)
+        jmp_to(a, way_found)
+        mark(a, way_down)
+        movi(a, r13, 1)
+        mark(a, way_found)
         load(a, rbx, rip("list_focus"))
         dec_r(a, rbx)
         shifti(a, "shl", rbx, 6)
@@ -14651,12 +14964,139 @@ to emit_gui_widgets with a
         movi(a, rcx, 6)
         call_to(a, "rt_app_label")
         jmp_to(a, ev_out)
+        mark(a, hit_drop) # a dropdown: the focus, and it opens
+        storei(a, rip("box_focus"), 0)
+        storei(a, rip("slider_focus"), 0)
+        load(a, rcx, mem(rbx, 40))
+        store(a, rip("list_focus"), rcx)
+        call_to(a, "rt_drop_open")
+        jmp_to(a, ev_out)
+        mark(a, hit_slider) # a slider: the focus, and it moves to the click; a drag from here moves it too
+        storei(a, rip("box_focus"), 0)
+        storei(a, rip("list_focus"), 0)
+        load(a, rax, mem(rbx, 40))
+        store(a, rip("slider_focus"), rax)
+        store(a, rip("sl_sel"), rax)
+        store(a, rip("slider_item"), rbx)
+        mov_rr(a, rcx, rbx)
+        movsd_load(a, xmm0, rip("ev_a"))
+        call_to(a, "rt_slider_at")
+        mov_rr(a, rcx, rbx)
+        call_to(a, "rt_slide")
+        jmp_to(a, ev_out)
+        mark(a, ev_dropped) # a dropdown's open: a wheel over its items scrolls them; a click closes it, and chooses the item it's on, if any
+        set outside to new_label(a)
+        set dropped_choose to new_label(a)
+        load(a, rbx, rip("drop_item"))
+        load(a, r13, rip("drop_open"))
+        mov_rr(a, rax, r13)
+        ls_entry(a, rax)
+        call_to(a, "rt_drop_rows")
+        movsd_store(a, rip("drop_h"), xmm0)
+        movsd_load(a, xmm1, rip("ev_a")) # across it
+        ucomisd(a, xmm1, mem(rbx, 8))
+        jcc(a, cc_b, outside)
+        movsd_load(a, xmm2, mem(rbx, 8))
+        sse_math(a, "+", xmm2, mem(rbx, 24))
+        ucomisd(a, xmm1, reg_at(xmm2))
+        jcc(a, cc_a, outside)
+        movsd_load(a, xmm1, rip("ev_b")) # and below it, no further than its items go
+        ucomisd(a, xmm1, mem(rbx, 16))
+        jcc(a, cc_ae, outside)
+        movsd_load(a, xmm2, mem(rbx, 16))
+        sse_math(a, "-", xmm2, rip("drop_h"))
+        ucomisd(a, xmm1, reg_at(xmm2))
+        jcc(a, cc_b, outside)
+        alui(a, "cmp", r12, 6)
+        jcc(a, cc_ne, dropped_choose)
+        mov_rr(a, rcx, r13)
+        load(a, rdx, rip("ev_c"))
+        movsd_load(a, xmm0, rip("drop_h"))
+        call_to(a, "rt_ls_scroll")
+        jmp_to(a, ev_out)
+        mark(a, dropped_choose)
+        storei(a, rip("drop_open"), 0)
+        movsd_load(a, xmm0, mem(rbx, 16)) # the row: how many down from its top, from its first in view
+        sse_math(a, "-", xmm0, rip("ev_b"))
+        load_bits(a, xmm1, double_bytes(24))
+        sse_math(a, "/", xmm0, reg_at(xmm1))
+        floor_sd(a, xmm0, xmm0)
+        cvttsd2si(a, rdx, xmm0)
+        mov_rr(a, rax, r13)
+        ls_entry(a, rax)
+        alu_load(a, "add", rdx, mem(rax, 32))
+        load(a, r8, mem(rax, 8))
+        untag(a, r8)
+        alu_load(a, "cmp", rdx, mem(r8, 0))
+        jcc(a, cc_ae, ev_out)
+        mov_rr(a, rcx, r13)
+        movsd_load(a, xmm0, rip("drop_h"))
+        call_to(a, "rt_ls_choose")
+        movi(a, rcx, 6)
+        call_to(a, "rt_app_label")
+        jmp_to(a, ev_out)
+        mark(a, outside) # a wheel anywhere else is as it always is; a click only closes it
+        alui(a, "cmp", r12, 6)
+        jcc(a, cc_e, hit_start)
+        storei(a, rip("drop_open"), 0)
+        jmp_to(a, ev_out)
+        mark(a, ev_slider_key) # a slider with the focus takes every key: the arrows move it a step, Home and End to its ends
+        set step_back to new_label(a)
+        set step_on to new_label(a)
+        set stepped to new_label(a)
+        set same_way to new_label(a)
+        set to_from to new_label(a)
+        set to_to to new_label(a)
+        set slide_to to new_label(a)
+        call_to(a, "rt_key_parts")
+        load(a, rax, rip("key_ctrl"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, ev_out)
+        load(a, rbx, rip("slider_focus"))
+        sl_entry(a, rbx)
+        for each pair in list of (list of "left", step_back), (list of "down", step_back), (list of "right", step_on), (list of "up", step_on),
+            (list of "home", to_from), (list of "end", to_to)
+            key_is(a, item 1 of pair, item 2 of pair)
+        end
+        jmp_to(a, ev_out)
+        mark(a, step_back)
+        movi(a, r8, 1)
+        jmp_to(a, stepped)
+        mark(a, step_on)
+        movi(a, r8, 0)
+        mark(a, stepped) # a step towards its `to`, or back towards its `from`
+        movsd_load(a, xmm2, mem(rbx, 24))
+        ucomisd(a, xmm2, mem(rbx, 16))
+        jcc(a, cc_ae, same_way)
+        alui(a, "xor", r8, 1)
+        mark(a, same_way)
+        movsd_load(a, xmm0, mem(rbx, 8))
+        load_bits(a, xmm1, double_bytes(1))
+        set step_up to new_label(a)
+        test_rr(a, r8, r8)
+        jcc(a, cc_e, step_up)
+        sse_math(a, "-", xmm0, reg_at(xmm1))
+        jmp_to(a, slide_to)
+        mark(a, step_up)
+        sse_math(a, "+", xmm0, reg_at(xmm1))
+        jmp_to(a, slide_to)
+        mark(a, to_from)
+        movsd_load(a, xmm0, mem(rbx, 16))
+        jmp_to(a, slide_to)
+        mark(a, to_to)
+        movsd_load(a, xmm0, mem(rbx, 24))
+        mark(a, slide_to)
+        sl_keep(a, rbx)
+        load(a, rcx, rip("slider_item"))
+        call_to(a, "rt_slide")
+        jmp_to(a, ev_out)
     end
     mark(a, hit_none) # none: the focus goes, and the program gets the click
     if controls of a # a wheel over none of them: nothing
         alui(a, "cmp", r12, 6)
         jcc(a, cc_e, ev_out)
         storei(a, rip("list_focus"), 0)
+        storei(a, rip("slider_focus"), 0)
     end
     storei(a, rip("box_focus"), 0)
     mark(a, ev_pass)
@@ -15865,8 +16305,10 @@ end
 to emit_focus_check with a
     mark(a, "rt_focus_check")
     set focus_sides to list of (list of "box_focus", 6, 11)
-    if controls of a
-        add (list of "list_focus", 12, 12) to focus_sides
+    if controls of a # and a list's or a dropdown's, a slider's, and the dropdown that's open (DESIGN §42)
+        add (list of "list_focus", 12, 13) to focus_sides
+        add (list of "slider_focus", 14, 14) to focus_sides
+        add (list of "drop_open", 13, 13) to focus_sides
     end
     for each side in focus_sides
         set side_loop to new_label(a)
@@ -15893,15 +16335,28 @@ to emit_focus_check with a
         mark(a, side_kind)
         alu_load(a, "cmp", rax, mem(rsi, 40))
         jcc(a, cc_ne, side_loop)
-        if item 2 of side is 6
+        if item 1 of side is "box_focus"
             store(a, rip("ed_item"), rsi)
             storei(a, rip("box_most"), 40)
             alui(a, "cmp", rdx, 11)
             jcc(a, cc_ne, side_done)
             storei(a, rip("box_most"), 2000)
-        else
+        else if item 1 of side is "list_focus" # its kind, and how high its rows are
+            set a_list to new_label(a)
+            store(a, rip("list_kind"), rdx)
+            alui(a, "cmp", rdx, 13)
+            jcc(a, cc_ne, a_list)
+            ls_entry(a, rax)
+            call_to(a, "rt_drop_rows")
+            movsd_store(a, rip("list_h"), xmm0)
+            jmp_to(a, side_done)
+            mark(a, a_list)
             load(a, rdx, mem(rsi, 32))
             store(a, rip("list_h"), rdx)
+        else if item 1 of side is "slider_focus"
+            store(a, rip("slider_item"), rsi)
+        else
+            store(a, rip("drop_item"), rsi)
         end
         jmp_to(a, side_done)
         mark(a, side_gone)
@@ -15965,8 +16420,321 @@ to put_at with a
     call_to(a, "rt_gui_unprep")
 end
 
+# register r, a slider's entry (from 1): where that entry is
+to sl_entry with a, r
+    dec_r(a, r)
+    shifti(a, "shl", r, 5)
+    alu_load(a, "add", r, rip("sl_items"))
+end
+
+# register r, a list's or dropdown's entry (from 1): where that entry is
+to ls_entry with a, r
+    dec_r(a, r)
+    shifti(a, "shl", r, 6)
+    alu_load(a, "add", r, rip("ls_items"))
+end
+
+# What dropdowns and sliders do in a window (DESIGN §42): opened, moved and drawn.
+to emit_gui_more with a
+    # rt_drop_open: rcx a dropdown's entry: it opens, if it has items, with what's chosen (or its first) in view
+    set open_none to new_label(a)
+    set open_from to new_label(a)
+    mark(a, "rt_drop_open")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    ls_entry(a, rbx)
+    load(a, rax, mem(rbx, 8))
+    untag(a, rax)
+    load(a, rax, mem(rax, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, open_none)
+    store(a, rip("drop_open"), rcx)
+    mov_rr(a, rax, rbx)
+    call_to(a, "rt_drop_rows") # rax its rows
+    load(a, rdx, mem(rbx, 24)) # what's chosen, or its first
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_ns, open_from)
+    movi(a, rdx, 0)
+    mark(a, open_from)
+    load(a, rcx, mem(rbx, 32)) # in view: first if it's above, last if it's below
+    set open_below to new_label(a)
+    set open_kept to new_label(a)
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_ge, open_below)
+    mov_rr(a, rcx, rdx)
+    jmp_to(a, open_kept)
+    mark(a, open_below)
+    mov_rr(a, r8, rcx)
+    alu(a, "add", r8, rax)
+    alu(a, "cmp", rdx, r8)
+    jcc(a, cc_l, open_kept)
+    mov_rr(a, rcx, rdx)
+    alu(a, "sub", rcx, rax)
+    inc_r(a, rcx)
+    mark(a, open_kept)
+    ls_keep_in_view(a)
+    mark(a, open_none)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_slider_at: rcx a slider drawn, xmm0 an x: the value a click there gives it, in xmm0: from its `from`
+    # 10 in to its `to` 10 from its other end, a whole number
+    mark(a, "rt_slider_at")
+    load(a, rax, mem(rcx, 40))
+    sl_entry(a, rax)
+    sse_math(a, "-", xmm0, mem(rcx, 8))
+    load_bits(a, xmm1, double_bytes(10))
+    sse_math(a, "-", xmm0, reg_at(xmm1))
+    movsd_load(a, xmm1, mem(rcx, 24))
+    load_bits(a, xmm2, double_bytes(20))
+    sse_math(a, "-", xmm1, reg_at(xmm2))
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    load_bits(a, xmm1, double_bytes(0))
+    sse_math(a, "max", xmm0, reg_at(xmm1))
+    load_bits(a, xmm1, double_bytes(1))
+    minsd(a, xmm0, xmm1)
+    movsd_load(a, xmm1, mem(rax, 24))
+    sse_math(a, "-", xmm1, mem(rax, 16))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    sse_math(a, "+", xmm0, mem(rax, 16))
+    load_bits(a, xmm1, double_bytes(0.5))
+    sse_math(a, "+", xmm0, reg_at(xmm1))
+    floor_sd(a, xmm0, xmm0)
+    ret(a)
+
+    # rt_slide: rcx a slider drawn, xmm0 a value for it: if that's new, its value, and its handlers, with it
+    set slide_same to new_label(a)
+    mark(a, "rt_slide")
+    load(a, rax, mem(rcx, 40))
+    sl_entry(a, rax)
+    movq_rx(a, rdx, xmm0)
+    alu_load(a, "cmp", rdx, mem(rax, 8))
+    jcc(a, cc_e, slide_same)
+    store(a, mem(rax, 8), rdx)
+    store(a, rip("ev_a"), rdx)
+    load(a, r8, mem(rax, 0))
+    movi(a, rcx, slot_of_word(front's event_names, "slider") - 1)
+    call_to(a, "rt_app_label")
+    mark(a, slide_same)
+    ret(a)
+
+    # rt_gui_drop: the dropdown in rbx, as the playground draws one: as a text box, with the item chosen in it,
+    # or its label in grey, and an arrow at its right in the pen's colour
+    set drop_label to new_label(a)
+    set drop_text to new_label(a)
+    mark(a, "rt_gui_drop")
+    item_box(a)
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    item_box(a)
+    load_bits(a, xmm4, double_bytes(2))
+    inset_xmm4(a)
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    item_box(a) # its text kept clear of the arrow
+    load_bits(a, xmm4, double_bytes(2))
+    sse_math(a, "+", xmm0, reg_at(xmm4))
+    sse_math(a, "+", xmm1, reg_at(xmm4))
+    load_bits(a, xmm4, double_bytes(30))
+    sse_math(a, "-", xmm2, reg_at(xmm4))
+    load_bits(a, xmm4, double_bytes(4))
+    sse_math(a, "-", xmm3, reg_at(xmm4))
+    call_to(a, "rt_gui_px")
+    call_to(a, "rt_gui_clip")
+    load(a, rax, mem(rbx, 40))
+    ls_entry(a, rax)
+    load(a, rcx, mem(rax, 24)) # what's chosen, if it's one of its items
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_s, drop_label)
+    load(a, rdx, mem(rax, 16))
+    untag(a, rdx)
+    alu_load(a, "cmp", rcx, mem(rdx, 0))
+    jcc(a, cc_ae, drop_label)
+    load(a, rdx, mem(rdx, 16))
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rdx, rcx)
+    load(a, rax, mem(rdx, 0))
+    movi(a, rcx, 0xFF000000)
+    jmp_to(a, drop_text)
+    mark(a, drop_label)
+    load(a, rax, mem(rbx, 56))
+    movi(a, rcx, 0xFF888888)
+    mark(a, drop_text)
+    store(a, rip("gui_tc"), rcx)
+    call_to(a, "rt_gui_prep")
+    item_spot(a, 8, 10)
+    put_at(a)
+    call_to(a, "rt_gui_unclip")
+    for each corner in list of (list of 0, 22, 19), (list of 8, 10, 19), (list of 16, 16, 11) # the arrow: so far in from its right, up from its bottom
+        movsd_load(a, xmm0, mem(rbx, 8))
+        sse_math(a, "+", xmm0, mem(rbx, 24))
+        load_bits(a, xmm1, double_bytes(item 2 of corner))
+        sse_math(a, "-", xmm0, reg_at(xmm1))
+        movsd_store(a, rip("gui_t0"), xmm0)
+        picture_x(a, xmm0, rip("gui_t0"))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, rip_plus("gui_poly", item 1 of corner), xmm4)
+        movsd_load(a, xmm0, mem(rbx, 16))
+        load_bits(a, xmm1, double_bytes(item 3 of corner))
+        sse_math(a, "+", xmm0, reg_at(xmm1))
+        movsd_store(a, rip("gui_t1"), xmm0)
+        picture_y(a, xmm0, rip("gui_t1"))
+        cvtsd2ss(a, xmm4, xmm0)
+        movss_store(a, rip_plus("gui_poly", item 1 of corner + 4), xmm4)
+    end
+    win_enter(a)
+    load32(a, rcx, rip("gui_argb"))
+    lea(a, rdx, rip("gui_brush"))
+    w_call(a, "GdipCreateSolidFill")
+    load(a, rcx, rip("gui_gfx"))
+    load(a, rdx, rip("gui_brush"))
+    lea(a, r8, rip("gui_poly"))
+    movi(a, r9, 3)
+    storei(a, arg_at(5), 0)
+    w_call(a, "GdipFillPolygon")
+    load(a, rcx, rip("gui_brush"))
+    w_call(a, "GdipDeleteBrush")
+    win_leave(a)
+    ret(a)
+
+    # rt_gui_slide: the slider in rbx, as the playground draws one: a grey track 4 high, in the pen's colour up
+    # to its knob, and the knob, 12 wide, with a white line in it while it has the focus
+    set no_line to new_label(a)
+    set level to new_label(a)
+    mark(a, "rt_gui_slide")
+    load(a, rax, mem(rbx, 40))
+    sl_entry(a, rax)
+    load_bits(a, xmm0, double_bytes(0)) # how far along it is, from 0 to 1
+    movsd_load(a, xmm1, mem(rax, 24))
+    sse_math(a, "-", xmm1, mem(rax, 16))
+    load_bits(a, xmm2, double_bytes(0))
+    ucomisd(a, xmm1, reg_at(xmm2))
+    jcc(a, cc_e, level)
+    movsd_load(a, xmm0, mem(rax, 8))
+    sse_math(a, "-", xmm0, mem(rax, 16))
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    mark(a, level)
+    movsd_load(a, xmm1, mem(rbx, 24)) # the knob's middle
+    load_bits(a, xmm2, double_bytes(20))
+    sse_math(a, "-", xmm1, reg_at(xmm2))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    sse_math(a, "+", xmm0, mem(rbx, 8))
+    load_bits(a, xmm2, double_bytes(10))
+    sse_math(a, "+", xmm0, reg_at(xmm2))
+    movsd_store(a, rip("gui_knob"), xmm0)
+    for each part in list of 0, 1 # the track in grey, then in the pen's colour up to the knob
+        movsd_load(a, xmm0, mem(rbx, 8))
+        load_bits(a, xmm4, double_bytes(10))
+        sse_math(a, "+", xmm0, reg_at(xmm4))
+        movsd_load(a, xmm1, mem(rbx, 16))
+        load_bits(a, xmm4, double_bytes(8))
+        sse_math(a, "+", xmm1, reg_at(xmm4))
+        if part is 0
+            movsd_load(a, xmm2, mem(rbx, 24))
+            load_bits(a, xmm4, double_bytes(20))
+            sse_math(a, "-", xmm2, reg_at(xmm4))
+        else
+            movsd_load(a, xmm2, rip("gui_knob"))
+            sse_math(a, "-", xmm2, reg_at(xmm0))
+        end
+        load_bits(a, xmm3, double_bytes(4))
+        call_to(a, "rt_gui_px")
+        if part is 0
+            movi(a, rcx, 0xFFC8C8C8)
+        else
+            load32(a, rcx, rip("gui_argb"))
+        end
+        call_to(a, "rt_gui_fill")
+    end
+    movsd_load(a, xmm0, rip("gui_knob")) # the knob
+    load_bits(a, xmm4, double_bytes(6))
+    sse_math(a, "-", xmm0, reg_at(xmm4))
+    movsd_load(a, xmm1, mem(rbx, 16))
+    load_bits(a, xmm2, double_bytes(12))
+    load_bits(a, xmm3, double_bytes(20))
+    call_to(a, "rt_gui_px")
+    load32(a, rcx, rip("gui_argb"))
+    call_to(a, "rt_gui_fill")
+    load(a, rax, mem(rbx, 40))
+    alu_load(a, "cmp", rax, rip("slider_focus"))
+    jcc(a, cc_ne, no_line)
+    movsd_load(a, xmm0, rip("gui_knob"))
+    load_bits(a, xmm4, double_bytes(1))
+    sse_math(a, "-", xmm0, reg_at(xmm4))
+    movsd_load(a, xmm1, mem(rbx, 16))
+    load_bits(a, xmm4, double_bytes(4))
+    sse_math(a, "+", xmm1, reg_at(xmm4))
+    load_bits(a, xmm2, double_bytes(2))
+    load_bits(a, xmm3, double_bytes(12))
+    call_to(a, "rt_gui_px")
+    movi(a, rcx, 0xFFFFFFFF)
+    call_to(a, "rt_gui_fill")
+    mark(a, no_line)
+    ret(a)
+
+    # rt_gui_popup: last, on top of everything, the open dropdown's items: a list below it, as many rows as it
+    # has, up to 6, drawn as rt_gui_list draws a list, in a border 2 wide
+    set popup_loop to new_label(a)
+    set popup_found to new_label(a)
+    set popup_none to new_label(a)
+    set popup_colour to new_label(a)
+    mark(a, "rt_gui_popup")
+    load(a, rax, rip("drop_open"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, popup_none)
+    load(a, rcx, rip("pic_n")) # the last dropdown drawn with that entry
+    mov_rr(a, rsi, rcx)
+    shifti(a, "shl", rsi, 6)
+    alu_load(a, "add", rsi, rip("pic_items"))
+    mark(a, popup_loop)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, popup_none)
+    dec_r(a, rcx)
+    alui(a, "sub", rsi, 64)
+    load(a, rdx, mem(rsi, 0))
+    alui(a, "cmp", rdx, 13)
+    jcc(a, cc_ne, popup_loop)
+    alu_load(a, "cmp", rax, mem(rsi, 40))
+    jcc(a, cc_ne, popup_loop)
+    mark(a, popup_found)
+    push_r(a, rbx)
+    push_r(a, rsi)
+    ls_entry(a, rax)
+    call_to(a, "rt_drop_rows") # xmm0 how high its items are
+    pop_r(a, rsi)
+    lea(a, rbx, rip("gui_fake"))
+    storei(a, mem(rbx, 0), 12)
+    load(a, rax, mem(rsi, 8))
+    store(a, mem(rbx, 8), rax)
+    movsd_load(a, xmm1, mem(rsi, 16))
+    sse_math(a, "-", xmm1, reg_at(xmm0))
+    movsd_store(a, mem(rbx, 16), xmm1)
+    load(a, rax, mem(rsi, 24))
+    store(a, mem(rbx, 24), rax)
+    movsd_store(a, mem(rbx, 32), xmm0)
+    for each place in list of 40, 48, 56
+        load(a, rax, mem(rsi, place))
+        store(a, mem(rbx, place), rax)
+    end
+    load(a, rax, mem(rbx, 48)) # in its pen's colour
+    call_to(a, "rt_css_argb")
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, popup_colour)
+    store(a, rip("gui_argb"), rax)
+    mark(a, popup_colour)
+    storei(a, rip("gui_popup"), 1)
+    call_to(a, "rt_gui_list")
+    storei(a, rip("gui_popup"), 0)
+    pop_r(a, rbx)
+    mark(a, popup_none)
+    ret(a)
+end
+
 # What checkboxes, text areas and lists do in a window: chosen, scrolled and drawn.
 to emit_gui_controls with a
+    emit_gui_more(a)
     # rt_ls_choose: rcx a list's entry, from 1, rdx the place of one of its items, from 0, xmm0 the list's
     # height: that item chosen, and in view; ev_a the item, and r8 the list's label, for its handlers
     set choose_up to new_label(a)
@@ -16084,6 +16852,9 @@ to emit_gui_controls with a
     load32(a, rcx, rip("gui_argb"))
     call_to(a, "rt_gui_fill")
     movi(a, rax, 2)
+    load(a, rcx, rip("gui_popup")) # a dropdown's items: always 2
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, thin)
     load(a, rcx, mem(rbx, 40))
     alu_load(a, "cmp", rcx, rip("list_focus"))
     jcc(a, cc_ne, thin)
@@ -16207,6 +16978,256 @@ end
 
 # whether a question asks for a drawing, as the playground decides it: "draw" first, after any spaces, in any
 # case, and as a word of its own
+# whether a question asks for a file, as the playground decides it: "which file to open" or "which file to
+# save" first, after any spaces, in any case, as words of their own (DESIGN §42)
+to asks_file with question
+    set k to 1
+    repeat while k is at most length of question
+        set c to code_point(item k of question)
+        if c is not 32 and (c is less than 9 or c is greater than 13)
+            stop
+        end
+        set k to k + 1
+    end
+    for each opening in list of "which file to open", "which file to save"
+        if starts_with_words(question, k, opening)
+            return yes
+        end
+    end
+    return no
+end
+
+# whether `said` from its letter k on is `opening`, in any case, then not a letter, a digit or _
+to starts_with_words with said, k, opening
+    set j to 1
+    repeat while j is at most length of opening
+        if k + j - 1 is greater than length of said
+            return no
+        end
+        set c to code_point(item (k + j - 1) of said)
+        if c is at least 65 and c is at most 90
+            set c to c + 32
+        end
+        if c is not code_point(item j of opening)
+            return no
+        end
+        set j to j + 1
+    end
+    if k + length of opening is greater than length of said
+        return yes
+    end
+    set c to code_point(item (k + length of opening) of said)
+    if c is 95 or (c is at least 48 and c is at most 57) or (c is at least 97 and c is at most 122) or (c is at least 65 and c is at most 90)
+        return no
+    end
+    return yes
+end
+
+# rt_file_hook: xmm0 a question: if it asks for a file (see asks_file) and a person is there to choose one (at a
+# terminal, or with the program's window open, but not while MOTH_PICTURE takes the picture), Windows' own box
+# for opening or saving a file, titled with the question: rax 1, and in xmm0 the file's whole name, or empty
+# text if none was chosen, shown after the question as an answer is; else rax 0 and nothing changes
+to emit_file_hook with a
+    set not_file to new_label(a)
+    set skip_spaces to new_label(a)
+    set spaced to new_label(a)
+    set at_words to new_label(a)
+    set is_file to new_label(a)
+    set a_person to new_label(a)
+    set none_chosen to new_label(a)
+    set decode_loop to new_label(a)
+    set decode_one to new_label(a)
+    set decode_lone to new_label(a)
+    set decode_done to new_label(a)
+    set no_person to new_label(a)
+    mark(a, "rt_file_hook")
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_ne, not_file)
+    untag(a, rax)
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    mark(a, skip_spaces)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, not_file)
+    load8(a, rax, mem(rsi, 0))
+    alui(a, "cmp", rax, 32)
+    jcc(a, cc_e, spaced)
+    alui(a, "sub", rax, 9)
+    alui(a, "cmp", rax, 4)
+    jcc(a, cc_a, at_words)
+    mark(a, spaced)
+    inc_r(a, rsi)
+    dec_r(a, rcx)
+    jmp_to(a, skip_spaces)
+    mark(a, at_words) # "which file to " in any case, then "open" or "save", then not a letter, a digit or _
+    alui(a, "cmp", rcx, 18)
+    jcc(a, cc_b, not_file)
+    set start to "which file to "
+    for each k from 1 to length of start
+        load8(a, rax, mem(rsi, k - 1))
+        if code_point(item k of start) is not 32
+            alui(a, "or", rax, 32)
+        end
+        alui(a, "cmp", rax, code_point(item k of start))
+        jcc(a, cc_ne, not_file)
+    end
+    set way_found to new_label(a)
+    for each way in list of (list of "open", 1), (list of "save", 2)
+        set not_way to new_label(a)
+        for each k from 1 to 4
+            load8(a, rax, mem(rsi, 13 + k))
+            alui(a, "or", rax, 32)
+            alui(a, "cmp", rax, code_point(item k of item 1 of way))
+            jcc(a, cc_ne, not_way)
+        end
+        storei(a, rip("fd_which"), item 2 of way)
+        jmp_to(a, way_found)
+        mark(a, not_way)
+    end
+    jmp_to(a, not_file)
+    mark(a, way_found)
+    alui(a, "cmp", rcx, 18)
+    jcc(a, cc_e, is_file)
+    load8(a, rax, mem(rsi, 18))
+    alui(a, "cmp", rax, 95)
+    jcc(a, cc_e, not_file)
+    alui(a, "cmp", rax, 128)
+    jcc(a, cc_ae, is_file)
+    mov_rr(a, rdx, rax)
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_be, not_file)
+    alui(a, "or", rax, 32)
+    alui(a, "sub", rax, 97)
+    alui(a, "cmp", rax, 25)
+    jcc(a, cc_be, not_file)
+    mark(a, is_file)
+    movsd_store(a, rip("fd_q"), xmm0)
+    if window of a # a person: the window open, unless the picture goes to a file
+        load(a, rax, rip("gui_headless"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, no_person)
+        load(a, rax, rip("gui_hwnd"))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, a_person)
+    end
+    call_to(a, "rt_in_setup") # or at a terminal
+    load(a, rax, rip("in_tty"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_person)
+    mark(a, a_person)
+    push_r(a, rbx)
+    call_to(a, "rt_b_reset") # the question, and a space, as asking shows it
+    load(a, rax, rip("fd_q"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    movi(a, rax, 32)
+    call_to(a, "rt_b_byte")
+    load(a, rsi, rip("b_ptr"))
+    load(a, rcx, rip("b_len"))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_flush_out")
+    win_enter(a) # the question, without the space, as the box's title
+    movi(a, rcx, 65001)
+    movi(a, rdx, 0)
+    load(a, r8, rip("b_ptr"))
+    load(a, r9, rip("b_len"))
+    dec_r(a, r9)
+    lea(a, rax, rip("wbuf"))
+    store(a, arg_at(5), rax)
+    storei(a, arg_at(6), wide_cap - 1)
+    w_call(a, "MultiByteToWideChar")
+    mov32_rr(a, rax, rax)
+    lea(a, rcx, rip("wbuf"))
+    alu(a, "add", rax, rax)
+    alu(a, "add", rcx, rax)
+    movi(a, rax, 0)
+    store16(a, mem(rcx, 0), rax)
+    for each place from 0 to 18 # what the box is asked for: OPENFILENAMEW, 152 bytes
+        storei(a, rip_plus("fd_ofn", place * 8), 0)
+    end
+    storei(a, rip("fd_ofn"), 152)
+    if window of a
+        load(a, rax, rip("gui_hwnd"))
+        store(a, rip_plus("fd_ofn", 8), rax)
+    end
+    storei(a, rip("fd_file"), 0)
+    lea(a, rax, rip("fd_file"))
+    store(a, rip_plus("fd_ofn", 48), rax)
+    storei(a, rip_plus("fd_ofn", 56), 1024)
+    lea(a, rax, rip("wbuf"))
+    store(a, rip_plus("fd_ofn", 88), rax)
+    set ask_save to new_label(a)
+    set asked to new_label(a)
+    load(a, rax, rip("fd_which"))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ne, ask_save)
+    storei(a, rip_plus("fd_ofn", 96), 0x1808) # a file that's there, in a folder that's there, and the folder left as it was
+    lea(a, rcx, rip("fd_ofn"))
+    w_call(a, "GetOpenFileNameW")
+    jmp_to(a, asked)
+    mark(a, ask_save)
+    storei(a, rip_plus("fd_ofn", 96), 0x80A) # and asked first whether to replace one that's there
+    lea(a, rcx, rip("fd_ofn"))
+    w_call(a, "GetSaveFileNameW")
+    mark(a, asked)
+    win_leave(a)
+    mov32_rr(a, rbx, rax)
+    call_to(a, "rt_b_reset")
+    test_rr(a, rbx, rbx)
+    jcc(a, cc_e, none_chosen)
+    lea(a, rbx, rip("fd_file")) # its name, from UTF-16
+    mark(a, decode_loop)
+    load16(a, rax, mem(rbx, 0))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, decode_done)
+    alui(a, "add", rbx, 2)
+    mov_rr(a, rcx, rax)
+    alui(a, "and", rcx, 0xF800)
+    alui(a, "cmp", rcx, 0xD800)
+    jcc(a, cc_ne, decode_one)
+    alui(a, "cmp", rax, 0xDC00)
+    jcc(a, cc_ae, decode_lone)
+    load16(a, rdx, mem(rbx, 0))
+    mov_rr(a, rcx, rdx)
+    alui(a, "and", rcx, 0xFC00)
+    alui(a, "cmp", rcx, 0xDC00)
+    jcc(a, cc_ne, decode_lone)
+    alui(a, "add", rbx, 2)
+    alui(a, "sub", rax, 0xD800)
+    shifti(a, "shl", rax, 10)
+    alui(a, "sub", rdx, 0xDC00)
+    alu(a, "add", rax, rdx)
+    alui(a, "add", rax, 0x10000)
+    jmp_to(a, decode_one)
+    mark(a, decode_lone)
+    movi(a, rax, 0xFFFD)
+    mark(a, decode_one)
+    call_to(a, "rt_b_code")
+    jmp_to(a, decode_loop)
+    mark(a, decode_done)
+    mark(a, none_chosen)
+    call_to(a, "rt_b_text") # shown after the question, as an answer piped in is
+    store(a, rip("fd_q"), rax)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_out_text")
+    call_to(a, "rt_out_line")
+    movsd_load(a, xmm0, rip("fd_q"))
+    movi(a, rax, 1)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, no_person) # no one to choose: the question as it was, for asking as any question is
+    movsd_load(a, xmm0, rip("fd_q"))
+    mark(a, not_file)
+    movi(a, rax, 0)
+    ret(a)
+end
+
 to asks_drawing with question
     set k to 1
     repeat while k is at most length of question
@@ -21924,6 +22945,8 @@ to emit_runtime with st
     set pictures of a to uses_pictures of st
     set widgets of a to uses_widgets of st
     set controls of a to uses_controls of st
+    set files of a to target of st is "windows" and uses_files of st
+    set window of a to windowed
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
     if uses_clock of st # the clock starts with the program
@@ -21973,7 +22996,7 @@ to emit_runtime with st
         emit_folders(a, target of st)
     end
     emit_gc_tables(a)
-    if uses_case of st or windowed or uses_saving of st
+    if uses_case of st or windowed or uses_saving of st or files of a # (and a file's name, from UTF-16)
         emit_cases(a)
     end
     if uses_drawing of st or uses_app of st
@@ -21989,6 +23012,27 @@ to emit_runtime with st
         emit_pictures(a)
     end
     set wanted to empty list # the functions of other DLLs, or more of kernel32.dll's, the runtime calls
+    if uses_choose of st # rt_chosen_file: xmm0 the answer to a question asking for a file: nothing for no answer
+        set chose_some to new_label(a)
+        mark(a, "rt_chosen_file")
+        movq_rx(a, rax, xmm0)
+        mov_rr(a, rcx, rax)
+        shifti(a, "shr", rcx, 48)
+        alui(a, "cmp", rcx, kind_text)
+        jcc(a, cc_ne, chose_some)
+        untag(a, rax)
+        load(a, rax, mem(rax, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, chose_some)
+        load_bits(a, xmm0, bits_nothing)
+        mark(a, chose_some)
+        movi(a, rax, 0)
+        ret(a)
+    end
+    if files of a
+        emit_file_hook(a)
+        add (list of "COMDLG32.dll", (list of "GetOpenFileNameW", "GetSaveFileNameW")) to wanted
+    end
     if windowed
         emit_gui(a, name of st)
         emit_gui_keys(a)
@@ -22009,8 +23053,9 @@ to emit_runtime with st
         if uses_pictures of st
             add (list of "gdiplus.dll", picture_imports) to wanted
         end
-        if controls of a # where a wheel turned, in the window
+        if controls of a # where a wheel turned, in the window, and a dropdown's arrow
             add (list of "USER32.dll", (list of "ScreenToClient")) to wanted
+            add (list of "gdiplus.dll", (list of "GdipFillPolygon")) to wanted
         end
         if widgets of a # copying and pasting what's typed in a box
             add (list of "USER32.dll", (list of "OpenClipboard", "CloseClipboard", "EmptyClipboard", "GetClipboardData", "SetClipboardData")) to wanted
@@ -22138,9 +23183,14 @@ to emit_runtime with st
                 "gui_rows", "gui_cols", "gui_cur", "gui_cl", "gui_cc", "gui_ink" # and what's typed, a letter at a time
                 reserve(a, name, 8, 8)
             end
-            if controls of a # and checkboxes and lists: a list's row, and where a wheel is
-                reserve(a, "gui_row", 8, 8)
+            if controls of a # and checkboxes, lists, dropdowns and sliders: a list's row, where a wheel is, a slider's
+                # knob, a dropdown's items as a list drawn, and its arrow
+                for each name in list of "gui_row", "gui_popup", "gui_knob"
+                    reserve(a, name, 8, 8)
+                end
                 reserve(a, "gui_pt", 16, 16)
+                reserve(a, "gui_fake", 64, 16)
+                reserve(a, "gui_poly", 32, 16)
             end
         end
     end
@@ -22175,6 +23225,12 @@ to emit_runtime with st
         "pic_items", "pic_n", "pic_cap", "app_items", "app_n", "app_cap", "ev_ms"
         reserve(a, name, 8, 8)
     end
+    if files of a # the question asking for a file, and what Windows' box for choosing one is asked
+        reserve(a, "fd_q", 8, 8)
+        reserve(a, "fd_which", 8, 8)
+        reserve(a, "fd_ofn", 152, 16)
+        reserve(a, "fd_file", 2056, 16)
+    end
     if widgets of a # each text box's label and text, the one with the focus, and what editing it needs
         for each name in list of "box_items", "box_n", "box_cap", "box_focus", "box_most", "ed_item", "ed_sel", "ed_put",
             "key_ctrl", "key_shift", "key_p", "key_n", "ed_from", "ed_to", "ed_line", "ed_col"
@@ -22182,7 +23238,9 @@ to emit_runtime with st
         end
     end
     if controls of a # each checkbox's label and tick, each list's, and the list with the focus (DESIGN §40)
-        for each name in list of "tk_items", "tk_n", "tk_cap", "ls_items", "ls_n", "ls_cap", "list_focus", "list_h"
+        for each name in list of "tk_items", "tk_n", "tk_cap", "ls_items", "ls_n", "ls_cap", "list_focus", "list_h",
+            "sl_items", "sl_n", "sl_cap", "slider_focus", "sl_sel", "slider_item", "drop_open", "drop_item", "list_kind", "sl_from", "sl_to",
+            "sl_now", "drop_h"
             reserve(a, name, 8, 8)
         end
     end
@@ -22882,6 +23940,15 @@ to emit_input with a, target
     set answered to new_label(a)
     set typed to new_label(a)
     mark(a, "rt_ask")
+    if files of a # Windows' own box for choosing a file, for a question that asks for one (DESIGN §42)
+        set not_chosen to new_label(a)
+        call_to(a, "rt_file_hook")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, not_chosen)
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, not_chosen)
+    end
     if pad of a
         set not_drawn to new_label(a)
         call_to(a, "rt_pad_hook")
@@ -26937,8 +28004,11 @@ to gen_outside with fc, e
         set question to question of e
         if kind of question is not "value" or type of question is not "string"
             set uses_pad of st of fc to yes
+            set uses_files of st of fc to yes
         else if asks_drawing(value of question)
             set uses_pad of st of fc to yes
+        else if asks_file(value of question)
+            set uses_files of st of fc to yes
         end
         gen_expr(fc, question)
         call_to(a, "rt_ask")
@@ -26950,7 +28020,8 @@ end
 # `move forward 10`, `pen color "red"`, `draw box at x, y size w by h` and the rest: the value, if there is
 # one, then what to do with it, as vm.js's TURTLE_ACTIONS counts them
 # the controls DESIGN §40 has: checkboxes, text areas and lists
-set control_actions to dictionary where "checkbox" is yes, "tick" is yes, "untick" is yes, "text area" is yes, "list" is yes
+set control_actions to dictionary where "checkbox" is yes, "tick" is yes, "untick" is yes, "text area" is yes, "list" is yes,
+    "dropdown" is yes, "slider" is yes, "set slider" is yes
 
 to gen_turtle with fc, s
     set a to a of fc
@@ -26993,7 +28064,7 @@ to gen_handler with fc, s
     set labelled to kind of s is "when" and label of s is not nothing
     if labelled # the button or text box it waits for, as `say` shows it, worked out first
         set uses_widgets of st of fc to yes
-        if event of s is "checkbox" or event of s is "choice"
+        if event of s is "checkbox" or event of s is "choice" or event of s is "slider"
             set uses_controls of st of fc to yes
         end
         gen_expr(fc, label of s)
@@ -28896,7 +29967,7 @@ to new_state with a, program_name, files, source, target
         line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
-        uses_controls no
+        uses_controls no, uses_choose no, uses_files no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -31544,7 +32615,7 @@ set builtin_routines to dictionary where "position" is "rt_position", "split" is
     "shift left" is "rt_shift_left", "shift right" is "rt_shift_right", "bytes" is "rt_bytes_of",
     "as bytes" is "rt_as_bytes", "as text" is "rt_as_text", "as hex" is "rt_as_hex", "as binary" is "rt_as_binary",
     "uppercase" is "rt_upper", "lowercase" is "rt_lower", "text in box" is "rt_box_text", "ticked" is "rt_ticked",
-    "choice in list" is "rt_choice"
+    "choice in list" is "rt_choice", "slider value" is "rt_slider_value", "chosen file" is "rt_chosen_file"
 
 # Each also gives what kind of value it is when it works: "whole", "number" or "value" (see the facts,
 # above). What a function call does to what's known happens here as well, in the order the code runs.
@@ -31749,12 +32820,15 @@ to gen_expr with fc, e
         if name of e is "uppercase" or name of e is "lowercase"
             set uses_case of st of fc to yes
         end
-        if name of e is "text in box" or name of e is "ticked" or name of e is "choice in list"
+        if name of e is "text in box" or name of e is "ticked" or name of e is "choice in list" or name of e is "slider value"
             set uses_widgets of st of fc to yes
             set uses_drawing of st of fc to yes
             if name of e is not "text in box"
                 set uses_controls of st of fc to yes
             end
+        end
+        if name of e is "chosen file"
+            set uses_choose of st of fc to yes
         end
         set inputs to args of e
         if length of inputs is 1

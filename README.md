@@ -211,7 +211,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (14,519,808 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (15,045,632 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -482,7 +482,7 @@ play a beep                                 # each sound starts when the one bef
 ```
 
 Apps: pictures that answer keys, clicks and time, with buttons, checkboxes,
-lists and boxes to type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
+lists, dropdowns, sliders and boxes to type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
 [`apps/paint.moth`](apps/paint.moth) a paint program in 54, and
 [`apps/todo.moth`](apps/todo.moth) a to-do list in 38.
 
@@ -528,6 +528,13 @@ when an item is chosen in the list "Fruits" with fruit   # a click, or up and do
     say fruit " " the choice in the list "Fruits"   # the choice is nothing until there is one
 end
 say the text in the text area "Notes"       # its lines, a new line between each
+draw dropdown "Size" showing (list of "S", "M", "L") at 100, 150   # a list that opens; 200 by 30
+draw slider "Volume" from 0 to 100 at 100, 100   # a whole number; 200 by 20
+set the slider "Volume" to 50               # kept between 0 and 100
+when the slider "Volume" is moved with volume   # also: an item is chosen in the dropdown
+    say "volume " volume
+end
+set name to choose a file to open           # or: to save; nothing if none is chosen
 ```
 
 - **Values:** numbers, amounts like `5 km`, `"text"`, `yes`, `no`, `nothing`,
@@ -716,10 +723,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (14,519,808 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (15,045,632 bytes)
 ```
 
-That's the same 14,519,808 bytes Node.js made of it, and the moth.exe they make
+That's the same 15,045,632 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -819,6 +826,9 @@ calls that led there.
 - editing what's typed: the cursor, selecting, cutting, a drag and a text area's
   lines on all three engines, through a move to the VM, and in machine code's
   window, whose pixels and clipboard were checked too
+- dropdowns, sliders and choosing a file: opening, choosing, the wheel, drags and
+  keys on all three engines and in machine code's window, and Windows' Open and
+  Save boxes in a real window
 - checkboxes, text areas and lists: ticks, choices, the arrow keys, the wheel
   and lines typed on all three engines and through a move to the VM, and in
   machine code's window, which must say, fail and draw as the JavaScript engine
@@ -892,7 +902,8 @@ unboxed numbers were all caught, some only by the fuzzer.
 - Units go one at a time: there's no speed, like km per hour, yet; dividing a
   distance by a time is a mistake. Temperatures aren't units either.
 - A table's cells are numbers, text or nothing: dates stay text.
-- An app runs in the playground, and can't `ask` once it's running.
+- An app runs in the playground, and can't `ask` or choose a file once it's
+  running. A slider's value is a whole number.
 - A text box holds one line of up to 40 letters, and a text area 2,000, drawn a
   letter every 10 pixels in a font whose letters take the same room: there's no
   undo, and no double-click or Ctrl+arrow to go a word at a time. A text area
@@ -916,7 +927,8 @@ unboxed numbers were all caught, some only by the fuzzer.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
 - The window is Windows only. On Linux a program that draws runs without
   showing its picture, and an app's handlers never run: its buttons, boxes,
-  checkboxes and lists are only drawn, and nothing can be typed into them. The window knows
+  checkboxes, lists, dropdowns and sliders are only drawn, nothing can be typed
+  into them, and choosing a file is asking for its name. The window knows
   CSS's colour names, `#` colours, `rgb()`, `rgba()`, `hsl()` and `hsla()`, but
   not `hwb()`, `lab()` or the other newer ones, and only opens at a terminal or
   when started from Explorer: with its output going to a file or another

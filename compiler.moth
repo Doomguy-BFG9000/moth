@@ -248,7 +248,7 @@ set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
-    "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box"
+    "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -313,6 +313,11 @@ set text_in_box to list of "the", "text", "in", "the", "text", "box"
 set chosen_phrase to list of "an", "item", "is", "chosen", "in", "the", "list"
 set text_in_area to list of "the", "text", "in", "the", "text", "area"
 set choice_in_list to list of "the", "choice", "in", "the", "list"
+# dropdowns, sliders and choosing a file (DESIGN §42)
+set chosen_in_dropdown to list of "an", "item", "is", "chosen", "in", "the", "dropdown"
+set choice_in_dropdown to list of "the", "choice", "in", "the", "dropdown"
+set value_of_slider to list of "the", "value", "of", "the", "slider"
+set choose_file to list of "choose", "a", "file", "to"
 set after_a_value to list of "at", "of", "bytes", "as", "in", "bit", "is", "and", "or"
 set comparison_phrases to list of "less than", "greater than", "at least", "at most", "divisible by"
 
@@ -742,6 +747,13 @@ to parse with tokens, reading
                 expect_word("to")
                 return record with kind "setItem", target target, value expression(), at t
             end
+            if words_at(pos, list of "the", "slider") # `set the slider "Volume" to 50`
+                set pos to pos + 2
+                set slider_label to additive()
+                expect_word("to")
+                set slider_items to list of slider_label, expression()
+                return record with kind "turtle", action "set slider", value (record with kind "list", items slider_items, at t), at t
+            end
             set variable to take_name("a variable name")
             if word("of") # `set name of person to ...` changes a field
                 set target to unary()
@@ -851,11 +863,19 @@ to parse with tokens, reading
                 expect_word("clicked")
                 set phrase to "the checkbox is clicked"
                 set event to "checkbox"
-            else if words_at(pos, chosen_phrase) # `when an item is chosen in the list "Fruits" with fruit`
+            else if words_at(pos, chosen_phrase) or words_at(pos, chosen_in_dropdown) # `when an item is chosen in the list "Fruits" with fruit`
                 set pos to pos + length of chosen_phrase
+                set phrase to "an item is chosen in the " + value of item (pos - 1) of tokens
                 set label to additive()
-                set phrase to "an item is chosen in the list"
                 set event to "choice"
+                set gives to 1
+            else if words_at(pos, list of "the", "slider") # `when the slider "Volume" is moved with volume`
+                set pos to pos + 2
+                set label to additive()
+                expect_word("is")
+                expect_word("moved")
+                set phrase to "the slider is moved"
+                set event to "slider"
                 set gives to 1
             else
                 set words to empty list
@@ -877,7 +897,7 @@ to parse with tokens, reading
             end
             if event is ""
                 set pos to start
-                expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked' or 'an item is chosen in the list ...'")
+                expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked', 'an item is chosen in the list ...' or 'the slider ... is moved'")
             end
             set params to empty list
             if gives is not 0 and word("with")
@@ -1102,6 +1122,27 @@ to parse with tokens, reading
                 set widget to "text box"
             else if is_word("checkbox") and label_at(pos + 1)
                 set widget to "checkbox"
+            end
+            # `draw dropdown "Size" showing sizes at x, y`, `draw slider "Volume" from 0 to 100 at x, y`
+            if (is_word("dropdown") or is_word("slider")) and label_at(pos + 1)
+                set control to value of peek()
+                set pos to pos + 1
+                set control_items to list of additive()
+                if control is "dropdown"
+                    expect_word("showing")
+                    add additive() to control_items
+                else
+                    expect_word("from")
+                    add additive() to control_items
+                    expect_word("to")
+                    add additive() to control_items
+                end
+                expect_word("at")
+                set control_spot to several(2, t)
+                for each n in items of control_spot
+                    add n to control_items
+                end
+                return record with kind "turtle", action control, value (record with kind "list", items control_items, at t), at t
             end
             # `draw text area "Notes" at x, y size w by h`, `draw list "Fruits" showing fruits at x, y size w by h`
             set tall to ""
@@ -1558,7 +1599,17 @@ to parse with tokens, reading
             set pos to pos + length of text_in_box
             return record with kind "builtin", name "text in box", args (list of unary()), at t
         end
-        if words_at(pos, choice_in_list) # `the choice in the list "Fruits"`: the item chosen, or nothing
+        if words_at(pos, value_of_slider) # `the value of the slider "Volume"`
+            set pos to pos + length of value_of_slider
+            return record with kind "builtin", name "slider value", args (list of unary()), at t
+        end
+        if words_at(pos, choose_file) and (word_at(pos + 4, "open") or word_at(pos + 4, "save")) # `choose a file to open`: asked, see DESIGN §42
+            set question to record with kind "value", type "string", value "Which file to " + value of item (pos + 4) of tokens + "?", at t
+            set pos to pos + length of choose_file + 1
+            set asked to record with kind "ask", question question, at t
+            return record with kind "builtin", name "chosen file", args (list of asked), at t
+        end
+        if words_at(pos, choice_in_list) or words_at(pos, choice_in_dropdown) # `the choice in the list "Fruits"`: the item chosen, or nothing
             set pos to pos + length of choice_in_list
             return record with kind "builtin", name "choice in list", args (list of unary()), at t
         end
@@ -2170,9 +2221,10 @@ end
 # ---------- JavaScript ----------
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
-set event_names to list of "key", "click", "drag", "button", "enter", "checkbox", "choice" # in the order of EVENTS in vm.js
+set event_names to list of "key", "click", "drag", "button", "enter", "checkbox", "choice", "slider" # in the order of EVENTS in vm.js
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text",
-    "chart", "picture", "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list"
+    "chart", "picture", "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list", "dropdown", "slider",
+    "set slider"
 set math_signs to list of "+", "-", "*", "/"
 set math_helpers to list of "add", "sub", "mul", "div"
 set comparisons to list of "is", "less than", "greater than", "at least", "at most", "divisible by", "in"

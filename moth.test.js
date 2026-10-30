@@ -1662,3 +1662,55 @@ test("the cursor moves, selects and edits in text boxes and text areas, through 
   assert.deepEqual(drawings[2], drawings[0]);
 });
 
+// Dropdowns and sliders (DESIGN §42): a click opens a dropdown, and one on an item below it chooses that item;
+// any click while it's open closes it and does nothing else; the arrows choose, Enter and Space open it and
+// Escape closes it, and the wheel scrolls its items. A slider moves to a click and a drag from it, and with the
+// arrows, Home and End, a whole number in its range, which `set the slider` is kept to as well.
+const CONTROLS_MORE = "set sizes to list of \"small\", \"medium\", \"large\", \"huge\", \"giant\", \"titanic\", \"cosmic\"\nto show\n    clear\n    draw dropdown \"Size\" showing sizes at -200, 150\n    draw slider \"Volume\" from 0 to 10 at -200, 50\n    draw button \"Show\" at 100, 150\n    draw button \"Deep\" at 100, 100\nend\nto deep with n\n    if n is 0\n        return the value of the slider \"Volume\"\n    end\n    return deep(n - 1)\nend\nshow()\nset the slider \"Volume\" to 7\nsay \"start \" (the value of the slider \"Volume\") \" \" (the choice in the dropdown \"Size\")\nwhen an item is chosen in the dropdown \"Size\" with size\n    say \"size \" size \" \" the choice in the dropdown \"Size\"\n    show()\nend\nwhen the slider \"Volume\" is moved with v\n    say \"volume \" v \" \" the value of the slider \"Volume\"\n    show()\nend\nwhen the button \"Show\" is clicked\n    say \"show \" (the value of the slider \"Volume\") \" \" (the choice in the dropdown \"Size\")\nend\nwhen the button \"Deep\" is clicked\n    say \"deep \" deep(5000)\n    set the slider \"Volume\" to 99\n    say \"set \" the value of the slider \"Volume\"\nend\nwhen a key is pressed with key\n    say \"key \" key\nend\nwhen the mouse is clicked with x and y\n    say \"click \" x \" \" y\nend";
+const CONTROL_MORE_EVENTS = ["click -150 160","click -150 140","key down","key enter","key escape","key space","scroll -150 100 3","click -150 10","click -150 160","click 0 0","click 0 0","click -100 60","drag -10 60","drag 300 60","key left","key home","key end","key right","key x","key shift+left","click 110 160","click 110 110","key left","click 110 160","click -150 160","key up","key up","click -150 175","key down","click 0 -200","key down"];
+
+test("dropdowns and sliders take their clicks, drags, keys and wheel, through a move to the VM, on all three engines", () => {
+  const drawings = [];
+  for (const engine of ENGINES) {
+    const said = [];
+    const drawn = [];
+    const app = run(CONTROLS_MORE, (line) => said.push(line), { engine, draw: (d) => drawn.push(d) });
+    assert.deepEqual(app.waits.slice(0, 2), [{ event: "choice", label: "Size" }, { event: "slider", label: "Volume" }], engine);
+    for (const event of CONTROL_MORE_EVENTS) {
+      const [what, rest] = [event.slice(0, event.indexOf(" ")), event.slice(event.indexOf(" ") + 1)];
+      app.send(what, what === "key" || what === "type" ? [rest] : rest.split(" ").map(Number));
+    }
+    assert.deepEqual(said, ["start 7 nothing","size small small","size medium medium","size cosmic cosmic","click 0 0","volume 5 5","volume 10 10","volume 9 9","volume 0 0","volume 10 10","volume 9 9","show 9 cosmic","deep 9","set 10","volume 9 9","show 9 cosmic","size titanic titanic","size giant giant","size titanic titanic","click 0 -200","key down"], engine);
+    drawings.push(drawn);
+  }
+  assert.deepEqual(drawings[1], drawings[0]);
+  assert.deepEqual(drawings[2], drawings[0]);
+  assert.deepEqual(drawings[0].slice(1, 3), [
+    { shape: "dropdown", label: "Size", items: ["small", "medium", "large", "huge", "giant", "titanic", "cosmic"], chosen: -1, top: 0, open: false, focused: false,
+      x: -200, y: 150, width: 200, height: 30, color: "#4f8ff7" },
+    { shape: "slider", label: "Volume", value: 0, from: 0, to: 10, focused: false, x: -200, y: 50, width: 200, height: 20, color: "#4f8ff7" },
+  ]);
+});
+
+test("choosing a file is asking for one: nothing for no answer, and a slider's and a dropdown's mistakes", () => {
+  for (const engine of ENGINES) {
+    const asked = [];
+    const answers = ["notes.txt", ""];
+    const said = [];
+    run('set f to choose a file to open\nsay "open: " + f\nset g to choose a file to save\nsay g\nset choose to 3\nsay choose', (line) => said.push(line),
+      { engine, ask: (question) => (asked.push(question), answers.shift()) });
+    assert.deepEqual([asked, said], [["Which file to open?", "Which file to save?"], ["open: notes.txt", "nothing", "3"]], engine);
+    for (const [source, message] of [
+      ['draw dropdown "D" showing 5 at 0, 0', "line 1: 'draw dropdown ... showing' needs a list, not a number"],
+      ['draw slider "S" from 0 to "x" at 0, 0', "line 1: 'draw slider' needs numbers, not text"],
+      ['set the slider "S" to "loud"', "line 1: 'set the slider' needs a number, not text"],
+      ['when the slider "S" is moved with a, b\n    say a\nend', "line 1: 'when the slider is moved' gives 1 value, so name one input or none, not 2"],
+    ]) {
+      assert.throws(() => run(source, () => {}, { engine }), { message }, `${engine}: ${source}`);
+    }
+  }
+  const drawn = [];
+  run('set the slider "S" to 70.6\ndraw slider "S" from 10.4 to -5 at 0, 0\nsay the value of the slider "S"\nsay the value of the slider "T"', () => {}, { draw: (d) => drawn.push(d) });
+  assert.deepEqual(drawn, [{ shape: "slider", label: "S", value: 10, from: 10, to: -5, focused: false, x: 0, y: 0, width: 200, height: 20, color: "#4f8ff7" }]);
+});
+

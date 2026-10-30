@@ -1876,3 +1876,48 @@ hold them to agreeing.
   selection's light blue, the cursor, a letter every 10); and the clipboard in a
   real window, by hand: a copy, a cut of two lines (CR LF on the clipboard), and
   a paste into a box.
+
+## 42. Dropdowns, sliders, and choosing a file
+
+- **The phrases.** `draw dropdown "Size" showing sizes at x, y`, with `when an
+  item is chosen in the dropdown "Size" with size` and `the choice in the
+  dropdown "Size"`, which are a list's: `list` and `dropdown` mean the same there.
+  `draw slider "Volume" from 0 to 100 at x, y`, `set the slider "Volume" to 50`,
+  `the value of the slider "Volume"` and `when the slider "Volume" is moved with
+  volume`. `choose a file to open`, and `choose a file to save`. Each is a run of
+  words that meant nothing before, so `dropdown`, `slider`, `moved` and `choose`
+  are still names, and `set the slider` was a mistake (`set the` wants `to`).
+- **A dropdown is a list that's closed.** It's 200 by 30, showing what's chosen,
+  or its label in grey, and an arrow. A click opens it: its items in a list
+  below it, up to 6 rows, on top of everything else, which the wheel scrolls.
+  While it's open, any click closes it, and one on an item chooses that item;
+  a click anywhere else does nothing more, so closing a dropdown never presses
+  the button under it. While it has the focus, open or not, up and down choose,
+  Enter and Space open and close it, and Escape closes it. Its items, what's
+  chosen and what's first in view are kept by its label, as a list's are.
+- **A slider** is 200 by 20, its value a whole number from its `from` to its `to`
+  (either way round), starting at `from`. A click moves it there, and so does a
+  drag from it; the arrows move it a step, and Home and End to its ends. Its
+  handlers run when its value changes, with the value; `set the slider` changes
+  it without running them, kept to its range while it's drawn. Whole numbers keep
+  every engine and machine code on the same value for the same click, as a
+  letter every 10 pixels keeps them on the same place in a text box (§41).
+- **Choosing a file is asking.** `choose a file to open` asks "Which file to
+  open?" and gives the answer, or nothing for an empty one. A host that can do
+  better does: the playground shows a file picker for a question that starts
+  that way, as it shows a pad for one that starts "Draw", and the file picked
+  joins the page's files, so `read` finds it by its name; the window shows
+  Windows' own Open or Save box, titled with the question, and gives the file's
+  whole name. Anywhere else (Linux, or a program reading its answers from a
+  file) it's a question like any other. In the playground, as with `ask`, an app
+  can't choose a file once it's running; machine code's apps can, from a button.
+- **Where the rules live.** Turtle.route in vm.js again, which reports what
+  changed with `{ dropdown: label, chosen, top, focused, open }` and `{ slider:
+  label, value, focused }`. Machine code keeps a slider's value, and the range it
+  was last drawn with, in an entry of 32 bytes by its label, and gives a dropdown
+  a list's entry.
+- **Tested.** A run of 31 events on all three engines, through a hand-over to the
+  VM, and the same events in the window against the JavaScript engine; values,
+  choices and every mistake in what's drawn, on Windows and Linux; the
+  playground's picker; and Windows' Open and Save boxes in a real window: a file
+  chosen, a name to save with an é in it, and both cancelled.

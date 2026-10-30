@@ -103,6 +103,11 @@ const TEXT_IN_BOX = ["the", "text", "in", "the", "text", "box"];
 const CHOSEN_PHRASE = ["an", "item", "is", "chosen", "in", "the", "list"];
 const TEXT_IN_AREA = ["the", "text", "in", "the", "text", "area"];
 const CHOICE_IN_LIST = ["the", "choice", "in", "the", "list"];
+// dropdowns, sliders and choosing a file (DESIGN §42)
+const CHOSEN_IN_DROPDOWN = ["an", "item", "is", "chosen", "in", "the", "dropdown"];
+const CHOICE_IN_DROPDOWN = ["the", "choice", "in", "the", "dropdown"];
+const VALUE_OF_SLIDER = ["the", "value", "of", "the", "slider"];
+const CHOOSE_FILE = ["choose", "a", "file", "to"];
 const AFTER_A_VALUE = ["at", "of", "bytes", "as", "in", "bit", "is", "and", "or"];
 // drawing: `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`
 const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["left", "right"]], ["pen", ["up", "down", "color", "width"]]]);
@@ -263,6 +268,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         expectWord("to");
         return { kind: "setItem", target, value: expression(), at: t };
       }
+      if (wordsAt(pos, ["the", "slider"])) { // `set the slider "Volume" to 50`
+        pos += 2;
+        const label = additive();
+        expectWord("to");
+        return { kind: "turtle", action: "set slider", value: { kind: "list", items: [label, expression()], at: t }, at: t };
+      }
       const variable = name("a variable name");
       if (word("of")) { // `set name of person to ...` changes a field
         const target = unary();
@@ -340,10 +351,17 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         expectWord("is");
         expectWord("clicked");
         [phrase, known] = ["the checkbox is clicked", { event: "checkbox", gives: 0 }];
-      } else if (wordsAt(pos, CHOSEN_PHRASE)) { // `when an item is chosen in the list "Fruits" with item`
+      } else if (wordsAt(pos, CHOSEN_PHRASE) || wordsAt(pos, CHOSEN_IN_DROPDOWN)) { // `when an item is chosen in the list "Fruits" with item`
         pos += CHOSEN_PHRASE.length;
+        phrase = `an item is chosen in the ${tokens[pos - 1].value}`;
         label = additive();
-        [phrase, known] = ["an item is chosen in the list", { event: "choice", gives: 1 }];
+        known = { event: "choice", gives: 1 };
+      } else if (wordsAt(pos, ["the", "slider"])) { // `when the slider "Volume" is moved with volume`
+        pos += 2;
+        label = additive();
+        expectWord("is");
+        expectWord("moved");
+        [phrase, known] = ["the slider is moved", { event: "slider", gives: 1 }];
       } else {
         const words = [];
         while (check("word") && !isWord("with") && !peek().nl) words.push(tokens[pos++].value);
@@ -352,7 +370,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       }
       if (!known) {
         pos = start;
-        expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked' or 'an item is chosen in the list ...'");
+        expected("'a key is pressed', 'the mouse is clicked', 'the mouse is dragged', 'the button ... is clicked', 'enter is pressed in the text box ...', 'the checkbox ... is clicked', 'an item is chosen in the list ...' or 'the slider ... is moved'");
       }
       const params = [];
       if (known.gives && word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
@@ -474,6 +492,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         : isWord("checkbox") && labelAt(pos + 1) ? "checkbox" : null;
       // `draw text area "Notes" at x, y size w by h`, `draw list "Fruits" showing fruits at x, y size w by h`
       const tall = wordsAt(pos, ["text", "area"]) ? "text area" : isWord("list") && labelAt(pos + 1) ? "list" : null;
+      // `draw dropdown "Size" showing sizes at x, y`, `draw slider "Volume" from 0 to 100 at x, y`
+      if ((isWord("dropdown") || isWord("slider")) && labelAt(pos + 1)) {
+        const control = tokens[pos++].value;
+        const label = additive();
+        const middle = control === "dropdown" ? [(expectWord("showing"), additive())] : [(expectWord("from"), additive()), (expectWord("to"), additive())];
+        expectWord("at");
+        const place = several(2, t);
+        return { kind: "turtle", action: control, value: { ...place, items: [label, ...middle, ...place.items] }, at: t };
+      }
       if (tall) {
         pos += tall === "list" ? 1 : 2;
         const label = additive();
@@ -740,7 +767,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += TEXT_IN_BOX.length;
       return { kind: "builtin", name: "text in box", args: [unary()], at: t };
     }
-    if (wordsAt(pos, CHOICE_IN_LIST)) { // `the choice in the list "Fruits"`: the item chosen, or nothing
+    if (wordsAt(pos, VALUE_OF_SLIDER)) { // `the value of the slider "Volume"`
+      pos += VALUE_OF_SLIDER.length;
+      return { kind: "builtin", name: "slider value", args: [unary()], at: t };
+    }
+    if (wordsAt(pos, CHOOSE_FILE) && (wordAt(pos + 4, "open") || wordAt(pos + 4, "save"))) { // `choose a file to open`: asked, see DESIGN §42
+      const question = { kind: "value", value: `Which file to ${tokens[pos + 4].value}?`, at: t };
+      pos += CHOOSE_FILE.length + 1;
+      return { kind: "builtin", name: "chosen file", args: [{ kind: "ask", question, at: t }], at: t };
+    }
+    if (wordsAt(pos, CHOICE_IN_LIST) || wordsAt(pos, CHOICE_IN_DROPDOWN)) { // `the choice in the list "Fruits"`: the item chosen, or nothing
       pos += CHOICE_IN_LIST.length;
       return { kind: "builtin", name: "choice in list", args: [unary()], at: t };
     }

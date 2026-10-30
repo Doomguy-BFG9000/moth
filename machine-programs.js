@@ -301,6 +301,14 @@ export const MACHINE_CASES = [
   "draw text area \"T\" at 0, \"x\"",
   "draw text area \"T\" at 0, 0 size 0.001 by 5",
   "draw checkbox \"C\" at yes, 0",
+  // dropdowns, sliders and choosing a file, away from a terminal (DESIGN §42)
+  "set the slider \"S\" to 70.6\ndraw slider \"S\" from 10.4 to -5 at 0, 0\nsay the value of the slider \"S\"\nsay the value of the slider \"T\"\nset the slider \"S\" to -99\nsay the value of the slider \"S\"\nclear\nset the slider \"S\" to 99\nsay the value of the slider \"S\"\ndraw dropdown \"D\" showing (list of 3, \"x\") at 0, 0\nsay the choice in the dropdown \"D\"\nset choose to 2\nsay choose",
+  "draw dropdown \"D\" showing 5 at 0, 0",
+  "draw dropdown \"D\" showing (list of 1) at \"x\", 0",
+  "draw slider \"S\" from 0 to \"x\" at 0, 0",
+  "set the slider \"S\" to \"loud\"",
+  "set the slider \"S\" to nothing",
+  "set f to choose a file to open\nsay f",
 ];
 
 export function machinePrograms(seed, count) {
