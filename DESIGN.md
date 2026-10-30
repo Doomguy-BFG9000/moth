@@ -1133,7 +1133,12 @@ hold them to agreeing.
   it, as on the JavaScript engine. Keys get the playground's names: arrows,
   space, enter and the rest by key code, other keys as the character typed, in
   lower case, and none while Ctrl or Alt is down. Timers go off every so many
-  milliseconds, 10 at the fastest, as the playground's do.
+  milliseconds, 10 at the fastest, as the playground's do. A handler that
+  says `stop the program` ends it there: the window goes, and the number
+  is the one the program ends with. The end of a program comes back to the
+  window's code once more when that happens, so it remembers it has already
+  begun: without that, the first try opened a second window inside the first,
+  and with `MOTH_EVENTS` it went through the events again, for ever.
 - **The pad.** `ask` with a question that starts with "Draw", as the
   playground decides it, opens a 440 by 440 pad at a terminal. Each stroke
   comes back as the playground's pad gives it: points from 0 to 100, y going

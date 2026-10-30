@@ -232,6 +232,19 @@ to cli_temp_for with cli_path, cli_target, cli_mark
     return cli_beside
 end
 
+# whether a file is already where `moth run` or `moth test` would put its program while it runs, which would
+# replace it and then remove it: if so, it says so, and nothing is built
+to cli_in_the_way with cli_temp
+    try
+        if length of (read bytes cli_temp) is at least 0
+            say "moth: there's already a file called '" + cli_temp + "', where the program would go while it runs: move it first" to the error output
+            return yes
+        end
+    if it fails
+        return no
+    end
+end
+
 to cli_build with cli_path, cli_target, cli_allowing, cli_into, cli_telling
     set cli_source to cli_text_of(cli_path)
     if cli_source is nothing
@@ -273,6 +286,9 @@ end
 # for a mistake, or for a number this system can't end with (Windows gives a crash a huge one).
 to cli_run with cli_path, cli_target, cli_allowing, cli_passed_on
     set cli_temp to cli_temp_for(cli_path, cli_target, "-run")
+    if cli_in_the_way(cli_temp)
+        return 1
+    end
     if not cli_build(cli_path, cli_target, cli_allowing, cli_temp, no)
         return 1
     end
@@ -1060,6 +1076,9 @@ to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
         set cli_names to list of cli_name_of(cli_path)
     end
     set cli_temp to cli_temp_for(cli_path, cli_target, "-test")
+    if cli_in_the_way(cli_temp)
+        return record with passed 0, failed 1
+    end
     if not cli_build_source(cli_path, cli_source + "\n" + cli_driver, cli_target, cli_allowing, cli_temp, no)
         return record with passed 0, failed 1
     end

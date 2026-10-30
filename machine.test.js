@@ -351,6 +351,15 @@ test("moth.exe runs a program, passing its arguments, input, output and exit cod
   assert.deepEqual([broken.status, broken.stdout, broken.stderr], [1, "", "broken.moth:2:1: expected a value but found the end of the code\n\n^\n"]);
   const missing = spawnSync(exe, ["run", "nowhere.moth"], { cwd: dir, encoding: "utf8" });
   assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
+  // a file already where the program would go for a while is left as it is, and nothing runs
+  writeFileSync(join(dir, "tool-run.exe"), "mine");
+  writeFileSync(join(dir, "tool-run"), "mine");
+  const inTheWay = spawnSync(exe, ["run", "--allow-read", "tool.moth"], { cwd: dir, encoding: "utf8", input: "Sam\n" });
+  const temp = target === "windows" ? "tool-run.exe" : "tool-run";
+  assert.deepEqual([inTheWay.status, inTheWay.stdout, inTheWay.stderr], [1, "", `moth: there's already a file called './${temp}', where the program would go while it runs: move it first\n`]);
+  assert.equal(readFileSync(join(dir, temp), "utf8"), "mine");
+  rmSync(join(dir, "tool-run.exe"));
+  rmSync(join(dir, "tool-run"));
   // a program in a folder of its own, and `run` with no file at all
   const deep = spawnSync(exe, ["run", join("deeper", "deep.moth")], { cwd: dir, encoding: "utf8" });
   assert.deepEqual([deep.status, deep.stdout], [0, "deep\n"]);
@@ -746,6 +755,14 @@ when the mouse is clicked with x and y
     draw circle at x, y size total
     say "circle " + x + " " + y + " " + total
 end`, "tick 0;tick 0;key left;key enter;click 0 0;key escape;tick 0;click -10 20"],
+  [`set n to 0
+when a key is pressed with key
+    add 1 to n
+    say "key " + key + " " + n
+    if key is "q"
+        stop the program with 3
+    end
+end`, "key a;key q;key b"], // the program ends there, as in the playground
 ];
 
 test("an app's handlers get keys, clicks, drags and timers, and say and fail as on the JavaScript engine", { skip: onWindows }, () => {
@@ -762,6 +779,7 @@ test("an app's handlers get keys, clicks, drags and timers, and say and fail as 
         else if (what === "tick") app.handle(timers[Number(rest[0])]);
         else app.send(what, rest.map(Number));
       }
+      status = app.stopped ?? 0;
     } catch (err) {
       if (!(err instanceof MothError)) throw err;
       stderr = `p.moth:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;

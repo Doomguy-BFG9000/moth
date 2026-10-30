@@ -10528,6 +10528,7 @@ to emit_gui with a, title
     for each r in list of rbx, r12, r13, r14, r15
         push_r(a, r)
     end
+    storei(a, rip("gui_headless"), 1)
     call_to(a, "rt_gui_start")
     win_enter(a)
     lea(a, rcx, rip(events_env))
@@ -10612,6 +10613,17 @@ to emit_gui with a, title
     alui(a, "add", r12, 2)
     jmp_to(a, ev_loop)
     mark(a, ev_done)
+    call_to(a, "rt_headless_write")
+    for each r in list of r15, r14, r13, r12, rbx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_headless_write: the picture, into MOTH_PICTURE's file as a BMP, 500 by 500
+    mark(a, "rt_headless_write")
+    for each r in list of rbx, r12, r13, r14, r15
+        push_r(a, r)
+    end
     win_enter(a) # the picture, drawn into memory
     movi(a, rcx, 0)
     w_call(a, "CreateCompatibleDC")
@@ -10718,7 +10730,22 @@ to emit_gui with a, title
     set timers_next to new_label(a)
     set timers_done to new_label(a)
     set faster to new_label(a)
+    # A handler that stops the program comes here again, from inside the window or the events: the program
+    # ends there, its picture into the file if it's going to one.
+    set first_time to new_label(a)
+    set no_picture to new_label(a)
     mark(a, "rt_gui_finish")
+    load(a, rax, rip("gui_ending"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, first_time)
+    load(a, rax, rip("gui_headless"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_picture)
+    call_to(a, "rt_headless_write")
+    mark(a, no_picture)
+    ret(a)
+    mark(a, first_time)
+    storei(a, rip("gui_ending"), 1)
     for each r in list of rbx, r12
         push_r(a, r)
     end
@@ -11235,7 +11262,7 @@ to emit_runtime with st
         for each name in list of "gui_scale", "gui_argb", "gui_last", "gui_brush", "gui_pen", "gui_half", "gui_t0",
             "gui_t1", "gui_font", "gui_family", "gui_units", "gui_ascent", "gui_format", "gui_started", "gui_token",
             "gui_hinst", "gui_mode", "gui_size", "gui_done", "gui_hwnd", "gui_old", "gui_graphics", "gui_bits",
-            "pad_n", "pad_cap", "pad_down"
+            "pad_n", "pad_cap", "pad_down", "gui_ending", "gui_headless"
             reserve(a, name, 8, 8)
         end
         for each pair in list of (list of "gui_input", 24), (list of "gui_rectf", 16), (list of "gui_wc", 80),

@@ -577,9 +577,10 @@ moth build moth.moth --allow-read --allow-write --allow-run    moth, built by it
 beside the source (`hello-run.exe`, or `hello-run` on Linux), gives it
 everything written after the file as its arguments and this terminal's own
 input and output, waits for it, removes the file, and ends with the number the
-program ended with. The `--allow` flags go before the file, since what comes
-after it is the program's own. `moth tidy` and `moth test` take any number of
-files; `moth check` one.
+program ended with. If a file of that name is already there, it leaves it
+alone and runs nothing. The `--allow` flags go before the file, since what
+comes after it is the program's own. `moth tidy` and `moth test` take any
+number of files; `moth check` one.
 
 `moth test` runs each test on its own, in a run of its own, so one test can't
 spoil another: it builds the file once, then starts it once for each test, and
