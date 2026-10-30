@@ -148,6 +148,11 @@ export const PROGRAMS = [
   // sound: each one takes its turn, and the program goes on at once
   ["say \"before\"\nplay note \"C\" for 0.5 seconds\nplay note 440 for 200 milliseconds\nplay a beep\nfor each n in list of \"E\", \"rest\", \"G#3\"\n    play note n for 50 milliseconds\nend\nsay \"after\"", "before\nafter"],
   ["set play to 1\nset note to 2\nset beep to 3\nsay play + note + beep\nto play_twice with note\n    play note note for 1 second\n    play note note for 1 second\nend\nplay_twice(\"A\")", "6"],
+  // JSON: `as json` and `json from`; `json`, `send` and `from` are still names
+  ["set data to record with name \"Sam\", age 30, tags list of \"a\", \"b\"\nsay data as json\nset back to json from (data as json)\nsay back\nsay item \"tags\" of back\nsay (list of 1, \"two\", yes, no, nothing, 0.5, 1 / 10000000, \"tab\\t\\\"q\\\"\") as json\nsay (dictionary where 1 is \"one\", \"k\" is (empty dictionary), 2.5 is (empty list)) as json",
+    "{\"name\":\"Sam\",\"age\":30,\"tags\":[\"a\",\"b\"]}\n(dictionary where \"name\" is \"Sam\", \"age\" is 30, \"tags\" is [\"a\", \"b\"])\n[\"a\", \"b\"]\n[1,\"two\",true,false,null,0.5,1e-7,\"tab\\t\\\"q\\\"\"]\n{\"1\":\"one\",\"k\":{},\"2.5\":[]}"],
+  ["say json from \" [1, 2e3, -0.5E-2, true, null, {\\\"a\\\": [], \\\"a\\\": {}}] \"\nset json to 3\nsay json + 1\nset send to \"s\"\nsay send\nto from with x\n    return x\nend\nsay from(json)",
+    "[1, 2000, -0.005, yes, nothing, (dictionary where \"a\" is (empty dictionary))]\n4\ns\n3"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -347,7 +352,7 @@ export const ERRORS = [
   ["say shift 1 left by 53", "line 1: 1 shifted left by 53 is too big: bits work on numbers up to 9007199254740991"],
   ["say shift 1 right by -1", "line 1: 'shift ... by' needs whole numbers of 0 or more, not -1"],
   ["say shift 1 up by 2", "line 1: expected 'left' or 'right' but found 'up'"],
-  ["say 5 as words", "line 1: expected 'bytes' or 'text' or 'hex' or 'binary' but found 'words'"],
+  ["say 5 as words", "line 1: expected 'bytes' or 'text' or 'hex' or 'binary' or 'json' but found 'words'"],
   ["say 5 as bytes", "line 1: 'as bytes' needs text, a list or bytes, not a number"],
   ["say (list of 1, 300) as bytes", "line 1: a byte is a whole number from 0 to 255, not 300"],
   ["say -5 as hex", "line 1: 'as hex' needs whole numbers of 0 or more, not -5"],
@@ -450,6 +455,23 @@ export const ERRORS = [
   ["play note \"C\" for 1", "line 1: expected 'milliseconds' or 'seconds' but found the end of the code"],
   ["play note \"C\"", "line 1: expected 'for' but found the end of the code"],
   ["play beep", "line 1: there is no function called 'play' (to make a sound, write 'play note \"C\" for 1 second' or 'play a beep')"],
+  // sending, and JSON
+  ["set big to 1\nrepeat 400 times\n    set big to big * 10\nend\nsay (list of big) as json",
+    "line 5: 'as json' can't write Infinity: JSON has no such number"],
+  ["say json from \"[1,]\"",
+    "line 1: 'json from' can't read this: it isn't JSON"],
+  ["say json from 5",
+    "line 1: 'json from' needs text, not a number"],
+  ["to f\n    return 1\nend\nsay (record with a f) as json",
+    "line 4: 'as json' can't write a function"],
+  ["send \"hello\" to \"https://example.com\"",
+    "line 1: 'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'"],
+  ["set reply to send \"hello\" to \"notes.txt\"",
+    "line 1: 'send' sends to a site, and 'notes.txt' isn't one (its address starts http:// or https://)"],
+  ["set reply to send \"hello\" to \"https://example.com\" with headers (dictionary where \"Bad Name\" is \"x\")",
+    "line 1: 'Bad Name' can't be a header's name: it's letters, digits and - (and !#$%&'*+.^_`|~)"],
+  ["say read \"notes.txt\" with headers (empty dictionary)",
+    "line 1: only a site is read with headers, and 'notes.txt' isn't one (its address starts http:// or https://)"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

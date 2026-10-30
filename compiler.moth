@@ -248,7 +248,7 @@ set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
-    "save", "load", "text in box"
+    "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "text in box"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -297,13 +297,14 @@ set time_units to dictionary where "millisecond" is 1, "milliseconds" is 1, "sec
 set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is still a name
 # a line that starts like a phrase but isn't one, which would otherwise be a call to a function nothing made
 set phrase_hints to dictionary where "wait" is "to wait, say how long: 'wait 2 seconds'",
+    "send" is "to send, say where: 'set reply to send data to \"https://...\"'",
     "save" is "to save a value, say where: 'save scores to \"scores.txt\"'"
 # `the time`, `the date`, ... `the clock`, in the order of NOW_WORDS in vm.js
 set now_words to list of "time", "date", "year", "month", "day", "hour", "minute", "second", "weekday", "clock"
 # what an input can say it is, `with width as a number`, in the order of KINDS in vm.js
 set kind_phrases to list of (list of "a", "number"), (list of "text"), (list of "yes", "or", "no"), (list of "a", "list"),
     (list of "a", "record"), (list of "a", "dictionary"), (list of "bytes"), (list of "a", "function")
-set as_words to list of "bytes", "text", "hex", "binary" # `block as text`
+set as_words to list of "bytes", "text", "hex", "binary", "json" # `block as text`
 # buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
 # "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
@@ -420,6 +421,39 @@ to parse with tokens, reading
             return no
         end
         return type of after is "string" or (type of after is "word" and not contains(reserved, value of after) and value of after is not "of")
+    end
+
+    # `send data to "https://..."`: `send` alone is still a name, and so is one not followed by a value and `to`
+    # on its line
+    to sends_data
+        if nl of item (pos + 1) of tokens
+            return no
+        end
+        set send_start to pos
+        set sends to no
+        try
+            set pos to pos + 1
+            expression()
+            set sends to is_word("to") and not nl of peek()
+        if it fails
+            set sends to no
+        end
+        set pos to send_start
+        return sends
+    end
+
+    # `json from reply`: `json` alone is still a name
+    to json_from
+        return word_at(pos + 1, "from") and not nl of item (pos + 1) of tokens
+    end
+
+    # ` with headers h`, after a site's address
+    to with_headers
+        if nl of peek() or not word_at(pos, "with") or not word_at(pos + 1, "headers") or nl of item (pos + 1) of tokens
+            return no
+        end
+        set pos to pos + 2
+        return yes
     end
 
     # A phrase that starts with a word that could be a name: `wait 2 seconds`, `save x to "f"`. It gives the
@@ -1099,6 +1133,9 @@ to parse with tokens, reading
         if is_word("run") and runs_program()
             fail with problem(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'")
         end
+        if is_word("send") and sends_data()
+            fail with problem(t, "'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'")
+        end
         if is_word("wait") and not nl of item (pos + 1) of tokens # `wait 2 seconds`: `wait` alone is still a name
             set waiting to try_phrase("wait", t)
             if waiting is not nothing
@@ -1338,7 +1375,7 @@ to parse with tokens, reading
                     end
                 end
                 if to_word is ""
-                    expected("'bytes' or 'text' or 'hex' or 'binary'")
+                    expected("'bytes' or 'text' or 'hex' or 'binary' or 'json'")
                 end
                 set pos to pos + 1
                 set inputs to list of e
@@ -1445,7 +1482,16 @@ to parse with tokens, reading
             if word("bytes")
                 set as_bytes to yes
             end
-            return record with kind "read", binary as_bytes, subject additive(), at t
+            set read_subject to additive()
+            if with_headers() # `read "https://..." with headers h`
+                set read_name to "read with headers"
+                if as_bytes
+                    set read_name to "read bytes with headers"
+                end
+                set read_args to list of read_subject, additive()
+                return record with kind "builtin", name read_name, args read_args, at t
+            end
+            return record with kind "read", binary as_bytes, subject read_subject, at t
         end
         if word("arguments")
             return record with kind "arguments", at t
@@ -1479,6 +1525,23 @@ to parse with tokens, reading
         if is_word("the") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word" and contains(now_words, value of item (pos + 1) of tokens)
             set pos to pos + 2
             return record with kind "now", which slot_of(now_words, value of item (pos - 1) of tokens) - 1, at t
+        end
+        if is_word("send") and sends_data() # `send data to "https://..."`, maybe `with headers h`
+            set pos to pos + 1
+            set send_body to expression()
+            expect_word("to")
+            set send_address to additive()
+            if with_headers()
+                set send_args to list of send_body, send_address, additive()
+                return record with kind "builtin", name "send with headers", args send_args, at t
+            end
+            set send_args to list of send_body, send_address
+            return record with kind "builtin", name "send", args send_args, at t
+        end
+        if is_word("json") and json_from() # `json from reply`: what JSON text says
+            set pos to pos + 2
+            set json_args to list of additive()
+            return record with kind "builtin", name "json from", args json_args, at t
         end
         if is_word("load") and loads_file() # `load "scores.txt"`: a value `save` wrote, read back
             set pos to pos + 1

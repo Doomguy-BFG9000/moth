@@ -1576,3 +1576,19 @@ test("draw picture reads a file as read bytes does, and keeps picture a name", (
     assert.equal(format(source), `${source.replace(/ {2}/g, " ")}\n`, source);
   }
 });
+
+// Sending: `send` and `read ... with headers` go through the disk the program is given, on every engine, as
+// { address, data, headers }; a run handed over to the VM part way gets the replies it had, and sends nothing twice
+test("send and read with headers go through the disk on every engine, and a hand-over to the VM sends nothing twice", () => {
+  const source = 'set h to dictionary where "Authorization" is "Bearer t"\nset first to send (record with a 1) to "https://api.test/one"\nto deep with n\n    if n is 0\n        return send "two" to "https://api.test/two" with headers h\n    end\n    return deep(n - 1)\nend\nsay deep(5000)\nsay first\nsay json from read "https://api.test/one" with headers h';
+  for (const engine of ENGINES) {
+    const disk = memoryDisk({ "https://api.test/one": '{"ok":1}', "https://api.test/two": "fine" });
+    const said = [];
+    run(source, (line) => said.push(line), { engine, disk });
+    assert.deepEqual(said, ["fine", '{"ok":1}', '(dictionary where "ok" is 1)'], engine);
+    assert.deepEqual(disk.sent, [
+      { address: "https://api.test/one", data: '{"a":1}', headers: [["Content-Type", "application/json"]] },
+      { address: "https://api.test/two", data: "two", headers: [["Content-Type", "text/plain; charset=utf-8"], ["Authorization", "Bearer t"]] },
+    ], engine);
+  }
+});

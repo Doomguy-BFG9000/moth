@@ -319,7 +319,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     },
     recordFor: (r, name, k) => recordFor(r, name, errors[k]),
     failWith: (value, k) => failWith(value, errors[k]),
-    builtin: (i, args, k) => BUILTINS[i].run(args, errors[k], turtle),
+    builtin: (i, args, k) => BUILTINS[i].run(args, errors[k], turtle, disk),
     depthNow: () => depth,
     // a mistake an `if it fails` handles; anything else (going too deep, a value too big) goes on to run()
     caught: (err, at) => {

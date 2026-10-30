@@ -587,6 +587,9 @@ function extreme(what, list, error) {
   return best;
 }
 
+// what `save`, `as json` and `send` take
+const SAVABLE = ["number", "text", "yes/no", "nothing", "list", "record", "dictionary"];
+
 export const BUILTINS = [
   { name: "uppercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'uppercase of'", t, error).toUpperCase() },
   { name: "lowercase", needs: [["text"]], gives: "text", run: ([t], error) => needText("'lowercase of'", t, error).toLowerCase() },
@@ -732,8 +735,20 @@ export const BUILTINS = [
     { name: `${how} by`, needs: [["list"], ["text"]], gives: "list", run: ([list, field], error) => inOrder(list, field, how !== "order", error) },
   ]),
   // `save scores to "scores.txt"` writes what this makes; `load "scores.txt"` reads it back (see savedText)
-  { name: "save", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary"]], gives: "text", run: ([value], error) => savedText(value, error) },
+  { name: "save", needs: [SAVABLE], gives: "text", run: ([value], error) => savedText(value, error) },
   { name: "load", needs: [["text"]], gives: null, run: ([text], error) => loadedValue(text, error) },
+  // `scores as json`, `json from reply`, `send data to "https://..."` (with headers), and `read` with headers
+  // (see jsonText, jsonValue and sendTo). A builtin that goes online gets the program's disk.
+  { name: "as json", needs: [SAVABLE], gives: "text", run: ([value], error) => jsonText(value, error, "'as json' can't write") },
+  { name: "json from", needs: [["text"]], gives: null, run: ([text], error) => jsonValue(text, error) },
+  { name: "send", needs: [SAVABLE, ["text"]], gives: "text", run: ([body, address], error, turtle, disk) => sendTo(body, address, null, disk, error) },
+  {
+    name: "send with headers", needs: [SAVABLE, ["text"], ["dictionary"]], gives: "text",
+    run: ([body, address, headers], error, turtle, disk) => sendTo(body, address, headers, disk, error),
+  },
+  ...[["read with headers", false, "text"], ["read bytes with headers", true, "bytes"]].map(([name, asBytes, gives]) => ({
+    name, needs: [["text"], ["dictionary"]], gives, run: ([address, headers], error, turtle, disk) => readFile(address, asBytes, disk, error, headers),
+  })),
   // `the text in the text box "Name"`: what's typed in it so far (see Turtle). The checker has no turtle.
   { name: "text in box", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "text", run: ([label], error, turtle) => turtle?.texts.get(show(label)) ?? "" },
 ];
@@ -870,6 +885,137 @@ export function loadedValue(text, error) {
   return loaded;
 }
 
+// ---------- sending, and JSON ----------
+
+// `scores as json`: the value as JSON, which most sites and programs that take data read: numbers as Moth
+// shows them (to 15 digits), text in quotes as JSON writes it, yes, no and nothing as true, false and null,
+// lists as [...], and records and dictionaries as {...}, a dictionary's number keys as their text, with no
+// spaces. Functions, bytes, amounts with units, Infinity and NaN have no JSON, nor does a list that holds itself.
+export function jsonText(value, error, cant) {
+  const inside = new Set();
+  const write = (v) => {
+    if (v === null) return "null";
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) error(`${cant} ${show(v)}: JSON has no such number`);
+      return show(v);
+    }
+    if (typeof v === "string") return JSON.stringify(v);
+    if (v instanceof Closure || isBytes(v) || isQuantity(v)) error(`${cant} ${kindOf(v)}`);
+    if (inside.has(v)) error(`${cant} ${kindOf(v)} that holds itself`);
+    inside.add(v);
+    const text = isList(v) ? `[${v.map(write).join(",")}]`
+      : `{${(isRecord(v) ? Object.entries(v) : [...v]).map(([k, x]) => `${JSON.stringify(typeof k === "string" ? k : show(k))}:${write(x)}`).join(",")}}`;
+    inside.delete(v);
+    return text;
+  };
+  return write(value);
+}
+
+// `json from reply`: what JSON text says, as Moth's values: an object becomes a dictionary (its keys are
+// text, which a record's fields can't always be), an array a list, true, false and null yes, no and nothing.
+// Spaces, tabs and new lines may come between the parts; anything else that isn't JSON is a mistake.
+const JSON_STRING = /"(?:[^"\\\u0000-\u001f]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"/y;
+const JSON_NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+export function jsonValue(text, error) {
+  if (typeof text !== "string") error(`'json from' needs text, not ${kindOf(text)}`);
+  let at = 0;
+  const bad = () => error("'json from' can't read this: it isn't JSON");
+  const space = () => {
+    while (at < text.length && " \t\r\n".includes(text[at])) at++;
+  };
+  const sees = (c) => {
+    space();
+    if (text[at] !== c) return false;
+    at++;
+    return true;
+  };
+  const string = () => {
+    JSON_STRING.lastIndex = at;
+    const m = JSON_STRING.exec(text) ?? bad();
+    at += m[0].length;
+    return JSON.parse(m[0]).toWellFormed(); // half a pair of surrogates is U+FFFD, as machine code's text has it
+  };
+  const value = () => {
+    space();
+    const c = text[at];
+    if (c === '"') return string();
+    if (c === "[") {
+      at++;
+      const list = [];
+      if (sees("]")) return list;
+      do list.push(value()); while (sees(","));
+      if (!sees("]")) bad();
+      return list;
+    }
+    if (c === "{") {
+      at++;
+      const items = [];
+      if (sees("}")) return new Map();
+      do {
+        space();
+        if (text[at] !== '"') bad();
+        items.push(string());
+        if (!sees(":")) bad();
+        items.push(value());
+      } while (sees(","));
+      if (!sees("}")) bad();
+      return makeDictionary(items, error);
+    }
+    for (const [word, v] of [["true", true], ["false", false], ["null", null]]) {
+      if (text.startsWith(word, at)) {
+        at += word.length;
+        return v;
+      }
+    }
+    JSON_NUMBER.lastIndex = at;
+    const number = JSON_NUMBER.exec(text) ?? bad();
+    at += number[0].length;
+    return Number(number[0]);
+  };
+  const got = value();
+  space();
+  if (at < text.length) bad();
+  return got;
+}
+
+// a site's address: http:// or https:// at its start, in either case
+export const isSite = (name) => /^https?:\/\//i.test(name);
+
+// `with headers (dictionary where "Authorization" is "Bearer x")`: [name, value] pairs, each name a token as
+// HTTP has them and each value text without a line break, which would start a header of its own
+function headerFields(headers, error) {
+  if (!isDictionary(headers)) error(`'with headers' needs a dictionary, not ${kindOf(headers)}`);
+  return [...headers].map(([name, value]) => {
+    if (typeof name !== "string") error(`a header's name is text, not ${kindOf(name)}`);
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) error(`'${name}' can't be a header's name: it's letters, digits and - (and !#$%&'*+.^_\`|~)`);
+    if (typeof value !== "string") error(`the header '${name}' needs text, not ${kindOf(value)}`);
+    if (/[\0\r\n]/.test(value)) error(`the header '${name}' can't hold a line break`);
+    return [name, value];
+  });
+}
+
+// `send data to "https://..."`: the data, sent to a site (POST), and the site's reply, as text. Text goes as
+// it is (text/plain), anything else as JSON (application/json), unless a Content-Type header says otherwise.
+// An answer from 300 up is a mistake, a move to another address too: data isn't sent on anywhere by itself.
+// A disk that can send has send(address, data, headers), headers as [name, value] pairs.
+export function sendTo(body, address, headers, disk, error) {
+  if (typeof address !== "string") error(`'send ... to' needs a site's address, not ${kindOf(address)}`);
+  const text = typeof body === "string";
+  const data = text ? body : jsonText(body, error, "'send' can't send");
+  const fields = headers ? headerFields(headers, error) : [];
+  if (!isSite(address)) error(`'send' sends to a site, and '${address}' isn't one (its address starts http:// or https://)`);
+  if (!fields.some(([name]) => name.toLowerCase() === "content-type")) {
+    fields.unshift(["Content-Type", text ? "text/plain; charset=utf-8" : "application/json"]);
+  }
+  if (!disk?.send) error("this program sends to a site, but there are no sites here");
+  try {
+    return disk.send(address, data, fields);
+  } catch (err) {
+    error(`can't send to '${address}': ${err.message}`);
+  }
+}
+
 // The clock a program reads with `the time` and `wait`s on: `now()` the time of day where it runs, in
 // milliseconds since 1970 as if that were UTC (so the UTC parts of a Date are the local ones), `since()` the
 // milliseconds since the program started, and `sleep(ms)`. A run isn't given a real one unless it asks
@@ -978,12 +1124,14 @@ export function expectYes(value, error) {
 // `read "notes.txt"` (as text) and `read bytes "photo.png"`. `disk` is whatever holds the files: it has
 // read(name, asBytes), which gives the file's text or bytes, or null if there is no such file, and
 // write(name, data), where data is text or bytes. Either may throw an Error, whose message is passed on.
-export function readFile(name, asBytes, disk, error) {
+export function readFile(name, asBytes, disk, error, headers = null) {
   if (typeof name !== "string") error(`a file name is text, not ${kindOf(name)}`);
+  const fields = headers && headerFields(headers, error);
+  if (fields && !isSite(name)) error(`only a site is read with headers, and '${name}' isn't one (its address starts http:// or https://)`);
   if (!disk) error("this program reads a file, but there are no files here");
   let data;
   try {
-    data = disk.read(name, asBytes);
+    data = fields ? disk.read(name, asBytes, fields) : disk.read(name, asBytes);
   } catch (err) {
     error(`can't read '${name}': ${err.message}`);
   }
@@ -1673,7 +1821,7 @@ export class Machine {
             break;
           case BUILTIN: {
             const builtin = BUILTINS[code[ip++]];
-            stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops, this.turtle));
+            stack.push(builtin.run(stack.splice(stack.length - builtin.needs.length), oops, this.turtle, this.disk));
             break;
           }
           case FAIL:

@@ -1517,3 +1517,69 @@ say output of (run program "./SHOW.BAT" with (list of "fine") keeping its output
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Sending, and reading with headers: machine code against a site of the test's own on 127.0.0.1, which says back
+// what it was sent; what's sent as JSON or as text, the headers, a reply's bytes, a move to another address and a
+// failing site as mistakes, and every mistake in what's asked, in vm.js's words, on Windows and Linux alike
+const SEND_SOURCE = "set base to item 1 of arguments\nset h to dictionary where \"Authorization\" is \"Bearer abc\", \"X-Thing\" is \"\"\nsay send (record with name \"Sam\", n 3, ok yes) to base + \"/echo\"\nsay send \"hello é\" to base + \"/echo\" with headers h\nsay send \"x\" to base + \"/echo\" with headers (dictionary where \"content-type\" is \"text/csv\")\nsay read base + \"/headers\" with headers h\nsay read bytes base + \"/bytes\" with headers (empty dictionary)\nsay json from (send (list of 1, 2) to base + \"/echo\")\nfor each path in list of \"/moved\", \"/fail\"\n    try\n        say send \"a\" to base + path\n    if it fails with why\n        say why\n    end\n    try\n        say read base + path with headers h\n    if it fails with why\n        say why\n    end\nend\nto f\n    return 1\nend\nfor each attempt in list of 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11\n    try\n        if attempt is 1\n            say send \"a\" to \"http://127.0.0.1:1/\"\n        else if attempt is 2\n            say send \"a\" to \"notes.txt\"\n        else if attempt is 3\n            say send \"a\" to base with headers (list of 1)\n        else if attempt is 4\n            say send \"a\" to base with headers (dictionary where \"Bad Name\" is \"v\")\n        else if attempt is 5\n            say send \"a\" to base with headers (dictionary where \"A\" is \"x\\ny\")\n        else if attempt is 6\n            say send \"a\" to 5\n        else if attempt is 7\n            say send (list of f) to base\n        else if attempt is 8\n            say send (list of 1 / 0) to \"notes.txt\"\n        else if attempt is 9\n            say read \"notes.txt\" with headers (empty dictionary)\n        else if attempt is 10\n            say send \"a\" to base with headers (dictionary where 1 is \"v\")\n        else\n            say read base + \"/echo\" with headers (dictionary where \"A\" is 5)\n        end\n    if it fails with why\n        say attempt \": \" why\n    end\nend\n";
+const SEND_SAYS = [
+  '{"method":"POST","type":"application/json","auth":null,"thing":null,"body":"{\\"name\\":\\"Sam\\",\\"n\\":3,\\"ok\\":true}"}',
+  '{"method":"POST","type":"text/plain; charset=utf-8","auth":"Bearer abc","thing":"","body":"hello é"}',
+  '{"method":"POST","type":"text/csv","auth":null,"thing":null,"body":"x"}',
+  "GET Bearer abc []",
+  "(3 bytes: 0, 1, 255)",
+  '(dictionary where "method" is "POST", "type" is "application/json", "auth" is nothing, "thing" is nothing, "body" is "[1,2]")',
+  "can't send to 'BASE/moved': the site answered 302",
+  "can't read 'BASE/moved': the site answered 302",
+  "can't send to 'BASE/fail': the site answered 500",
+  "can't read 'BASE/fail': the site answered 500",
+  "1: can't send to 'http://127.0.0.1:1/': couldn't reach it (Failed to connect to 127.0.0.1 port 1: Couldn't connect to server)",
+  "2: 'send' sends to a site, and 'notes.txt' isn't one (its address starts http:// or https://)",
+  "3: 'with headers' needs a dictionary, not a list",
+  "4: 'Bad Name' can't be a header's name: it's letters, digits and - (and !#$%&'*+.^_`|~)",
+  "5: the header 'A' can't hold a line break",
+  "6: 'send ... to' needs a site's address, not a number",
+  "7: 'send' can't send a function",
+  "8: can't divide by zero",
+  "9: only a site is read with headers, and 'notes.txt' isn't one (its address starts http:// or https://)",
+  "10: a header's name is text, not a number",
+  "11: the header 'A' needs text, not a number",
+];
+
+test("machine code sends to sites and reads them with headers, as vm.js says", { skip }, async () => {
+  const server = createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      const routes = {
+        "/echo": () => [200, {}, JSON.stringify({ method: req.method, type: req.headers["content-type"] ?? null, auth: req.headers.authorization ?? null, thing: req.headers["x-thing"] ?? null, body })],
+        "/headers": () => [200, {}, `${req.method} ${req.headers.authorization} [${req.headers["x-thing"]}]`],
+        "/bytes": () => [200, {}, Buffer.from([0, 1, 255])],
+        "/moved": () => [302, { location: "/echo" }, ""],
+        "/fail": () => [500, {}, "oops"],
+      };
+      const [status, headers, out] = (routes[req.url] ?? (() => [404, {}, ""]))();
+      res.writeHead(status, headers);
+      res.end(out);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const dir = mkdtempSync(join(tmpdir(), "moth-send-"));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const exe = executable(dir, "send");
+    for (const [allow, want] of [
+      [["--allow-net"], { stdout: `${SEND_SAYS.join("\n").replaceAll("BASE", base)}\n`, stderr: "", status: 0 }],
+      [[], { stdout: "", stderr: `send.moth:3:5: can't send to '${base}/echo': this program isn't allowed to go online (start it with --allow-net)\nsay send (record with name "Sam", n 3, ok yes) to base + "/echo"\n    ^\n`, status: 1 }],
+    ]) {
+      writeFileSync(exe, machine(SEND_SOURCE, { target, name: "send.moth", allow }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const got = await runWhileServing(exe, [base], dir);
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, want, allow.join(" "));
+    }
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

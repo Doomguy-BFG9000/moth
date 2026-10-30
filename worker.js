@@ -55,10 +55,11 @@ let files = {};
 function pageDisk(start) {
   const files = memoryDisk(start);
   return {
-    read: (name, asBytes) => {
+    read: (name, asBytes, headers = []) => {
       if (!/^https?:\/\//i.test(name)) return files.read(name, asBytes);
       const request = new XMLHttpRequest(); // a worker may wait for it
       request.open("GET", name, false);
+      for (const [field, value] of headers) request.setRequestHeader(field, value);
       if (asBytes) request.overrideMimeType("text/plain; charset=x-user-defined");
       try {
         request.send();
@@ -69,6 +70,20 @@ function pageDisk(start) {
       if (request.status >= 400) throw new Error(`the site answered ${request.status}`);
       if (!asBytes) return request.responseText;
       return Uint8Array.from(request.responseText, (c) => c.charCodeAt(0) & 0xff);
+    },
+    // `send`: POSTed, and the site's reply. A browser follows a move to another address by itself.
+    send: (address, data, headers) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", address, false);
+      for (const [field, value] of headers) request.setRequestHeader(field, value);
+      try {
+        request.send(data);
+      } catch {
+        throw new Error("couldn't reach it (the site may not let pages send to it)");
+      }
+      if (request.status === 0) throw new Error("couldn't reach it (the site may not let pages send to it)");
+      if (request.status >= 300) throw new Error(`the site answered ${request.status}`);
+      return request.responseText;
     },
     write: files.write,
     remove: files.remove,

@@ -211,7 +211,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (13,076,480 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (13,553,152 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -470,6 +470,11 @@ end
 save scores to "scores.txt"                 # any number, text, list, record or dictionary
 set scores to load "scores.txt"             # and back again, as it was
 
+set reply to send (record with name "Sam") to "https://example.com/api"   # as JSON; text goes as it is
+set data to json from reply                 # what JSON says: its objects are dictionaries
+say scores as json                          # [10,20,30]
+set me to read "https://example.com/me" with headers (dictionary where "Authorization" is "Bearer x")
+
 play note "C" for 0.5 seconds               # middle C; also "C#5", "Bb3", or "rest"
 play note 440 for 200 milliseconds          # or a pitch, in hertz
 play a beep                                 # each sound starts when the one before ends,
@@ -670,6 +675,13 @@ again there, ten moves at most; any other answer from 300 up is a mistake
 (`can't read 'https://example.com/nothing': the site answered 404`), and a site
 gets 60 seconds.
 
+`send data to "https://..."` sends data to a site (a POST) and gives back its
+reply, as text: text goes as it is, and anything else as JSON. `with headers`
+adds headers, a dictionary of text, to a `send` or a `read`, for a site that
+wants a key or a token. `scores as json` writes a value as JSON, and
+`json from reply` reads JSON back, its objects as dictionaries. Sending is going
+online, with the same `--allow-net` rules.
+
 A mistake in a program, and what `moth` itself says went wrong, go to the error
 output, so a program's own words stay clean; `moth` ends with 1 for a mistake,
 2 when it doesn't understand what it was asked, and for `moth run` with
@@ -690,10 +702,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (13,076,480 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (13,553,152 bytes)
 ```
 
-That's the same 13,076,480 bytes Node.js made of it, and the moth.exe they make
+That's the same 13,553,152 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -837,6 +849,11 @@ unboxed numbers were all caught, some only by the fuzzer.
   them can be read, and answering a question runs the program again from the
   start, so a `wait` before it waits again. On Linux a program goes online
   through `curl`, so where curl isn't installed it can't.
+- `send` only POSTs: there's no PUT, PATCH or DELETE yet. A `send`, or a `read`
+  with headers, doesn't follow a move to another address, so a header like
+  Authorization never goes on to another site; in the playground the browser
+  follows it, and keeps such headers to the same site itself. JSON's numbers
+  are written to 15 digits, as Moth shows numbers.
 - `the time` and the rest are the time where the program runs. A program built
   for Linux reads its time zone from /etc/localtime when it starts (not TZ);
   for years past the last change that file lists, it keeps the last one, which

@@ -91,7 +91,7 @@ const BUILTIN_SYNTAX = new Map([["uppercase", ["of"]], ["lowercase", ["of"]], ["
 // `a bit and b`, `a bit or b`, `a bit xor b`; `bit` alone is still a name
 const BIT_WORDS = ["and", "or", "xor"];
 // what `as` turns a value into: `block as text`, `"hi" as bytes`, `255 as hex`
-const AS_WORDS = ["bytes", "text", "hex", "binary"];
+const AS_WORDS = ["bytes", "text", "hex", "binary", "json"];
 // what `when` can wait for, and how many values each gives its handler
 const EVENT_PHRASES = new Map([["a key is pressed", { event: "key", gives: 1 }], ["the mouse is clicked", { event: "click", gives: 2 }],
   ["the mouse is dragged", { event: "drag", gives: 2 }]]);
@@ -151,6 +151,19 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // a button's label can start at token i: a value there on the same line, where today `button` would end one
   const labelAt = (i) => !tokens[i].nl && (tokens[i].type === "string" || tokens[i].type === "number"
     || (tokens[i].type === "word" && !AFTER_A_VALUE.includes(tokens[i].value)));
+  // `send data to "https://..."`: `send` alone is still a name, and so is one not followed by a value and `to`
+  // on its line
+  const sendsData = () => {
+    if (tokens[pos + 1].nl) return false;
+    const start = pos;
+    const found = phrase(() => (expression(), isWord("to") && !peek().nl ? true : null));
+    pos = start;
+    return Boolean(found);
+  };
+  // `json from reply`: `json` alone is still a name
+  const jsonFrom = () => wordAt(pos + 1, "from") && !tokens[pos + 1].nl;
+  // ` with headers h`, after a site's address
+  const withHeaders = () => !peek().nl && wordsAt(pos, ["with", "headers"]) && ((pos += 2), true);
   // `play note ...` and `play a beep`: `play` alone is still a name, and so are `note`, `a` and `beep`
   const playsSound = () => isWord("play") && !tokens[pos + 1].nl
     && (wordAt(pos + 1, "note") || (wordAt(pos + 1, "a") && wordAt(pos + 2, "beep") && !tokens[pos + 2].nl));
@@ -466,6 +479,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "turtle", action: "text", value: { ...place, items: [text, ...place.items, size] }, at: t };
     }
     if (isWord("run") && runsProgram()) fail(t, "'run program' gives back the number the program ended with, so it goes where a value goes: 'set code to run program ...'");
+    if (isWord("send") && sendsData()) fail(t, "'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'");
     if (isWord("wait") && !tokens[pos + 1].nl) { // `wait 2 seconds`, `wait n milliseconds`: `wait` alone is still a name
       const waiting = phrase(() => {
         let amount = additive();
@@ -685,7 +699,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       }
       if (word("table")) return { kind: "builtin", name: "table", args: [{ kind: "read", bytes: false, of: additive(), at: t }], at: t };
       const bytes = Boolean(word("bytes"));
-      return { kind: "read", bytes, of: additive(), at: t };
+      const of = additive();
+      if (withHeaders()) return { kind: "builtin", name: bytes ? "read bytes with headers" : "read with headers", args: [of, additive()], at: t };
+      return { kind: "read", bytes, of, at: t };
     }
     if (word("arguments")) return { kind: "arguments", at: t };
     if (wordsAt(pos, TEXT_IN_BOX)) { // `the text in the text box "Name"`: what's typed in it
@@ -709,6 +725,18 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (isWord("the") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word" && NOW_WORDS.includes(tokens[pos + 1].value)) {
       pos += 2;
       return { kind: "now", which: NOW_WORDS.indexOf(tokens[pos - 1].value), at: t };
+    }
+    if (isWord("send") && sendsData()) { // `send data to "https://..."`, maybe `with headers h`
+      pos++;
+      const body = expression();
+      expectWord("to");
+      const address = additive();
+      if (withHeaders()) return { kind: "builtin", name: "send with headers", args: [body, address, additive()], at: t };
+      return { kind: "builtin", name: "send", args: [body, address], at: t };
+    }
+    if (isWord("json") && jsonFrom()) { // `json from reply`: what JSON text says
+      pos += 2;
+      return { kind: "builtin", name: "json from", args: [additive()], at: t };
     }
     if (isWord("load") && loadsFile()) { // `load "scores.txt"`: a value `save` wrote, read back
       pos++;
@@ -1385,8 +1413,9 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   const answer = ask && kept(ask);
   const chance = kept(random);
   const timer = { now: kept(() => clock.now()), since: kept(() => clock.since()), sleep: kept((ms) => clock.sleep(ms)) };
-  const drive = disk && { read: kept((name, asBytes) => disk.read(name, asBytes)), write: kept((name, data) => disk.write(name, data)),
-    remove: disk.remove && kept((name) => disk.remove(name)), folder: disk.folder && kept((name) => disk.folder(name)) };
+  const drive = disk && { read: kept((name, asBytes, headers) => (headers ? disk.read(name, asBytes, headers) : disk.read(name, asBytes))),
+    write: kept((name, data) => disk.write(name, data)), remove: disk.remove && kept((name) => disk.remove(name)),
+    folder: disk.folder && kept((name) => disk.folder(name)), send: disk.send && kept((address, data, headers) => disk.send(address, data, headers)) };
   let program = null;
   if (engine !== "vm") {
     try {
@@ -1409,14 +1438,20 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   function onVm(again) {
     let [next, skipSaid, skipDrawn, skipComplained, skipPlayed] = [0, again ? said : 0, again ? drawn : 0, again ? complained : 0, again ? played : 0];
     const replay = (f) => f && (!again ? f : (...inputs) => {
-      if (next >= outside.length) return f(...inputs);
+      if (next >= outside.length) { // past what the first run got: a call of its own, which is kept too, so not got again
+        try {
+          return f(...inputs);
+        } finally {
+          next = outside.length;
+        }
+      }
       const before = outside[next++];
       if ("err" in before) throw before.err;
       return copy(before.got);
     });
     const say = (line) => skipSaid-- > 0 || print(line);
     const options = {
-      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove), folder: replay(drive.folder) }, args, random: replay(chance),
+      maxSteps, ask: replay(answer), disk: drive && { read: replay(drive.read), write: replay(drive.write), remove: replay(drive.remove), folder: replay(drive.folder), send: replay(drive.send) }, args, random: replay(chance),
       clock: { now: replay(timer.now), since: replay(timer.since), sleep: replay(timer.sleep) },
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
       play: (sound) => skipPlayed-- > 0 || play?.(sound),
@@ -1519,8 +1554,17 @@ export function test(source, options = {}) {
 // Files kept in memory, for a page or a test: `start` gives the first ones, by name, as text or bytes.
 export function memoryDisk(start = {}) {
   const files = new Map(Object.entries(start));
+  const sent = [];
   return {
     files,
+    // what was sent to a site, each { address, data, headers }; a site's reply is the file of its address
+    sent,
+    send: (address, data, headers) => {
+      sent.push({ address, data, headers });
+      if (!files.has(address)) throw new Error("couldn't reach it");
+      const reply = files.get(address);
+      return typeof reply === "string" ? reply : new TextDecoder().decode(reply);
+    },
     read: (name, asBytes) => {
       if (!files.has(name)) return null;
       const data = files.get(name);

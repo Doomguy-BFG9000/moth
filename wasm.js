@@ -1489,7 +1489,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       return catchable(caughtError) ? 1 : 0;
     },
     caughtValue: () => (caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError))),
-    builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k], turtle)),
+    builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k], turtle, disk)),
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),

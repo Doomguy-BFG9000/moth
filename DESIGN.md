@@ -1718,3 +1718,53 @@ hold them to agreeing.
   (`0.0000001`) and reads that, which is exact; past 10^310 it's Infinity and
   below 10^-330 zero, so a huge exponent costs nothing.
 
+## 39. Sending, and JSON
+
+- **The phrases.** `set reply to send data to "https://..."` POSTs data to a site
+  and gives back the reply as text; `with headers h` adds headers, a dictionary
+  of text, to a `send` or a `read`. `x as json` writes a value as JSON, and
+  `json from text` reads JSON back. `send`, `json` and `from` stay names, as
+  `wait` and `save` do: `send` is the phrase only with a value and `to` after it
+  on its line, and `json` only with `from` after it. A `send` alone on a line is
+  a mistake that says where it goes, as `run program` is: what it gives back is
+  the point of it.
+- **What is sent.** Text goes as it is (text/plain), anything else as JSON
+  (application/json), unless a Content-Type header says otherwise. JSON is what
+  sites and the programs behind them take, so it needed no choosing; writing it
+  is `save`'s own walk over a value, with JSON's brackets, and `save`'s checks:
+  functions, bytes, amounts with units, a list that holds itself, and Infinity
+  and NaN, which JSON has no way to write, are mistakes that say so. Numbers go
+  to 15 digits, as Moth shows them.
+- **What comes back.** `json from` reads with `load`'s own reader, set to JSON:
+  `{...}`, `true`, `false`, `null` and JSON's exponents, `1e5` and `1E5`
+  included. An object becomes a dictionary, not a record: its keys are text that
+  needn't be a name (`"first-name"`, `"1"`), and a field is found by its name in
+  lower case. Half a pair of surrogates becomes U+FFFD, as machine code's text
+  can only hold.
+- **Headers are checked before anything goes.** A name is HTTP's token
+  characters, and a value can't hold a line break, which would start a header
+  of its own: a header can't be used to slip another into a request.
+- **Nothing goes on by itself.** A `send`, and a `read` with headers, don't
+  follow a move to another address: an answer from 300 up is a mistake. So data,
+  and a header like Authorization, only ever go to the address the program names.
+- **The engines.** A builtin that goes online gets the program's disk, whose
+  `send(address, data, headers)` does it: the playground's with
+  XMLHttpRequest, the tests' memoryDisk by keeping what was sent. A run handed
+  over to the VM part way gets the replies it had, and sends nothing twice.
+- **Machine code.** WinHTTP sends on Windows, with the headers as one block and
+  the data as the request's body. On Linux curl does, with `-H` for each header
+  and `--data-binary @-`, the data written into its input, which it reads to the
+  end before it goes online, so a large one can't leave both waiting; and with
+  SIGPIPE ignored, so a curl that stops early can't end the program.
+- **A bug the tests found on the way.** After a hand-over to the VM, each call
+  outside (a read, an answer, a random number, now a send) made fresh is kept
+  too, but the count of what had been got again didn't move past it, so the next
+  call got the one before's answer: two random numbers in a row came out the
+  same. The count now moves past each one.
+- **Tested.** JSON's every corner on all three engines and in machine code, on
+  Windows and Linux, against vm.js; sending through the disk on every engine,
+  and through a hand-over; and machine code against a site of the test's own,
+  which says back what it was sent: JSON and text, the headers, a reply's bytes,
+  a move and a failing site as mistakes, a megabyte sent and 20,000 records sent
+  as JSON and read back, and every mistake in what's asked.
+
