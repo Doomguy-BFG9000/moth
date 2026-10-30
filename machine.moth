@@ -10990,6 +10990,233 @@ to asks_drawing with question
     return yes
 end
 
+# ---------- the runtime: random numbers ----------
+# `random number from 1 to 6` picks as randomWhole in vm.js does, from numbers made the way seeded() in vm.js
+# makes them (mulberry32). They start from MOTH_SEED if it's set to a whole number, so a run can be repeated
+# exactly, as the tests repeat the JavaScript engine's; otherwise from the processor's clock, so each run
+# differs.
+
+to emit_random with a, target
+    # rt_rnd_seed: where the numbers start, in rnd_state
+    set clock to new_label(a)
+    set parse to new_label(a)
+    set seeded to new_label(a)
+    mark(a, "rt_rnd_seed")
+    storei(a, rip("rnd_ready"), 1)
+    if target is "windows"
+        win_enter(a)
+        lea(a, rcx, rip(wide_place(a, "MOTH_SEED")))
+        lea(a, rdx, rip("rnd_buf"))
+        movi(a, r8, 32)
+        call_import(a, "imp_GetEnvironmentVariableW")
+        win_leave(a)
+        mov32_rr(a, rax, rax)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, clock)
+        alui(a, "cmp", rax, 32)
+        jcc(a, cc_ae, clock)
+        lea(a, rsi, rip("rnd_buf"))
+        jmp_to(a, parse)
+    else
+        set next_name to new_label(a)
+        set names_loop to new_label(a)
+        load(a, r8, rip("env_vector"))
+        mark(a, names_loop)
+        load(a, rsi, mem(r8, 0))
+        test_rr(a, rsi, rsi)
+        jcc(a, cc_e, clock)
+        set k to 0
+        for each c in "MOTH_SEED=" as bytes
+            load8(a, rax, mem(rsi, k))
+            alui(a, "cmp", rax, c)
+            jcc(a, cc_ne, next_name)
+            set k to k + 1
+        end
+        alui(a, "add", rsi, 10)
+        jmp_to(a, parse)
+        mark(a, next_name)
+        alui(a, "add", r8, 8)
+        jmp_to(a, names_loop)
+    end
+    # its digits, maybe after a minus, as a whole number that wraps round at 2^32, as `seed >>> 0` does
+    set step to 1
+    if target is "windows"
+        set step to 2
+    end
+    set digits to new_label(a)
+    set digits_done to new_label(a)
+    set plus to new_label(a)
+    mark(a, parse)
+    movi(a, rax, 0)
+    movi(a, rdi, 0) # 1 for a minus
+    movi(a, r9, 0) # how many digits
+    if step is 2
+        load16(a, rdx, mem(rsi, 0))
+    else
+        load8(a, rdx, mem(rsi, 0))
+    end
+    alui(a, "cmp", rdx, 45)
+    jcc(a, cc_ne, digits)
+    movi(a, rdi, 1)
+    alui(a, "add", rsi, step)
+    mark(a, digits)
+    if step is 2
+        load16(a, rdx, mem(rsi, 0))
+    else
+        load8(a, rdx, mem(rsi, 0))
+    end
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, digits_done)
+    alui(a, "sub", rdx, 48)
+    alui(a, "cmp", rdx, 9)
+    jcc(a, cc_a, clock) # not a whole number: the clock instead
+    imul_ri(a, rax, rax, 10)
+    alu(a, "add", rax, rdx)
+    inc_r(a, r9)
+    alui(a, "add", rsi, step)
+    jmp_to(a, digits)
+    mark(a, digits_done)
+    test_rr(a, r9, r9)
+    jcc(a, cc_e, clock)
+    test_rr(a, rdi, rdi)
+    jcc(a, cc_e, plus)
+    unary(a, "neg", rax)
+    mark(a, plus)
+    jmp_to(a, seeded)
+    mark(a, clock)
+    raw(a, list of 0x0F, 0x31) # rdtsc: the processor's count of its cycles
+    alu(a, "xor", rax, rdx)
+    mark(a, seeded)
+    mov32_rr(a, rax, rax)
+    store(a, rip("rnd_state"), rax)
+    ret(a)
+
+    # rt_rnd_next: the next number from 0 up to 1, in xmm0, as seeded() in vm.js gives it; uses rax, rcx, rdx
+    # and xmm1
+    mark(a, "rt_rnd_next")
+    load(a, rax, rip("rnd_state"))
+    alui(a, "add", rax, 0x6D2B79F5)
+    mov32_rr(a, rax, rax)
+    store(a, rip("rnd_state"), rax)
+    mov_rr(a, rcx, rax) # t = imul(a ^ (a >>> 15), a | 1)
+    shifti(a, "shr", rcx, 15)
+    alu(a, "xor", rcx, rax)
+    alui(a, "or", rax, 1)
+    imul_rr(a, rcx, rax)
+    mov32_rr(a, rcx, rcx)
+    mov_rr(a, rdx, rcx) # t ^= t + imul(t ^ (t >>> 7), t | 61)
+    shifti(a, "shr", rdx, 7)
+    alu(a, "xor", rdx, rcx)
+    mov_rr(a, rax, rcx)
+    alui(a, "or", rax, 61)
+    imul_rr(a, rdx, rax)
+    alu(a, "add", rdx, rcx)
+    mov32_rr(a, rdx, rdx)
+    alu(a, "xor", rcx, rdx)
+    mov_rr(a, rdx, rcx) # (t ^ (t >>> 14)) >>> 0, over 2^32
+    shifti(a, "shr", rdx, 14)
+    alu(a, "xor", rcx, rdx)
+    mov32_rr(a, rcx, rcx)
+    cvtsi2sd(a, xmm0, rcx)
+    load_bits(a, xmm1, double_bytes(4294967296))
+    sse_math(a, "/", xmm0, reg_at(xmm1))
+    ret(a)
+
+    # rt_rnd_whole: xmm0 a value: rax 0 and xmm0 the whole number it is to 15 digits, as canon in vm.js has it;
+    # or rax 2, with err_a what it is
+    set whole_ok to new_label(a)
+    set whole_bad to new_label(a)
+    mark(a, "rt_rnd_whole")
+    movsd_store(a, rip("err_a"), xmm0)
+    odd_jump(a, xmm0, whole_bad)
+    finite_jump(a, xmm0, whole_bad)
+    is_whole(a, xmm0, whole_ok)
+    movq_rx(a, rax, xmm0)
+    store(a, rip("rnd_sign"), rax)
+    bit_op(a, "btr", rax, 63)
+    movq_xr(a, xmm0, rax)
+    call_to(a, "rt_canon_double")
+    load(a, rcx, rip("rnd_sign"))
+    shifti(a, "shr", rcx, 63)
+    shifti(a, "shl", rcx, 63)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    movsd_store(a, rip("err_a"), xmm0)
+    is_whole(a, xmm0, whole_ok)
+    mark(a, whole_bad)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, whole_ok)
+    movi(a, rax, 0)
+    ret(a)
+
+    # rt_random: xmm0 the lowest and xmm1 the highest: a whole number from one to the other, each as likely,
+    # in xmm0 with rax 0; or rax 2 (err_why 80 or 81)
+    set low_fine to new_label(a)
+    set not_whole to new_label(a)
+    set none_between to new_label(a)
+    set started to new_label(a)
+    mark(a, "rt_random")
+    movsd_store(a, rip("rnd_high"), xmm1)
+    call_to(a, "rt_rnd_whole")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, not_whole)
+    movsd_store(a, rip("rnd_low"), xmm0)
+    movsd_load(a, xmm0, rip("rnd_high"))
+    call_to(a, "rt_rnd_whole")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, not_whole)
+    movsd_store(a, rip("rnd_high"), xmm0)
+    movsd_load(a, xmm0, rip("rnd_low"))
+    ucomisd(a, xmm0, rip("rnd_high"))
+    jcc(a, cc_a, none_between)
+    load(a, rax, rip("rnd_ready"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, started)
+    call_to(a, "rt_rnd_seed")
+    mark(a, started)
+    call_to(a, "rt_rnd_next") # low + floor(r * (high - low + 1))
+    movsd_load(a, xmm1, rip("rnd_high"))
+    sse_math(a, "-", xmm1, rip("rnd_low"))
+    sse_math(a, "+", xmm1, rip(number_place(a, double_bytes(1))))
+    sse_math(a, "*", xmm0, reg_at(xmm1))
+    floor_sd(a, xmm0, xmm0)
+    sse_math(a, "+", xmm0, rip("rnd_low"))
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_whole)
+    storei(a, rip("err_why"), 80)
+    movi(a, rax, 2)
+    ret(a)
+    mark(a, none_between)
+    load(a, rax, rip("rnd_low"))
+    store(a, rip("err_a"), rax)
+    load(a, rax, rip("rnd_high"))
+    store(a, rip("err_b"), rax)
+    storei(a, rip("err_why"), 81)
+    movi(a, rax, 2)
+    ret(a)
+
+    # rt_why_random: what was wrong, into the builder, as randomWhole in vm.js says it
+    set w81 to new_label(a)
+    mark(a, "rt_why_random")
+    load(a, rax, rip("err_why"))
+    alui(a, "cmp", rax, 81)
+    jcc(a, cc_e, w81)
+    b_text(a, "'random number from' needs whole numbers, not ")
+    load(a, rax, rip("err_a"))
+    jmp_to(a, "rt_described")
+    mark(a, w81)
+    b_text(a, "there is no number from ")
+    load(a, rax, rip("err_a"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_b_value")
+    b_text(a, " to ")
+    load(a, rax, rip("err_b"))
+    movi(a, rdx, 0)
+    jmp_to(a, "rt_b_value")
+end
+
 # ---------- the runtime: the system ----------
 # rt_write (rdi: 1 for the output, 2 for mistakes; rsi and rdx: the bytes) and rt_exit (rcx: the exit
 # code), and where the program starts: on Windows through kernel32.dll, on Linux by system calls.
@@ -11232,11 +11459,21 @@ to emit_runtime with st
     if uses_app of st
         emit_app_setup(a)
     end
+    set wanted to empty list # the functions of other DLLs, or more of kernel32.dll's, the runtime calls
     if windowed
         emit_gui(a, name of st)
         emit_gui_keys(a)
-        set more_imports of a to gui_imports
+        for each group in gui_imports
+            add group to wanted
+        end
     end
+    if uses_random of st
+        emit_random(a, target of st)
+        if target of st is "windows"
+            add (list of "KERNEL32.dll", (list of "GetEnvironmentVariableW")) to wanted
+        end
+    end
+    set more_imports of a to wanted
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
     pad_to(ro, 8)
     rodata_here(a, "pow10")
@@ -11258,6 +11495,12 @@ to emit_runtime with st
         reserve(a, name, 8, 8)
     end
     reserve(a, "gc_free", 16 * length of gc_sizes, 8)
+    if uses_random of st # never values either
+        for each name in list of "rnd_state", "rnd_ready", "rnd_low", "rnd_high", "rnd_sign"
+            reserve(a, name, 8, 8)
+        end
+        reserve(a, "rnd_buf", 64, 16)
+    end
     if windowed # the window's own, which are never values
         for each name in list of "gui_scale", "gui_argb", "gui_last", "gui_brush", "gui_pen", "gui_half", "gui_t0",
             "gui_t1", "gui_font", "gui_family", "gui_units", "gui_ascent", "gui_format", "gui_started", "gui_token",
@@ -13935,6 +14178,19 @@ to emit_file_why with a
     ret(a)
 end
 
+# `random number from 1 to 6`: into xmm0
+to gen_random with fc, e
+    set a to a of fc
+    set uses_random of st of fc to yes
+    gen_expr(fc, left of e)
+    push_value(fc)
+    gen_expr(fc, right of e)
+    movapd(a, xmm1, xmm0)
+    pop_value(fc, xmm0)
+    call_to(a, "rt_random")
+    why_stub(fc, at of e, "rt_why_random")
+end
+
 # `read`, `ask` and `arguments`, whose values come from outside the program: into xmm0
 to gen_outside with fc, e
     set a to a of fc
@@ -14409,6 +14665,22 @@ to emit_run_program with a, target
         call_to(a, "rt_b_reset") # the command line: the program, then each argument, quoted as it needs
         load(a, rax, rip("err_file"))
         call_to(a, "rt_b_arg")
+        set slash_loop to new_label(a) # its forward slashes turned to backslashes, which Windows needs to find a program in a folder
+        set slashes_done to new_label(a)
+        load(a, rsi, rip("b_ptr"))
+        load(a, rcx, rip("b_len"))
+        mark(a, slash_loop)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, slashes_done)
+        dec_r(a, rcx)
+        mov_rr(a, rdx, rsi)
+        alu(a, "add", rdx, rcx)
+        load8(a, rax, mem(rdx, 0))
+        alui(a, "cmp", rax, 47)
+        jcc(a, cc_ne, slash_loop)
+        store8i(a, mem(rdx, 0), 92)
+        jmp_to(a, slash_loop)
+        mark(a, slashes_done)
         movi(a, rbx, 0)
         mark(a, each_arg)
         alu(a, "cmp", rbx, r13)
@@ -15095,7 +15367,8 @@ to new_state with a, program_name, files, source, target
     return record with a a, name program_name, sources sources, lines empty dictionary, sites empty dictionary,
         calls empty list, call_places empty dictionary, functions empty dictionary, fn_slots empty dictionary,
         main_scope nothing, target target, all_fns empty list, pending empty list, fn_records empty dictionary,
-        line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no
+        line_entries empty dictionary, uses_case no, allowed nothing, uses_drawing no, uses_app no, uses_pad no,
+        uses_random no
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -16398,6 +16671,8 @@ to gen_expr with fc, e
         why_stub(fc, at of e, "rt_why_builtin")
     else if what is "read" or what is "ask" or what is "arguments"
         gen_outside(fc, e)
+    else if what is "random"
+        gen_random(fc, e)
     else
         not_yet_node(e)
     end
@@ -16794,7 +17069,9 @@ to windows_file with a
     for each group in more_imports of a
         if item 1 of group is "KERNEL32.dll"
             for each fn_name in item 2 of group
-                add fn_name to names
+                if fn_name is not in names
+                    add fn_name to names
+                end
             end
         else
             add group to others

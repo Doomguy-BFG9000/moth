@@ -780,8 +780,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   dictionaries JavaScript's engine, which has years of tuning behind it, is
   faster. It has no limit on its steps, so a loop that never ends runs until
   it's stopped.
-- `moth build` takes only part of Moth so far: no units, tables,
-  `random number` or `draw chart of`; anything else stops with a
+- `moth build` takes only part of Moth so far: no units, tables or
+  `draw chart of`; anything else stops with a
   mistake that says it can't become machine code yet. What it makes can't go
   online either: reading a site it may read says it couldn't reach it.
   It makes programs for x86-64 Windows and Linux, not for Macs.
