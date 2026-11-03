@@ -389,6 +389,41 @@ test("moth.exe debug runs a program with the debugger it was built with, passing
 // Packages (DESIGN §60): Git repositories made here, a package that uses a file of its own and another that
 // uses it, fetched, run, updated to a new commit, fetched again at theirs, and taken away, by moth.exe
 const gitHere = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+// The package index: moth search lists an index's packages, or those with every word asked for, and moth add
+// takes one by its name there; a name the index hasn't, an index that isn't there and one that isn't JSON say so
+test("moth search lists a package index, and moth add takes a package by its name there", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "indexing");
+  mkdirSync(root, { recursive: true });
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const source = join(root, "greeter");
+  mkdirSync(source);
+  writeFileSync(join(source, "greeter.moth"), 'to greet with who\n    return "Hello, " + who + "!"\nend\n');
+  for (const args of [["init", "-q"], ["add", "."], ["commit", "-qm", "one"]]) {
+    assert.equal(spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", ...args], { cwd: source }).status, 0);
+  }
+  const app = join(root, "app");
+  mkdirSync(app);
+  writeFileSync(join(app, "index.json"), JSON.stringify({ packages: { greeter: { repository: source.replace(/\\/g, "/"), about: "Says hello to anyone" },
+    zipper: { repository: "github.com/example/zipper", about: "Squeezes files" } } }));
+  assert.deepEqual(moth(app, "search", "--index", "index.json"), ["greeter  Says hello to anyone\nzipper   Squeezes files\n", "", 0]);
+  assert.deepEqual(moth(app, "search", "HELLO", "anyone", "--index", "index.json"), ["greeter  Says hello to anyone\n", "", 0]);
+  assert.deepEqual(moth(app, "search", "nothing", "--index", "index.json"), ["no package in the index has nothing\n", "", 0]);
+  const added = moth(app, "add", "greeter", "--index", "index.json");
+  assert.match(added[0], /^added greeter at [0-9a-f]{7}, from .*greeter\n$/);
+  writeFileSync(join(app, "p.moth"), 'use the package "greeter"\nsay greet("Sam")\n');
+  assert.deepEqual(moth(app, "run", "p.moth"), ["Hello, Sam!\n", "", 0]);
+  assert.deepEqual(moth(app, "add", "nope", "--index", "index.json"), ["", "moth: the package index has no package called nope: moth search lists them\n", 1]);
+  assert.deepEqual(moth(app, "search", "--index", "nowhere.json"), ["", "moth: can't read the package index at nowhere.json: there is no file called 'nowhere.json'\n", 1]);
+  writeFileSync(join(app, "bad.json"), "{ not json");
+  const bad = moth(app, "search", "--index", "bad.json");
+  assert.deepEqual([bad[0], bad[2]], ["", 1]);
+  assert.match(bad[1], /^moth: the package index at bad\.json isn't one: /);
+});
+
 test("moth add, update, get and remove keep packages/ and moth.packages, and use the package finds them", { skip: skip || (gitHere ? false : "there's no git") }, () => {
   const { dir, exe } = mothExe();
   const root = join(dir, "packaging");

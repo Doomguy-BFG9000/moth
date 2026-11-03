@@ -23,7 +23,7 @@ use "stdlib.moth" as standard # the libraries a program anywhere can use (see cl
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  get fetches every package listed, at its commit; update moves them, or one, to their newest; remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest; remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -1652,6 +1652,128 @@ to cli_remove_folder with cli_path
     end
 end
 
+# ---------- the package index ----------
+# A JSON file of the packages people have made, each by its name: where it comes from, as moth add takes it,
+# and what it's for: {"packages": {"thing": {"repository": "github.com/someone/thing", "about": "..."}}}. This
+# one, unless --index gives another, an address or a file.
+
+set cli_index_default to "https://raw.githubusercontent.com/samyyy2423/moth-packages/main/index.json"
+
+# the index a command was given with --index, and what else it was given
+to cli_index_flag with cli_all
+    set cli_index to cli_index_default
+    set cli_others to empty list
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_all
+        if item cli_k of cli_all is "--index" and cli_k is less than length of cli_all
+            set cli_index to item (cli_k + 1) of cli_all
+            add 2 to cli_k
+        else
+            add item cli_k of cli_all to cli_others
+            add 1 to cli_k
+        end
+    end
+    return record with index cli_index, rest cli_others
+end
+
+# whether what moth add was given is a name alone, for the index: no folder, address or site in it, and no
+# folder of that name here
+to cli_index_name with cli_given
+    for each cli_c in cli_given
+        if cli_c is "/" or cli_c is "\\" or cli_c is ":"
+            return no
+        end
+    end
+    return cli_package_name(cli_given) and not cli_folder_here(cli_given)
+end
+
+# the index's packages, each a record of its name, source and about, by name; nothing, said, if it can't be read
+to cli_read_index with cli_index
+    set cli_text to nothing
+    try
+        if cli_first(cli_index + "        ", 8) is "https://" or cli_first(cli_index + "       ", 7) is "http://"
+            set cli_got to run program "curl" with (list of "-fsSL", cli_index) keeping its output
+            if code of cli_got is not 0
+                say "moth: can't read the package index at " + cli_index + ": " + cli_trimmed(mistakes of cli_got) to the error output
+                return nothing
+            end
+            set cli_text to output of cli_got
+        else
+            set cli_text to read cli_index
+        end
+    if it fails with cli_why
+        say "moth: can't read the package index at " + cli_index + ": " + cli_why to the error output
+        return nothing
+    end
+    set cli_made to empty list
+    try
+        set cli_packages to item "packages" of json from cli_text
+        for each cli_name in cli_packages
+            set cli_entry to item cli_name of cli_packages
+            set cli_about to ""
+            if "about" is in cli_entry
+                set cli_about to item "about" of cli_entry
+            end
+            add record with name cli_name, source item "repository" of cli_entry, about "" + cli_about to cli_made
+        end
+    if it fails with cli_why
+        say "moth: the package index at " + cli_index + " isn't one: " + cli_why to the error output
+        return nothing
+    end
+    return cli_made
+end
+
+# the index's package of this name, or nothing, said
+to cli_index_find with cli_name, cli_index
+    set cli_all to cli_read_index(cli_index)
+    if cli_all is nothing
+        return nothing
+    end
+    for each cli_one in cli_all
+        if name of cli_one is cli_name
+            return cli_one
+        end
+    end
+    say "moth: the package index has no package called " + cli_name + ": moth search lists them" to the error output
+    return nothing
+end
+
+# `moth search [words]`: the index's packages that have every word in their name or what they're for
+to cli_search with cli_words, cli_index
+    set cli_all to cli_read_index(cli_index)
+    if cli_all is nothing
+        return 1
+    end
+    set cli_shown to 0
+    set cli_widest to 0
+    for each cli_one in cli_all
+        if length of name of cli_one is greater than cli_widest
+            set cli_widest to length of name of cli_one
+        end
+    end
+    for each cli_one in cli_all in order by name
+        set cli_seen to lowercase of (name of cli_one + " " + about of cli_one)
+        set cli_fits to yes
+        for each cli_word in cli_words
+            if position of lowercase of cli_word in cli_seen is 0
+                set cli_fits to no
+            end
+        end
+        if cli_fits
+            say name of cli_one + cli_spaces(cli_widest - length of name of cli_one + 2) + about of cli_one
+            add 1 to cli_shown
+        end
+    end
+    if cli_shown is 0
+        if length of cli_words is 0
+            say "the package index has no packages yet"
+        else
+            say "no package in the index has " + join cli_words with " "
+        end
+    end
+    return 0
+end
+
 # where a package comes from, as git takes it: github.com/someone/thing is https://github.com/someone/thing
 to cli_package_source with cli_given
     for each cli_site in list of "github.com/", "gitlab.com/", "codeberg.org/", "bitbucket.org/"
@@ -1875,15 +1997,31 @@ to cli_list_packages
     return 0
 end
 
-# `moth add`, `get`, `update`, `remove` and `packages`, with what follows them
-to cli_package_command with cli_command, cli_rest
+# `moth add`, `get`, `update`, `remove`, `packages` and `search`, with what follows them
+to cli_package_command with cli_command, cli_all
+    set cli_flagged to cli_index_flag(cli_all)
+    set cli_rest to rest of cli_flagged
     set cli_n to length of cli_rest
+    if cli_command is "search"
+        return cli_search(cli_rest, index of cli_flagged)
+    end
     if cli_command is "add" and (cli_n is 1 or cli_n is 2)
         set cli_named to nothing
         if cli_n is 2
             set cli_named to item 2 of cli_rest
         end
-        return cli_add(item 1 of cli_rest, cli_named)
+        set cli_given to item 1 of cli_rest
+        if cli_index_name(cli_given) # a name alone: the index's
+            set cli_found to cli_index_find(cli_given, index of cli_flagged)
+            if cli_found is nothing
+                return 1
+            end
+            if cli_named is nothing
+                set cli_named to cli_given
+            end
+            set cli_given to source of cli_found
+        end
+        return cli_add(cli_given, cli_named)
     end
     if cli_command is "get" and cli_n is 0
         return cli_get()
@@ -2487,7 +2625,7 @@ to cli_main
         end
         stop the program with cli_shell(cli_shell_flags)
     end
-    if cli_command is "add" or cli_command is "get" or cli_command is "update" or cli_command is "remove" or cli_command is "packages"
+    if cli_command is "add" or cli_command is "get" or cli_command is "update" or cli_command is "remove" or cli_command is "packages" or cli_command is "search"
         set cli_rest to empty list
         for each cli_k from 2 to length of cli_given
             add item cli_k of cli_given to cli_rest

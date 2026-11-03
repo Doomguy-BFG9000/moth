@@ -3294,3 +3294,25 @@ hold them to agreeing.
   after it, run twice to the same file, with nothing left behind; and the
   shell running a list built from a list once.
 
+## 78. A package index
+
+- **Why.** Python has PyPI: `pip install requests` finds a package by its
+  name. Moth's packages (§60) are Git repositories, fetched by where they
+  are.
+- **What it is.** An index is a JSON file: each package's name, its
+  repository as `moth add` takes it, and a line about it. `moth search
+  [words]` lists its packages, or those with every word in their name or
+  line, in no case; `moth add greeter` takes the index's greeter. A name
+  alone (no folder, address or site, and no folder of that name here) is the
+  index's; anything else is as it was. `--index` gives another, an address
+  or a file.
+- **Where it is.** By default
+  raw.githubusercontent.com/samyyy2423/moth-packages/main/index.json, read
+  with curl, which Windows 10 and later and Linux have, so moth needs no new
+  permission: a package is added there by a pull request to that
+  repository. Until it's made, the default address answers 404, which `moth
+  search` says.
+- **Tested.** Through moth.exe, with an index in a file: every package, words
+  in any case, none, a package added by its name and used, a name the index
+  hasn't, an index that isn't there, and one that isn't JSON.
+

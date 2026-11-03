@@ -804,6 +804,8 @@ moth debug hello.moth Sam 3              the same, stopping at its first line fo
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
+moth search hello                        the package index's packages with "hello" in their name or what they're for
+moth add greeter                         a package by its name in the index
 moth get                                 fetch every package moth.packages lists, at its commit (on another computer, say)
 moth update                              move the packages to their newest commits (or moth update json, one)
 moth remove json                         take a package away; moth packages lists them
