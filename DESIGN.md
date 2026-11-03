@@ -3123,3 +3123,68 @@ hold them to agreeing.
   comment. 400 gzip files damaged at random each stop with a mistake, or,
   where the damage is somewhere gzip doesn't look, read right: none gives
   wrong bytes.
+
+## 72. Sockets
+
+- **Why.** Python's `socket` is how a program talks to any other over a
+  network: its own protocols, a database's, a game's. Moth had `read` and
+  `send` for the web, and server.moth for answering it.
+- **What it is.** tools/sockets.moth, on the system's own sockets through
+  `use the library` (ws2_32 on Windows, the C library on Linux), so a
+  program `moth build` makes, with `--allow-libraries`, can use it.
+  Connections out (`connect`) and in (`listen`, `listen_everywhere`,
+  `accept`), each a record with its handle and `peer`, the host and port at
+  the other end; `send` sends all it's given; `receive` gives what has come,
+  up to so many bytes, and no bytes once the other end has closed;
+  `receive_line` a line, without its `\n` or `\r\n`; `receive_all` until the
+  end; `finish_sending` (shutdown) ends the other end's `receive_all` while
+  this end can still receive; `wait_at_most` makes a receive that waits
+  longer fail. UDP: `open_messages`, `send_message`, `receive_message`.
+- **Names** are looked up with getaddrinfo, IPv4 only, so the hosts file and
+  DNS both work. What it gives is a list C made: its first entry is copied
+  into the program's bytes with memcpy, and the address taken from where
+  each system keeps it (Linux puts ai_addr before ai_canonname, Windows
+  after), then the list is freed.
+- **With tasks.** A library's function lets the turn go while it waits
+  (§62), so a task can wait in `receive` while the program goes on, and a
+  server can give each connection a task of its own.
+- **Not added.** TLS for sockets: see §73 for HTTPS. IPv6, and `select`.
+- **Tested.** In machine code on Windows and Linux: a task of the program's
+  own connecting to it by name, lines with `\r\n` and without an end, a reply
+  after `finish_sending`, a message and where it came from, waiting too long
+  for one, a port with nothing on it, a name no DNS has, a port past 65535,
+  and 300 KB through `listen_everywhere`, read back the same.
+
+## 73. HTTPS for server.moth
+
+- **Why.** A server a browser reaches over the internet needs TLS; Python's
+  `http.server` gets it from the `ssl` module, which is OpenSSL.
+- **What it does.** `serve_secure(port, answer, certificate, key)` (and
+  `serve_secure_everywhere`) answers as `serve` does, after a TLS handshake
+  with each connection, through OpenSSL 3 by `use the library`: the
+  certificate (and its chain) and key from PEM files, then `SSL_accept`,
+  `SSL_read` and `SSL_write` where `recv` and `send` were. A connection that
+  can't agree on TLS (one that doesn't trust the certificate) is said to the
+  error output, and the server goes on. A certificate or key it can't use,
+  or no OpenSSL at all, is a mistake that says which.
+- **Where OpenSSL is.** Linux has libssl.so.3. Windows has none of its own:
+  an MSVC build's libssl-3.dll and libcrypto-3.dll (Python's, in its DLLs
+  folder) or libssl-3-x64.dll and libcrypto-3-x64.dll (the Win64 OpenSSL
+  installer's) go beside the program. Git for Windows' own, built with
+  MinGW, load but fail in a program of Moth's: its random numbers can't be
+  seeded there, and then it crashes, though the same calls work from
+  Python; that's not yet understood.
+- **A library beside the program** now finds what it needs from System32
+  too: the second place a name is looked for was LoadLibraryExW with
+  LOAD_LIBRARY_SEARCH_APPLICATION_DIR, which looks for the library's own
+  libraries in the program's folder alone, so Python's libssl-3.dll couldn't
+  find VCRUNTIME140.dll; it is LOAD_LIBRARY_SEARCH_DEFAULT_DIRS now.
+- **Bodies in chunks.** HTTP/1.1 lets a body come as chunks, each its length
+  in hex, then its bytes, until one of none, with trailers after it, and
+  servers must read it: Node sends a body it's given in pieces that way.
+  server.moth does now, over HTTP and HTTPS; chunks it can't read are 400.
+- **Not added.** TLS for sockets.moth's own connections, and HTTP/2.
+- **Tested.** In machine code on Windows and Linux, with a certificate the
+  test makes: a page, a body in chunks and one with a length, a page that
+  isn't there, a client that doesn't trust the certificate, and a
+  certificate and a key it can't use.

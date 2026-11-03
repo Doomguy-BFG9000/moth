@@ -332,6 +332,15 @@ bytes and dictionaries:
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
   `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
   on every engine, the playground's too, and test themselves.
+- [`server.moth`](tools/server.moth) answers with HTTPS too:
+  `serve_secure(443, answer, "cert.pem", "key.pem")`, through OpenSSL 3
+  (Linux's own; on Windows, an MSVC build's two DLLs beside the program,
+  such as Python's), and reads bodies sent in chunks.
+- [`sockets.moth`](tools/sockets.moth) talks over a network as Python's
+  `socket` does: `connect("example.com", 80)`, `listen(9000)` and `accept`,
+  `send`, `receive`, `receive_line`, `receive_all`, `finish_sending`,
+  `wait_at_most` a time, and UDP messages, on Windows' and Linux's own
+  sockets. With tasks, one program can talk to many at once.
 - [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`

@@ -19,6 +19,12 @@
 #
 # serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. Requests are
 # answered one at a time; stop_serving() ends serve() after the one it's answering. Built with --allow-libraries.
+#
+# serve_secure(443, answer, "cert.pem", "key.pem") answers with HTTPS instead, through OpenSSL 3, with a
+# certificate (and the chain after it) and its key, each in a PEM file; serve_secure_everywhere() as well. Linux
+# has OpenSSL; on Windows, OpenSSL's two DLLs go beside the program: libssl-3.dll and libcrypto-3.dll, as Python
+# has them in its DLLs folder, or libssl-3-x64.dll and libcrypto-3-x64.dll, as the Win64 OpenSSL installer has
+# them. (Git for Windows' own, built with MinGW, don't work in a program of Moth's.)
 
 use the library "ws2_32"
     WSAStartup(a whole number, bytes) gives a whole number
@@ -43,6 +49,20 @@ end
 use the library "kernel32"
     GetTickCount() gives a whole number
 end
+use the library "libssl-3" or "libssl-3-x64" or "ssl"
+    TLS_server_method() gives a pointer
+    SSL_CTX_new(a pointer) gives a pointer
+    SSL_CTX_use_certificate_chain_file(a pointer, text) gives a whole number
+    SSL_CTX_use_PrivateKey_file(a pointer, text, a whole number) gives a whole number
+    SSL_CTX_free(a pointer)
+    SSL_new(a pointer) gives a pointer
+    SSL_set_fd(a pointer, a whole number) gives a whole number
+    SSL_accept(a pointer) gives a whole number
+    SSL_read(a pointer, bytes, a whole number) gives a whole number
+    SSL_write(a pointer, bytes, a whole number) gives a whole number
+    SSL_shutdown(a pointer) gives a whole number
+    SSL_free(a pointer)
+end
 
 # which system it is: a library every Windows has, which no Linux has
 set web_windows to yes
@@ -52,6 +72,8 @@ if it fails
     set web_windows to no
 end
 set web_running to no
+set web_secure to nothing # OpenSSL's context, while answering with HTTPS
+set web_session to nothing # its connection, for the request being answered
 set web_cr to (list of 13) as bytes as text
 set web_line to web_cr + "\n"
 set web_most to 16777216 # the most a request can be, in bytes
@@ -79,20 +101,78 @@ to stop_serving
     set web_running to no
 end
 
+# with HTTPS: the certificate's PEM file (the chain after it, if it has one) and its key's
+to serve_secure with port, handler, certificate, key
+    web_serve_secure(no, port, handler, certificate, key)
+end
+
+to serve_secure_everywhere with port, handler, certificate, key
+    web_serve_secure(yes, port, handler, certificate, key)
+end
+
+to web_serve_secure with everywhere, port, handler, certificate, key
+    set context to nothing
+    try
+        set context to SSL_CTX_new(TLS_server_method())
+    if it fails
+        fail with "HTTPS needs OpenSSL 3: on Linux, its libssl; on Windows, libssl-3.dll and libcrypto-3.dll (or the -x64 ones) beside the program, as Python has them in its DLLs folder"
+    end
+    if SSL_CTX_use_certificate_chain_file(context, certificate) is not 1
+        SSL_CTX_free(context)
+        fail with "can't use the certificate in " + certificate + ": it isn't there, or isn't one in PEM"
+    end
+    if SSL_CTX_use_PrivateKey_file(context, key, 1) is not 1
+        SSL_CTX_free(context)
+        fail with "can't use the key in " + key + ": it isn't there, isn't one in PEM, or isn't the certificate's"
+    end
+    set web_secure to context
+    try
+        web_serve(everywhere, port, handler)
+    if it fails with why
+        set web_secure to nothing
+        SSL_CTX_free(context)
+        fail with why
+    end
+    set web_secure to nothing
+    SSL_CTX_free(context)
+end
+
 to web_serve with everywhere, port, handler
     set listener to web_listener(everywhere, port)
     set host to "127.0.0.1"
     if everywhere
         set host to "0.0.0.0"
     end
-    say "listening on http://" + host + ":" + port + "/" to the error output
+    set scheme to "http"
+    if web_secure is not nothing
+        set scheme to "https"
+    end
+    say "listening on " + scheme + "://" + host + ":" + port + "/" to the error output
     set web_running to yes
     repeat while web_running
         set client to web_accept(listener)
-        try
-            web_answer(client, handler)
-        if it fails with why # a request it couldn't read, or a connection gone
-            say "couldn't answer a request: " + why to the error output
+        set agreed to yes
+        if web_secure is not nothing # TLS first: the browser and the server agree on keys
+            set web_session to SSL_new(web_secure)
+            SSL_set_fd(web_session, client)
+            if SSL_accept(web_session) is not 1
+                set agreed to no
+                say "a connection that couldn't agree on TLS with the server" to the error output
+            end
+        end
+        if agreed
+            try
+                web_answer(client, handler)
+            if it fails with why # a request it couldn't read, or a connection gone
+                say "couldn't answer a request: " + why to the error output
+            end
+        end
+        if web_session is not nothing
+            if agreed
+                SSL_shutdown(web_session)
+            end
+            SSL_free(web_session)
+            set web_session to nothing
         end
         web_close(client)
     end
@@ -137,6 +217,9 @@ to web_accept with listener
 end
 
 to web_receive with client, room
+    if web_session is not nothing
+        return SSL_read(web_session, room, length of room)
+    end
     if web_windows
         return win_recv(client, room, length of room, 0)
     end
@@ -145,6 +228,9 @@ end
 
 to web_send with client, sent
     set at to 0
+    if web_session is not nothing
+        return SSL_write(web_session, sent, length of sent)
+    end
     if web_windows
         return win_send(client, sent, length of sent, 0)
     end
@@ -185,6 +271,8 @@ to web_answer with client, handler
     set room to 65536 bytes
     set head_end to 0
     set wanted to -1 # the whole request's bytes, once the headers say how long its body is
+    set chunked to no # the body in chunks, each with its length first, until one of none
+    set body to nothing
     repeat while wanted is -1 or used is less than wanted
         set got to web_receive(client, room)
         if got is at most 0
@@ -207,19 +295,40 @@ to web_answer with client, handler
         if head_end is 0
             set head_end to web_head_end(whole, used)
             if head_end is not 0
-                set wanted to head_end + 3 + web_body_length(web_part(whole, 1, head_end - 1) as text)
+                set head to web_part(whole, 1, head_end - 1) as text
+                if web_is_chunked(head)
+                    set chunked to yes
+                else
+                    set wanted to head_end + 3 + web_body_length(head)
+                end
             else if used is greater than 65536
                 web_reply(client, record with status 431, body "The request's headers are too long")
                 return nothing
             end
         end
-        if wanted is greater than web_most
+        if chunked
+            set found to web_chunks(whole, head_end + 4, used)
+            if found is not nothing
+                if not ok of found
+                    web_reply(client, record with status 400, body "The request's chunks can't be read")
+                    return nothing
+                end
+                set body to body of found
+                set wanted to used
+            end
+        end
+        if wanted is greater than web_most or used is greater than web_most
             web_reply(client, record with status 413, body "The request is too big")
             return nothing
         end
     end
-    set request to web_request(web_part(whole, 1, head_end - 1) as text, web_part(whole, head_end + 4,
-        used - head_end - 3))
+    if body is nothing
+        set body to web_part(whole, head_end + 4, used - head_end - 3)
+        if chunked # it ended before its last chunk
+            set body to 0 bytes
+        end
+    end
+    set request to web_request(web_part(whole, 1, head_end - 1) as text, body)
     set answer to nothing
     try
         set answer to handler(request)
@@ -235,6 +344,81 @@ to web_body_length with head
         set parts to split one by ":"
         if length of parts is at least 2 and lowercase of item 1 of parts is "content-length"
             return number of item 2 of parts
+        end
+    end
+    return 0
+end
+
+# whether the headers say the body comes in chunks
+to web_is_chunked with head
+    for each one in split head by web_line
+        set colon to position of ":" in one
+        if colon is greater than 0 and lowercase of web_trim(web_text_part(one, 1, colon - 1)) is "transfer-encoding"
+            return position of "chunked" in lowercase of one is greater than 0
+        end
+    end
+    return no
+end
+
+# A body in chunks, from byte `from` of the `used` bytes come so far: nothing if its last chunk hasn't come
+# yet, else a record of whether it could be read and the body's bytes. Each chunk is its length in hex (and
+# anything after a ;), a line end, its bytes, a line end; the last has length 0, then lines of trailers,
+# which are passed over, until an empty one.
+to web_chunks with b, from, used
+    set made to empty list
+    set at to from
+    repeat while yes
+        set line_end to web_line_end(b, at, used)
+        if line_end is 0
+            return nothing
+        end
+        set size to 0
+        set digits to 0
+        set k to at
+        repeat while k is less than line_end and byte k of b is not 59 # up to a ;
+            set c to byte k of b
+            if (c is at least 48 and c is at most 57) or (c is at least 65 and c is at most 70) or (c is at least 97 and c is at most 102)
+                set size to size * 16 + web_hex(c)
+                set digits to digits + 1
+            else if c is not 32 and c is not 9
+                return record with ok no, body nothing
+            end
+            set k to k + 1
+        end
+        if digits is 0 or size is greater than web_most
+            return record with ok no, body nothing
+        end
+        set at to line_end + 2
+        if size is 0
+            repeat while yes # trailers, to an empty line
+                set line_end to web_line_end(b, at, used)
+                if line_end is 0
+                    return nothing
+                end
+                if line_end is at
+                    return record with ok yes, body made as bytes
+                end
+                set at to line_end + 2
+            end
+        end
+        if at + size + 1 is greater than used
+            return nothing
+        end
+        for each k from at to at + size - 1
+            add byte k of b to made
+        end
+        if byte (at + size) of b is not 13 or byte (at + size + 1) of b is not 10
+            return record with ok no, body nothing
+        end
+        set at to at + size + 2
+    end
+end
+
+# where the next \r\n is, from byte `from`, or 0 if it hasn't come yet
+to web_line_end with b, from, used
+    for each k from from to used - 1
+        if byte k of b is 13 and byte (k + 1) of b is 10
+            return k
         end
     end
     return 0

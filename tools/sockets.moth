@@ -1,0 +1,449 @@
+# Talking to other programs over a network, as Python's socket module does, on Windows and Linux: connections
+# out and in (TCP), and messages (UDP), with IPv4 addresses or names. A program `moth build` makes can use it,
+# built with --allow-libraries.
+#
+#   use "sockets.moth" as net
+#   set c to net's connect("example.com", 80)
+#   set line_end to (list of 13, 10) as bytes as text
+#   net's send(c, "GET / HTTP/1.0" + line_end + "Host: example.com" + line_end + line_end)
+#   say net's receive_all(c) as text
+#   net's close(c)
+#
+#   set listener to net's listen(9000)        # this computer alone; listen_everywhere(9000) for every network
+#   set c to net's accept(listener)           # waits for one; peer of c says who: (record with host ..., port ...)
+#   say net's receive(c, 1024) as text        # up to 1024 bytes, as soon as some come; none once it's closed
+#   net's wait_at_most(c, 5000)               # then a receive that waits longer than 5 seconds fails
+#   net's finish_sending(c)                   # no more to send: the other end's receive_all ends
+#
+#   set u to net's open_messages(9001)        # UDP, on a port of its own (0 for any)
+#   net's send_message(u, "127.0.0.1", 9002, "hi")
+#   set m to net's receive_message(u, 1500)   # (record with data ..., host ..., port ...)
+#
+# Each fails with a `fail with` that says why when the network does: catch it with `try`.
+
+use the library "ws2_32"
+    WSAStartup(a whole number, bytes) gives a whole number
+    "socket" as win_socket(a whole number, a whole number, a whole number) gives a pointer
+    "connect" as win_connect(a pointer, bytes, a whole number) gives a whole number
+    "bind" as win_bind(a pointer, bytes, a whole number) gives a whole number
+    "listen" as win_listen(a pointer, a whole number) gives a whole number
+    "accept" as win_accept(a pointer, bytes, bytes) gives a pointer
+    "recv" as win_recv(a pointer, bytes, a whole number, a whole number) gives a whole number
+    "send" as win_send(a pointer, bytes, a whole number, a whole number) gives a whole number
+    "sendto" as win_send_to(a pointer, bytes, a whole number, a whole number, bytes, a whole number) gives a whole number
+    "recvfrom" as win_receive_from(a pointer, bytes, a whole number, a whole number, bytes, bytes) gives a whole number
+    "setsockopt" as win_option(a pointer, a whole number, a whole number, bytes, a whole number) gives a whole number
+    "getsockname" as win_own_name(a pointer, bytes, bytes) gives a whole number
+    "getaddrinfo" as win_lookup(text, a pointer, bytes, bytes) gives a whole number
+    "freeaddrinfo" as win_free_lookup(a pointer)
+    "shutdown" as win_shutdown(a pointer, a whole number) gives a whole number
+    closesocket(a pointer) gives a whole number
+end
+use the library "c"
+    "socket" as unix_socket(a whole number, a whole number, a whole number) gives a whole number
+    "connect" as unix_connect(a whole number, bytes, a whole number) gives a whole number
+    "bind" as unix_bind(a whole number, bytes, a whole number) gives a whole number
+    "listen" as unix_listen(a whole number, a whole number) gives a whole number
+    "accept" as unix_accept(a whole number, bytes, bytes) gives a whole number
+    "recv" as unix_recv(a whole number, bytes, a long whole number, a whole number) gives a long whole number
+    "send" as unix_send(a whole number, bytes, a long whole number, a whole number) gives a long whole number
+    "sendto" as unix_send_to(a whole number, bytes, a long whole number, a whole number, bytes, a whole number) gives a long whole number
+    "recvfrom" as unix_receive_from(a whole number, bytes, a long whole number, a whole number, bytes, bytes) gives a long whole number
+    "setsockopt" as unix_option(a whole number, a whole number, a whole number, bytes, a whole number) gives a whole number
+    "getsockname" as unix_own_name(a whole number, bytes, bytes) gives a whole number
+    "getaddrinfo" as unix_lookup(text, a pointer, bytes, bytes) gives a whole number
+    "freeaddrinfo" as unix_free_lookup(a pointer)
+    "shutdown" as unix_shutdown(a whole number, a whole number) gives a whole number
+    "close" as unix_close(a whole number) gives a whole number
+end
+use the library "msvcrt" or "c"
+    "memcpy" as net_copy(bytes, a pointer, a long whole number) gives a pointer
+end
+use the library "kernel32"
+    GetTickCount() gives a whole number
+end
+
+# which system it is: a library every Windows has, which no Linux has
+set net_windows to yes
+try
+    GetTickCount()
+if it fails
+    set net_windows to no
+end
+set net_started to no
+
+to net_start
+    if net_windows and not net_started
+        WSAStartup(514, 408 bytes)
+        set net_started to yes
+    end
+end
+
+# ---------- addresses ----------
+
+# sockaddr_in: AF_INET, the port high byte first, then the 4 bytes of the address
+to net_address with host_bytes, port
+    if not (port is divisible by 1) or port is less than 0 or port is greater than 65535
+        fail with "a port is a whole number from 0 to 65535, not " + port
+    end
+    set address to 16 bytes
+    set byte 1 of address to 2
+    set byte 3 of address to (shift port right by 8) bit and 255
+    set byte 4 of address to port bit and 255
+    for each k from 1 to 4
+        set byte (4 + k) of address to item k of host_bytes
+    end
+    return address
+end
+
+# "93.184.216.34" as its 4 numbers, or nothing if it isn't one
+to net_dotted with host
+    set parts to split host by "."
+    if length of parts is not 4
+        return nothing
+    end
+    set made to empty list
+    for each part in parts
+        if part is "" or length of part is greater than 3
+            return nothing
+        end
+        for each c in part
+            if not (c is in "0123456789")
+                return nothing
+            end
+        end
+        set n to number of part
+        if n is greater than 255
+            return nothing
+        end
+        add n to made
+    end
+    return made
+end
+
+# a name's IPv4 address, from the system's resolver (the hosts file, then DNS): its 4 numbers
+to net_look_up with host
+    set dotted to net_dotted(host)
+    if dotted is not nothing
+        return dotted
+    end
+    net_start()
+    set hints to 48 bytes # addrinfo: flags, family AF_INET, type SOCK_STREAM, then nothing
+    set byte 5 of hints to 2
+    set byte 9 of hints to 1
+    set found to 8 bytes
+    set failed to 0
+    if net_windows
+        set failed to win_lookup(host, nothing, hints, found)
+    else
+        set failed to unix_lookup(host, nothing, hints, found)
+    end
+    set first to net_number(found, 1, 8)
+    if failed is not 0 or first is 0
+        fail with "can't find " + host + " on the network"
+    end
+    set info to 48 bytes
+    net_copy(info, first, 48)
+    set at to 25 # where ai_addr is: Linux has it before ai_canonname, Windows after
+    if net_windows
+        set at to 33
+    end
+    set address to 16 bytes
+    net_copy(address, net_number(info, at, 8), 16)
+    if net_windows
+        win_free_lookup(first)
+    else
+        unix_free_lookup(first)
+    end
+    return list of byte 5 of address, byte 6 of address, byte 7 of address, byte 8 of address
+end
+
+# a whole number from `count` bytes, the lowest first
+to net_number with b, from, count
+    set made to 0
+    set k to from + count - 1
+    repeat while k is at least from
+        set made to made * 256 + byte k of b
+        set k to k - 1
+    end
+    return made
+end
+
+# a sockaddr_in's host and port, as a record
+to net_peer with address
+    set host to byte 5 of address + "." + byte 6 of address + "." + byte 7 of address + "." + byte 8 of address
+    return record with host host, port byte 3 of address * 256 + byte 4 of address
+end
+
+# ---------- connections ----------
+
+to net_socket with kind
+    net_start()
+    if net_windows
+        return win_socket(2, kind, 0)
+    end
+    set made to unix_socket(2, kind, 0)
+    if made is less than 0
+        fail with "the system wouldn't make a socket"
+    end
+    return made
+end
+
+to connect with host, port
+    set address to net_address(net_look_up(host), port)
+    set handle to net_socket(1)
+    set failed to 0
+    if net_windows
+        set failed to win_connect(handle, address, 16)
+    else
+        set failed to unix_connect(handle, address, 16)
+    end
+    if failed is not 0
+        net_close_handle(handle)
+        fail with "can't connect to " + host + " port " + port + ": nothing answered there"
+    end
+    return record with handle handle, peer net_peer(address)
+end
+
+to listen with port
+    return net_listener(list of 127, 0, 0, 1, port)
+end
+
+to listen_everywhere with port
+    return net_listener(list of 0, 0, 0, 0, port)
+end
+
+# host's 4 numbers, then the port
+to net_listener with at
+    set address to net_address(items 1 to 4 of at, item 5 of at)
+    set handle to net_socket(1)
+    net_reuse(handle)
+    if net_bind(handle, address) is not 0
+        net_close_handle(handle)
+        fail with "can't listen on port " + item 5 of at + ": something else is using it"
+    end
+    if net_windows
+        win_listen(handle, 64)
+    else
+        unix_listen(handle, 64)
+    end
+    return record with handle handle, peer net_own(handle)
+end
+
+# SO_REUSEADDR, on Linux: a port just used can be used again at once (on Windows it would let two share one)
+to net_reuse with handle
+    if not net_windows
+        set one to 4 bytes
+        set byte 1 of one to 1
+        unix_option(handle, 1, 2, one, 4)
+    end
+end
+
+to net_bind with handle, address
+    if net_windows
+        return win_bind(handle, address, 16)
+    end
+    return unix_bind(handle, address, 16)
+end
+
+# where a socket is: its own host and port, which the system picked if it was given 0
+to net_own with handle
+    set address to 16 bytes
+    set size to 4 bytes
+    set byte 1 of size to 16
+    if net_windows
+        win_own_name(handle, address, size)
+    else
+        unix_own_name(handle, address, size)
+    end
+    return net_peer(address)
+end
+
+# the port a listener, or a socket for messages, is on
+to port_of with s
+    return port of peer of s
+end
+
+to accept with listener
+    set address to 16 bytes
+    set size to 4 bytes
+    set byte 1 of size to 16
+    set handle to nothing
+    if net_windows
+        set handle to win_accept(handle of listener, address, size)
+    else
+        set handle to unix_accept(handle of listener, address, size)
+        if handle is less than 0
+            fail with "can't take a connection: the listener is closed"
+        end
+    end
+    return record with handle handle, peer net_peer(address)
+end
+
+# what text or bytes there are, all of it
+to send with connection, data
+    set block to data as bytes
+    set at to 1
+    repeat while at is at most length of block
+        set piece to block
+        if at is greater than 1
+            set piece to items at to (length of block) of block
+        end
+        set sent to 0
+        if net_windows
+            set sent to win_send(handle of connection, piece, length of piece, 0)
+        else
+            set sent to unix_send(handle of connection, piece, length of piece, 16384) # MSG_NOSIGNAL: a mistake, not the end
+        end
+        if sent is less than 1
+            fail with "can't send: the connection is gone"
+        end
+        set at to at + sent
+    end
+end
+
+# up to `most` bytes, as soon as there are some; no bytes once the other end has closed it
+to receive with connection, most
+    set room to most bytes
+    set got to 0
+    if net_windows
+        set got to win_recv(handle of connection, room, most, 0)
+    else
+        set got to unix_recv(handle of connection, room, most, 0)
+    end
+    if got is less than 0
+        fail with "can't receive: the connection broke, or nothing came in time"
+    end
+    if got is most
+        return room
+    end
+    return items 1 to got of room
+end
+
+# everything, until the other end closes it
+to receive_all with connection
+    set made to empty list
+    repeat while yes
+        set piece to receive(connection, 65536)
+        if length of piece is 0
+            return made as bytes
+        end
+        for each b in piece
+            add b to made
+        end
+    end
+end
+
+# a line, without its \n (or \r\n); nothing once it's closed with no more
+to receive_line with connection
+    set made to empty list
+    repeat while yes
+        set piece to receive(connection, 1)
+        if length of piece is 0
+            if length of made is 0
+                return nothing
+            end
+            return made as bytes as text
+        end
+        set b to byte 1 of piece
+        if b is 10
+            if length of made is at least 1 and item (length of made) of made is 13
+                set made to items 1 to (length of made - 1) of made
+            end
+            return made as bytes as text
+        end
+        add b to made
+    end
+end
+
+# a receive that waits longer than this many milliseconds fails; 0 waits for ever
+to wait_at_most with connection, milliseconds
+    if net_windows
+        set value to 4 bytes # a DWORD of milliseconds
+        set left to milliseconds
+        for each k from 1 to 4
+            set byte k of value to left bit and 255
+            set left to shift left right by 8
+        end
+        win_option(handle of connection, 65535, 4102, value, 4) # SOL_SOCKET, SO_RCVTIMEO
+    else
+        set value to 16 bytes # a timeval: seconds, then microseconds
+        set whole to remainder of milliseconds divided by 1000
+        set seconds to (milliseconds - whole) / 1000
+        set micros to whole * 1000
+        for each k from 1 to 8
+            set byte k of value to seconds bit and 255
+            set seconds to shift seconds right by 8
+            set byte (8 + k) of value to micros bit and 255
+            set micros to shift micros right by 8
+        end
+        unix_option(handle of connection, 1, 20, value, 16)
+    end
+end
+
+# says there's no more to send, so the other end's receive_all ends, while this end can still receive
+to finish_sending with connection
+    if net_windows
+        win_shutdown(handle of connection, 1) # SD_SEND
+    else
+        unix_shutdown(handle of connection, 1) # SHUT_WR
+    end
+end
+
+to close with connection
+    net_close_handle(handle of connection)
+end
+
+to net_close_handle with handle
+    if net_windows
+        closesocket(handle)
+    else
+        unix_close(handle)
+    end
+end
+
+# ---------- messages ----------
+
+# a socket for UDP messages, on this port of every network (0 for any the system picks)
+to open_messages with port
+    set handle to net_socket(2)
+    net_reuse(handle)
+    if net_bind(handle, net_address((list of 0, 0, 0, 0), port)) is not 0
+        net_close_handle(handle)
+        fail with "can't use port " + port + " for messages: something else is using it"
+    end
+    return record with handle handle, peer net_own(handle)
+end
+
+to send_message with s, host, port, data
+    set block to data as bytes
+    set address to net_address(net_look_up(host), port)
+    set sent to 0
+    if net_windows
+        set sent to win_send_to(handle of s, block, length of block, 0, address, 16)
+    else
+        set sent to unix_send_to(handle of s, block, length of block, 0, address, 16)
+    end
+    if sent is not length of block
+        fail with "can't send a message to " + host + " port " + port
+    end
+end
+
+# the next message, of up to `most` bytes: its data, and the host and port it came from
+to receive_message with s, most
+    set room to most bytes
+    set address to 16 bytes
+    set size to 4 bytes
+    set byte 1 of size to 16
+    set got to 0
+    if net_windows
+        set got to win_receive_from(handle of s, room, most, 0, address, size)
+    else
+        set got to unix_receive_from(handle of s, room, most, 0, address, size)
+    end
+    if got is less than 0
+        fail with "can't receive a message: nothing came in time, or it was bigger than " + most + " bytes"
+    end
+    set from to net_peer(address)
+    return record with data items 1 to got of room, host host of from, port port of from
+end

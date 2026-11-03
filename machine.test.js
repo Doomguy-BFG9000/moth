@@ -5,6 +5,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
+import https from "node:https";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1117,7 +1118,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1381,6 +1382,82 @@ remove the file "a.txt"`, ["--allow-libraries", "--allow-read", "--allow-write"]
     + "there is no file called 'nope'\ncan't move 'nope' to 'nowhere'\ncan't go into the folder 'nope'\n", "", 0]);
 });
 
+// tools/sockets.moth: a connection from a task of the program's own to it, by name, lines with and without \r,
+// a reply after the task says it has no more to send, a message, waiting too long, each mistake, and 300 KB
+test("tools/sockets.moth connects, listens, and sends lines, bytes and messages, on Windows and Linux", { skip }, () => {
+  const ran = libraryRun(String.raw`use "sockets.moth" as net
+set listener to net's listen(0)
+set port to net's port_of(listener)
+say port is greater than 0
+to client with port
+    set c to net's connect("localhost", port)
+    net's send(c, "hello moth" + (list of 13) as bytes as text + "\nsecond line\nlast, without an end")
+    net's finish_sending(c)
+    set reply to net's receive_all(c)
+    net's close(c)
+    return reply as text
+end
+set job to start client(port)
+set c to net's accept(listener)
+say host of peer of c
+say net's receive_line(c)
+say net's receive_line(c)
+say net's receive_line(c)
+say net's receive_line(c)
+net's send(c, "HELLO BACK é")
+net's close(c)
+say wait for job
+net's close(listener)
+set a to net's open_messages(0)
+set b to net's open_messages(0)
+net's send_message(a, "127.0.0.1", net's port_of(b), "ping é")
+set m to net's receive_message(b, 100)
+say data of m as text
+say host of m
+say port of m is net's port_of(a)
+net's wait_at_most(b, 200)
+try
+    net's receive_message(b, 100)
+if it fails with why
+    say why
+end
+try
+    net's connect("127.0.0.1", 1)
+if it fails with why
+    say why
+end
+try
+    net's connect("no-such-host.invalid", 80)
+if it fails with why
+    say why
+end
+try
+    net's listen(70000)
+if it fails with why
+    say why
+end
+set wide to net's listen_everywhere(0)
+to sender with port
+    set out to net's connect("127.0.0.1", port) # not c: the program made one above
+    set block to 300000 bytes
+    for each k from 1 to 300000
+        set byte k of block to remainder of k * 31 divided by 251
+    end
+    net's send(out, block)
+    net's close(out)
+    return block
+end
+set job to start sender(net's port_of(wide))
+set c to net's accept(wide)
+net's wait_at_most(c, 5000)
+set got to net's receive_all(c)
+say length of got
+say got is wait for job
+net's close(c)
+net's close(wide)`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\n127.0.0.1\nhello moth\nsecond line\nlast, without an end\nnothing\nHELLO BACK é\nping é\n127.0.0.1\nyes\ncan't receive a message: nothing came in time, or it was bigger than 100 bytes\ncan't connect to 127.0.0.1 port 1: nothing answered there\ncan't find no-such-host.invalid on the network\na port is a whole number from 0 to 65535, not 70000\n300000\nyes\n", "", 0]);
+});
+
 // tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote
 // and Linux's must not, asked while it runs, waited for, stopped, and a program that isn't there
 test("tools/tasks.moth runs programs in the background, and says what they said and ended with", { skip }, () => {
@@ -1509,6 +1586,82 @@ say read site + "/stop"`, ["--allow-net"]);
       + `can't read 'http://127.0.0.1:${port}/nowhere': the site answered 404\nbye\n`, "", 0]);
     assert.deepEqual([out, err, code], ["served 9\n", `listening on http://127.0.0.1:${port}/\n`
       + "a mistake answering GET /broken: there is no item 5, the list only has 1 item\n", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// tools/server.moth with HTTPS: a certificate made for the test by the openssl command, OpenSSL 3's libraries
+// (Linux's own; on Windows, Python's, put beside the program), and Node's https, which trusts that certificate
+// alone, asking: a page, a body in chunks and one with its length, a page that isn't there, and a client that
+// doesn't trust it, which the server says couldn't agree on TLS; then a certificate or key it can't use
+const OPENSSL = ["openssl", "C:/Program Files/Git/usr/bin/openssl.exe", "C:/Program Files/Git/mingw64/bin/openssl.exe"]
+  .find((c) => spawnSync(c, ["version"], { encoding: "utf8" }).status === 0);
+const SSL_DLLS = target !== "windows" ? null : (() => {
+  const found = spawnSync("python", ["-c", "import sys, os; print(os.path.join(sys.base_prefix, 'DLLs'))"], { encoding: "utf8" });
+  const dir = found.status === 0 ? found.stdout.trim() : "";
+  return ["libssl-3.dll", "libcrypto-3.dll"].every((n) => existsSync(join(dir, n))) ? dir : null;
+})();
+const httpsSkip = skip || (!OPENSSL ? "there's no openssl command" : target === "windows" && !SSL_DLLS ? "there's no OpenSSL 3 of Python's" : false);
+test("tools/server.moth answers with HTTPS through OpenSSL, and reads bodies in chunks", { skip: httpsSkip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-https-"));
+  const port = 23000 + (process.pid % 2000);
+  try {
+    const made = spawnSync(OPENSSL, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem"),
+      "-days", "2", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost"], { encoding: "utf8" });
+    assert.equal(made.status, 0, made.stderr);
+    if (SSL_DLLS) for (const n of ["libssl-3.dll", "libcrypto-3.dll"]) writeFileSync(join(dir, n), readFileSync(join(SSL_DLLS, n)));
+    const exe = executable(dir, "site");
+    writeFileSync(exe, machine(`use "server.moth" as web
+to answer with request
+    set p to path of request
+    if p is "/"
+        return "<h1>Hello over TLS</h1>"
+    else if p is "/echo"
+        return record with status 201, body uppercase of body of request
+    else if p is "/stop"
+        web's stop_serving()
+        return "bye"
+    end
+    return record with status 404, body "nothing at " + p
+end
+for each pair in list of (list of "nowhere.pem", "key.pem"), (list of "cert.pem", "cert.pem")
+    try
+        web's serve_secure(${port}, answer, item 1 of pair, item 2 of pair)
+    if it fails with why
+        say why
+    end
+end
+web's serve_secure(${port}, answer, "cert.pem", "key.pem")
+say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries", "--allow-read"], files: { "server.moth": readFileSync(new URL("./tools/server.moth", import.meta.url), "utf8") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const running = spawn(exe, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    running.stdout.on("data", (d) => (out += d));
+    running.stderr.on("data", (d) => (err += d));
+    const ended = new Promise((resolve) => running.on("exit", resolve));
+    for (let waited = 0; !err.includes("listening") && waited < 10000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+    const ca = readFileSync(join(dir, "cert.pem"));
+    const ask = (path, body, length) => new Promise((done, failed) => {
+      const headers = length ? { "Content-Length": Buffer.byteLength(body) } : {};
+      const req = https.request({ host: "127.0.0.1", port, path, method: body ? "POST" : "GET", ca, headers }, (res) => {
+        let text = "";
+        res.on("data", (d) => (text += d));
+        res.on("end", () => done(`${res.statusCode} ${text}`));
+      });
+      req.on("error", failed);
+      if (body) for (const piece of body.match(/.{1,5}/gu)) req.write(piece); // in chunks of their own, unless it has a length
+      req.end();
+    });
+    const untrusted = () => new Promise((done) => https.get({ host: "127.0.0.1", port, path: "/" }, () => done("trusted")).on("error", (e) => done(e.code)));
+    const answers = [await ask("/"), await ask("/echo", "shout this, in pieces ✓"), await ask("/echo", "with a length", true), await ask("/missing"),
+      await untrusted(), await ask("/stop")];
+    const code = await ended;
+    assert.deepEqual(answers, ["200 <h1>Hello over TLS</h1>", "201 SHOUT THIS, IN PIECES ✓", "201 WITH A LENGTH", "404 nothing at /missing",
+      "DEPTH_ZERO_SELF_SIGNED_CERT", "200 bye"]);
+    assert.deepEqual([out, err, code], ["can't use the certificate in nowhere.pem: it isn't there, or isn't one in PEM\n"
+      + "can't use the key in cert.pem: it isn't there, isn't one in PEM, or isn't the certificate's\nstopped\n",
+      `listening on https://127.0.0.1:${port}/\na connection that couldn't agree on TLS with the server\n`, 0]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

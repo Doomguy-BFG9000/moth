@@ -36570,12 +36570,13 @@ to emit_libraries with a, target
     jcc(a, cc_ae, none)
     imul_ri(a, r14, r13, 24)
     alu(a, "add", r14, r12)
-    if target is "windows" # a name alone from System32, then the program's folder; one with a folder in it as it is
+    if target is "windows" # a name alone from System32, then the program's folder (what that needs from either);
+        # one with a folder in it as it is
         set with_folder to new_label(a)
         load(a, rax, mem(r14, 32))
         test_rr(a, rax, rax)
         jcc(a, cc_ne, with_folder)
-        for each flags in list of 0x800, 0x200
+        for each flags in list of 0x800, 0x1000 # LOAD_LIBRARY_SEARCH_SYSTEM32, then _DEFAULT_DIRS
             win_enter(a)
             load(a, rcx, mem(r14, 24))
             movi(a, rdx, 0)
