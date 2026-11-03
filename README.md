@@ -229,7 +229,7 @@ in about 9 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (19,020,288 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -727,6 +727,7 @@ Get `moth-windows.exe` (save it as `moth.exe`) or `moth-linux` (save it as
 source with Node.js: `node bootstrap.mjs`.
 
 ```text
+moth                                     the Moth shell: type Moth and see what it does (also moth shell --allow-...)
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
@@ -756,6 +757,32 @@ comes after it is the program's own. `moth tidy` and `moth test` take any
 number of files, and `moth test` with none finds every file ending in
 `.test.moth` here and in the folders inside, but not hidden ones or
 `node_modules`; `moth check` takes one.
+
+`moth` on its own is the Moth shell: type a line, or a block that runs once its
+`end` is typed, and see what it does. A line that's a value shows it.
+
+```text
+$ moth
+Moth shell. Type Moth code: a block runs once its 'end' is typed, and a value shows itself. 'quit' ends it.
+moth> set prices to list of 3, 4.5, 2
+moth> to total_of with xs
+....>     set sum to 0
+....>     for each x in xs
+....>         add x to sum
+....>     end
+....>     return sum
+....> end
+moth> total_of(prices)
+9.5
+moth> "{length of prices} prices"
+3 prices
+moth> quit
+```
+
+Each entry is built and run as a program of its own, in about 35 ms, with what
+the entries before it left: their functions, and their names' values.
+`moth shell --allow-read` (or any `--allow` flag) lets the entries do more
+without asking.
 
 `moth debug` runs a program as `moth run` does, built with a debugger in it,
 which stops before the first line and takes commands, typed or from the input:
@@ -886,10 +913,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (19,020,288 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 ```
 
-That's the same 19,020,288 bytes Node.js made of it, and the moth.exe they make
+That's the same 19,166,208 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -1073,6 +1100,10 @@ calls that led there.
   text joined to text and digits in place and not, and records of other shapes
   at the same place; in machine code on Windows and Linux, against the
   JavaScript engine
+- the shell: a session typed into moth.exe on Windows and Linux, with values
+  shown, functions made earlier called, a function's own names kept apart, a
+  file used, a mistake's trail naming the entries, a value that can't be kept,
+  a block dropped, and no file left behind
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
@@ -1097,6 +1128,11 @@ unboxed numbers were all caught, some only by the fuzzer.
   waiting, but doesn't make a sum faster on more cores. On the JavaScript
   engines a task runs to its end when it's started. There's no lock a program
   can take yet, and no way to ask whether a task has ended without waiting for it.
+- The shell runs each entry as a program of its own, and keeps names' values
+  from one to the next by saving them: a value that can't be saved (a function,
+  bytes) is nothing in the next entry, two names holding the same list hold
+  copies of it after the entry, a task doesn't outlive its entry, and an entry
+  that ends with a mistake keeps nothing it set. Ctrl+C ends the shell too.
 - `moth debug` stops before a line, not inside one, and shows variables by
   name, not other values (`show x`, not `show x + 1`). A mistake ends the
   program as it always does, with no stop to look around first. A program

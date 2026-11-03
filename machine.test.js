@@ -2879,3 +2879,38 @@ say "the window's timer ran while the task worked: " (ticks_while_working is gre
 say wait for job`, ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
   assert.deepEqual([ran.stdout, ran.status], ["the window's timer ran while the task worked: yes\n1250000025000000\n", 0], ran.stderr);
 });
+
+// The Moth shell (DESIGN §65): `moth` with nothing after it reads Moth an entry at a time, a block once its `end`
+// is typed, each entry built and run as a program of its own with what the entries before it left: names'
+// values, functions as they were made (so a function's own names stay its own), files used, a value shown,
+// a mistake's trail naming the entries, and what can't be kept said; and it leaves no file behind.
+const SHELL_TYPED = "set x to 5\nx + 1\nto twice with n\n    return n * 2\nend\ntwice(x)\nto local_count\n    set count to 1\n    return count\nend\nset count to 5\nlocal_count()\ncount\nset xs to list of 1, 2\nadd twice(10) to xs\nxs\nfor each i from 1 to 3\n    set last to i * 10\nend\nlast\nuse \"helpers.moth\"\ntriple(last)\nto risky with n\n    return n / 0\nend\nrisky(2)\nx\nset f to twice\nf\n\"é😀\" + x\nif x is 5\n\n\nquit\n";
+test("moth.exe with nothing after it is the Moth shell, each entry a program with what the ones before it left", { skip }, () => {
+  const { exe } = mothExe();
+  const dir = mkdtempSync(join(tmpdir(), "moth-shell-"));
+  try {
+    writeFileSync(join(dir, "helpers.moth"), "to triple with n\n    return n * 3\nend\n");
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: SHELL_TYPED, timeout: 120_000 });
+    const echoed = SHELL_TYPED.split("\n").slice(0, -1); // as each question is asked away from a terminal, the answer after it
+    const prompts = ["moth", "moth", "moth", "....", "....", "moth", "moth", "....", "....", "....", "moth", "moth", "moth", "moth",
+      "moth", "moth", "moth", "....", "....", "moth", "moth", "moth", "moth", "....", "....", "moth", "moth", "moth", "moth",
+      "moth", "moth", "....", "....", "moth"];
+    const shown = { 2: "6", 6: "10", 12: "1", 13: "5", 16: "[1, 2, 20]", 20: "30", 22: "90", 27: "5", 29: "nothing", 30: "é😀5",
+      33: "(dropped what wasn't finished)" };
+    let stdout = "Moth shell. Type Moth code: a block runs once its 'end' is typed, and a value shows itself. 'quit' ends it.\n";
+    echoed.forEach((line, i) => {
+      stdout += `${prompts[i]}> ${line}\n`;
+      if (shown[i + 1]) stdout += `${shown[i + 1]}\n`;
+    });
+    assert.equal(ran.stdout, stdout);
+    assert.equal(ran.stderr, "[16]:2:14: can't divide by zero\n    return n / 0\n             ^\n  in 'risky', called from [17], line 1\n" +
+      "(f can't be kept for the next entry: 'save' can't save a function)\n");
+    assert.equal(ran.status, 0);
+    assert.deepEqual(readdirSync(dir).sort(), ["helpers.moth"]);
+    const wrong = spawnSync(exe, ["shell", "--allow-everything"], { cwd: dir, encoding: "utf8", input: "" });
+    assert.deepEqual([wrong.status, wrong.stdout], [2, ""]);
+    assert.match(wrong.stderr, /^usage: moth /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -2888,3 +2888,44 @@ hold them to agreeing.
   not, with characters past one byte; joins of every kind of value; records of
   other shapes at the same place, fields added later, and every mistake; on
   Windows and Linux, against the JavaScript engine.
+
+## 65. The Moth shell
+
+- **Why.** Python's first lesson is typing `2 + 3` and seeing 5. moth.exe
+  could only build files; the shell Moth had, on the Node.js command line, went
+  with it in 1.5.
+- **What it does.** `moth`, or `moth shell` with `--allow` flags for what its
+  entries may do, reads Moth an entry at a time: a line, or a block once its
+  `end` is typed (the compiler says when what's typed ended too soon: its
+  mistake is at the end of the code), with `....>` while it waits for more,
+  and two empty lines dropping what isn't finished. An entry that's a value
+  (`x + 1`, `xs`, `p's name`) is said; a call to one of the functions made
+  (`square(4)`) shows what it gives, unless that's nothing. `quit`, `exit` or
+  the end of the input ends it.
+- **Each entry is a program.** moth.exe has no interpreter in it, only the
+  compiler, so each entry is built into a program, run and removed, as `moth
+  run` does, in about 35 ms. The program is what the entries before it left,
+  then the entry: each entry before is a file of its own, `[1]`, `[2]`..., which
+  the program uses in order, holding that entry's `to` blocks and `use` lines
+  as typed, and in place of each other statement, a line giving each name it
+  first gave a value to the value it had after the last entry, then blank
+  lines. So line numbers are the ones typed, a mistake in a function made
+  earlier says which entry it's in (`[3]:2:14`, `called from [4], line 1`), and
+  a function changes the names it would have if the entries were one program
+  (a name it sets that wasn't made before it is its own, §27).
+- **Values in between.** After the entry, the program saves every name's value
+  to `.moth-shell-state` with `save`, which the next program loads, so the
+  program may read and write that one file whatever the flags say. A value
+  `save` can't keep (a function, bytes, a list that holds itself) is said to
+  be lost, and is nothing in the next entry. An entry that ends with a mistake,
+  or stops the program with a number other than 0, keeps nothing it set, nor
+  the functions it made; one that stops it with 0 keeps its functions only.
+- **Not as one program.** Two names holding the same list hold copies of it
+  after the entry, as each value is saved by itself; a task started doesn't
+  outlive its entry; a file used runs its own lines again in every entry; and
+  Ctrl+C ends the shell with the program, as no Moth program can catch it.
+- **Tested.** A session through moth.exe, on Windows and Linux, typed into its
+  input: values shown, functions made and called, a function's own name kept
+  apart from the program's, lists added to, a loop's names, a file used, a
+  mistake in a function made earlier, with its trail, a function that can't be
+  kept, text past one byte, a block dropped, `quit`, and no file left behind.
