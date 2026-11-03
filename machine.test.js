@@ -385,6 +385,84 @@ test("moth.exe debug runs a program with the debugger it was built with, passing
   assert.match(wrong.stderr, /moth debug \[--allow-\.\.\.\] <file\.moth> \[arguments\.\.\.\]/);
 });
 
+// Packages (DESIGN §60): Git repositories made here, a package that uses a file of its own and another that
+// uses it, fetched, run, updated to a new commit, fetched again at theirs, and taken away, by moth.exe
+const gitHere = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
+test("moth add, update, get and remove keep packages/ and moth.packages, and use the package finds them", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "packaging");
+  mkdirSync(root, { recursive: true });
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const repo = (name, files) => {
+    const at = join(root, name);
+    mkdirSync(at, { recursive: true });
+    for (const [file, text] of Object.entries(files)) writeFileSync(join(at, file), text);
+    git(at, "init", "-q");
+    git(at, "add", ".");
+    git(at, "commit", "-qm", "one");
+    return at;
+  };
+  const greet = repo("greet", { "greet.moth": 'use "words.moth" as words\nto hello with n\n    return words\'s hi + ", " + n\nend\n', "words.moth": 'set hi to "Hello"\n' });
+  const first = git(greet, "rev-parse", "HEAD");
+  const app = join(root, "app");
+  mkdirSync(app);
+  writeFileSync(join(app, "app.moth"), 'use the package "greet" as greet\nsay greet\'s hello("Sam")\n');
+  assert.deepEqual(moth(app, "packages"), ["no packages: moth add <git repository> adds one\n", "", 0]);
+  assert.deepEqual(moth(app, "add", "../greet"), [`added greet at ${first.slice(0, 7)}, from ../greet\n`, "", 0]);
+  assert.match(readFileSync(join(app, "moth.packages"), "utf8"), new RegExp(`\\ngreet \\.\\./greet ${first}\\n$`));
+  assert.deepEqual(moth(app, "run", "app.moth"), ["Hello, Sam\n", "", 0]);
+
+  // a new commit: update moves to it, and a second says it's at its newest
+  writeFileSync(join(greet, "words.moth"), 'set hi to "Hi"\n');
+  git(greet, "commit", "-qam", "two");
+  const second = git(greet, "rev-parse", "HEAD");
+  assert.deepEqual(moth(app, "update"), [`greet: ${first.slice(0, 7)} -> ${second.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(app, "run", "app.moth"), ["Hi, Sam\n", "", 0]);
+  assert.deepEqual(moth(app, "update", "greet"), [`greet is at its newest, ${second.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(app, "packages"), [`greet at ${second.slice(0, 7)}, from ../greet\n`, "", 0]);
+
+  // packages/ gone, as on another computer: get brings each back, at its commit
+  rmSync(join(app, "packages"), { recursive: true, force: true });
+  assert.deepEqual(moth(app, "packages"), [`greet at ${second.slice(0, 7)}, from ../greet (not fetched: moth get fetches it)\n`, "", 0]);
+  assert.deepEqual(moth(app, "get"), [`greet at ${second.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(app, "run", "app.moth"), ["Hi, Sam\n", "", 0]);
+
+  // a package that uses another comes with it, at the commit its own moth.packages lists
+  const shout = repo("shout", { "shout.moth": 'use the package "greet" as greet\nto shout with n\n    return uppercase of greet\'s hello(n)\nend\n',
+    "moth.packages": `greet ../greet ${first}\n` });
+  const shouting = git(shout, "rev-parse", "HEAD");
+  const other = join(root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "app.moth"), 'use the package "shout" as shout\nsay shout\'s shout("Bo")\n');
+  assert.deepEqual(moth(other, "add", "../shout"),
+    [`added shout at ${shouting.slice(0, 7)}, from ../shout\nadded greet at ${first.slice(0, 7)}, which shout uses\n`, "", 0]);
+  assert.deepEqual(moth(other, "run", "app.moth"), ["HELLO, BO\n", "", 0]);
+
+  // mistakes
+  assert.deepEqual(moth(other, "add", "../shout"), ["", "moth: there's a package called shout here already: moth update shout moves it to its newest\n", 1]);
+  assert.deepEqual(moth(other, "add", "../shout", "bad/name"),
+    ["", "moth: 'bad/name' can't be a package's name (letters, digits, '-', '_' and '.' make one): give it one, as in moth add ../shout thing\n", 1]);
+  const nowhere = moth(other, "add", "../nowhere");
+  assert.equal(nowhere[2], 1);
+  assert.match(nowhere[1], /^moth: git couldn't fetch \.\.\/nowhere: /);
+  assert.deepEqual(moth(other, "remove", "nope"), ["", "moth: there's no package called nope here: moth packages lists them\n", 1]);
+  assert.equal(moth(other, "add")[2], 2);
+  assert.deepEqual(moth(root, "get"), ["", "moth: there's no moth.packages here: moth add <git repository> adds a package\n", 1]);
+
+  // remove: its folder and its line gone
+  assert.deepEqual(moth(other, "remove", "greet"), ["removed greet\n", "", 0]);
+  assert.deepEqual(readdirSync(join(other, "packages")), ["shout"]);
+  assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
+});
+
 test("moth.exe builds a program, and itself into the same bytes", { skip }, () => {
   const { dir, exe, made } = mothExe();
   writeFileSync(join(dir, "lib.moth"), "to twice with t\n    return t + t\nend\n");

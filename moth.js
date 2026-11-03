@@ -159,6 +159,8 @@ const RESERVED = new Set([
   "byte", "bytes", "as", "shift", "read", "write", "arguments", "expect", "clear", "draw", "when", "every"]);
 // built-in operations (BUILTINS in vm.js), by the word that starts them: the word after it, if any, then
 // either one input, or two with a word between them: `uppercase of x`, `split x by ","`, `position of "a" in x`
+// the folder a file is in, as its name has it: up to its last / or \, or "" for one in the program's own
+const folderOf = (name) => name.slice(0, Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\")) + 1);
 // whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 // going up out of a folder ("../x")
 const outsideFolder = (name) => /^[/\\]|^[A-Za-z]:/.test(name) || name.split(/[/\\]/).includes("..");
@@ -298,10 +300,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
   // names are kept apart (see prefixed), and it can be used again as another. Files are read once for each
   // set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's "), and the
-  // program can still use the same file for itself.
-  function useFile(nameToken, alias) {
-    const name = nameToken.value;
-    if (outsideFolder(name)) fail(nameToken, `'${name}' isn't in the program's folder: 'use' only reads files there, or in folders inside it`);
+  // program can still use the same file for itself. A file's name is from the folder of the file that uses
+  // it, unless `fromTop`, for a package's, which is from the program's.
+  function useFile(nameToken, alias, fromTop = false) {
+    const written = nameToken.value;
+    if (outsideFolder(written)) fail(nameToken, `'${written}' isn't in the program's folder: 'use' only reads files there, or in folders inside it`);
+    const name = fromTop ? written : (reading.folder ?? "") + written; // `folder`: the using file's
     const within = reading.within ?? "";
     const key = `${within}${name}${alias ? ` as ${alias}` : ""}`;
     if (reading.open.includes(name)) fail(nameToken, `'${name}' is already being read, so it can't be used here: files can't use each other in a circle`);
@@ -311,8 +315,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     reading.loaded.add(key);
     reading.open.push(name);
     if (alias) reading.within = `${within}${alias}'s `;
+    const folder = reading.folder;
+    reading.folder = folderOf(name);
     const body = parse(tokenize(text, name), reading);
     reading.within = within;
+    reading.folder = folder;
     reading.open.pop();
     return alias ? prefixed(body, alias) : body;
   }
@@ -627,11 +634,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("use")) {
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "library")) return library(t);
-      const nameToken = match("string") || expected("a file name in quotes, like \"shapes.moth\"");
-      const alias = word("as") ? name("a name for the file") : null; // `use "math.moth" as math`
+      // `use the package "json" as json`: what `moth add` put in packages/json, its main file json.moth
+      const aPackage = isWord("the") && !peek().nl && wordAt(pos + 1, "package") && !tokens[pos + 1].nl && ((pos += 2), true);
+      const nameToken = match("string") || expected(aPackage ? "a package's name in quotes, like \"json\"" : "a file name in quotes, like \"shapes.moth\"");
+      if (aPackage && !/^[A-Za-z0-9_.-]+$/.test(nameToken.value)) fail(nameToken, `'${nameToken.value}' isn't a package's name: letters, digits, '-', '_' and '.' make one`);
+      const alias = word("as") ? name(aPackage ? "a name for the package" : "a name for the file") : null; // `use "math.moth" as math`
       if (alias) aliases.add(alias);
       if (!atTop) fail(t, "'use' only works at the top level of a program");
-      return { kind: "use", body: useFile(nameToken, alias), at: t };
+      const file = aPackage ? { ...nameToken, value: `packages/${nameToken.value}/${nameToken.value}.moth` } : nameToken;
+      return { kind: "use", body: useFile(file, alias, aPackage), at: t };
     }
     if (word("stop")) {
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "program")) { // `stop the program`, `stop the program with 2`

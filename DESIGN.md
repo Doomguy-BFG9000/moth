@@ -2633,3 +2633,41 @@ hold them to agreeing.
 - **Tested.** Three sessions word for word, on Windows and Linux; every test
   program built to be debugged and told to `go`, against its usual build; and
   `moth debug` through moth.exe.
+
+## 60. Packages
+
+- **Why.** A Moth file someone else wrote was a file to copy by hand, and copy
+  again when it changed, with nothing to say which version a program needs.
+- **A package is a Git repository** of Moth files, its main file named after it.
+  `moth add <repository> [name]` clones it into `packages/<name>`, from a site
+  (`github.com/someone/thing` gets `https://` put before it) or a folder, and
+  writes a line to `moth.packages`: its name, where it came from, and the
+  commit it's at. `moth get` makes `packages/` match the list, cloning what's
+  missing and checking each clone out at its commit, fetching first if it hasn't
+  that commit; `moth update` checks out `origin/HEAD` after a fetch, and writes
+  the new commit down; `moth remove` takes the folder away, with the system's
+  own `rmdir /s /q` or `rm -rf`, as a clone's files can be read-only. A package
+  with a `moth.packages` of its own brings those packages too, at their commits,
+  into the same `packages/`, unless one of that name is there already.
+- **Git, not a registry.** Every program that needs packages is a program
+  people already keep in Git, and a commit names the exact code, so the list
+  needs no versions or hashes of its own. moth runs `git`, as it runs any
+  program (`run program ... keeping its output`), and says what git said when
+  it fails. It passes `core.longpaths=true` on Windows, where a package's
+  files can be deeper than 260 characters.
+- **Finding a package's files.** A file used to be found from the program's
+  folder, even when another file used it; now a file uses files from its own
+  folder (from the parser's `folder`, as `within` is kept for names), so a
+  package's `use "helpers.moth"` is its own. `use the package "json"` is
+  `packages/json/json.moth`, from the program's folder wherever it's written,
+  so a package that uses another finds it where `moth add` put it. Nothing in
+  the repository used a file from a folder, so nothing that ran changes.
+  Both parsers do this, and moth.moth's list of the files to read before a
+  build (`cli_used_by`) finds them the same way. compiler.moth's `use_file`
+  had kept the wrong list of files being read after a file used one, which
+  only mattered now.
+- **Tested.** Git repositories made by the tests: a package with a file of its
+  own, added, run, updated, fetched again after `packages/` was deleted, and
+  one that uses it brought along at its listed commit; every mistake; and
+  `remove`, through moth.exe, on Windows and Linux. Files in folders and
+  packages on the three engines, and compiler.moth held to moth.js.

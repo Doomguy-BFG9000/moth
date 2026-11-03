@@ -709,6 +709,37 @@ test("use ... as keeps a file's names apart, on all three engines and in the com
   }
 });
 
+test("a file uses files from its own folder, and use the package finds packages/<name>/<name>.moth, on all three engines and in the compiler written in Moth", () => {
+  const files = {
+    "packages/greet/greet.moth": 'use "words.moth" as words\nto hello with n\n    return words\'s hi + ", " + n\nend',
+    "packages/greet/words.moth": 'set hi to "Hello"',
+    "packages/shout/shout.moth": 'use the package "greet" as greet\nto shout with n\n    return uppercase of greet\'s hello(n)\nend',
+    "lib/a.moth": 'use "b.moth"\nset a_value to b_value + 1',
+    "lib/b.moth": "set b_value to 41",
+    "b.moth": "set b_value to 0", // the program's own folder's, which lib/a.moth doesn't mean
+  };
+  const reading = { files: (name) => files[name] };
+  const programs = [
+    ['use the package "greet" as greet\nuse "lib/a.moth"\nsay greet\'s hello("Sam") " " a_value', "Hello, Sam 42"],
+    ['use the package "shout" as shout\nsay shout\'s shout("Bo")', "HELLO, BO"],
+    ['use the package "greet"\nsay hello("Ana")', "Hello, Ana"],
+  ];
+  const mistakes = [
+    ['use the package "no/pe"', "line 1: 'no/pe' isn't a package's name: letters, digits, '-', '_' and '.' make one"],
+    ['use the package "missing" as m', "line 1: there is no file called 'packages/missing/missing.moth'"],
+    ["use the package\nsay 1", "line 2: expected a package's name in quotes, like \"json\" but found 'say'"],
+    ['use "lib/nope.moth"', "line 1: there is no file called 'lib/nope.moth'"],
+  ];
+  for (const engine of ENGINES) {
+    for (const [source, want] of programs) assert.equal(output(source, { engine, ...reading }), want, `${engine}: ${source}`);
+    for (const [source, message] of mistakes) assert.equal(error(source, { engine, ...reading }).message, message, `${engine}: ${source}`);
+  }
+  const moth = mothCompiler(COMPILER);
+  for (const source of [...programs, ...mistakes].map(([source]) => source)) {
+    assert.deepEqual(compiled((s) => moth(s, files), source), compiled((s) => compileToJs(s, reading), source), source);
+  }
+});
+
 // ---------- error trails ----------
 
 // Each engine keeps track of the calls in progress its own way (the VM's frames, the JIT's arrays, an array

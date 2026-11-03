@@ -229,7 +229,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (17,537,024 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (17,674,240 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -476,6 +476,7 @@ end
 
 use "math.moth" as math                     # another file, its names kept apart as math's ...
 say math's sqrt(2)                          # a name used as a file is the file's; any other x's is x's own
+use the package "json" as json              # a package moth add fetched: packages/json/json.moth
 
 set notes to read "notes.txt"               # files: read, read bytes, write ... to
 write uppercase of notes to "loud.txt"
@@ -725,6 +726,10 @@ source with Node.js: `node bootstrap.mjs`.
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
+moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
+moth get                                 fetch every package moth.packages lists, at its commit (on another computer, say)
+moth update                              move the packages to their newest commits (or moth update json, one)
+moth remove json                         take a package away; moth packages lists them
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
 moth check hello.moth                    find problems in it without running it
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
@@ -773,6 +778,24 @@ total is 0
 i is 1
 (moth) go
 total 12
+```
+
+A package is a Git repository of Moth files, whose main file is named after
+it. `moth add` fetches one, from a site (`github.com/someone/json` is
+`https://github.com/someone/json`) or a folder, into `packages/json`, and
+lists it in `moth.packages` with the exact commit it got, so `moth get`
+anywhere fetches the same code; a program uses it with `use the package "json"
+as json`. If the package lists packages of its own in a `moth.packages`, they
+come too, at their commits. A file uses files from its own folder, so a
+package's `use "helpers.moth"` is its own helpers, and `use the package` is
+always the program's, from wherever it's written. moth runs the system's `git`
+to fetch them.
+
+```text
+$ moth add github.com/someone/json
+added json at 3f2a9c1, from https://github.com/someone/json
+$ moth update
+json: 3f2a9c1 -> 8b1d2e0
 ```
 
 `moth test` runs each test on its own, in a run of its own, so one test can't
@@ -846,10 +869,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (17,537,024 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (17,674,240 bytes)
 ```
 
-That's the same 17,537,024 bytes Node.js made of it, and the moth.exe they make
+That's the same 17,674,240 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -1006,6 +1029,11 @@ calls that led there.
   mistake, the program's own question answered from the same input, the input
   running out and `quit`; and every test program, built to be debugged and
   told to go, saying, failing and ending exactly as its usual build does
+- packages: Git repositories made by the tests, added, run, updated to a new
+  commit, fetched again after `packages/` is gone, a package that uses another
+  bringing it at its commit, the mistakes, and removed, through moth.exe on
+  Windows and Linux; and files in folders and `use the package` on all three
+  engines and in the compiler written in Moth
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
@@ -1071,7 +1099,12 @@ unboxed numbers were all caught, some only by the fuzzer.
   collide; `use ... as` keeps the file to itself, as if it ran alone, so its
   functions' variables are theirs and the program reaches it only through
   `math's ...`. It only reads files in the program's folder, or folders inside
-  it: not `../lib.moth`, and not through a link out.
+  it: not `../lib.moth`, and not through a link out. A file it uses uses files
+  from its own folder.
+- Packages come from Git repositories, through the system's `git`: there's no
+  list of packages to search, so a package is found by where it is, and
+  `moth.packages` keeps only one of each name, the first, if two packages
+  want different commits of a third.
 - In text, a `{` right before a letter or a bracket starts a value, so text
   that means one there as itself, as curl's `%{http_code}` does, needs `\{`.
   One right before a number is itself, as in `"\\d{3}"`, so a value that starts

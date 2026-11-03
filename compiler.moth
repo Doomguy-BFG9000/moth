@@ -98,6 +98,40 @@ to small with c
     return c
 end
 
+# the folder a file is in, as its name has it: up to its last / or \, or "" for one in the program's own
+to folder_of with name
+    set cut to 0
+    set k to 0
+    for each c in name
+        add 1 to k
+        if c is "/" or c is "\\"
+            set cut to k
+        end
+    end
+    set made to ""
+    set k to 0
+    for each c in name
+        add 1 to k
+        if k is at most cut
+            add c to made
+        end
+    end
+    return made
+end
+
+# whether a package's name is one: letters, digits, '-', '_' and '.'
+to package_name with name
+    if name is ""
+        return no
+    end
+    for each c in name
+        if not (in_word(c) or c is "-" or c is ".")
+            return no
+        end
+    end
+    return yes
+end
+
 # what text can hold: any character but a control character, except tab
 to fits_text with c
     return c is "\t" or c is at least " "
@@ -768,11 +802,15 @@ to parse with tokens, reading
 
     # The statements of a file the program uses, or none if it was read already. Used `as` a name, its own
     # names are kept apart (see prefixed), and it can be used again as another. Files are read once for each
-    # set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's ").
-    to use_file with name_token, alias
+    # set of names: a file that one used `as m` uses is m's own copy (`within` is then "m's "). A file's name
+    # is from the folder of the file that uses it, the last one open, unless `from_top`, for a package's.
+    to use_file with name_token, alias, from_top
         set wanted to value of name_token
         if outside_folder(wanted)
             fail with problem(name_token, "'" + wanted + "' isn't in the program's folder: 'use' only reads files there, or in folders inside it")
+        end
+        if not from_top and length of open of reading is greater than 0
+            set wanted to folder_of(item (length of open of reading) of open of reading) + wanted
         end
         set within to within of reading
         set key to within + wanted
@@ -803,6 +841,7 @@ to parse with tokens, reading
         end
         set inner to parse(tokenize(text, wanted), reading)
         set within of reading to within
+        set open_now to open of reading # as the files it used left it
         set still_open to empty list # all but the last
         for each n from 1 to length of open_now - 1
             add item n of open_now to still_open
@@ -1403,19 +1442,37 @@ to parse with tokens, reading
             if is_word("the") and not nl of peek() and word_at(pos + 1, "library")
                 return library_use(t)
             end
+            # `use the package "json" as json`: what `moth add` put in packages/json, its main file json.moth
+            set a_package to is_word("the") and not nl of peek() and word_at(pos + 1, "package") and not nl of item (pos + 1) of tokens
+            if a_package
+                set pos to pos + 2
+            end
             set name_token to match("string")
-            if not name_token
+            if not name_token and a_package
+                expected("a package's name in quotes, like \"json\"")
+            else if not name_token
                 expected("a file name in quotes, like \"shapes.moth\"")
+            end
+            if a_package and not package_name(value of name_token)
+                fail with problem(name_token, "'" + value of name_token + "' isn't a package's name: letters, digits, '-', '_' and '.' make one")
             end
             set alias to nothing
             if word("as") # `use "math.moth" as math`
-                set alias to take_name("a name for the file")
+                if a_package
+                    set alias to take_name("a name for the package")
+                else
+                    set alias to take_name("a name for the file")
+                end
                 add alias to aliases
             end
             if not at_top
                 fail with problem(t, "'use' only works at the top level of a program")
             end
-            return record with kind "use", body use_file(name_token, alias), at t
+            if a_package
+                set name_token to record with type "string", value "packages/" + value of name_token + "/" + value of name_token + ".moth",
+                    line line of name_token, col col of name_token, nl nl of name_token, file file of name_token, parts nothing
+            end
+            return record with kind "use", body use_file(name_token, alias, a_package), at t
         end
         if word("stop")
             if is_word("the") and not nl of peek() and word_at(pos + 1, "program") # `stop the program`, `stop the program with 2`
