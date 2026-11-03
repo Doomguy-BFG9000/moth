@@ -1,0 +1,83 @@
+# zip.moth's own tests: `moth test zip.test.moth`
+use "zip.moth" as zip
+
+to test_checks
+    expect zip's crc32("123456789") is 3421780262
+    expect zip's crc32("") is 0
+    expect zip's crc32(256 bytes) is 227968344
+end
+
+# what zlib made: gzip of "hello\n", and DEFLATE's three kinds of block, as it is, with the fixed code, and with
+# codes of its own
+to test_reading_what_zlib_makes
+    set hello to list of 31, 139, 8, 0, 0, 0, 0, 0, 2, 10, 203, 72, 205, 201, 201, 231, 2, 0, 32, 48, 58, 54, 6, 0, 0, 0
+    expect zip's gunzip(hello as bytes) as text is "hello\n"
+    set stored to list of 1, 12, 0, 243, 255, 115, 116, 111, 114, 101, 100, 32, 98, 121, 116, 101, 115
+    expect zip's inflate(stored as bytes) as text is "stored bytes"
+    set own to list of 165, 201, 193, 13, 128, 32, 12, 5, 208, 85, 254, 0, 132, 45, 60, 120, 96, 136, 6, 26, 105, 36, 197, 180,
+        53, 172, 111, 140, 35, 120, 125, 175, 204, 232, 48, 166, 230, 24, 114, 50, 174, 65, 162, 216, 244, 24, 226, 61, 163,
+        252, 234, 61, 208, 233, 45, 15, 79, 48, 174, 211, 154, 131, 180, 161, 73, 13, 153, 74, 38, 236, 233, 19, 163, 229,
+        88, 18, 29, 132, 184, 45, 6, 231, 7
+    set line to "Moth reads like plain English. "
+    expect zip's inflate(own as bytes) as text is line + line + line + "It has lists, records and dictionaries, and draws with a turtle."
+end
+
+to test_round_trips
+    set many to empty list
+    for each i from 1 to 3000
+        add item (remainder of i * 7 divided by 5) + 1 of (list of "moth", "lamp", "night", "é", "😀") to many
+    end
+    set every_byte to empty list
+    for each b from 0 to 255
+        add b to every_byte
+    end
+    for each data in list of "", "a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", join many with " ", 70000 bytes, every_byte as bytes
+        set block to data as bytes
+        expect zip's inflate(zip's deflate(block)) is block
+        expect zip's gunzip(zip's gzip(block)) is block
+    end
+    expect length of zip's gzip(70000 bytes) is less than 200
+    expect length of zip's deflate(every_byte as bytes) is at most 261 # as it is, when squeezing would make it bigger
+end
+
+to test_archives
+    set names to list of "a.txt", "folder/", "folder/b.bin", "é.txt"
+    set contents to list of "one", "", 1000 bytes, "two"
+    set files to zip's unzipped(zip's zipped(names, contents))
+    expect length of files is 4
+    for each k from 1 to 4
+        expect item (item k of names) of files is item k of contents as bytes
+    end
+    expect zip's unzipped(zip's zipped(empty list, empty list)) is empty dictionary
+end
+
+# what the call, by its number, fails with
+to mistake_of with which
+    set caught to nothing
+    try
+        if which is 1
+            zip's gunzip("not gzip at all")
+        else if which is 2
+            zip's inflate((list of 7) as bytes)
+        else if which is 3
+            zip's unzipped("PK, but not really")
+        else if which is 4
+            set made to zip's gzip("hello") as bytes
+            set byte 12 of made to 0
+            zip's gunzip(made)
+        else
+            zip's inflate((list of 1, 5, 0) as bytes)
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of(1) is "this isn't gzip: it doesn't start with gzip's two bytes"
+    expect mistake_of(2) is "the compressed data has a block of a kind DEFLATE doesn't have"
+    expect mistake_of(3) is "this isn't a zip file: it has no list of what it holds"
+    expect mistake_of(4) is not nothing
+    expect mistake_of(5) is "the compressed data ends too soon"
+end

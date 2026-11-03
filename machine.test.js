@@ -1311,18 +1311,18 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, big.moth, xml.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
-    "xml.moth", "xml.test.moth"]) {
+    "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
-  const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "math.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "34 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "39 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux

@@ -3084,3 +3084,42 @@ hold them to agreeing.
   800 random documents (attributes in either quote, entities, CDATA,
   comments, text past one byte, nesting), read the same as Python's
   ElementTree reads them, and written and read back the same.
+
+## 71. gzip and zip
+
+- **Why.** Python has `gzip`, `zlib` and `zipfile`; downloads, logs and
+  office files come squeezed.
+- **What it is.** tools/zip.moth, in Moth alone, so it works on every engine:
+  `deflate` and `inflate` (RFC 1951), `gzip` and `gunzip` (RFC 1952, every
+  member of a file, its name, comment and extra field passed over, its check
+  and size checked), `zipped` and `unzipped` for archives, and `crc32`.
+  Each takes text or bytes and gives bytes.
+- **Reading** is zlib's puff.c, a bit at a time: stored blocks, the fixed
+  code, and codes a block brings, each code taken from its lengths in the
+  canonical order. Data that can't be DEFLATE is a mistake that says why;
+  DEFLATE has no check of its own, so damage it can still read is caught by
+  gzip's and zip's CRC.
+- **Writing** finds each place's longest match in the 32768 bytes before it,
+  from the last 32 places with the same 3 bytes, and, as zlib does, writes a
+  byte on its own when the next place has a longer match. Each 16384 matches
+  are a block, written the shortest of three ways: with the fixed code, with
+  Huffman codes made for it (from how often each symbol comes, none longer
+  than 15 bits, or 7 for the lengths' own code, halving the counts until
+  none is), or as it is. Its gzip came out 4% smaller than zlib's default
+  level, in all, on the test's samples.
+- **Archives** are version 2.0 with names in UTF-8, each file squeezed unless
+  that makes it bigger, at 1980-01-01 0:00 so the same files make the same
+  bytes. Reading takes the list at the end, so a file with a data
+  descriptor, extra fields or a comment reads too; one locked with a
+  password, ZIP64 or a method other than DEFLATE says so.
+- **Tested.** Its own tests, on the three engines and in machine code: what
+  zlib made at every level (so stored, fixed and own-code blocks), round
+  trips of empty, short, repeating, random and every-byte data, archives
+  with a folder, an empty file and a name past one byte, and each mistake.
+  And 46 random samples of four shapes, up to 60 KB: zlib reads Moth's gzip
+  and Moth reads zlib's, crc32 agrees, and the machine code on Windows and
+  Linux writes the same bytes as the JIT; Windows' tar and Python's zipfile
+  read Moth's archive, and Moth reads one with data descriptors and a
+  comment. 400 gzip files damaged at random each stop with a mistake, or,
+  where the damage is somewhere gzip doesn't look, read right: none gives
+  wrong bytes.

@@ -332,6 +332,10 @@ bytes and dictionaries:
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
   `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
   on every engine, the playground's too, and test themselves.
+- [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
+  do (DEFLATE, with codes made for each block as zlib's are), and makes and
+  reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`
+  read, and it reads what they make.
 - [`xml.moth`](tools/xml.moth) reads XML into records, each element's name,
   attributes and what's inside it, finds elements by name, and writes them
   back, in Moth alone, read the same as Python's ElementTree reads it.

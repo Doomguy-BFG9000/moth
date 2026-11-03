@@ -1,0 +1,984 @@
+# Squeezes bytes smaller and back, as gzip and .zip files do, in Moth alone: DEFLATE (RFC 1951), gzip (RFC
+# 1952) and zip archives. Each takes text or bytes and gives bytes.
+#
+#   use "zip.moth" as zip
+#   write zip's gzip(read "notes.txt") to "notes.txt.gz"
+#   say zip's gunzip(read bytes "notes.txt.gz") as text
+#   write zip's zipped(list of "a.txt", "b.txt", list of "one", "two") to "both.zip"
+#   set files to zip's unzipped(read bytes "both.zip")       # a dictionary: each file's name, its bytes
+#   say item "a.txt" of files as text
+#
+# A file that isn't one of these, or that's damaged, is a `fail with` that says why: catch it with `try`.
+
+# ---------- the tables DEFLATE uses ----------
+
+set length_bases to list of 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258
+set length_extras to list of 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
+set distance_bases to list of 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049,
+    3073, 4097, 6145, 8193, 12289, 16385, 24577
+set distance_extras to list of 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
+set code_length_order to list of 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
+set powers_of_two to list of 1
+repeat 32 times
+    add item (length of powers_of_two) of powers_of_two * 2 to powers_of_two
+end
+
+# 2 to the power of n, for n from 0 to 32
+to two_to with n
+    return item (n + 1) of powers_of_two
+end
+
+# ---------- CRC-32, which gzip and zip check what they hold with ----------
+
+# made in a function, so its names are its own
+to made_crc_table
+    set table to empty list
+    for each entry from 0 to 255
+        set c to entry
+        repeat 8 times
+            if c bit and 1 is 1
+                set c to 3988292384 bit xor (shift c right by 1) # 0xEDB88320
+            else
+                set c to shift c right by 1
+            end
+        end
+        add c to table
+    end
+    return table
+end
+
+set crc_table to made_crc_table()
+
+to crc32 with data
+    set block to data as bytes
+    set c to 4294967295
+    for each b in block
+        set c to (item (((c bit xor b) bit and 255) + 1) of crc_table) bit xor (shift c right by 8)
+    end
+    return c bit xor 4294967295
+end
+
+# ---------- reading DEFLATE ----------
+
+# where reading is: the bytes, the next byte, and the bits taken from it not used yet
+to new_reader with block, start
+    return record with block block, next start, held 0, count 0
+end
+
+to bits with reader, n
+    repeat while count of reader is less than n
+        if next of reader is greater than length of block of reader
+            fail with "the compressed data ends too soon"
+        end
+        set held of reader to held of reader bit or (shift (byte (next of reader) of block of reader) left by count of reader)
+        set next of reader to next of reader + 1
+        set count of reader to count of reader + 8
+    end
+    set value to held of reader bit and (two_to(n) - 1)
+    set held of reader to shift held of reader right by n
+    set count of reader to count of reader - n
+    return value
+end
+
+# A Huffman code from each symbol's length (0 for none): how many codes of each length, and the symbols in
+# the order their codes go (by length, then by symbol), as zlib's puff.c reads them
+to huffman with lengths
+    set counts to empty list
+    repeat 16 times
+        add 0 to counts
+    end
+    for each l in lengths
+        set item (l + 1) of counts to item (l + 1) of counts + 1
+    end
+    set item 1 of counts to 0
+    set left to 1
+    for each l from 1 to 15
+        set left to left * 2 - item (l + 1) of counts
+        if left is less than 0
+            fail with "the compressed data has a code that can't be read"
+        end
+    end
+    set offsets to list of 0, 0
+    for each l from 1 to 14
+        add item (l + 1) of offsets + item (l + 1) of counts to offsets
+    end
+    set symbols to empty list
+    repeat length of lengths times
+        add 0 to symbols
+    end
+    for each s from 1 to length of lengths
+        set l to item s of lengths
+        if l is not 0
+            set item (l + 1) of offsets to item (l + 1) of offsets + 1
+            set item (item (l + 1) of offsets) of symbols to s - 1
+        end
+    end
+    return record with counts counts, symbols symbols
+end
+
+to decoded with reader, code
+    set c to 0
+    set first to 0
+    set index to 0
+    for each l from 1 to 15
+        set c to c bit or bits(reader, 1)
+        set many to item (l + 1) of counts of code
+        if c - many is less than first
+            return item (index + c - first + 1) of symbols of code
+        end
+        set index to index + many
+        set first to (first + many) * 2
+        set c to c * 2
+    end
+    fail with "the compressed data has a code that can't be read"
+end
+
+set fixed_codes to nothing # made the first time a fixed block is read
+
+to fixed_tables
+    if fixed_codes is nothing
+        set lengths to empty list
+        for each s from 0 to 287
+            if s is less than 144
+                add 8 to lengths
+            else if s is less than 256
+                add 9 to lengths
+            else if s is less than 280
+                add 7 to lengths
+            else
+                add 8 to lengths
+            end
+        end
+        set far to empty list
+        repeat 30 times
+            add 5 to far
+        end
+        set fixed_codes to record with letters huffman(lengths), distances huffman(far)
+    end
+    return fixed_codes
+end
+
+to dynamic_tables with reader
+    set letter_count to bits(reader, 5) + 257
+    set distance_count to bits(reader, 5) + 1
+    set length_count to bits(reader, 4) + 4
+    if letter_count is greater than 286 or distance_count is greater than 30
+        fail with "the compressed data has too many codes"
+    end
+    set code_lengths to empty list
+    repeat 19 times
+        add 0 to code_lengths
+    end
+    for each k from 1 to length_count
+        set item (item k of code_length_order + 1) of code_lengths to bits(reader, 3)
+    end
+    set length_code to huffman(code_lengths)
+    set lengths to empty list
+    repeat while length of lengths is less than letter_count + distance_count
+        set s to decoded(reader, length_code)
+        if s is less than 16
+            add s to lengths
+        else
+            set again to 0
+            set how_many to 0
+            if s is 16
+                if length of lengths is 0
+                    fail with "the compressed data repeats a length before there is one"
+                end
+                set again to item (length of lengths) of lengths
+                set how_many to 3 + bits(reader, 2)
+            else if s is 17
+                set how_many to 3 + bits(reader, 3)
+            else
+                set how_many to 11 + bits(reader, 7)
+            end
+            if length of lengths + how_many is greater than letter_count + distance_count
+                fail with "the compressed data has too many lengths"
+            end
+            repeat how_many times
+                add again to lengths
+            end
+        end
+    end
+    set letters to huffman(items 1 to letter_count of lengths)
+    set far to huffman(items (letter_count + 1) to (letter_count + distance_count) of lengths)
+    return record with letters letters, distances far
+end
+
+# DEFLATE's blocks from byte `start`, into `made` (a list of numbers): gives the byte after the last
+to inflate_into with block, start, made
+    set reader to new_reader(block, start)
+    set last to 0
+    repeat while last is 0
+        set last to bits(reader, 1)
+        set kind to bits(reader, 2)
+        if kind is 0
+            set held of reader to 0 # to the next whole byte
+            set count of reader to 0
+            set at to next of reader
+            if at + 3 is greater than length of block
+                fail with "the compressed data ends too soon"
+            end
+            set size to byte at of block + byte (at + 1) of block * 256
+            set check to byte (at + 2) of block + byte (at + 3) of block * 256
+            if size + check is not 65535
+                fail with "the compressed data has a stored block whose length is damaged"
+            end
+            if at + 3 + size is greater than length of block
+                fail with "the compressed data ends too soon"
+            end
+            for each k from at + 4 to at + 3 + size
+                add byte k of block to made
+            end
+            set next of reader to at + 4 + size
+        else if kind is 3
+            fail with "the compressed data has a block of a kind DEFLATE doesn't have"
+        else
+            set tables to nothing
+            if kind is 1
+                set tables to fixed_tables()
+            else
+                set tables to dynamic_tables(reader)
+            end
+            set going to yes
+            repeat while going
+                set s to decoded(reader, letters of tables)
+                if s is less than 256
+                    add s to made
+                else if s is 256
+                    set going to no
+                else
+                    set s to s - 257
+                    if s is at least 29
+                        fail with "the compressed data has a length that can't be"
+                    end
+                    set size to item (s + 1) of length_bases + bits(reader, item (s + 1) of length_extras)
+                    set d to decoded(reader, distances of tables)
+                    if d is at least 30
+                        fail with "the compressed data has a distance that can't be"
+                    end
+                    set back to item (d + 1) of distance_bases + bits(reader, item (d + 1) of distance_extras)
+                    if back is greater than length of made
+                        fail with "the compressed data goes back past its start"
+                    end
+                    set from to length of made - back + 1
+                    for each k from from to from + size - 1
+                        add item k of made to made
+                    end
+                end
+            end
+        end
+    end
+    return next of reader
+end
+
+to inflate with data
+    set made to empty list
+    inflate_into(data as bytes, 1, made)
+    return made as bytes
+end
+
+# Each place's longest match with the 32768 bytes before it, of 3 bytes or more, from the last 32 places
+# the same 3 bytes were; but a byte on its own when the next place has a longer one, as zlib does. Gives
+# the matches as two lists: each one's size (0 for a byte on its own), and how far back it is (or the byte).
+to matches_of with block
+    set n to length of block
+    set sizes to empty list
+    set values to empty list
+    set seen to empty dictionary # the places each 3 bytes have been, the latest last
+    set at to 1
+    set ahead to nothing # the match at the next place, if it's been looked for
+    repeat while at is at most n
+        set found to ahead
+        if found is nothing
+            set found to longest_match(block, at, seen)
+        end
+        note_place(block, at, seen)
+        set ahead to nothing
+        if size of found is at least 3 and size of found is less than 128 and at + 1 is at most n
+            set ahead to longest_match(block, at + 1, seen)
+            if size of ahead is greater than size of found
+                set found to record with size 0, back 0
+            end
+        end
+        if size of found is at least 3
+            add size of found to sizes
+            add back of found to values
+            for each p from at + 1 to at + size of found - 1
+                note_place(block, p, seen)
+            end
+            set at to at + size of found
+            set ahead to nothing
+        else
+            add 0 to sizes
+            add byte at of block to values
+            set at to at + 1
+        end
+    end
+    return record with sizes sizes, values values
+end
+
+to place_key with block, at
+    return byte at of block * 65536 + byte (at + 1) of block * 256 + byte (at + 2) of block
+end
+
+to note_place with block, at, seen
+    if at + 2 is at most length of block
+        set key to place_key(block, at)
+        if key is in seen
+            set places to item key of seen
+            add at to places
+        else
+            set item key of seen to list of at
+        end
+    end
+end
+
+to longest_match with block, at, seen
+    set n to length of block
+    set best to 0
+    set best_back to 0
+    if at + 2 is at most n
+        set key to place_key(block, at)
+        if key is in seen
+            set places to item key of seen
+            set k to length of places
+            set tries to 0
+            repeat while k is at least 1 and tries is less than 32 and best is less than 258
+                set from to item k of places
+                if at - from is greater than 32768
+                    set k to 0
+                else
+                    set size to 3
+                    repeat while size is less than 258 and at + size is at most n and byte (from + size) of block is byte (at + size) of block
+                        set size to size + 1
+                    end
+                    if size is greater than best
+                        set best to size
+                        set best_back to at - from
+                    end
+                    set k to k - 1
+                    set tries to tries + 1
+                end
+            end
+        end
+    end
+    return record with size best, back best_back
+end
+
+# ---------- Huffman codes for a block of its own ----------
+
+# The length of each symbol's code, from how often each comes (0 for never), none longer than `limit`: the
+# shortest in all, by Huffman's way, two of the least often at a time; if one is too long, again with the
+# counts halved, which evens them out. At least two symbols get a code, as DEFLATE needs.
+to code_lengths with counts, limit
+    set used to empty list
+    for each c in counts
+        add c to used
+    end
+    set many to 0
+    for each c in used
+        if c is greater than 0
+            set many to many + 1
+        end
+    end
+    for each k from 1 to 2
+        if many is less than 2 and item k of used is 0
+            set item k of used to 1
+            set many to many + 1
+        end
+    end
+    repeat while yes
+        set lengths to huffman_lengths(used)
+        set longest to 0
+        for each l in lengths
+            if l is greater than longest
+                set longest to l
+            end
+        end
+        if longest is at most limit
+            return lengths
+        end
+        for each k from 1 to length of used
+            if item k of used is greater than 1
+                set item k of used to (item k of used / 2) rounded down
+            end
+        end
+    end
+end
+
+to huffman_lengths with counts
+    set leaves to empty list
+    for each k from 1 to length of counts
+        if item k of counts is greater than 0
+            add (record with count item k of counts, symbol k) to leaves
+        end
+    end
+    set leaves to leaves in order by count # the least often first; the same counts, by symbol
+    set m to length of leaves
+    set weights to empty list
+    set parents to empty list
+    for each leaf in leaves
+        add count of leaf to weights
+        add 0 to parents
+    end
+    set next_leaf to 1
+    set next_join to m + 1
+    repeat m - 1 times # each time, the two least often, of the leaves and what's been joined, joined
+        set picked to empty list
+        repeat 2 times
+            if next_leaf is at most m and (next_join is greater than length of weights or item next_leaf of weights is at most item next_join of weights)
+                add next_leaf to picked
+                set next_leaf to next_leaf + 1
+            else
+                add next_join to picked
+                set next_join to next_join + 1
+            end
+        end
+        add item (item 1 of picked) of weights + item (item 2 of picked) of weights to weights
+        add 0 to parents
+        set item (item 1 of picked) of parents to length of weights
+        set item (item 2 of picked) of parents to length of weights
+    end
+    set depths to empty list
+    repeat length of weights times
+        add 0 to depths
+    end
+    set k to length of weights - 1
+    repeat while k is at least 1 # each below the top: one deeper than what it joined
+        set item k of depths to item (item k of parents) of depths + 1
+        set k to k - 1
+    end
+    set lengths to empty list
+    repeat length of counts times
+        add 0 to lengths
+    end
+    for each k from 1 to m
+        set item (symbol of item k of leaves) of lengths to item k of depths
+    end
+    return lengths
+end
+
+# each symbol's code, from the lengths, as DEFLATE gives them: shorter first, and in a length by symbol
+to codes_of with lengths
+    set counts to empty list
+    repeat 16 times
+        add 0 to counts
+    end
+    for each l in lengths
+        set item (l + 1) of counts to item (l + 1) of counts + 1
+    end
+    set item 1 of counts to 0
+    set next_codes to list of 0, 0 # for lengths 0 and 1; then each length's first, after the shorter ones
+    set c to 0
+    for each l from 2 to 15
+        set c to (c + item l of counts) * 2
+        add c to next_codes
+    end
+    set codes to empty list
+    for each l in lengths
+        if l is 0
+            add 0 to codes
+        else
+            add item (l + 1) of next_codes to codes
+            set item (l + 1) of next_codes to item (l + 1) of next_codes + 1
+        end
+    end
+    return codes
+end
+
+# a run of lengths, as DEFLATE writes them: 16 for the one before again 3 to 6 times, 17 for 3 to 10 0s and
+# 18 for 11 to 138; each a record of the symbol and what follows it
+to runs_of with lengths
+    set made to empty list
+    set k to 1
+    set n to length of lengths
+    repeat while k is at most n
+        set l to item k of lengths
+        set run to 1
+        repeat while k + run is at most n and item (k + run) of lengths is l
+            set run to run + 1
+        end
+        if l is 0 and run is at least 3
+            set left to run
+            repeat while left is at least 3
+                if left is at least 11
+                    set take to left
+                    if take is greater than 138
+                        set take to 138
+                    end
+                    add (record with symbol 18, extra take - 11, bits 7) to made
+                else
+                    set take to left
+                    if take is greater than 10
+                        set take to 10
+                    end
+                    add (record with symbol 17, extra take - 3, bits 3) to made
+                end
+                set left to left - take
+            end
+            repeat left times
+                add (record with symbol 0, extra 0, bits 0) to made
+            end
+        else if l is not 0 and run is at least 4
+            add (record with symbol l, extra 0, bits 0) to made
+            set left to run - 1
+            repeat while left is at least 3
+                set take to left
+                if take is greater than 6
+                    set take to 6
+                end
+                add (record with symbol 16, extra take - 3, bits 2) to made
+                set left to left - take
+            end
+            repeat left times
+                add (record with symbol l, extra 0, bits 0) to made
+            end
+        else
+            repeat run times
+                add (record with symbol l, extra 0, bits 0) to made
+            end
+        end
+        set k to k + run
+    end
+    return made
+end
+
+# ---------- writing DEFLATE ----------
+
+# bits for the output, the lowest first: the bytes so far, and the bits not yet a whole byte
+to new_writer
+    return record with made empty list, held 0, count 0
+end
+
+to put_bits with writer, value, n
+    set held of writer to held of writer bit or (shift value left by count of writer)
+    set count of writer to count of writer + n
+    set made_bytes to made of writer
+    repeat while count of writer is at least 8
+        add held of writer bit and 255 to made_bytes
+        set held of writer to shift held of writer right by 8
+        set count of writer to count of writer - 8
+    end
+end
+
+# a Huffman code, which DEFLATE writes from its top bit down
+to put_code with writer, code, n
+    set turned to 0
+    set c to code
+    repeat n times
+        set turned to turned * 2 + (c bit and 1)
+        set c to shift c right by 1
+    end
+    put_bits(writer, turned, n)
+end
+
+# the code of a length from 3 to 258, or a distance from 1 to 32768, in a table of bases
+to base_code with value, bases
+    set k to length of bases
+    repeat while item k of bases is greater than value
+        set k to k - 1
+    end
+    return k
+end
+
+# The bytes' matches, in blocks of up to 16384, each written the shortest of three ways: with the fixed code,
+# with codes made for it, or as it is.
+to deflate with data
+    set block to data as bytes
+    set found to matches_of(block)
+    set sizes to sizes of found
+    set values to values of found
+    set writer to new_writer()
+    set first to 1
+    set source_at to 1
+    repeat while yes
+        set last to first + 16383
+        if last is at least length of sizes
+            set last to length of sizes
+        end
+        set covered to 0
+        for each k from first to last
+            if item k of sizes is 0
+                set covered to covered + 1
+            else
+                set covered to covered + item k of sizes
+            end
+        end
+        write_block(writer, sizes, values, first, last, block, source_at, covered, last is length of sizes)
+        set source_at to source_at + covered
+        set first to last + 1
+        if first is greater than length of sizes
+            if count of writer is greater than 0
+                put_bits(writer, 0, 8 - count of writer)
+            end
+            return made of writer as bytes
+        end
+    end
+end
+
+to fixed_length with s
+    if s is less than 144
+        return 8
+    else if s is less than 256
+        return 9
+    else if s is less than 280
+        return 7
+    end
+    return 8
+end
+
+to write_block with writer, sizes, values, first, last, block, source_at, covered, final
+    set letter_counts to empty list
+    repeat 286 times
+        add 0 to letter_counts
+    end
+    set distance_counts to empty list
+    repeat 30 times
+        add 0 to distance_counts
+    end
+    set extra_bits to 0
+    for each k from first to last
+        set size to item k of sizes
+        if size is 0
+            set s to item k of values + 1
+            set item s of letter_counts to item s of letter_counts + 1
+        else
+            set l to base_code(size, length_bases)
+            set item (257 + l) of letter_counts to item (257 + l) of letter_counts + 1
+            set d to base_code(item k of values, distance_bases)
+            set item d of distance_counts to item d of distance_counts + 1
+            set extra_bits to extra_bits + item l of length_extras + item d of distance_extras
+        end
+    end
+    set item 257 of letter_counts to 1 # the block's end
+    # with the fixed code
+    set fixed_bits to 3 + extra_bits
+    for each s from 1 to 286
+        set fixed_bits to fixed_bits + item s of letter_counts * fixed_length(s - 1)
+    end
+    for each c in distance_counts
+        set fixed_bits to fixed_bits + c * 5
+    end
+    # with codes of its own
+    set letter_lengths to code_lengths(letter_counts, 15)
+    set distance_lengths to code_lengths(distance_counts, 15)
+    set letters_used to 286
+    repeat while letters_used is greater than 257 and item letters_used of letter_lengths is 0
+        set letters_used to letters_used - 1
+    end
+    set distances_used to 30
+    repeat while distances_used is greater than 1 and item distances_used of distance_lengths is 0
+        set distances_used to distances_used - 1
+    end
+    set all_lengths to items 1 to letters_used of letter_lengths
+    for each l in items 1 to distances_used of distance_lengths
+        add l to all_lengths
+    end
+    set runs to runs_of(all_lengths)
+    set run_counts to empty list
+    repeat 19 times
+        add 0 to run_counts
+    end
+    for each r in runs
+        set item (symbol of r + 1) of run_counts to item (symbol of r + 1) of run_counts + 1
+    end
+    set run_lengths to code_lengths(run_counts, 7)
+    set run_order_used to 19
+    repeat while run_order_used is greater than 4 and item (item run_order_used of code_length_order + 1) of run_lengths is 0
+        set run_order_used to run_order_used - 1
+    end
+    set own_bits to 3 + 14 + 3 * run_order_used + extra_bits
+    for each r in runs
+        set own_bits to own_bits + item (symbol of r + 1) of run_lengths + bits of r
+    end
+    for each s from 1 to 286
+        set own_bits to own_bits + item s of letter_counts * item s of letter_lengths
+    end
+    for each s from 1 to 30
+        set own_bits to own_bits + item s of distance_counts * item s of distance_lengths
+    end
+    # as it is, in pieces of up to 65535 bytes
+    set pieces to (covered + 65534 - remainder of covered + 65534 divided by 65535) / 65535
+    if pieces is 0
+        set pieces to 1
+    end
+    set stored_bits to (covered + 5 * pieces) * 8 + 7
+    if stored_bits is less than fixed_bits and stored_bits is less than own_bits
+        set at to source_at
+        set left to covered
+        repeat pieces times
+            set size to left
+            if size is greater than 65535
+                set size to 65535
+            end
+            set left to left - size
+            if final and left is 0
+                put_bits(writer, 1, 1)
+            else
+                put_bits(writer, 0, 1)
+            end
+            put_bits(writer, 0, 2)
+            if count of writer is greater than 0
+                put_bits(writer, 0, 8 - count of writer)
+            end
+            put_bits(writer, size, 16)
+            put_bits(writer, 65535 - size, 16)
+            set out to made of writer
+            for each k from at to at + size - 1
+                add byte k of block to out
+            end
+            set at to at + size
+        end
+        return nothing
+    end
+    if final
+        put_bits(writer, 1, 1)
+    else
+        put_bits(writer, 0, 1)
+    end
+    if fixed_bits is at most own_bits
+        put_bits(writer, 1, 2)
+        set letter_lengths to empty list
+        for each s from 0 to 287 # all 288 of the fixed code's, though 286 and 287 are never used, as its codes count them
+            add fixed_length(s) to letter_lengths
+        end
+        set distance_lengths to empty list
+        repeat 30 times
+            add 5 to distance_lengths
+        end
+    else
+        put_bits(writer, 2, 2)
+        put_bits(writer, letters_used - 257, 5)
+        put_bits(writer, distances_used - 1, 5)
+        put_bits(writer, run_order_used - 4, 4)
+        for each k from 1 to run_order_used
+            put_bits(writer, item (item k of code_length_order + 1) of run_lengths, 3)
+        end
+        set run_codes to codes_of(run_lengths)
+        for each r in runs
+            put_code(writer, item (symbol of r + 1) of run_codes, item (symbol of r + 1) of run_lengths)
+            put_bits(writer, extra of r, bits of r)
+        end
+    end
+    set letter_codes to codes_of(letter_lengths)
+    set distance_codes to codes_of(distance_lengths)
+    for each k from first to last
+        set size to item k of sizes
+        if size is 0
+            set s to item k of values + 1
+            put_code(writer, item s of letter_codes, item s of letter_lengths)
+        else
+            set l to base_code(size, length_bases)
+            put_code(writer, item (257 + l) of letter_codes, item (257 + l) of letter_lengths)
+            put_bits(writer, size - item l of length_bases, item l of length_extras)
+            set back to item k of values
+            set d to base_code(back, distance_bases)
+            put_code(writer, item d of distance_codes, item d of distance_lengths)
+            put_bits(writer, back - item d of distance_bases, item d of distance_extras)
+        end
+    end
+    put_code(writer, item 257 of letter_codes, item 257 of letter_lengths)
+end
+
+# ---------- gzip ----------
+
+to gzip with data
+    set block to data as bytes
+    set made to list of 31, 139, 8, 0, 0, 0, 0, 0, 0, 255 # no name, no time, from no system in particular
+    for each b in deflate(block)
+        add b to made
+    end
+    add_four(made, crc32(block))
+    add_four(made, length of block)
+    return made as bytes
+end
+
+# a whole number's low 4 bytes, the lowest first
+to add_four with made, value
+    set left to value
+    repeat 4 times
+        add left bit and 255 to made
+        set left to shift left right by 8
+    end
+end
+
+to read_four with block, at
+    return byte at of block + byte (at + 1) of block * 256 + byte (at + 2) of block * 65536 + byte (at + 3) of block * 16777216
+end
+
+to read_two with block, at
+    return byte at of block + byte (at + 1) of block * 256
+end
+
+# every member of a gzip file, one after the other, as one
+to gunzip with data
+    set block to data as bytes
+    set made to empty list
+    set at to 1
+    repeat while at is at most length of block
+        if at + 9 is greater than length of block or byte at of block is not 31 or byte (at + 1) of block is not 139
+            fail with "this isn't gzip: it doesn't start with gzip's two bytes"
+        end
+        if byte (at + 2) of block is not 8
+            fail with "this gzip file is compressed some way other than DEFLATE"
+        end
+        set flags to byte (at + 3) of block
+        set at to at + 10
+        if flags bit and 4 is 4 # more about it
+            set at to at + 2 + read_two(block, at)
+        end
+        for each flag in list of 8, 16 # its name, and a comment, each ending with a 0
+            if flags bit and flag is flag
+                repeat while at is at most length of block and byte at of block is not 0
+                    set at to at + 1
+                end
+                set at to at + 1
+            end
+        end
+        if flags bit and 2 is 2 # a check of its own
+            set at to at + 2
+        end
+        set started to length of made
+        set at to inflate_into(block, at, made)
+        if at + 7 is greater than length of block
+            fail with "this gzip file ends too soon"
+        end
+        set member to items (started + 1) to (length of made) of made
+        if read_four(block, at) is not crc32(member as bytes)
+            fail with "this gzip file is damaged: its check doesn't match what it holds"
+        end
+        if read_four(block, at + 4) is not remainder of length of member divided by 4294967296
+            fail with "this gzip file is damaged: it holds a different number of bytes than it says"
+        end
+        set at to at + 8
+    end
+    return made as bytes
+end
+
+# ---------- zip archives ----------
+
+# an archive holding each file, by its name, each squeezed unless that makes it bigger
+to zipped with names, contents
+    if length of names is not length of contents
+        fail with "zipped needs as many names as files"
+    end
+    set made to empty list
+    set central to empty list
+    for each k from 1 to length of names
+        set name_bytes to item k of names as bytes
+        set block to item k of contents as bytes
+        set squeezed to deflate(block)
+        set method to 8
+        if length of squeezed is at least length of block
+            set squeezed to block
+            set method to 0
+        end
+        set check to crc32(block)
+        set offset to length of made
+        add_four(made, 67324752) # PK 3 4
+        add_header(made, method, check, length of squeezed, length of block, length of name_bytes)
+        add_two(made, 0)
+        for each b in name_bytes
+            add b to made
+        end
+        for each b in squeezed
+            add b to made
+        end
+        add_four(central, 33639248) # PK 1 2
+        add_two(central, 20)
+        add_header(central, method, check, length of squeezed, length of block, length of name_bytes)
+        for each part in list of 0, 0, 0, 0 # no extra field or comment, disk 0, no attributes
+            add_two(central, part)
+        end
+        add_four(central, 0)
+        add_four(central, offset)
+        for each b in name_bytes
+            add b to central
+        end
+    end
+    set central_at to length of made
+    for each b in central
+        add b to made
+    end
+    add_four(made, 101010256) # PK 5 6
+    add_two(made, 0)
+    add_two(made, 0)
+    add_two(made, length of names)
+    add_two(made, length of names)
+    add_four(made, length of central)
+    add_four(made, central_at)
+    add_two(made, 0)
+    return made as bytes
+end
+
+# what a file's local and central headers both have: version 2.0, names in UTF-8, the time 1980-01-01 0:00
+to add_header with made, method, check, squeezed_size, size, name_size
+    for each part in list of 20, 2048, method, 0, 33
+        add_two(made, part)
+    end
+    add_four(made, check)
+    add_four(made, squeezed_size)
+    add_four(made, size)
+    add_two(made, name_size)
+end
+
+to add_two with made, value
+    add value bit and 255 to made
+    add shift value right by 8 to made
+end
+
+# each file an archive holds, by its name: a dictionary of their bytes. A folder's name ends with "/", and
+# holds no bytes.
+to unzipped with data
+    set block to data as bytes
+    set at to length of block - 21
+    repeat while at is at least 1 and read_four(block, at) is not 101010256
+        set at to at - 1
+    end
+    if at is less than 1
+        fail with "this isn't a zip file: it has no list of what it holds"
+    end
+    set count to read_two(block, at + 10)
+    set place to read_four(block, at + 16) + 1
+    if count is 65535 or place is 4294967296
+        fail with "this zip file is a ZIP64 one, which is for files of more than 4 GB"
+    end
+    set files to empty dictionary
+    repeat count times
+        if place + 45 is greater than length of block or read_four(block, place) is not 33639248
+            fail with "this zip file is damaged: its list of what it holds is"
+        end
+        set flags to read_two(block, place + 8)
+        set method to read_two(block, place + 10)
+        set check to read_four(block, place + 16)
+        set squeezed_size to read_four(block, place + 20)
+        set size to read_four(block, place + 24)
+        set name_size to read_two(block, place + 28)
+        set skip to read_two(block, place + 30) + read_two(block, place + 32)
+        set local to read_four(block, place + 42) + 1
+        set name to items (place + 46) to (place + 45 + name_size) of block as text
+        if flags bit and 1 is 1
+            fail with "this zip file's " + name + " is locked with a password"
+        end
+        set place to place + 46 + name_size + skip
+        if local + 29 is greater than length of block or read_four(block, local) is not 67324752
+            fail with "this zip file is damaged: " + name + " isn't where its list says"
+        end
+        set start to local + 30 + read_two(block, local + 26) + read_two(block, local + 28)
+        set held to items start to (start + squeezed_size - 1) of block
+        set content to nothing
+        if method is 0
+            set content to held
+        else if method is 8
+            set content to inflate(held)
+        else
+            fail with "this zip file's " + name + " is compressed some way other than DEFLATE"
+        end
+        if length of content is not size or crc32(content) is not check
+            fail with "this zip file is damaged: " + name + " isn't what it was"
+        end
+        set item name of files to content
+    end
+    return files
+end
