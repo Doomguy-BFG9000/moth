@@ -4,6 +4,8 @@
 import examples from "./examples.js";
 
 export const PROGRAMS = [
+  // tasks: a call started on a thread of its own, and waited for; `start` alone is still a name
+  ["to twice with n\n    return n * 2\nend\nset made to empty list\nto note with word\n    add word to made\nend\nset a to start twice(4)\nset n to start note(\"x\")\nset b to start twice(wait for a)\nsay a \" \" (wait for a) + (wait for b)\nwait for n\nsay made\nstart note(\"y\")\nset start to 3\nsay start + 1", "(record with task 1) 24\n[\"x\"]\n4"],
   // text inside a value in text, and values that start with a bracket
   ["to f with x\n    return x + \"!\"\nend\nset words to list of \"kiwi\", \"pear\"\nset n to 4\nset d to dictionary where \"a b\" is 1\nsay \"I have {join words with \", \"} and {(3 * n)} more\"\nsay \"{uppercase of \"{n} x\"} {item \"a b\" of d} # not a comment\"\nsay \"{f(\"{n} {f(\"{(n - 1)}\")}\")}\"\nsay \"é😀{n}\" \"\\{(n)}\"", "I have kiwi, pear and 12 more\n4 X 1 # not a comment\n4 3!!\né😀4{(n)}"],
   // text with values in it: "Hi {name}" is "Hi " + name; a '{' before anything but a letter or '_' is itself, as is '\{'
@@ -432,6 +434,11 @@ export const ERRORS = [
   ["say \"before\"\nwait -1 seconds", "line 2: 'wait' needs a number of 0 or more, not -1"],
   ["wait 5", "line 1: there is no function called 'wait' (to wait, say how long: 'wait 2 seconds')"],
   ["save 5", "line 1: there is no function called 'save' (to save a value, say where: 'save scores to \"scores.txt\"')"],
+  // a task, and waiting for one
+  ["start 5", "line 1: there is no function called 'start' (to start a task, give it a function's call: 'start work(5)')"],
+  ["to f\n    return 1\nend\nstart f() + 1", "line 4: there is no function called 'start' (to start a task, give it a function's call: 'start work(5)')"],
+  ["say wait for 5", "line 1: 'wait for' needs a task, as 'start' gives, not a number"],
+  ["to f\n    return 1\nend\nset t to start f()\nsay wait for (record with task (t's task + 1))", "line 5: 'wait for' needs a task, as 'start' gives, not this record"],
   ["say (list of 1, \"a\") in order", "line 1: 'in order' can't put numbers and text in order together"],
   ["say 5 in reverse order", "line 1: 'in reverse order' needs a list, not a number"],
   ["say (list of yes, no) in order", "line 1: 'in order' puts numbers or text in order, not yes/no"],

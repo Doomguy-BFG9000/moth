@@ -229,7 +229,7 @@ in about 4 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (17,674,240 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (18,177,024 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -554,6 +554,10 @@ set reply to send (record with name "Sam") to "https://example.com/api"   # as J
 set data to json from reply                 # what JSON says: its objects are dictionaries
 say scores as json                          # [10,20,30]
 set me to read "https://example.com/me" with headers (dictionary where "Authorization" is "Bearer x")
+
+set job to start count_to(1000000)          # a task: the call runs on a thread of its own,
+say "counting..."                           # sharing the program's names, while the program goes on
+say wait for job                            # waits for it to end, and gives what it gave back
 
 play note "C" for 0.5 seconds               # middle C; also "C#5", "Bb3", or "rest"
 play note 440 for 200 milliseconds          # or a pitch, in hertz
@@ -882,10 +886,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (17,674,240 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (18,177,024 bytes)
 ```
 
-That's the same 17,674,240 bytes Node.js made of it, and the moth.exe they make
+That's the same 18,177,024 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -1054,6 +1058,13 @@ calls that led there.
   and commands, against a stand-in for VS Code's API; the .vsix, unzipped and
   compared with the files here; VS Code installing it; and, with
   MOTH_VSCODE=1, the extension in VS Code's own extension host
+- tasks: what they say, fail with and give back, against the JavaScript engine,
+  with names shared, thousands of them, tasks starting tasks past the threads
+  there are, five threads making far more than they keep, and files read and written by tasks at once; a task counting while
+  the program waits for a line typed half a second late, running a program,
+  sleeping in a library's function while the program counts, `qsort` calling a
+  task back, and a window's timer ticking while a task works, on Windows and
+  Linux; and a program that starts no task made to the same bytes as before
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
@@ -1073,6 +1084,11 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 ## Limits
 
+- Tasks take turns: one thread runs Moth at a time, and lets the others run
+  every so often and whenever it waits, so a task keeps a program from
+  waiting, but doesn't make a sum faster on more cores. On the JavaScript
+  engines a task runs to its end when it's started. There's no lock a program
+  can take yet, and no way to ask whether a task has ended without waiting for it.
 - `moth debug` stops before a line, not inside one, and shows variables by
   name, not other values (`show x`, not `show x + 1`). A mistake ends the
   program as it always does, with no stop to look around first. A program
@@ -1142,8 +1158,8 @@ unboxed numbers were all caught, some only by the fuzzer.
   and gives one the same way; a structure's fields are whole numbers of 32 or
   64 bits, not 8 or 16 (but `2 bytes` and the like), numbers, floats,
   pointers, text, other structures and callbacks. Its whole numbers are
-  signed, and exact up to 2^53. C can call a callback only on the program's
-  own thread, while the program is in one of a library's functions, and there
+  signed, and exact up to 2^53. C can call a callback only on one of the
+  program's own threads (its own or a task's), while it's in one of a library's functions, and there
   can be 64 functions of each kind of callback at once; a mistake in one ends the
   program, as a mistake in an app's handler does. A mistake in a library can
   crash the program. On Linux a program that uses one needs glibc's dynamic linker, as

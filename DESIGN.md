@@ -2382,8 +2382,8 @@ hold them to agreeing.
   backslashes, an empty one, é and an emoji, as they were; a task that never
   ends, stopped (1 on Windows, 137 for SIGKILL on Linux); and a program that
   isn't there.
-- **Not yet.** Sending a task its input, threads of the program's own, and
-  telling its output from its error output.
+- **Not yet.** Sending a task its input, and telling its output from its
+  error output. Threads of the program's own are §62.
 
 ## 53. Shipping a program: its icon, its version and its files
 
@@ -2704,3 +2704,83 @@ hold them to agreeing.
   with a profile of its own; and, with MOTH_VSCODE=1, VS Code 1.142 itself,
   running the extension in its extension host: the problems, the Quick Fix,
   Format Document, the outline and the commands.
+
+## 62. Tasks: threads of a program's own
+
+- **Why.** §52's tasks are other programs: they share nothing, and what they
+  find comes back as text. A program that wants a long sum done while its
+  window still answers, or several files read at once, needed its own
+  functions to run alongside it.
+- **What a program writes.** `set job to start count(10)` starts the call on a
+  thread of its own and gives back a task at once, `(record with task 1)`;
+  `wait for job` waits for it to end and gives what it returned, as often as
+  it's asked. `start count(10)` on a line of its own starts one and keeps
+  nothing. A task shares the program's names: what it sets, the program sees.
+  `start` alone, or before anything but a call, is still a name, so a program
+  that called something `start` still runs, and `start 5` is a mistake that
+  says how to start a task. A mistake in a task ends the program, as one in
+  the program does, its trail ending at the line that started it.
+- **On the JavaScript engines** a task runs to its end when it's started, so
+  a program says the same each time it runs, and the playground's step and
+  rewind work as they did. `wait for` gives what it gave back.
+- **In machine code, one turn at a time.** The runtime has one heap and one
+  collector, so its threads take turns: one holds the turn, as Python's
+  threads hold its global lock. A thread lets the turn go every 200,000 loop
+  rounds and calls (a count taken down at each loop's end and each function's
+  start), and whenever it waits: for a time, a line typed, a program it runs,
+  a site, a window's next message, or a library's function. So a task works
+  while the program waits, and the program while a task does; and as a thread
+  only lets the turn go at a loop's end, a call or a wait, `add 1 to total` in
+  three threads at once loses nothing.
+- **On Windows** the turn is a semaphore that's at most 1; a task is
+  CreateThread, its stack 256 MB reserved, as the program's own is; a thread
+  finds its slot through thread-local storage (TlsAlloc). `wait for` waits on
+  an event of the task's slot.
+- **On Linux** the turn is a ticket lock: a thread takes a number and sleeps on
+  a futex until it's served, so turns go in order. A task is a `clone` with a
+  stack from mmap, or, in a program that uses a library, `pthread_create`,
+  found with dlsym, so the C library has the thread's own state; a thread
+  finds its slot through gs (arch_prctl). `wait for` waits on a futex of the
+  slot.
+- **More tasks than threads.** What a task gave is kept by its number, in a
+  list among the runtime's own, so `wait for` gives it however long after.
+  There are 255 slots, and one is free for another task once its task has
+  ended and nothing waits for it; on Linux, once its thread has left its
+  stack too, which the system says by clearing the thread's id (clone's
+  CHILD_CLEARTID), as the next task in the slot has the same stack. A task
+  started while every slot is in use is made there and then, by the thread
+  that starts it, as the JavaScript engines make every task, so tasks that
+  start tasks never wait for a slot that can't come free.
+- **What a thread keeps.** Its slot: where its stack starts (for the collector
+  and for a mistake's trail), the innermost `try`, the text being built, and,
+  while it hasn't the turn, its stack pointer. Taking the turn puts these where
+  the runtime has them, and letting it go saves them back. A thread that lets
+  the turn go keeps a copy of every register on its stack, or, in a library's
+  function, in its slot, as C may need the stack where it is; the collector
+  looks through each other thread's stack, from there to where it starts.
+- **What changes in a program that starts a task.** machine.moth makes it
+  twice: once to find that it starts one, then with threads. The second time it
+  keeps no name of the program's in a register through a loop, and takes
+  nothing as known about one from line to line (§48), as another thread can
+  set it in between. A program that starts no task has none of this, imports
+  nothing more, and is the same bytes as before.
+- **One at a time.** Reading a line typed, running a program (and on Linux
+  reading a site, through curl), and on Windows WinHTTP's requests are each
+  claimed by a thread until it's done, so two threads asking at once are
+  answered one after the other.
+- **C calling back.** A function C calls back on a task's thread takes the
+  turn for that thread first, and lets it go before going back to C. A thread
+  the program didn't make has no slot, and ends the program, with 70.
+- **Tested.** On Windows and Linux: what tasks say, fail with and give back,
+  against the JavaScript engine, with names shared, a thousand tasks one after
+  another, two thousand started before one is waited for, tasks starting tasks
+  past the slots there are, five threads making far more than they keep, and
+  files read and written by tasks at once; a task counting while the program waits for a line typed half a
+  second late, a task running a program, one sleeping 300 ms in a library's
+  function while the program counts to 3 million, `qsort` calling a task back,
+  and a window's timer ticking while a task sums to 50 million; and every
+  program that starts no task, the same bytes as before. A thousand tasks
+  start and end in about a tenth of a second.
+- **Not yet.** Two threads running Moth at the same moment, which needs a
+  collector that can stop them all; a lock a program can take; and asking
+  whether a task has ended without waiting for it.

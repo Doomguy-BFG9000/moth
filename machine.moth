@@ -233,7 +233,8 @@ to new_asm
         absolutes empty list, text_objects empty dictionary, more_imports empty list, pad no, net no, units no,
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
-        library_callbacks empty dictionary, callback_jobs empty list, shipping nothing
+        library_callbacks empty dictionary, callback_jobs empty list, shipping nothing, task_runtime no, threading no,
+        guarded empty list, released empty list
     set code of made to hot of made
     return made
 end
@@ -2994,6 +2995,36 @@ to emit_collect with a
     lea(a, rsi, rip("gc_roots_from"))
     lea(a, rdi, rip("gc_roots_to"))
     call_to(a, "rt_gc_scan")
+    if task_runtime of a # each other thread's stack, from its registers' copies up (see rt_gil_out)
+        set thr_loop to new_label(a)
+        set thr_next to new_label(a)
+        set thr_done to new_label(a)
+        storei(a, rip("gc_thr_i"), 0)
+        mark(a, thr_loop)
+        load(a, rax, rip("gc_thr_i"))
+        alui(a, "cmp", rax, thr_max)
+        jcc(a, cc_ae, thr_done)
+        imul_ri(a, rax, rax, thr_size)
+        lea(a, rdx, rip("thr_slots"))
+        alu(a, "add", rax, rdx)
+        load(a, rcx, mem(rax, thr_state))
+        alui(a, "cmp", rcx, 1)
+        jcc(a, cc_ne, thr_next)
+        load(a, rcx, mem(rax, thr_holding))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_ne, thr_next)
+        load(a, rsi, mem(rax, thr_saved))
+        test_rr(a, rsi, rsi)
+        jcc(a, cc_e, thr_next)
+        load(a, rdi, mem(rax, thr_top))
+        call_to(a, "rt_gc_scan")
+        mark(a, thr_next)
+        load(a, rax, rip("gc_thr_i"))
+        inc_r(a, rax)
+        store(a, rip("gc_thr_i"), rax)
+        jmp_to(a, thr_loop)
+        mark(a, thr_done)
+    end
     mark(a, tracing) # each block found: through it, if it can hold values
     alu(a, "cmp", r13, r12)
     jcc(a, cc_e, traced)
@@ -13525,11 +13556,19 @@ to emit_gui with a, title
     load(a, rax, rip("gui_done"))
     test_rr(a, rax, rax)
     jcc(a, cc_ne, loop_out)
+    if threading of a # in a frame of its own, below the registers' copies
+        call_to(a, "rt_gil_out")
+        win_enter(a)
+    end
     lea(a, rcx, rip("gui_msg"))
     movi(a, rdx, 0)
     movi(a, r8, 0)
     movi(a, r9, 0)
     w_call(a, "GetMessageW")
+    if threading of a
+        win_leave(a)
+        call_to(a, "rt_gil_in")
+    end
     load32s(a, rax, reg_at(rax))
     alui(a, "cmp", rax, 0)
     jcc(a, cc_le, loop_out)
@@ -13782,6 +13821,17 @@ to emit_gui with a, title
     mov_rr(a, r12, rdx)
     mov_rr(a, r13, r8)
     mov_rr(a, r14, r9)
+    if threading of a # called while the program waits for a message, with the turn let go: it takes it
+        set held_already to new_label(a)
+        storei(a, mem(rsp, 160), 0)
+        lea(a, rcx, rip("thr_slots"))
+        load(a, rax, mem(rcx, thr_holding))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, held_already)
+        call_to(a, "rt_gil_take")
+        storei(a, mem(rsp, 160), 1)
+        mark(a, held_already)
+    end
     for each pair in list of (list of 0x000F, w_paint), (list of 0x0014, w_erase), (list of 0x0010, w_close),
         (list of 0x0002, w_destroy), (list of 0x0113, w_timer), (list of 0x0100, w_key), (list of 0x0102, w_char),
         (list of 0x0201, w_down), (list of 0x0200, w_move), (list of 0x0202, w_up)
@@ -14118,6 +14168,18 @@ to emit_gui with a, title
     mark(a, w_zero)
     movi(a, rax, 0)
     mark(a, w_back)
+    if threading of a # and gives it back, if it took it
+        set not_taken to new_label(a)
+        load(a, rcx, mem(rsp, 160))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, not_taken)
+        push_r(a, rax)
+        push_r(a, rax)
+        call_to(a, "rt_gil_give")
+        pop_r(a, rax)
+        pop_r(a, rax)
+        mark(a, not_taken)
+    end
     for each k from 6 to 15
         movdqu_load(a, k, mem(rsp, 16 * (k - 6)))
     end
@@ -17990,7 +18052,13 @@ to emit_x_window with a, title
     lea(a, rdi, rip("x_pfd"))
     movi(a, rsi, 1)
     mov_rr(a, rdx, rcx)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     sys_call(a, 7)
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
     test_rr(a, rax, rax)
     jcc(a, cc_le, wait_none)
     movi(a, rax, 1)
@@ -23394,9 +23462,15 @@ to emit_clock with a, target
         jcc(a, cc_be, short_enough)
         mov_rr(a, rcx, rax)
         mark(a, short_enough)
+        if threading of a
+            call_to(a, "rt_gil_out")
+        end
         win_enter(a)
         call_import(a, "imp_Sleep")
         win_leave(a)
+        if threading of a
+            call_to(a, "rt_gil_in")
+        end
     else
         load_bits(a, xmm1, double_bytes(1000)) # seconds and nanoseconds, for nanosleep
         movapd(a, xmm2, xmm0)
@@ -23410,10 +23484,24 @@ to emit_clock with a, target
         sse_math(a, "*", xmm0, reg_at(xmm1))
         cvttsd2si(a, rax, xmm0)
         store(a, rip_plus("clk_buf", 8), rax)
+        if threading of a # how long, on this thread's own stack, as clk_buf is anyone's once the turn is let go
+            load(a, rax, rip_plus("clk_buf", 8))
+            push_r(a, rax)
+            load(a, rax, rip("clk_buf"))
+            push_r(a, rax)
+            mov_rr(a, rdi, rsp)
+            call_to(a, "rt_gil_out")
+        end
         movi(a, rax, 35) # nanosleep
-        lea(a, rdi, rip("clk_buf"))
+        if not threading of a
+            lea(a, rdi, rip("clk_buf"))
+        end
         movi(a, rsi, 0)
         syscall(a)
+        if threading of a
+            call_to(a, "rt_gil_in")
+            alui(a, "add", rsp, 16)
+        end
     end
     ret(a)
 
@@ -26561,6 +26649,878 @@ to emit_linux with a
     ret(a)
 end
 
+# ---------- the runtime: tasks ----------
+# `start count(10)` (DESIGN §62) makes the call on a thread of its own. The threads take turns: one at a time
+# holds the turn (on Windows a semaphore, on Linux a ticket lock, both handing it on in the order threads
+# asked for it), and it lets the others have it while it waits for anything (rt_gil_out, then rt_gil_in) and
+# every so often while it works (rt_gil_yield, from each loop's turn and each call). So the runtime and the
+# collector go on as they did with one thread: whatever runs holds the turn, a thread that has let it go has
+# every register's copy on its own stack, below its stack's top, for the collector (see emit_collect), and a
+# thread's stack_top and try_top come back with the turn. Each task is a slot of thr_slots, among the
+# collector's roots: what it calls, its inputs and what it gave. Slot 0 is the program's own run. What each
+# task gave is item n of task_gave, a list among the roots too, so it's there once the slot is another's.
+
+set thr_max to 256
+set thr_size to 480
+set thr_state to 8 # 0 a free slot, 1 running, 2 done
+set thr_holding to 16 # 1 while it holds the turn
+set thr_saved to 24 # where its stack is, while it has let the turn go
+set thr_top to 32 # its stack's top
+set thr_try to 40 # its try_top, while another thread has the turn
+set thr_tramp to 48 # where it starts: its start's trampoline
+set thr_fn to 56
+set thr_result to 64
+set thr_nargs to 72
+set thr_number to 80 # the task's number, from 1
+set thr_tid to 88 # on Linux, its thread's id, from clone, which the system clears once the thread has gone
+set thr_base to 96 # on Linux, the memory its stack is in, kept for the next task in this slot
+set thr_args to 104 # up to 8 inputs
+set thr_event to 168 # on Windows, the event its end sets, made once for the slot
+set thr_builder to 176 # its text builder: b_ptr, b_len and b_cap, while another thread has the turn
+set thr_regs to 200 # while it's in a library's function: every register, for the collector (see rt_gil_park)
+set thr_pret to 456 # on Linux, a pthread's: where its start routine goes back to, and what it kept
+set thr_waiters to 464 # how many threads are waiting for it to end, while its slot can't be used again
+set thr_stack to 268435456 # 256 MB of addresses for each task's stack, as the program's own run has
+set gil_slice to 200000 # loops' turns and calls between looks at whether another thread is waiting
+set thread_imports to list of "CreateThread", "ExitThread", "CreateSemaphoreW", "ReleaseSemaphore", "TlsAlloc", "TlsSetValue",
+    "CreateEventW", "SetEvent", "ResetEvent", "TlsGetValue"
+set builder_names to list of "b_ptr", "b_len", "b_cap"
+# the registers rt_gil_out keeps, as they're pushed (r11 changes in any call, so isn't kept)
+set gil_regs to list of rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r12, r13, r14, r15
+
+to lock_inc with a, label
+    enc(a, (list of 0xF0), yes, (list of 0xFF), 0, rip(label), empty list)
+end
+
+to lock_dec with a, label
+    enc(a, (list of 0xF0), yes, (list of 0xFF), 1, rip(label), empty list)
+end
+
+# lock xadd: r gets what's at the label, which goes up by r
+to lock_xadd with a, label, r
+    enc(a, (list of 0xF0), yes, (list of 0x0F, 0xC1), r, rip(label), empty list)
+end
+
+# every register back from its copy, the copies `base` bytes above rsp: the slot, the 14 pushed, then xmm0 to 15
+to gil_restore with a, base
+    for each i from 1 to length of gil_regs
+        load(a, item i of gil_regs, mem(rsp, base + 8 + 8 * (14 - i)))
+    end
+    for each k from 0 to 15
+        movsd_load(a, k, mem(rsp, base + 120 + 8 * k))
+    end
+end
+
+# a millisecond's wait, for a thread that has let the turn go
+to gil_nap with a, windows
+    if windows
+        win_enter(a)
+        movi(a, rcx, 1)
+        call_import(a, "imp_Sleep")
+        win_leave(a)
+    else
+        lea(a, rdi, rip("thr_ts"))
+        movi(a, rsi, 0)
+        sys_call(a, 35)
+    end
+end
+
+# Until the task in rbx's slot is done, the turn let go: on Windows its event, which its end sets, and on Linux
+# its state, which its end wakes whoever waits on
+to gil_await with a, windows
+    set waiting to new_label(a)
+    set over to new_label(a)
+    mark(a, waiting)
+    load(a, rdx, mem(rbx, thr_state))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_ne, over)
+    call_to(a, "rt_gil_out")
+    if windows
+        win_enter(a)
+        load(a, rcx, mem(rbx, thr_event))
+        movi(a, rdx, -1)
+        call_import(a, "imp_WaitForSingleObject")
+        win_leave(a)
+    else
+        lea(a, rdi, mem(rbx, thr_state))
+        movi(a, rsi, 128) # FUTEX_WAIT_PRIVATE, while it's still running
+        movi(a, rdx, 1)
+        movi(a, r10, 0)
+        sys_call(a, 202)
+    end
+    call_to(a, "rt_gil_in")
+    jmp_to(a, waiting)
+    mark(a, over)
+end
+
+# A routine that uses what threads would clash over (the input; a program it starts and its pipes; a site),
+# in a program whose threads take turns: its own code is name + "_now", and `name` claims what it uses first
+# (see emit_guards). A routine's code is called again, by the same thread, without claiming it twice.
+to guarded with a, name
+    if not threading of a
+        return name
+    end
+    set names to guarded of a
+    add name to names
+    return name + "_now"
+end
+
+# A routine that waits for what it does, with nothing of anyone else's: with the turn let go all through it
+to released with a, name
+    if not threading of a
+        return name
+    end
+    set names to released of a
+    add name to names
+    return name + "_now"
+end
+
+# what each guarded routine claims: the input, programs, or sites, which on Linux are read through curl, a
+# program like any other
+to guard_flag with name, windows
+    if name is "rt_read_line"
+        return "in_busy"
+    end
+    if name is "rt_run_program" or not windows
+        return "run_busy"
+    end
+    return "net_busy"
+end
+
+to emit_guards with a, target
+    set windows to target is "windows"
+    for each name in guarded of a
+        set flag to guard_flag(name, windows)
+        set mine to new_label(a)
+        set again to new_label(a)
+        set free to new_label(a)
+        mark(a, name)
+        push_r(a, rax)
+        load(a, rax, rip(flag))
+        alu_load(a, "cmp", rax, rip("thr_current"))
+        pop_r(a, rax)
+        jcc(a, cc_e, mine) # this thread has it already
+        mark(a, again)
+        push_r(a, rax)
+        load(a, rax, rip(flag))
+        test_rr(a, rax, rax)
+        pop_r(a, rax)
+        jcc(a, cc_e, free)
+        call_to(a, "rt_gil_out") # another thread has it: a millisecond, and look again
+        gil_nap(a, windows)
+        call_to(a, "rt_gil_back")
+        jmp_to(a, again)
+        mark(a, free)
+        push_r(a, rax)
+        load(a, rax, rip("thr_current"))
+        store(a, rip(flag), rax)
+        pop_r(a, rax)
+        call_to(a, name + "_now")
+        storei(a, rip(flag), 0)
+        ret(a)
+        mark(a, mine)
+        jmp_to(a, name + "_now")
+    end
+    for each name in released of a
+        mark(a, name)
+        call_to(a, "rt_gil_out")
+        call_to(a, name + "_now")
+        call_to(a, "rt_gil_in")
+        ret(a)
+    end
+end
+
+to emit_threads with a, target
+    set windows to target is "windows"
+    set ro to rodata of a # where a task's first call goes back to, for a mistake's trail: a call the runtime made
+    rodata_here(a, "thr_stop")
+    add 0xA9 to ro
+    put32(ro, -1)
+
+    # rt_threads_init: the program's own run is slot 0, holding the turn
+    mark(a, "rt_threads_init")
+    lea(a, rax, rip("thr_slots"))
+    store(a, mem(rax, 0), rax)
+    storei(a, mem(rax, thr_state), 1)
+    storei(a, mem(rax, thr_holding), 1)
+    load(a, rcx, rip("stack_top"))
+    store(a, mem(rax, thr_top), rcx)
+    store(a, rip("thr_current"), rax)
+    storei(a, rip("gil_ticks"), gil_slice)
+    storei(a, rip_plus("thr_ts", 8), 1000000) # a millisecond, in nanoseconds
+    if windows
+        win_enter(a)
+        movi(a, rcx, 0)
+        movi(a, rdx, 0) # none free: the program's own run has it
+        movi(a, r8, 1)
+        movi(a, r9, 0)
+        call_import(a, "imp_CreateSemaphoreW")
+        win_leave(a)
+        store(a, rip("gil_sem"), rax)
+        win_enter(a)
+        call_import(a, "imp_TlsAlloc")
+        win_leave(a)
+        store(a, rip("tls_index"), rax)
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        lea(a, rdx, rip("thr_slots"))
+        call_import(a, "imp_TlsSetValue")
+        win_leave(a)
+    else
+        storei(a, rip("gil_next"), 1) # the program's own run has ticket 0
+        storei(a, rip("gil_serving"), 0)
+        movi(a, rdi, 4097) # ARCH_SET_GS: gs:0 is this thread's slot
+        lea(a, rsi, rip("thr_slots"))
+        sys_call(a, 158)
+    end
+    ret(a)
+
+    # rt_gil_take: rcx a thread's slot: waits for the turn, then has it, with its stack_top and try_top
+    mark(a, "rt_gil_take")
+    push_r(a, rbx)
+    mov_rr(a, rbx, rcx)
+    if windows
+        lock_inc(a, "gil_waiting")
+        win_enter(a)
+        load(a, rcx, rip("gil_sem"))
+        movi(a, rdx, -1)
+        call_import(a, "imp_WaitForSingleObject")
+        win_leave(a)
+        lock_dec(a, "gil_waiting")
+    else
+        set waiting to new_label(a)
+        set got to new_label(a)
+        movi(a, rax, 1)
+        lock_xadd(a, "gil_next", rax) # rax: this thread's ticket
+        mark(a, waiting)
+        load(a, rdx, rip("gil_serving"))
+        alu(a, "cmp", rdx, rax)
+        jcc(a, cc_e, got)
+        push_r(a, rax)
+        lea(a, rdi, rip("gil_serving"))
+        movi(a, rsi, 128) # FUTEX_WAIT_PRIVATE, if it's still the number seen
+        movi(a, r10, 0)
+        sys_call(a, 202)
+        pop_r(a, rax)
+        jmp_to(a, waiting)
+        mark(a, got)
+    end
+    store(a, rip("thr_current"), rbx)
+    storei(a, mem(rbx, thr_holding), 1)
+    for each k from 0 to 2
+        load(a, rax, mem(rbx, thr_builder + 8 * k))
+        store(a, rip(item (k + 1) of builder_names), rax)
+    end
+    load(a, rax, mem(rbx, thr_top))
+    store(a, rip("stack_top"), rax)
+    load(a, rax, mem(rbx, thr_try))
+    store(a, rip("try_top"), rax)
+    storei(a, rip("gil_ticks"), gil_slice)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_gil_give: the turn, to the thread that has waited longest, this one's try_top kept for when it's back
+    mark(a, "rt_gil_give")
+    load(a, rax, rip("thr_current"))
+    load(a, rcx, rip("try_top"))
+    store(a, mem(rax, thr_try), rcx)
+    for each k from 0 to 2
+        load(a, rcx, rip(item (k + 1) of builder_names))
+        store(a, mem(rax, thr_builder + 8 * k), rcx)
+    end
+    storei(a, mem(rax, thr_holding), 0)
+    if windows
+        win_enter(a)
+        load(a, rcx, rip("gil_sem"))
+        movi(a, rdx, 1)
+        movi(a, r8, 0)
+        call_import(a, "imp_ReleaseSemaphore")
+        win_leave(a)
+    else
+        lock_inc(a, "gil_serving")
+        lea(a, rdi, rip("gil_serving"))
+        movi(a, rsi, 129) # FUTEX_WAKE_PRIVATE: every waiting thread, each looking whose ticket it is
+        movi(a, rdx, 2147483647)
+        sys_call(a, 202)
+    end
+    ret(a)
+
+    # rt_gil_out: before something that waits, the turn let go. Every register's copy is left on the stack,
+    # 248 bytes of them under where it was called from (the slot, 14 registers, then xmm0 to 15), so the
+    # collector can find any value in them, and it goes back with each register as it was. rt_gil_in, after
+    # the wait, takes the turn back, and every register but rax and xmm0, which have what the wait gave.
+    mark(a, "rt_gil_out")
+    alui(a, "sub", rsp, 128)
+    for each k from 0 to 15
+        movsd_store(a, mem(rsp, 8 * k), k)
+    end
+    for each r in gil_regs
+        push_r(a, r)
+    end
+    load(a, rax, rip("thr_current"))
+    push_r(a, rax)
+    store(a, mem(rax, thr_saved), rsp)
+    call_to(a, "rt_gil_give")
+    gil_restore(a, 0)
+    enc(a, empty list, no, (list of 0xFF), 4, mem(rsp, 248), empty list) # jmp back, the copies left there
+
+    mark(a, "rt_gil_in")
+    store(a, mem(rsp, 120), rax) # what the wait gave, kept as the registers come back
+    movsd_store(a, mem(rsp, 128), xmm0)
+    load(a, rcx, mem(rsp, 8))
+    call_to(a, "rt_gil_take")
+    load(a, r11, mem(rsp, 0))
+    store(a, mem(rsp, 256), r11) # where it goes back to, above the copies
+    gil_restore(a, 8)
+    lea(a, rsp, mem(rsp, 256))
+    ret(a)
+
+    mark(a, "rt_gil_back") # as rt_gil_in, every register back as it was
+    load(a, rcx, mem(rsp, 8))
+    call_to(a, "rt_gil_take")
+    load(a, r11, mem(rsp, 0))
+    store(a, mem(rsp, 256), r11)
+    gil_restore(a, 8)
+    lea(a, rsp, mem(rsp, 256))
+    ret(a)
+
+    # rt_gil_park: before a call into a library, whose inputs are in place: every register into this thread's
+    # slot, where the collector finds them, the stack where it is, and the turn let go. Every register kept.
+    mark(a, "rt_gil_park")
+    push_r(a, rax)
+    load(a, rax, rip("thr_current"))
+    store(a, mem(rax, thr_regs), rbx)
+    mov_rr(a, rbx, rax) # the slot, from here: rbx is kept by the turn's own calls
+    for each i from 1 to length of gil_regs
+        store(a, mem(rbx, thr_regs + 8 * i), item i of gil_regs)
+    end
+    load(a, rax, mem(rsp, 0))
+    store(a, mem(rbx, thr_regs + 8), rax) # rax as it was
+    for each k from 0 to 15
+        movsd_store(a, mem(rbx, thr_regs + 128 + 8 * k), k)
+    end
+    store(a, mem(rbx, thr_saved), rsp)
+    call_to(a, "rt_gil_give")
+    for each k from 0 to 15
+        movsd_load(a, k, mem(rbx, thr_regs + 128 + 8 * k))
+    end
+    for each i from 1 to length of gil_regs
+        set r to item i of gil_regs
+        if r is not rbx
+            load(a, r, mem(rbx, thr_regs + 8 * i))
+        end
+    end
+    load(a, rbx, mem(rbx, thr_regs))
+    pop_r(a, rax)
+    ret(a)
+
+    # rt_gil_unpark: after it, the turn back; rax, rdx, xmm0 and xmm1, what it gave, kept, and what C keeps
+    mark(a, "rt_gil_unpark")
+    push_r(a, rax)
+    push_r(a, rdx)
+    alui(a, "sub", rsp, 24)
+    movsd_store(a, mem(rsp, 0), xmm0)
+    movsd_store(a, mem(rsp, 8), xmm1)
+    call_to(a, "rt_gil_mine")
+    mov_rr(a, rcx, rax)
+    call_to(a, "rt_gil_take")
+    movsd_load(a, xmm0, mem(rsp, 0))
+    movsd_load(a, xmm1, mem(rsp, 8))
+    alui(a, "add", rsp, 24)
+    pop_r(a, rdx)
+    pop_r(a, rax)
+    ret(a)
+
+    # rt_gil_mine: this thread's slot, in rax, from its thread's own storage
+    mark(a, "rt_gil_mine")
+    if windows
+        win_enter(a)
+        load(a, rcx, rip("tls_index"))
+        call_import(a, "imp_TlsGetValue")
+        win_leave(a)
+    else
+        raw(a, list of 0x65, 0x48, 0x8B, 0x04, 0x25, 0, 0, 0, 0) # mov rax, gs:0
+    end
+    ret(a)
+
+    # rt_gil_cb_in: a function C calls back, before it works out what it was given: the turn, for the thread
+    # it's called on, which let it go to call C. A thread the program didn't make has no turn to take, and
+    # ends the program. rt_gil_cb_out, before it goes back to C: the turn let go again, rax and xmm0 kept.
+    set foreign to new_label(a)
+    mark(a, "rt_gil_cb_in")
+    call_to(a, "rt_gil_mine")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, foreign)
+    mov_rr(a, rcx, rax)
+    jmp_to(a, "rt_gil_take")
+    mark(a, foreign)
+    movi(a, rcx, 70)
+    jmp_to(a, "rt_exit")
+    mark(a, "rt_gil_cb_out")
+    push_r(a, rax)
+    alui(a, "sub", rsp, 8)
+    movsd_store(a, mem(rsp, 0), xmm0)
+    call_to(a, "rt_gil_give")
+    movsd_load(a, xmm0, mem(rsp, 0))
+    alui(a, "add", rsp, 8)
+    pop_r(a, rax)
+    ret(a)
+
+    # rt_gil_yield: every so often, the turn to another thread, if one is waiting for it; every register kept
+    set no_one to new_label(a)
+    mark(a, "rt_gil_yield")
+    storei(a, rip("gil_ticks"), gil_slice)
+    push_r(a, rax)
+    if windows
+        load(a, rax, rip("gil_waiting"))
+        alui(a, "cmp", rax, 0)
+    else
+        load(a, rax, rip("gil_next"))
+        alu_load(a, "sub", rax, rip("gil_serving"))
+        alui(a, "cmp", rax, 1)
+    end
+    pop_r(a, rax)
+    jcc(a, cc_le, no_one)
+    call_to(a, "rt_gil_out")
+    call_to(a, "rt_gil_in")
+    mark(a, no_one)
+    ret(a)
+
+    # rt_task_start: rsi what a start pushed (its inputs, the last first, then the function), rcx how many
+    # inputs, rdx its trampoline: a slot for it, and a thread. rax the task's number; 0 if every slot is in
+    # use (and the start makes the call itself, then rt_task_ran), or -1 if the thread couldn't be started.
+    set seek to new_label(a)
+    set next_slot to new_label(a)
+    set full to new_label(a)
+    set found to new_label(a)
+    set copying to new_label(a)
+    set copied to new_label(a)
+    set started to new_label(a)
+    set failed to new_label(a)
+    set over to new_label(a)
+    mark(a, "rt_task_start")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rcx)
+    lea(a, rbx, rip_plus("thr_slots", thr_size))
+    movi(a, rcx, 1)
+    mark(a, seek)
+    alui(a, "cmp", rcx, thr_max)
+    jcc(a, cc_ae, full)
+    load(a, rax, mem(rbx, thr_state))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, found)
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_ne, next_slot)
+    load(a, rax, mem(rbx, thr_waiters))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, found)
+    mark(a, next_slot)
+    alui(a, "add", rbx, thr_size)
+    inc_r(a, rcx)
+    jmp_to(a, seek)
+    mark(a, full)
+    movi(a, rax, 0)
+    jmp_to(a, over)
+    mark(a, found)
+    store(a, mem(rbx, 0), rbx)
+    storei(a, mem(rbx, thr_holding), 0)
+    storei(a, mem(rbx, thr_saved), 0)
+    storei(a, mem(rbx, thr_try), 0)
+    for each k from 0 to 2 # a text builder of its own, made as it's first used
+        storei(a, mem(rbx, thr_builder + 8 * k), 0)
+    end
+    store(a, mem(rbx, thr_tramp), rdx)
+    mov_rr(a, rax, r13)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r12)
+    load(a, rax, mem(rax, 0))
+    store(a, mem(rbx, thr_fn), rax)
+    movi64(a, rax, bits_nothing)
+    store(a, mem(rbx, thr_result), rax)
+    store(a, mem(rbx, thr_nargs), r13)
+    movi(a, rcx, 0)
+    mark(a, copying) # input k, from the first: pushed n - 1 - k places above the last
+    alu(a, "cmp", rcx, r13)
+    jcc(a, cc_ae, copied)
+    mov_rr(a, rax, r13)
+    alu(a, "sub", rax, rcx)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r12)
+    load(a, rax, mem(rax, 0))
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rdx, rbx)
+    store(a, mem(rdx, thr_args), rax)
+    inc_r(a, rcx)
+    jmp_to(a, copying)
+    mark(a, copied)
+    load(a, rax, rip("tasks_made"))
+    inc_r(a, rax)
+    store(a, rip("tasks_made"), rax)
+    store(a, mem(rbx, thr_number), rax)
+    set have_list to new_label(a) # room in task_gave for what it gives, nothing until then
+    load(a, rax, rip("task_gave"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_list)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    store(a, rip("task_gave"), rax)
+    mark(a, have_list)
+    movi64(a, rdx, bits_nothing)
+    call_to(a, "rt_list_push")
+    if windows # the event its end sets: made once for the slot, and reset for each task in it
+        set have_event to new_label(a)
+        set event_ready to new_label(a)
+        load(a, rax, mem(rbx, thr_event))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, have_event)
+        win_enter(a)
+        movi(a, rcx, 0)
+        movi(a, rdx, 1) # reset by hand
+        movi(a, r8, 0)
+        movi(a, r9, 0)
+        call_import(a, "imp_CreateEventW")
+        win_leave(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, failed)
+        store(a, mem(rbx, thr_event), rax)
+        jmp_to(a, event_ready)
+        mark(a, have_event)
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_ResetEvent")
+        win_leave(a)
+        mark(a, event_ready)
+    end
+    storei(a, mem(rbx, thr_state), 1)
+    if windows
+        win_enter(a)
+        movi(a, rcx, 0)
+        movi(a, rdx, thr_stack)
+        lea(a, r8, rip("rt_task_entry"))
+        mov_rr(a, r9, rbx)
+        storei(a, mem(rsp, 32), 65536) # STACK_SIZE_PARAM_IS_A_RESERVATION
+        storei(a, mem(rsp, 40), 0)
+        call_import(a, "imp_CreateThread")
+        win_leave(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, failed)
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+    else
+        set have_stack to new_label(a)
+        set in_child to new_label(a)
+        set by_clone to new_label(a)
+        storei(a, mem(rbx, thr_pret), 0)
+        if libraries of a # the C library's own way, so the thread has its own of what the library keeps
+            set have_pthreads to new_label(a)
+            load(a, rax, rip("thr_pcreate"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, have_pthreads)
+            for each pair in list of (list of "thr_pcreate", "pthread_create"), (list of "thr_pattr_init", "pthread_attr_init"),
+                (list of "thr_pattr_size", "pthread_attr_setstacksize"), (list of "thr_pattr_detach", "pthread_attr_setdetachstate")
+                push_r(a, rbp)
+                mov_rr(a, rbp, rsp)
+                alui(a, "and", rsp, -16)
+                movi(a, rdi, 0) # RTLD_DEFAULT
+                lea(a, rsi, rip(c_text_place(a, item 2 of pair)))
+                call_import(a, "got_dlsym")
+                mov_rr(a, rsp, rbp)
+                pop_r(a, rbp)
+                store(a, rip(item 1 of pair), rax)
+            end
+            load(a, rax, rip("thr_pcreate"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, by_clone) # a C library older than 2.34, with pthreads apart: as without libraries
+            mark(a, have_pthreads)
+            push_r(a, rbp)
+            mov_rr(a, rbp, rsp)
+            alui(a, "and", rsp, -16)
+            lea(a, rdi, rip("thr_pattr"))
+            load(a, rax, rip("thr_pattr_init"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_pattr"))
+            movi(a, rsi, thr_stack)
+            load(a, rax, rip("thr_pattr_size"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_pattr"))
+            movi(a, rsi, 1) # PTHREAD_CREATE_DETACHED
+            load(a, rax, rip("thr_pattr_detach"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_ptid"))
+            lea(a, rsi, rip("thr_pattr"))
+            lea(a, rdx, rip("rt_task_pentry"))
+            mov_rr(a, rcx, rbx)
+            load(a, rax, rip("thr_pcreate"))
+            call_r(a, rax)
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, failed)
+            jmp_to(a, started)
+        end
+        mark(a, by_clone)
+        set gone to new_label(a)
+        set still_there to new_label(a)
+        mark(a, still_there) # the thread this slot had last, which may not quite have left its stack yet
+        load(a, rdx, mem(rbx, thr_tid))
+        test_rr(a, rdx, rdx)
+        jcc(a, cc_e, gone)
+        lea(a, rdi, mem(rbx, thr_tid))
+        movi(a, rsi, 0) # FUTEX_WAIT, as the system wakes it as anyone's
+        movi(a, r10, 0)
+        sys_call(a, 202)
+        jmp_to(a, still_there)
+        mark(a, gone)
+        load(a, rax, mem(rbx, thr_base))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, have_stack)
+        movi(a, rdi, 0)
+        movi(a, rsi, thr_stack)
+        movi(a, rdx, 3) # PROT_READ | PROT_WRITE
+        movi(a, r10, 147490) # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_STACK
+        movi(a, r8, -1)
+        movi(a, r9, 0)
+        sys_call(a, 9)
+        alui(a, "cmp", rax, -4096)
+        jcc(a, cc_a, failed)
+        store(a, mem(rbx, thr_base), rax)
+        mark(a, have_stack)
+        mov_rr(a, rsi, rax)
+        movi(a, rcx, thr_stack)
+        alu(a, "add", rsi, rcx)
+        movi(a, rdi, 3477248) # CLONE_VM | FS | FILES | SIGHAND | THREAD | SYSVSEM | PARENT_SETTID | CHILD_CLEARTID
+        lea(a, rdx, mem(rbx, thr_tid))
+        mov_rr(a, r10, rdx)
+        movi(a, r8, 0)
+        sys_call(a, 56)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, in_child)
+        jcc(a, cc_l, failed)
+        jmp_to(a, started)
+        mark(a, in_child) # the new thread, on its own stack
+        mov_rr(a, rcx, rbx)
+        jmp_to(a, "rt_task_entry")
+    end
+    mark(a, started)
+    load(a, rax, mem(rbx, thr_number))
+    jmp_to(a, over)
+    mark(a, failed)
+    storei(a, mem(rbx, thr_state), 0)
+    movi(a, rax, -1)
+    mark(a, over)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_task_ran: xmm0 what a task's call gave, made at once by the thread that started it, as every slot
+    # was in use: its number in rax, and what it gave in task_gave
+    set have_room to new_label(a)
+    mark(a, "rt_task_ran")
+    load(a, rax, rip("tasks_made"))
+    inc_r(a, rax)
+    store(a, rip("tasks_made"), rax)
+    push_r(a, rax)
+    alui(a, "sub", rsp, 8)
+    movsd_store(a, mem(rsp, 0), xmm0)
+    load(a, rax, rip("task_gave"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_room)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    store(a, rip("task_gave"), rax)
+    mark(a, have_room)
+    load(a, rdx, mem(rsp, 0))
+    call_to(a, "rt_list_push")
+    alui(a, "add", rsp, 8)
+    pop_r(a, rax)
+    ret(a)
+
+    if not windows # rt_task_pentry: a pthread's start, rdi its slot: what C keeps, kept for going back
+        mark(a, "rt_task_pentry")
+        for each r in list of rbx, rbp, r12, r13, r14, r15
+            push_r(a, r)
+        end
+        store(a, mem(rdi, thr_pret), rsp)
+        mov_rr(a, rcx, rdi)
+        jmp_to(a, "rt_task_entry")
+    end
+
+    # rt_task_entry: a task's thread, rcx its slot: the turn, then its function and inputs pushed, and on to
+    # the trampoline, which makes the call
+    set pushing to new_label(a)
+    set pushed to new_label(a)
+    mark(a, "rt_task_entry")
+    mov_rr(a, rbx, rcx)
+    alui(a, "and", rsp, -16)
+    if windows
+        win_enter(a)
+        load(a, rcx, rip("tls_index"))
+        mov_rr(a, rdx, rbx)
+        call_import(a, "imp_TlsSetValue")
+        win_leave(a)
+    else
+        movi(a, rdi, 4097) # ARCH_SET_GS
+        mov_rr(a, rsi, rbx)
+        sys_call(a, 158)
+    end
+    lea(a, rax, rip("thr_stop")) # a frame for its first call to go back from, where a mistake's trail stops
+    push_r(a, rax)
+    push_r(a, rax)
+    mov_rr(a, rbp, rsp)
+    store(a, mem(rbx, thr_top), rsp)
+    mov_rr(a, rcx, rbx)
+    call_to(a, "rt_gil_take")
+    movi(a, r15, 0)
+    load(a, rax, mem(rbx, thr_fn))
+    push_r(a, rax)
+    load(a, rcx, mem(rbx, thr_nargs))
+    lea(a, rsi, mem(rbx, thr_args))
+    mark(a, pushing)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, pushed)
+    load(a, rax, mem(rsi, 0))
+    push_r(a, rax)
+    alui(a, "add", rsi, 8)
+    dec_r(a, rcx)
+    jmp_to(a, pushing)
+    mark(a, pushed)
+    load(a, rax, mem(rbx, thr_tramp))
+    jmp_r(a, rax)
+
+    # rt_task_end: xmm0 what the task's call gave: kept, the task done, the turn let go, and the thread ended
+    mark(a, "rt_task_end")
+    load(a, rbx, rip("thr_current"))
+    movsd_store(a, mem(rbx, thr_result), xmm0)
+    load(a, rcx, rip("task_gave"))
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 16))
+    load(a, rax, mem(rbx, thr_number))
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rcx, rax)
+    movsd_store(a, mem(rcx, -8), xmm0)
+    storei(a, mem(rbx, thr_saved), 0)
+    storei(a, mem(rbx, thr_state), 2)
+    if windows
+        win_enter(a)
+        load(a, rcx, mem(rbx, thr_event))
+        call_import(a, "imp_SetEvent")
+        win_leave(a)
+    else
+        lea(a, rdi, mem(rbx, thr_state))
+        movi(a, rsi, 129) # FUTEX_WAKE_PRIVATE
+        movi(a, rdx, 2147483647)
+        sys_call(a, 202)
+    end
+    call_to(a, "rt_gil_give")
+    if windows
+        alui(a, "and", rsp, -16)
+        alui(a, "sub", rsp, 32)
+        movi(a, rcx, 0)
+        call_import(a, "imp_ExitThread")
+    else
+        set raw_thread to new_label(a)
+        load(a, rax, mem(rbx, thr_pret))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, raw_thread)
+        mov_rr(a, rsp, rax) # a pthread: back to its start, which ends it
+        for each r in list of r15, r14, r13, r12, rbp, rbx
+            pop_r(a, r)
+        end
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, raw_thread)
+        movi(a, rdi, 0)
+        sys_call(a, 60) # exit: this thread only
+    end
+
+    # rt_task_wait: rax a task's number: rax 0 and what it gave in xmm0, once it's done, or 1 if there's no
+    # such task. While it's running, the turn goes to the others, and its slot is kept for it.
+    set seek_task to new_label(a)
+    set next_task to new_label(a)
+    set no_task to new_label(a)
+    set waiting_for to new_label(a)
+    set ended to new_label(a)
+    mark(a, "rt_task_wait")
+    push_r(a, rbx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_le, no_task)
+    alu_load(a, "cmp", rax, rip("tasks_made"))
+    jcc(a, cc_g, no_task)
+    lea(a, rbx, rip_plus("thr_slots", thr_size))
+    movi(a, rcx, 1)
+    mark(a, seek_task)
+    alui(a, "cmp", rcx, thr_max)
+    jcc(a, cc_ae, ended) # in no slot: it ended, and its slot is another's
+    load(a, rdx, mem(rbx, thr_state))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_ne, next_task)
+    load(a, rdx, mem(rbx, thr_number))
+    alu(a, "cmp", rdx, rax)
+    jcc(a, cc_e, waiting_for)
+    mark(a, next_task)
+    alui(a, "add", rbx, thr_size)
+    inc_r(a, rcx)
+    jmp_to(a, seek_task)
+    mark(a, no_task)
+    movi(a, rax, 1)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, waiting_for)
+    push_r(a, rax)
+    load(a, rdx, mem(rbx, thr_waiters))
+    inc_r(a, rdx)
+    store(a, mem(rbx, thr_waiters), rdx)
+    gil_await(a, windows)
+    load(a, rdx, mem(rbx, thr_waiters))
+    dec_r(a, rdx)
+    store(a, mem(rbx, thr_waiters), rdx)
+    pop_r(a, rax)
+    mark(a, ended)
+    load(a, rcx, rip("task_gave"))
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 16))
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rcx, rax)
+    movsd_load(a, xmm0, mem(rcx, -8))
+    movi(a, rax, 0)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_task_join_all: once the program's own code is done, every task still running waited for
+    set join_again to new_label(a)
+    set join_seek to new_label(a)
+    set join_next to new_label(a)
+    set joined to new_label(a)
+    mark(a, "rt_task_join_all")
+    push_r(a, rbx)
+    mark(a, join_again)
+    lea(a, rbx, rip_plus("thr_slots", thr_size))
+    movi(a, rcx, 1)
+    mark(a, join_seek)
+    alui(a, "cmp", rcx, thr_max)
+    jcc(a, cc_ae, joined)
+    load(a, rdx, mem(rbx, thr_state))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_ne, join_next)
+    gil_await(a, windows)
+    jmp_to(a, join_again)
+    mark(a, join_next)
+    alui(a, "add", rbx, thr_size)
+    inc_r(a, rcx)
+    jmp_to(a, join_seek)
+    mark(a, joined)
+    pop_r(a, rbx)
+    ret(a)
+end
+
 to emit_runtime with st
     set a to a of st
     set windowed to uses_drawing of st or uses_app of st # a window for the picture, and on Windows the pad
@@ -26586,9 +27546,17 @@ to emit_runtime with st
         call_to(a, "rt_snd_start")
     end
     store(a, rip("stack_top"), rsp)
+    set task_runtime of a to uses_threads of st or uses_waitfor of st
+    set threading of a to uses_threads of st
+    if threading of a
+        call_to(a, "rt_threads_init")
+    end
     movi(a, r15, 0)
     call_to(a, "moth_main")
     call_mark(a, -1)
+    if threading of a # the tasks still running, done first
+        call_to(a, "rt_task_join_all")
+    end
     movi(a, rcx, 0)
     mark(a, "rt_finish") # rcx: the number the program ends with, once what it said and drew has gone out
     push_r(a, rcx)
@@ -26624,6 +27592,9 @@ to emit_runtime with st
         emit_folders(a, target of st)
     end
     emit_gc_tables(a)
+    if task_runtime of a
+        emit_threads(a, target of st)
+    end
     if uses_case of st or windowed or uses_saving of st or files of a or libraries of a # (and a file's name, from UTF-16)
         emit_cases(a)
     end
@@ -26737,6 +27708,12 @@ to emit_runtime with st
                 add group to wanted
             end
         end
+    end
+    if task_runtime of a and target of st is "windows"
+        add (list of "KERNEL32.dll", thread_imports) to wanted
+    end
+    if threading of a
+        emit_guards(a, target of st)
     end
     set more_imports of a to wanted
     set ro to rodata of a # 10^0 to 10^22, which doubles hold exactly
@@ -26855,6 +27832,19 @@ to emit_runtime with st
         end
     end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
+    if task_runtime of a # each task's function, inputs and what it gave
+        reserve(a, "thr_slots", thr_max * thr_size, 16)
+        for each name in list of "thr_current", "gil_sem", "gil_waiting", "gil_next", "gil_serving", "gil_ticks", "tasks_made",
+            "task_made", "tls_index", "gc_thr_i"
+            reserve(a, name, 8, 8)
+        end
+        reserve(a, "thr_ts", 16, 8)
+        for each name in list of "in_busy", "run_busy", "net_busy", "net_ok", "thr_pcreate", "thr_pattr_init", "thr_pattr_size",
+            "thr_pattr_detach", "thr_ptid", "task_gave"
+            reserve(a, name, 8, 8)
+        end
+        reserve(a, "thr_pattr", 64, 16)
+    end
     for each job in callback_jobs of a # the functions C calls back, which it keeps
         reserve(a, slots of job, 8 * callback_slots, 8)
     end
@@ -27365,7 +28355,7 @@ to emit_input with a, target
     # rt_in_fill: more of the input, into in_buf from its start: rax how many bytes came, 0 at its end
     set filled to new_label(a)
     set nothing_more to new_label(a)
-    mark(a, "rt_in_fill")
+    mark(a, released(a, "rt_in_fill"))
     storei(a, rip("in_at"), 0)
     storei(a, rip("in_end"), 0)
     if target is "windows"
@@ -27463,7 +28453,7 @@ to emit_input with a, target
     set none_left to new_label(a)
     set as_text to new_label(a)
     set held_cr to new_label(a)
-    mark(a, "rt_read_line")
+    mark(a, guarded(a, "rt_read_line"))
     push_r(a, rbx)
     push_r(a, r12)
     call_to(a, "rt_in_setup")
@@ -29057,7 +30047,7 @@ to emit_reading with a, target
     if net of a # a site is read, as rt_fetch reads it
         set offline to online
     end
-    mark(a, "rt_read")
+    mark(a, guarded(a, "rt_read"))
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
@@ -29735,7 +30725,7 @@ to emit_send with a, target
     set sent to new_label(a)
     set moved to new_label(a)
     set failed to new_label(a)
-    mark(a, "rt_send")
+    mark(a, guarded(a, "rt_send"))
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
@@ -29848,7 +30838,7 @@ to emit_send with a, target
     # text), 135 to 139 (the headers), 142 (it isn't a site's) or rt_read's
     set read_gave_up to new_label(a)
     set read_out to new_label(a)
-    mark(a, "rt_read_headers")
+    mark(a, guarded(a, "rt_read_headers"))
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
@@ -30944,11 +31934,17 @@ to emit_fetch_linux with a
     mark(a, sent_all)
     call_to(a, "rt_keep_words")
     mark(a, waiting)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     mov_rr(a, rdi, r14)
     lea(a, rsi, rip("run_status"))
     movi(a, rdx, 0)
     movi(a, r10, 0)
     sys_call(a, 61)
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
     alui(a, "cmp", rax, -4) # interrupted: wait again
     jcc(a, cc_e, waiting)
     test_rr(a, rax, rax)
@@ -31296,6 +32292,9 @@ to emit_fetch_windows with a
     call_to(a, "rt_net_deadline")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, timed_out)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     win_enter(a) # with the headers, ending in a 0, and what's sent, if anything is
     load(a, rcx, rip("net_request"))
     load(a, rdx, rip("net_hdr_block"))
@@ -31322,16 +32321,25 @@ to emit_fetch_windows with a
     mark(a, no_body)
     call_import(a, "imp_WinHttpSendRequest")
     win_leave(a)
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
     test32(a, rax)
     jcc(a, cc_e, failed)
     call_to(a, "rt_net_deadline")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, timed_out)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     win_enter(a)
     load(a, rcx, rip("net_request"))
     movi(a, rdx, 0)
     call_import(a, "imp_WinHttpReceiveResponse")
     win_leave(a)
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
     test32(a, rax)
     jcc(a, cc_e, failed)
     win_enter(a) # the answer's number
@@ -31429,6 +32437,9 @@ to emit_fetch_windows with a
     call_to(a, "rt_net_deadline")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, timed_out)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     win_enter(a)
     load(a, rcx, rip("net_request"))
     load(a, rdx, rip("net_buf"))
@@ -31441,6 +32452,11 @@ to emit_fetch_windows with a
     mov32_rr(a, rbx, rax)
     load32(a, rax, mem(rsp, 64))
     win_leave(a)
+    if threading of a # rbx comes back as it was: whether the read went well, kept where it stays
+        store(a, rip("net_ok"), rbx)
+        call_to(a, "rt_gil_in")
+        load(a, rbx, rip("net_ok"))
+    end
     test_rr(a, rbx, rbx)
     jcc(a, cc_e, failed)
     test_rr(a, rax, rax)
@@ -32835,7 +33851,7 @@ to emit_run_program with a, target
     set gave_up to new_label(a)
     set plain_code to new_label(a)
     set run_out to new_label(a)
-    mark(a, "rt_run_program")
+    mark(a, guarded(a, "rt_run_program"))
     push_r(a, rbx)
     push_r(a, r12)
     push_r(a, r13)
@@ -33050,6 +34066,9 @@ to emit_run_program with a, target
         end
         call_to(a, "rt_keep_words")
         mark(a, waited) # wait for it, and take the number it ended with
+        if threading of a
+            call_to(a, "rt_gil_out")
+        end
         win_enter(a)
         load(a, rcx, rip("run_pi"))
         movi(a, rdx, -1)
@@ -33062,6 +34081,9 @@ to emit_run_program with a, target
         load(a, rcx, rip_plus("run_pi", 8))
         call_import(a, "imp_CloseHandle")
         win_leave(a)
+        if threading of a
+            call_to(a, "rt_gil_in")
+        end
         load32(a, rax, rip("run_code"))
     else
         set measure_given to new_label(a)
@@ -33196,11 +34218,17 @@ to emit_run_program with a, target
         end
         call_to(a, "rt_keep_words")
         mark(a, waiting)
+        if threading of a
+            call_to(a, "rt_gil_out")
+        end
         mov_rr(a, rdi, rbx)
         lea(a, rsi, rip("run_status"))
         movi(a, rdx, 0)
         movi(a, r10, 0)
         sys_call(a, 61)
+        if threading of a
+            call_to(a, "rt_gil_in")
+        end
         alui(a, "cmp", rax, -4) # interrupted: wait again
         jcc(a, cc_e, waiting)
         test_rr(a, rax, rax)
@@ -33400,6 +34428,9 @@ to emit_keep_words with a, target
     load(a, rax, rip("run_got"))
     test_rr(a, rax, rax)
     jcc(a, cc_ne, poll)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
     if target is "windows" # nothing came from either: a moment's wait, so this doesn't spin
         win_enter(a)
         movi(a, rcx, 1)
@@ -33412,6 +34443,9 @@ to emit_keep_words with a, target
         lea(a, rdi, rip("run_wait"))
         movi(a, rsi, 0)
         sys_call(a, 35)
+    end
+    if threading of a
+        call_to(a, "rt_gil_in")
     end
     jmp_to(a, poll)
     mark(a, read_all)
@@ -33985,7 +35019,13 @@ to gen_library_call with fc, e
     if not windows # how many xmm registers hold inputs, for a function that takes any number of them
         movi(a, rax, floats)
     end
+    if threading of a # what it does, the other threads' turns go on meanwhile
+        call_to(a, "rt_gil_park")
+    end
     call_import(a, desc)
+    if threading of a
+        call_to(a, "rt_gil_unpark")
+    end
     set structured to no
     for each type_name in types
         if is_structure(nat, type_name)
@@ -34450,6 +35490,9 @@ to emit_callback with a, job, target
         end
     end
     mov_rr(a, r12, r11) # the slot
+    if threading of a
+        call_to(a, "rt_gil_cb_in")
+    end
     load(a, rax, rip("try_top")) # nothing to catch a mistake further out, past C
     push_r(a, rax)
     storei(a, rip("try_top"), 0)
@@ -34584,6 +35627,9 @@ to emit_callback with a, job, target
         setcc(a, cc_e, rax)
         movzx8(a, rax, rax)
         mark(a, given)
+    end
+    if threading of a
+        call_to(a, "rt_gil_cb_out")
     end
     if windows
         for each k from 6 to 15
@@ -35164,7 +36210,8 @@ to new_state with a, program_name, files, source, target
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
         uses_controls no, uses_choose no, uses_files no, sigs nothing, seen_inputs empty dictionary,
-        seen_gives empty dictionary, escaped empty dictionary, live no, debugging no
+        seen_gives empty dictionary, escaped empty dictionary, live no, debugging no, uses_threads no, uses_waitfor no,
+        threaded no
 end
 
 # The program with the debugger's code before it, and between them the debugger told the program's name and
@@ -35571,6 +36618,20 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
         set sigs of st to empty dictionary
     end
     gen_program(st, body)
+    set threaded to uses_threads of st
+    if threaded # it starts tasks: written again, its code taking turns with theirs (see gen_tick)
+        set a to new_asm()
+        set shipping of a to shipping
+        set st to new_state(a, program_name, files, source, target)
+        set allowed of st to allowing
+        set debugging of st to debugging
+        set threaded of st to yes
+        set threading of a to yes # what code generation writes, library calls among it, knows already
+        if debugging
+            set sigs of st to empty dictionary
+        end
+        gen_program(st, body)
+    end
     set rounds to 0
     repeat while not sigs_hold(st) # a guess was wrong: written again with what was found, then with none
         add 1 to rounds
@@ -35583,6 +36644,8 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
         set debugging of st to debugging
+        set threaded of st to threaded
+        set threading of a to threaded
         set sigs of st to guess
         gen_program(st, body)
     end
@@ -35594,6 +36657,8 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
         set debugging of st to debugging
+        set threaded of st to threaded
+        set threading of a to threaded
         set sigs of st to settled
         gen_program(st, body)
     end
@@ -35812,6 +36877,7 @@ to gen_function with st, f
         load(a, rax, rip("try_top"))
         store(a, saved_try of fc, rax)
     end
+    gen_tick(fc)
     gen_block(fc, body of f)
     if not always_leaves(body of f)
         note_gives(st, f, "value")
@@ -35903,7 +36969,7 @@ end
 set known_statements to dictionary where "say" is yes, "set" is yes, "add" is yes, "if" is yes, "while" is yes,
     "repeat" is yes, "count" is yes, "define" is yes, "return" is yes, "stop" is yes, "call" is yes, "setItem" is yes,
     "each" is yes, "try" is yes, "setField" is yes, "remove" is yes, "fail" is yes, "write" is yes, "removeFile" is yes,
-    "expect" is yes, "exit" is yes, "turtle" is yes
+    "expect" is yes, "exit" is yes, "turtle" is yes, "do" is yes
 
 to gen_statement with fc, s
     set a to a of fc
@@ -35948,6 +37014,7 @@ to gen_statement with fc, s
         gen_cond(fc, cond of s, exit, no)
         gen_loop_body(fc, body of s, exit)
         set marks of fc to nothing
+        gen_tick(fc)
         jmp_to(a, top)
         mark(a, exit)
         cache_leave(fc, was)
@@ -36003,6 +37070,8 @@ to gen_statement with fc, s
         jmp_to(a, exit of loops of fc)
     else if what is "call"
         gen_call(fc, s, yes)
+    else if what is "do" # a value done for what it does: `start count(10)`, `wait for job`
+        gen_expr(fc, value of s)
     else if what is "setItem" # checked before the value is worked out, as the engines check it
         set target to target of s
         gen_pair(fc, subject of target, index of target)
@@ -36409,6 +37478,7 @@ to gen_each with fc, s
     set facts of fc to facts_copy(stable)
     set_fact(fc, name_key(fc, name of s), "value")
     gen_loop_body(fc, body of s, exit)
+    gen_tick(fc)
     jmp_to(a, top)
     mark(a, exit)
     cache_leave(fc, was)
@@ -36447,6 +37517,7 @@ to gen_repeat with fc, s
     end
     set facts of fc to facts_copy(stable)
     gen_loop_body(fc, body of s, exit)
+    gen_tick(fc)
     jmp_to(a, top)
     mark(a, exit)
     cache_leave(fc, held)
@@ -36524,6 +37595,7 @@ to gen_count with fc, s
     set_fact(fc, name_key(fc, name of s), counted)
     gen_loop_body(fc, body of s, exit)
     set marks of fc to nothing
+    gen_tick(fc)
     jmp_to(a, top)
     mark(a, exit)
     cache_leave(fc, held)
@@ -36564,6 +37636,9 @@ to fact_key with fc, found
         return nothing
     end
     if level of fc - depth of found is 0
+        if threaded of st of fc # another thread can change it whenever this one lets the turn go
+            return nothing
+        end
         return slot of found
     end
     if depth of found is 0 and env_slot of fc is nothing
@@ -37169,7 +38244,7 @@ to ga_statement with held, fc, s, known
         end
     else if what is "call"
         ga_expr(held, fc, s, known)
-    else if what is "fail" or what is "exit" or what is "turtle"
+    else if what is "fail" or what is "exit" or what is "turtle" or what is "do"
         ga_expr(held, fc, value of s, known)
     else if what is "setItem" or what is "setField" or what is "write"
         ga_expr(held, fc, target of s, known)
@@ -37392,7 +38467,7 @@ to scan_statement with fc, info, s, weight
         scan_block(fc, info, handler of s, weight)
     else if what is "define"
         region_set(fc, info, name of s, "value", nothing, weight)
-    else if what is "return" or what is "fail" or what is "exit" or what is "turtle"
+    else if what is "return" or what is "fail" or what is "exit" or what is "turtle" or what is "do"
         scan_expr(fc, info, value of s, weight)
     else if what is "setItem" or what is "setField" or what is "write"
         scan_expr(fc, info, target of s, weight)
@@ -37545,7 +38620,7 @@ end
 # registers); a loop inside it may still use them, from where it starts.
 to cache_enter with fc, info, keep
     set was to record with cache cache of fc, next_reg next_reg of fc, open open of fc
-    set open of fc to not (calls of info or tries of info or debugging of st of fc)
+    set open of fc to not (calls of info or tries of info or debugging of st of fc or threaded of st of fc)
     if not open of fc
         return was
     end
@@ -38650,6 +39725,12 @@ to gen_expr with fc, e
             alui(a, "add", rsp, 8 * n)
             set pushed of fc to pushed of fc - n
         end
+    else if what is "builtin" and name of e is "start"
+        gen_task_start(fc, e)
+    else if what is "builtin" and name of e is "wait for"
+        gen_task_wait(fc, e)
+    else if what is "task_made" # the number of the task just started
+        movsd_load(a, xmm0, rip("task_made"))
     else if what is "builtin" and name of e is "library call" # the body of a library's function
         set made to gen_library_call(fc, e)
     else if what is "builtin" and (name of e is "run program" or name of e is "run program keeping")
@@ -39200,6 +40281,180 @@ to call_site with fc, at
     add "called from " + from + "line " + line of at to calls
     set item key of known to length of calls - 1
     return length of calls - 1
+end
+
+# Each loop's turn and each call, in a program that starts tasks: now and then another thread's turn (see
+# emit_threads)
+to gen_tick with fc
+    if not threaded of st of fc
+        return nothing
+    end
+    set a to a of fc
+    set back to new_label(a)
+    set yielding to new_label(a)
+    enc(a, empty list, yes, (list of 0xFF), 1, rip("gil_ticks"), empty list) # dec
+    jcc(a, cc_e, yielding)
+    mark(a, back)
+    set was to enter_cold(a)
+    set over to new_label(a)
+    if was is "cold"
+        jmp_to(a, over)
+    end
+    mark(a, yielding)
+    call_to(a, "rt_gil_yield")
+    jmp_to(a, back)
+    mark(a, over)
+    leave_cold(a, was)
+end
+
+# `start count(10)` (see emit_threads): the function and its inputs worked out and checked here, as a call
+# through a function value has them, so a mistake in them is this line's; then the call made on a thread of
+# its own, from a trampoline of this start's own, whose call number says where the task was started. It
+# gives the task: a record of its number.
+to gen_task_start with fc, e
+    set a to a of fc
+    set st to st of fc
+    set uses_threads of st to yes
+    set call to item 1 of args of e
+    set callee to name of call
+    set n to length of args of call
+    if n is greater than 8
+        not_yet(at of e, "a task given more than 8 inputs")
+    end
+    set found to front's resolve(scope of fc, callee)
+    if found is nothing
+        jmp_to(a, fail_stub(fc, at of call, front's undefined_message(scope of fc, callee, yes, no)))
+        return "value"
+    end
+    set named_fn to function_at(fc, found)
+    if named_fn is not nothing # called with anything, by the task's thread
+        note_escaped(st, named_fn)
+    end
+    set none to fail_stub(fc, at of call, "there is no function called '" + callee + "'")
+    set wrong to new_label(a)
+    set back to new_label(a)
+    movsd_load(a, xmm0, place_of(fc, found))
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, none)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_function)
+    jcc(a, cc_ne, wrong)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm0)
+    stub_start(fc, at of call)
+    stub_text(a, "'" + callee + "' is ")
+    stub_kind(a, "err_a")
+    stub_text(a, ", not a function")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+    push_value(fc)
+    for each arg in args of call
+        gen_expr(fc, arg)
+        push_value(fc)
+    end
+    load(a, rax, mem(rsp, 8 * n))
+    movi(a, rcx, n)
+    mov_rr(a, rsi, rsp)
+    call_to(a, "rt_check_call")
+    set call_wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, call_wrong)
+    set was_too to enter_cold(a)
+    mark(a, call_wrong)
+    stub_start(fc, at of call)
+    lea(a, rax, rip(text_object(a, callee)))
+    store(a, rip("err_what"), rax)
+    call_to(a, "rt_why_call")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was_too)
+    set tramp to new_label(a) # on the task's thread: the call, then what it gave to rt_task_end
+    set was_cold to enter_cold(a)
+    set over to new_label(a)
+    if was_cold is "cold"
+        jmp_to(a, over)
+    end
+    mark(a, tramp)
+    load(a, rax, mem(rsp, 8 * n))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    inc_r(a, r15)
+    call_r(a, rcx)
+    note_return(fc, at of call)
+    jmp_to(a, "rt_task_end")
+    mark(a, over)
+    leave_cold(a, was_cold)
+    mov_rr(a, rsi, rsp)
+    movi(a, rcx, n)
+    lea(a, rdx, rip(tramp))
+    call_to(a, "rt_task_start")
+    set has_thread to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, has_thread)
+    set deep to fail_stub(fc, at of call, "too much recursion: a function kept calling itself")
+    alui(a, "cmp", r15, deepest) # every slot in use: the call made here and now, as the JavaScript engines make it
+    jcc(a, cc_ae, deep)
+    load(a, rax, mem(rsp, 8 * n))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    inc_r(a, r15)
+    call_r(a, rcx)
+    note_return(fc, at of call)
+    dec_r(a, r15)
+    call_to(a, "rt_task_ran")
+    mark(a, has_thread)
+    alui(a, "add", rsp, 8 * (n + 1))
+    set pushed of fc to pushed of fc - n - 1
+    set broken to fail_stub(fc, at of e, "the task's thread couldn't be started")
+    test_rr(a, rax, rax)
+    jcc(a, cc_l, broken)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("task_made"), xmm0)
+    forget_main(fc)
+    set the_number to list of (record with kind "task_made", at at of e)
+    return gen_expr(fc, (record with kind "record", fields (list of "task"), values the_number, at at of e))
+end
+
+# `wait for job`: the task's number, from the record start gave; then what it gave, once it's done
+to gen_task_wait with fc, e
+    set a to a of fc
+    set uses_waitfor of st of fc to yes
+    set not_task to fail_stub(fc, at of e, "'wait for' needs a task, as 'start' gives, not this record")
+    gen_expr(fc, item 1 of args of e)
+    lea(a, rdx, rip(text_object(a, "task")))
+    call_to(a, "rt_field")
+    set bad to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad)
+    cvttsd2si(a, rax, xmm0)
+    cvtsi2sd(a, xmm1, rax)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_ne, not_task)
+    jcc(a, cc_p, not_task) # NaN: text, or another value that isn't a number
+    call_to(a, "rt_task_wait")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, not_task)
+    set was to enter_cold(a)
+    set over to new_label(a)
+    if was is "cold"
+        jmp_to(a, over)
+    end
+    mark(a, bad) # no such field, or not a record at all
+    load(a, rcx, rip("err_why"))
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_ne, not_task)
+    stub_start(fc, at of e)
+    stub_text(a, "'wait for' needs a task, as 'start' gives, not ")
+    stub_kind(a, "err_a")
+    jmp_to(a, "rt_e_end")
+    mark(a, over)
+    leave_cold(a, was)
+    forget_main(fc)
 end
 
 # A call through a function value: the name's value must be a function, then the inputs are worked out

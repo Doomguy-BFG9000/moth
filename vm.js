@@ -774,7 +774,25 @@ export const BUILTINS = [
     name: "library call", needs: [["text"]], gives: null,
     run: ([library], error) => error(`can't use the library '${library}' here: only a program made by moth build can`),
   },
+  // `start count(10)` and `wait for job` (see taskOf)
+  { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
+  { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
 ];
+
+// Tasks (DESIGN §62): `start count(10)` gives one, a record of its number, and in a program moth build makes
+// the call runs on a thread of its own. Here it has run already, as starting a task runs it to its end at
+// once, which is one of the ways threads that take turns can go, and what the call gave is kept, by the
+// task's number, for `wait for`. They're numbered from 1 in each run, as machine code numbers them.
+const tasksGave = new Map();
+export const startTasks = () => tasksGave.clear();
+function taskOf(gave) {
+  tasksGave.set(tasksGave.size + 1, gave);
+  return makeRecord(["task"], [tasksGave.size]);
+}
+function waitedFor(task, error) {
+  if (!isRecord(task) || !Object.hasOwn(task, "task") || !tasksGave.has(task.task)) error(`'wait for' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
+  return tasksGave.get(task.task);
+}
 
 // `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
 // in turn (so "B" comes before "a", and "apple" before "apples"), records `by` a field by that field. All of

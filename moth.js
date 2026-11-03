@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, Ended, fail, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
+import { MothError, Ended, fail, startTasks, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -771,6 +771,19 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       return { kind: "turtle", action: ticking, value: additive(), at: t };
     }
     if (isWord("send") && sendsData()) fail(t, "'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'");
+    // `start count(10)`, a task whose call runs on a thread of its own (see "start" in vm.js), and `wait for job`,
+    // done for what they do: `start` alone, or before a bracket, is still a name, and so is `wait`
+    if (isWord("start") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word") {
+      const started = phrase(() => {
+        const call = primary();
+        return call.kind === "call" && peek().nl ? call : null;
+      });
+      if (started) return { kind: "do", value: { kind: "builtin", name: "start", args: [started], at: t }, at: t };
+    }
+    if (isWord("wait") && !tokens[pos + 1].nl && wordAt(pos + 1, "for")) {
+      pos += 2;
+      return { kind: "do", value: { kind: "builtin", name: "wait for", args: [expression()], at: t }, at: t };
+    }
     if (isWord("wait") && !tokens[pos + 1].nl) { // `wait 2 seconds`, `wait n milliseconds`: `wait` alone is still a name
       const waiting = phrase(() => {
         let amount = additive();
@@ -1032,6 +1045,17 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += 2;
       return { kind: "builtin", name: t.value, args: [column(unary)], at: t };
     } // what the program was started with: `tool a b`
+    if (isWord("start") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word") { // `set job to start count(10)`
+      const started = phrase(() => {
+        const call = primary();
+        return call.kind === "call" ? call : null;
+      });
+      if (started) return { kind: "builtin", name: "start", args: [started], at: t };
+    }
+    if (isWord("wait") && !tokens[pos + 1].nl && wordAt(pos + 1, "for")) { // `set answer to wait for job`
+      pos += 2;
+      return { kind: "builtin", name: "wait for", args: [unary()], at: t };
+    }
     if (isWord("run") && runsProgram()) { // `run program "tool.exe" with (list of "a") keeping its output`
       pos += 2;
       const program = additive();
@@ -1381,6 +1405,10 @@ class Compiler extends Scope {
         return;
       case "call":
         this.call(s, true);
+        this.emit(s.at, POP);
+        return;
+      case "do": // a value done for what it does: `start count(10)`, `wait for job`
+        this.expr(s.value);
         this.emit(s.at, POP);
         return;
       case "turtle":
@@ -1747,6 +1775,7 @@ export function format(source) {
 // Each sound the program makes goes to `play`, as { hertz, seconds } (see soundOf in vm.js).
 export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock(), play } = {}) {
   const reading = { files, file };
+  startTasks();
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
   // Kept, so that running it again (below) gets the same, and writes nothing twice.
   const outside = [];
@@ -1806,6 +1835,7 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
       listeners: [], turtle: new Turtle((line) => skipDrawn-- > 0 || draw?.(line)), printError: (line) => skipComplained-- > 0 || printError(line),
       play: (sound) => skipPlayed-- > 0 || play?.(sound),
     };
+    startTasks();
     new Machine(compile(source, reading), say, options).run();
     const host = { vm: true, handlers: options.listeners, call: (handler, inputs) => callFunction(handler.closure, inputs, say, options), turtle: options.turtle };
     for (const [i, inputs] of sent) typeof i === "string" ? host.turtle.route(i, inputs) : host.call(host.handlers[i], inputs);
@@ -2004,6 +2034,7 @@ export function machineCompiler(machineSource, compilerSource) {
 // A paused program for a debugger: call run({ pauseAtLines: true }) to go to the next statement, and
 // inspect() to see where it is and what its variables hold.
 export function debug(source, print = console.log, draw = undefined, ask = undefined, { files, file, disk, args, random, printError, clock } = {}) {
+  startTasks();
   return new Machine(compile(source, { debug: true, files, file }), print, { draw, ask, disk, args, random, printError, clock });
 }
 

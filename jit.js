@@ -103,6 +103,8 @@ class JsCompiler extends Scope {
         return `return ${s.value ? this.expr(s.value) : "null"};`;
       case "call":
         return `${this.call(s, true)};`;
+      case "do": // a value done for what it does: `start count(10)`, `wait for job`
+        return `${this.expr(s.value)};`;
       case "turtle":
         return `turtle(${TURTLE_ACTIONS.indexOf(s.action)}, ${s.value ? this.expr(s.value) : "null"}, ${this.pos(s.at)});`;
       case "setField":

@@ -316,6 +316,9 @@ class Checker extends Scope {
       case "call":
         this.call(s, true);
         return;
+      case "do":
+        this.expr(s.value);
+        return;
       case "play": { // a note or a time of the wrong kind fails, and so does one written out wrong
         if (!s.note) return; // a beep
         this.expr(s.note);

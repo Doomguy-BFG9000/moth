@@ -417,7 +417,7 @@ set builtin_names to list of "uppercase", "lowercase", "split", "join", "number"
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
     "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
-    "library call"
+    "library call", "start", "wait for"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -467,7 +467,8 @@ set bit_words to list of "and", "or", "xor" # `a bit and b`; `bit` alone is stil
 # a line that starts like a phrase but isn't one, which would otherwise be a call to a function nothing made
 set phrase_hints to dictionary where "wait" is "to wait, say how long: 'wait 2 seconds'",
     "send" is "to send, say where: 'set reply to send data to \"https://...\"'",
-    "save" is "to save a value, say where: 'save scores to \"scores.txt\"'"
+    "save" is "to save a value, say where: 'save scores to \"scores.txt\"'",
+    "start" is "to start a task, give it a function's call: 'start work(5)'"
 # `the time`, `the date`, ... `the clock`, in the order of NOW_WORDS in vm.js
 set now_words to list of "time", "date", "year", "month", "day", "hour", "minute", "second", "weekday", "clock"
 # what an input can say it is, `with width as a number`, in the order of KINDS in vm.js
@@ -649,6 +650,8 @@ to parse with tokens, reading
             set pos to pos + 1
             if which is "wait"
                 set node to wait_rest(t)
+            else if which is "start" or which is "start value"
+                set node to start_rest(which is "start")
             else
                 set node to save_rest(t)
             end
@@ -659,6 +662,16 @@ to parse with tokens, reading
             set pos to start
         end
         return node
+    end
+
+    # `start count(10)`: the call, or nothing if what follows `start` isn't one (or, for a line of its own, if
+    # anything follows it)
+    to start_rest with whole_line
+        set started to primary()
+        if kind of started is not "call" or (whole_line and not nl of peek())
+            return nothing
+        end
+        return started
     end
 
     # `wait 2 seconds`, `wait n milliseconds`
@@ -1724,6 +1737,20 @@ to parse with tokens, reading
         if is_word("send") and sends_data()
             fail with problem(t, "'send' gives back what the site replies, so it goes where a value goes: 'set reply to send ...'")
         end
+        # `start count(10)`, a task whose call runs on a thread of its own (see "start" in vm.js), and `wait for
+        # job`, done for what they do: `start` alone, or before a bracket, is still a name, and so is `wait`
+        if is_word("start") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word"
+            set started to try_phrase("start", t)
+            if started is not nothing
+                set start_args to list of started
+                return record with kind "do", value (record with kind "builtin", name "start", args start_args, at t), at t
+            end
+        end
+        if is_word("wait") and not nl of item (pos + 1) of tokens and word_at(pos + 1, "for")
+            set pos to pos + 2
+            set wait_args to list of expression()
+            return record with kind "do", value (record with kind "builtin", name "wait for", args wait_args, at t), at t
+        end
         if is_word("wait") and not nl of item (pos + 1) of tokens # `wait 2 seconds`: `wait` alone is still a name
             set waiting to try_phrase("wait", t)
             if waiting is not nothing
@@ -2137,6 +2164,18 @@ to parse with tokens, reading
             set aggregate_args to list of column_or(no)
             return record with kind "builtin", name value of t, args aggregate_args, at t
         end
+        if is_word("start") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word" # `set job to start count(10)`
+            set started to try_phrase("start value", t)
+            if started is not nothing
+                set start_args to list of started
+                return record with kind "builtin", name "start", args start_args, at t
+            end
+        end
+        if is_word("wait") and not nl of item (pos + 1) of tokens and word_at(pos + 1, "for") # `set answer to wait for job`
+            set pos to pos + 2
+            set wait_args to list of unary()
+            return record with kind "builtin", name "wait for", args wait_args, at t
+        end
         if is_word("run") and runs_program() # `run program "tool.exe" with (list of "a") keeping its output`
             set pos to pos + 2
             set program to additive()
@@ -2455,6 +2494,9 @@ to rename with node, alias, hidden
     end
     if what is "expect"
         rename(cond of node, alias, hidden)
+    end
+    if what is "do"
+        rename(value of node, alias, hidden)
     end
     if what is "when" or what is "every" # a handler's name isn't a variable
         rename_inside(fn of node, alias, hidden)
@@ -2935,6 +2977,9 @@ to js_statement with scope, s
     end
     if what is "call"
         return js_call(scope, s, yes) + ";"
+    end
+    if what is "do" # a value done for what it does: `start count(10)`, `wait for job`
+        return js_expr(scope, value of s) + ";"
     end
     if what is "turtle"
         set value to "null"
@@ -3446,6 +3491,9 @@ to bytecode_statement with fc, s
         emit(fc, at of s, list of op_return)
     else if what is "call"
         bytecode_call(fc, s, yes)
+        emit(fc, at of s, list of op_pop)
+    else if what is "do" # a value done for what it does: `start count(10)`, `wait for job`
+        bytecode_expr(fc, value of s)
         emit(fc, at of s, list of op_pop)
     else if what is "turtle"
         if value of s is not nothing

@@ -39,7 +39,7 @@ function madeOrder(body, made, places, count = { n: 0 }) {
 // to a (depth, slot) pair: how many functions out it lives, and which of that function's slots it is.
 // a line that starts like a phrase but isn't one, which would otherwise be a call to a function nothing made
 const PHRASE_HINTS = new Map([["wait", "to wait, say how long: 'wait 2 seconds'"], ["send", "to send, say where: 'set reply to send data to \"https://...\"'"],
-  ["save", "to save a value, say where: 'save scores to \"scores.txt\"'"]]);
+  ["save", "to save a value, say where: 'save scores to \"scores.txt\"'"], ["start", "to start a task, give it a function's call: 'start work(5)'"]]);
 
 export class Scope {
   // `slots` carries a shell's earlier top-level variables; `debug` asks the compiler for pause points.

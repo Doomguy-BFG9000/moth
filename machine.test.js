@@ -2728,3 +2728,154 @@ test("machine code sends to sites and reads them with headers, as vm.js says", {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Tasks: functions a program starts, each run on a thread of its own, taking turns with the program at running
+// Moth (DESIGN §62). What a program with tasks says must be what the JavaScript engine says, which runs each
+// task when it's started; what only threads show, a task working while the program waits, is said as yes or
+// no, and is yes on both.
+const TASK_PROGRAMS = [
+  // results, the names a task shares with the program, and a name that's only called start
+  "to count_to with n\n    set total to 0\n    for each i from 1 to n\n        add i to total\n    end\n    return total\nend\nset made to empty list\nto note with word\n    add word to made\nend\nset job to start count_to(100)\nset noted to start note(\"background\")\nset second to start count_to(10)\nsay \"started \" job \" \" second\nsay wait for job\nsay (wait for second) + 1\nwait for job\nsay wait for noted\nsay made\nset start to 5\nsay start",
+  // two tasks and the program adding to one name, a turn at a time
+  "set total to 0\nto adder with n\n    repeat n times\n        add 1 to total\n    end\n    return n\nend\nset a to start adder(300000)\nset b to start adder(300000)\nrepeat 300000 times\n    add 1 to total\nend\nsay (wait for a) + (wait for b)\nsay total",
+  // tasks that start tasks, more than there are threads for, and two thousand started before any is waited for,
+  // then each waited for, and the first again; and numbers that are no task's
+  "to fib with n\n    if n is less than 2\n        return n\n    end\n    return fib(n - 1) + fib(n - 2)\nend\nset started to 0\nto pfib with n\n    if n is less than 15\n        return fib(n)\n    end\n    add 1 to started\n    set a to start pfib(n - 1)\n    set b to pfib(n - 2)\n    return (wait for a) + b\nend\nsay pfib(27)\nsay started",
+  "to sq with n\n    return n * n\nend\nset jobs to empty list\nfor each i from 1 to 2000\n    add start sq(i) to jobs\nend\nset total to 0\nfor each j in jobs\n    add wait for j to total\nend\nsay total\nsay wait for (item 1 of jobs)\nfor each t in list of 0, 1.5, 2001, \"1\", -1\n    try\n        say wait for (record with task t)\n    if it fails with why\n        say why\n    end\nend",
+  // a thousand tasks, one after another
+  "to sq with n\n    return n * n\nend\nset total to 0\nfor each i from 1 to 1000\n    add wait for (start sq(i)) to total\nend\nsay total",
+  // a task works while the program waits
+  "set progress to empty list\nto busy with n\n    for each i from 1 to n\n        if i is divisible by 100000\n            add i to progress\n        end\n    end\n    return n\nend\nset job to start busy(3000000)\nset seen to empty list\nrepeat 5 times\n    wait 0.02 seconds\n    add length of progress to seen\nend\nsay \"ran while the program waited: \" (item 5 of seen is greater than item 1 of seen or length of progress is 30)\nsay wait for job\nsay length of progress",
+  // the collector, with five threads making far more than they keep, and waiting now and then
+  "to churn with tag, rounds\n    set kept to empty list\n    for each r from 1 to rounds\n        set garbage to empty list\n        for each i from 1 to 2000\n            add (list of tag, i, tag + i) to garbage\n        end\n        add item 1 of garbage to kept\n        if r is divisible by 25\n            wait 0.001 seconds\n        end\n    end\n    set sum to 0\n    for each k in kept\n        add item 2 of k to sum\n    end\n    return tag + \" \" + length of kept + \" \" + sum + \" \" + item 3 of item 1 of kept\nend\nset jobs to empty list\nfor each k from 1 to 4\n    add start churn(\"t\" + k, 100) to jobs\nend\nsay churn(\"main\", 100)\nfor each j in jobs\n    say wait for j\nend",
+  // waiting for what isn't a task
+  "for each thing in list of 5, (record with task \"x\"), (record with name 1), nothing\n    try\n        say wait for thing\n    if it fails with why\n        say why\n    end\nend",
+  // a task's mistake ends the program, saying where the task was started
+  "to risky with n\n    if n is 0\n        return 1 / 0\n    end\n    return risky(n - 1)\nend\nset j to start risky(2)\nwait 0.2 seconds\nsay \"never\"",
+  // a task's mistake caught in the task, and files read and written by tasks at once
+  "to save_and_read with k\n    set name to \"f\" + k + \".txt\"\n    write \"file \" + k to name\n    try\n        set nothing_here to read \"missing\" + k + \".txt\"\n    if it fails with why\n        return (read name) + \", \" + why\n    end\nend\nset jobs to empty list\nfor each k from 1 to 4\n    add start save_and_read(k) to jobs\nend\nsay save_and_read(0)\nfor each j in jobs\n    say wait for j\nend",
+];
+
+// What the JavaScript engine says for a program, with a disk of its own, as onEngine but with no step limit
+function tasksOnEngine(source, name) {
+  let [stdout, stderr, status] = ["", "", 0];
+  try {
+    run(source, (line) => (stdout += `${line}\n`), { file: name, disk: memoryDisk(), printError: (line) => (stderr += `${line}\n`), exit: (code) => (status = code) });
+  } catch (err) {
+    if (!(err instanceof MothError)) throw err;
+    stderr += `${name}:${err.line}:${err.col}: ${err.reason}\n${excerpt(source, err)}\n${err.trail.length ? `${describeTrail(err.trail)}\n` : ""}`;
+    status = 1;
+  }
+  return { stdout, stderr, status };
+}
+
+// A program with tasks, built and run in a folder of its own
+function taskRun(source, { allow = ["--allow-read", "--allow-write"], files, env = {} } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "moth-tasks-"));
+  try {
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(source, { target, name: "p.moth", allow, files }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const got = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", timeout: 60_000, env: { ...process.env, ...env } });
+    return { stdout: got.stdout, stderr: got.stderr, status: got.status };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("tasks run alongside the program, share its names, and say, fail and give back what the JavaScript engine has them do", { skip }, () => {
+  for (const source of TASK_PROGRAMS) assert.deepEqual(taskRun(source), tasksOnEngine(source, "p.moth"), source);
+});
+
+test("a program with no tasks has no threads in it, and one with tasks takes its turns from the system", () => {
+  const plain = Buffer.from(machine("say 1", { target: "windows", name: "p.moth" })).toString("latin1");
+  const tasks = Buffer.from(machine("to f\n    return 1\nend\nsay wait for (start f())", { target: "windows", name: "p.moth" })).toString("latin1");
+  assert.ok(!plain.includes("CreateThread") && tasks.includes("CreateThread") && tasks.includes("CreateSemaphoreW"));
+});
+
+// What a task waits on, a line typed, a program it runs, a library's function: the turn goes to the others meanwhile
+test("a task works while the program waits for a line typed", { skip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-tasks-"));
+  try {
+    const exe = executable(dir, "p");
+    const source = "set ticks to 0\nto count_on\n    repeat 2000000 times\n        add 1 to ticks\n    end\n    return ticks\nend\nset job to start count_on()\nset name to ask \"Name?\"\nsay \"when \" name \" answered, the task had counted to \" ticks\nsay wait for job";
+    writeFileSync(exe, machine(source, { target, name: "p.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const said = await new Promise((resolve, reject) => {
+      const child = spawn(exe, [], { cwd: dir });
+      let out = "";
+      child.stdout.on("data", (d) => (out += d));
+      child.on("error", reject);
+      child.on("close", (status) => resolve({ out, status }));
+      setTimeout(() => child.stdin.end("Sam\n"), 500);
+    });
+    assert.deepEqual(said, { out: "Name? Sam\nwhen Sam answered, the task had counted to 2000000\n2000000\n", status: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a task runs a program, and calls a library's functions, which C calls back, while the program goes on", { skip }, () => {
+  const ran = taskRun("to run_it\n    return run program \"" + (target === "windows" ? "cmd\" with (list of \"/c\", \"echo hi\")" : "echo\" with (list of \"hi\")") + " keeping its output\nend\nset job to start run_it()\nset n to 0\nrepeat 100000 times\n    add 1 to n\nend\nset got to wait for job\nsay n \" \" code of got \" \" output of got", { allow: ["--allow-run"] });
+  assert.deepEqual(ran, { stdout: target === "windows" ? "100000 0 hi\r\n\n" : "100000 0 hi\n\n", stderr: "", status: 0 });
+  const nap = target === "windows" ? ["kernel32", "Sleep", 300] : ["c", "usleep", 300_000];
+  const library = taskRun(`use the library "msvcrt" or "c"
+    structure cell with v as a whole number
+    callback compare(a cell, a cell) gives a whole number
+    qsort(bytes, a long whole number, a long whole number, a compare)
+end
+use the library "${nap[0]}"
+    ${nap[1]}(a whole number) gives a whole number
+end
+to by_size with x, y
+    return v of x - v of y
+end
+to sleeper
+    ${nap[1]}(${nap[2]})
+    return "slept in C"
+end
+to sorter
+    set b to (list of 5, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0) as bytes
+    qsort(b, 4, 4, by_size)
+    return b
+end
+set ticks to 0
+set s to start sleeper()
+set q to start sorter()
+set t0 to the clock
+repeat 3000000 times
+    add 1 to ticks
+end
+say "main counted to " ticks " while C slept: " (the clock - t0 is less than 0.25)
+say wait for s
+say wait for q`, { allow: ["--allow-libraries"] });
+  assert.deepEqual(library, { stdout: "main counted to 3000000 while C slept: yes\nslept in C\n(16 bytes: 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0)\n", stderr: "", status: 0 });
+});
+
+test("a window's timer ticks while a task works", { skip: onUi }, () => {
+  const ran = libraryRun(`use "ui.moth" as ui
+set finished to no
+set ticks_while_working to 0
+to work
+    set total to 0
+    for each i from 1 to 50000000
+        add i to total
+    end
+    set finished to yes
+    return total
+end
+set w to ui's window("Working", 300, 120)
+to tick
+    if finished
+        ui's close(w)
+    else
+        add 1 to ticks_while_working
+    end
+end
+ui's timer(w, 10, tick)
+set job to start work()
+ui's run()
+say "the window's timer ran while the task worked: " (ticks_while_working is greater than 3)
+say wait for job`, ["--allow-libraries"], { NO_AT_BRIDGE: "1" });
+  assert.deepEqual([ran.stdout, ran.status], ["the window's timer ran while the task worked: yes\n1250000025000000\n", 0], ran.stderr);
+});

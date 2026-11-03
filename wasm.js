@@ -929,6 +929,10 @@ class WasmCompiler extends Scope {
         this.call(s, true);
         this.e("drop");
         return;
+      case "do": // a value done for what it does: `start count(10)`, `wait for job`
+        this.expr(s.value);
+        this.e("drop");
+        return;
       case "turtle":
         this.e("i32.const", TURTLE_ACTIONS.indexOf(s.action));
         if (s.value) this.expr(s.value);

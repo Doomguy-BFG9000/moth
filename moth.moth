@@ -990,7 +990,7 @@ to cli_check_statement with cli_state, cli_frame, cli_s
     else if cli_what is "every"
         cli_check_expr(cli_state, cli_frame, interval of cli_s)
         cli_check_function(cli_state, cli_frame, fn of cli_s)
-    else if cli_what is "return" or cli_what is "fail" or cli_what is "exit" or cli_what is "turtle"
+    else if cli_what is "return" or cli_what is "fail" or cli_what is "exit" or cli_what is "turtle" or cli_what is "do"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
     else if cli_what is "call"
         cli_check_call(cli_state, cli_frame, cli_s, yes)
