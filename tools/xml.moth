@@ -1,0 +1,433 @@
+# Reads XML into records, and writes them back. An element is a record with kind "element", its name, its
+# attributes (a dictionary, in the order they're written) and what's in it, in order: other elements, and
+# text, each a record with kind "text" and the text.
+#
+#   use "xml.moth" as xml
+#   set feed to xml's parse(read "feed.xml")
+#   for each entry in xml's all_named(feed, "item")
+#       say xml's text_of(xml's first_named(entry, "title"))
+#   end
+#   say xml's attribute(feed, "version")
+#   write xml's written(feed) to "copy.xml"
+#
+# A mistake in the XML is a `fail with` that says which line it's on: catch it with `try`.
+
+set letters to empty list # the text being read, a letter at a time, then "" to mark the end
+set at to 1 # the letter being read
+
+# ---------- reading ----------
+
+# the text's one element, past the `<?xml ...?>` line, comments and a <!DOCTYPE> around it
+to parse with text
+    set return_letter to (list of 13) as bytes as text # line ends are \n alone, as XML has them
+    set one_end to join (split text by return_letter + "\n") with "\n"
+    set letters to split (join (split one_end by return_letter) with "\n") by ""
+    add "" to letters
+    set at to 1
+    skip_around()
+    if here() is not "<"
+        problem("expected an element, '<'")
+    end
+    set root to read_element()
+    skip_around()
+    if at is less than length of letters
+        problem("there is more after the element that holds the rest")
+    end
+    return root
+end
+
+to problem with why
+    set line to 1
+    for each k from 1 to at - 1
+        if item k of letters is "\n"
+            set line to line + 1
+        end
+    end
+    fail with "XML, line " + line + ": " + why
+end
+
+to here
+    return item at of letters
+end
+
+# whether the letters from here are `wanted`
+to looking_at with wanted
+    set k to 0
+    for each c in wanted
+        if at + k is greater than length of letters or item (at + k) of letters is not c
+            return no
+        end
+        set k to k + 1
+    end
+    return yes
+end
+
+to take with wanted
+    if not looking_at(wanted)
+        problem("expected '" + wanted + "'")
+    end
+    set at to at + length of wanted
+end
+
+to is_space with c
+    return c is " " or c is "\n" or c is "\t" or c is (list of 13) as bytes as text
+end
+
+to skip_spaces
+    repeat while is_space(here())
+        set at to at + 1
+    end
+end
+
+# everything up to `ending`, which it skips too
+to up_to with ending, what
+    set made to empty list
+    repeat while not looking_at(ending)
+        if here() is ""
+            problem(what + " has no end: expected '" + ending + "'")
+        end
+        add here() to made
+        set at to at + 1
+    end
+    set at to at + length of ending
+    return join made with ""
+end
+
+# spaces, comments, `<?...?>` and `<!DOCTYPE ...>`, before or after the element
+to skip_around
+    repeat while yes
+        skip_spaces()
+        if looking_at("<!--")
+            set at to at + 4
+            up_to("-->", "a comment")
+        else if looking_at("<?")
+            set at to at + 2
+            up_to("?>", "'<?'")
+        else if looking_at("<!DOCTYPE") or looking_at("<!doctype")
+            skip_doctype()
+        else
+            return nothing
+        end
+    end
+end
+
+# <!DOCTYPE ...>, with a [ ... ] of its own inside it
+to skip_doctype
+    set depth to 0
+    repeat while yes
+        set c to here()
+        if c is ""
+            problem("'<!DOCTYPE' has no end: expected '>'")
+        end
+        set at to at + 1
+        if c is "["
+            set depth to depth + 1
+        else if c is "]"
+            set depth to depth - 1
+        else if c is ">" and depth is 0
+            return nothing
+        end
+    end
+end
+
+to is_name_letter with c
+    if c is ""
+        return no
+    end
+    if c is in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:"
+        return yes
+    end
+    return byte 1 of (c as bytes) is at least 128 # a letter past ASCII
+end
+
+to read_name
+    set made to empty list
+    repeat while is_name_letter(here())
+        add here() to made
+        set at to at + 1
+    end
+    if length of made is 0
+        problem("expected a name but found " + shown(here()))
+    end
+    return join made with ""
+end
+
+to shown with c
+    if c is ""
+        return "the end"
+    end
+    return "'" + c + "'"
+end
+
+to read_element
+    take("<")
+    set name to read_name()
+    set attributes to empty dictionary
+    repeat while yes
+        set before to at
+        skip_spaces()
+        if looking_at("/>")
+            set at to at + 2
+            return element(name, attributes, empty list)
+        end
+        if here() is ">"
+            set at to at + 1
+            return element(name, attributes, read_inside(name))
+        end
+        if at is before
+            problem("expected a space, '>' or '/>' after " + name + " but found " + shown(here()))
+        end
+        set attribute_name to read_name()
+        skip_spaces()
+        take("=")
+        skip_spaces()
+        set quote to here()
+        if quote is not "\"" and quote is not "'"
+            problem("an attribute's value goes in quotes")
+        end
+        set at to at + 1
+        set made to empty list
+        repeat while here() is not quote
+            if here() is "" or here() is "<"
+                problem("the value of " + attribute_name + " has no end")
+            end
+            if here() is "&"
+                add read_entity() to made
+            else if is_space(here()) # a tab or a line end in a value is a space, as XML has it
+                add " " to made
+                set at to at + 1
+            else
+                add here() to made
+                set at to at + 1
+            end
+        end
+        set at to at + 1
+        if attribute_name is in attributes
+            problem(name + " has " + attribute_name + " twice")
+        end
+        set item attribute_name of attributes to join made with ""
+    end
+end
+
+# what's in an element, up to its </name>
+to read_inside with name
+    set inside to empty list
+    set words to empty list # text not yet added
+    repeat while yes
+        if here() is ""
+            problem(name + " has no end: expected '</" + name + ">'")
+        end
+        if looking_at("</")
+            add_text(inside, words)
+            set at to at + 2
+            set closing to read_name()
+            if closing is not name
+                problem("expected '</" + name + ">' but found '</" + closing + ">'")
+            end
+            skip_spaces()
+            take(">")
+            return inside
+        else if looking_at("<!--")
+            set at to at + 4
+            up_to("-->", "a comment")
+        else if looking_at("<![CDATA[")
+            set at to at + 9
+            add up_to("]]>", "'<![CDATA['") to words
+        else if looking_at("<?")
+            set at to at + 2
+            up_to("?>", "'<?'")
+        else if here() is "<"
+            add_text(inside, words)
+            set words to empty list
+            add read_element() to inside
+        else if here() is "&"
+            add read_entity() to words
+        else
+            add here() to words
+            set at to at + 1
+        end
+    end
+end
+
+to add_text with inside, words
+    if length of words is greater than 0
+        add (record with kind "text", text join words with "") to inside
+    end
+end
+
+# `&lt;`, `&#233;`, `&#x1F600;`: the letter it stands for
+to read_entity
+    set start to at
+    take("&")
+    set made to empty list
+    repeat while here() is not ";"
+        if here() is "" or length of made is greater than 10
+            set at to start
+            problem("'&' starts an entity like '&amp;', which ends with ';'")
+        end
+        add here() to made
+        set at to at + 1
+    end
+    set at to at + 1
+    set named to join made with ""
+    set known to dictionary where "lt" is "<", "gt" is ">", "amp" is "&", "quot" is "\"", "apos" is "'"
+    if named is in known
+        return item named of known
+    end
+    if length of named is greater than 1 and item 1 of named is "#"
+        set code to nothing
+        try
+            if item 2 of named is "x" or item 2 of named is "X"
+                set code to hex_number(items 3 to (length of named) of named)
+            else
+                set code to number of (items 2 to (length of named) of named)
+            end
+        if it fails
+        end
+        if code is not nothing and code is divisible by 1 and code is at least 1 and code is at most 1114111
+            return letter_of(code)
+        end
+    end
+    set at to start
+    problem("there is no entity '&" + named + ";'")
+end
+
+# hex digits as a whole number, or nothing if they aren't any
+to hex_number with digits
+    if length of digits is 0
+        return nothing
+    end
+    set made to 0
+    for each c in lowercase of digits
+        set d to position of c in "0123456789abcdef"
+        if d is 0
+            return nothing
+        end
+        set made to made * 16 + d - 1
+    end
+    return made
+end
+
+# a code point as text, in UTF-8
+to letter_of with code
+    if code is less than 128
+        return (list of code) as bytes as text
+    end
+    if code is less than 2048
+        return (list of 192 + (shift code right by 6), 128 + (code bit and 63)) as bytes as text
+    end
+    if code is less than 65536
+        return (list of 224 + (shift code right by 12), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+    end
+    return (list of 240 + (shift code right by 18), 128 + ((shift code right by 12) bit and 63), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+end
+
+# ---------- making and finding ----------
+
+to element with name, attributes, inside
+    return record with kind "element", name name, attributes attributes, children inside
+end
+
+to text_node with words
+    return record with kind "text", text words
+end
+
+# all the text in an element, inside the elements in it too
+to text_of with e
+    set made to empty list
+    gather_text(e, made)
+    return join made with ""
+end
+
+to gather_text with e, made
+    for each child in children of e
+        if kind of child is "text"
+            add text of child to made
+        else
+            gather_text(child, made)
+        end
+    end
+end
+
+# the first element directly in e with this name, or nothing
+to first_named with e, name
+    for each child in children of e
+        if kind of child is "element" and name of child is name
+            return child
+        end
+    end
+    return nothing
+end
+
+# every element in e with this name, at any depth, in the order they're written
+to all_named with e, name
+    set found to empty list
+    gather_named(e, name, found)
+    return found
+end
+
+to gather_named with e, name, found
+    for each child in children of e
+        if kind of child is "element"
+            if name of child is name
+                add child to found
+            end
+            gather_named(child, name, found)
+        end
+    end
+end
+
+# an attribute's value, or nothing
+to attribute with e, name
+    if name is in attributes of e
+        return item name of attributes of e
+    end
+    return nothing
+end
+
+# ---------- writing ----------
+
+to written with e
+    set made to empty list
+    write_element(e, made)
+    return join made with ""
+end
+
+to write_element with e, made
+    add "<" + name of e to made
+    for each key in attributes of e
+        add " " + key + "=\"" + escaped(item key of attributes of e, yes) + "\"" to made
+    end
+    if length of children of e is 0
+        add "/>" to made
+        return nothing
+    end
+    add ">" to made
+    for each child in children of e
+        if kind of child is "text"
+            add escaped(text of child, no) to made
+        else
+            write_element(child, made)
+        end
+    end
+    add "</" + name of e + ">" to made
+end
+
+# text with &, < and > as entities, and " too in an attribute's value
+to escaped with words, in_quotes
+    set made to empty list
+    for each c in words
+        if c is "&"
+            add "&amp;" to made
+        else if c is "<"
+            add "&lt;" to made
+        else if c is ">"
+            add "&gt;" to made
+        else if c is "\"" and in_quotes
+            add "&quot;" to made
+        else
+            add c to made
+        end
+    end
+    return join made with ""
+end

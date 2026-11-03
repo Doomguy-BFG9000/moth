@@ -776,6 +776,21 @@ to parse with tokens, reading
         return record with kind "builtin", name "remainder", args left_args, at t
     end
 
+    # `xs without repeats`: a call to a function, made before the statement, that adds each item it hasn't
+    # already to a new list
+    to without_repeats with over, t
+        set one_item to record with kind "name", name "each item", at t
+        set made_list to record with kind "name", name "the list made", at t
+        set adding to record with kind "add", name "the list made", value one_item, at t
+        set fresh to record with kind "compare", op "in", negate yes, left one_item, right made_list, at t
+        set kept_if to record with kind "if", cond fresh, then (list of adding), otherwise empty list, at t
+        set loop to record with kind "each", name "each item", over (record with kind "name", name "the items", at t), body (list of kept_if), at t
+        set start_made to record with kind "set", name "the list made", value (record with kind "list", items empty list, at t), at t
+        set give_made to record with kind "return", value made_list, at t
+        set fn_name to unnamed("without repeats", (list of "the items"), (list of start_made, loop, give_made), t)
+        return made_call(fn_name, (list of over), t)
+    end
+
     # `items 2 to 4 of xs`
     to items_rest with t
         set outside to indexing
@@ -2108,6 +2123,12 @@ to parse with tokens, reading
             set unit_args to list of left
             add (record with kind "value", type "string", value value of unit_token, at unit_token) to unit_args
             set left to record with kind "builtin", name "in", args unit_args, at in_token
+        end
+        # `names without repeats`: each item once, where it first is
+        if is_word("without") and not nl of peek() and word_at(pos + 1, "repeats")
+            set without_token to peek()
+            set pos to pos + 2
+            set left to without_repeats(left, without_token)
         end
         # `total / count rounded`, `x rounded down`, `x rounded up`: the whole sum; `rounded(x)` is still a call
         if is_word("rounded") and not nl of peek() and type of item (pos + 1) of tokens is not "("

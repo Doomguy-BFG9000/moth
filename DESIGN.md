@@ -3040,3 +3040,47 @@ hold them to agreeing.
   line, two in a row on what the first gave, a function of that name winning,
   and each mistake, caught and not, on the three engines, in compiler.moth,
   and in machine code on Windows and Linux.
+
+## 69. Lists as sets
+
+- **Why.** Python has sets: each value once, `in` that's quick, and `&`, `|`
+  and `-`. Moth had `is in` and dictionaries, whose keys are once each.
+- **What's new.** `xs without repeats`, after the sum before it as `rounded`
+  is, keeps each item where it first is, by `is`, so lists and records count
+  as the same when they hold the same, and `0.1 * 30` is a repeat of 3. It
+  is a function of the program's, made as list building's are (§66), so
+  nothing else changed. What's in both, in one only, or in either is list
+  building with `is in`, which the README shows.
+- **Not added.** A set as a value of its own: the dictionaries Moth has are
+  one already, for text and numbers, and finding a list in a list by `is`
+  can't be quicker than looking at each.
+- **Tested.** Repeats of numbers to 15 digits, of letters in text, of lists
+  and records, none at all, and what isn't a list, on the three engines, in
+  compiler.moth and in machine code on Windows and Linux.
+
+## 70. XML
+
+- **Why.** Python reads XML with `xml.etree`; feeds, office files, SVG and
+  much of what older services send are XML.
+- **What it is.** tools/xml.moth, in Moth alone, so it works on every engine.
+  An element is a record with kind "element", its name, its attributes in a
+  dictionary, in the order written, and its children, in order: elements, and
+  text as records with kind "text", so a program tells them apart by `kind`.
+  Text next to text (across a comment, or a CDATA section) is one piece.
+  `text_of`, `first_named`, `all_named` and `attribute` find things;
+  `element` and `text_node` make them, and `written` writes XML back, with
+  `&`, `<`, `>` (and `"` in a value) as entities, so writing and reading
+  again gives the same records.
+- **As XML says.** Line ends are `\n` alone; in an attribute's value a tab or
+  a line end is a space; the five named entities and `&#...;` and `&#x...;`
+  are the letters they stand for, past one byte too; the `<?xml?>` line, a
+  `<!DOCTYPE>` (with a `[...]` of its own), comments and `<?...?>` are passed
+  over. A DOCTYPE's entities aren't used, and namespaces are just names with
+  a `:`.
+- **Mistakes** are a `fail with` saying the line: a closing tag that doesn't
+  match, one missing, an attribute twice or without quotes, an entity Moth
+  doesn't know, anything after the element.
+- **Tested.** Its own tests, on the three engines and in machine code; and
+  800 random documents (attributes in either quote, entities, CDATA,
+  comments, text past one byte, nesting), read the same as Python's
+  ElementTree reads them, and written and read back the same.

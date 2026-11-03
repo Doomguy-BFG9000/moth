@@ -332,6 +332,9 @@ bytes and dictionaries:
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
   `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
   on every engine, the playground's too, and test themselves.
+- [`xml.moth`](tools/xml.moth) reads XML into records, each element's name,
+  attributes and what's inside it, finds elements by name, and writes them
+  back, in Moth alone, read the same as Python's ElementTree reads it.
 - [`big.moth`](tools/big.moth) works with whole numbers of any size, kept as
   text, so `say` shows them and `is` compares them: `big's times(f, 30)`,
   `plus`, `minus`, `divided`, `remainder`, `power` and `compare`, in Moth
@@ -437,6 +440,7 @@ say double(21)
 set squares to list of n * n for each n in list of 1, 2, 3, 4   # a list built from another
 say list of n for each n in squares where n is greater than 5  # [9, 16]: the ones that pass
 say items 2 to 3 of squares         # [4, 9]: of a list, text or bytes
+say list of 3, 1, 3 without repeats # [3, 1]: each once, where it first is
 say 2 to the power of 10            # 1024
 say 10 / 4 rounded down             # 2; also rounded up, and rounded (a half away from 0)
 say remainder of 17 divided by 5    # 2: what's left over, with the divisor's sign
@@ -683,6 +687,15 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   the sum before them, as it's shown, to 15 digits, so `(0.1 * 30) rounded
   down` is 3; `remainder of a divided by b` is exact for whole numbers. Adding
   text to anything joins them into text.
+- **Sets:** `xs without repeats` keeps each item once; `x is in xs` finds
+  one; and list building does the rest: `list of x for each x in a where x
+  is in b` is what's in both, and with `not`, what's only in a. A
+  dictionary's keys are a set that finds a key at once, however many.
+- **Mistakes of your own kinds:** `fail with` takes any value, so `fail with
+  record with kind "missing", file name` is one a `try` can tell from the
+  rest by its `kind`, and `fail with why` passes on one it doesn't handle.
+  Tasks (`start`, `wait for`) are what async code is for; a generator is a
+  function that adds to a list, or a record with its own `next` function.
 - **A record's own functions:** `rex's speak()`, where the program makes
   nothing else called `speak`, calls the function rex's `speak` field holds,
   with rex first. So records made by different functions can each answer the

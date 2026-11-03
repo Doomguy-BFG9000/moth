@@ -387,6 +387,9 @@ export const MACHINE_CASES = [
   "set xs to list of 1\nxs's speak()",
   "to falls with self\n    return 1 / 0\nend\nset r to record with go falls\nsay r's go()",
   "set r to record with go (function with s gives 5)\ntry\n    r's nope()\nif it fails with why\n    say \"caught: \" why\nend\nsay r's go()",
+  // lists as sets: without repeats
+  "set xs to list of 3, 1, 3, 2, 1, 0.1 * 30\nsay xs without repeats\nsay \"banana\" without repeats\nset a to list of 1, 2, 3, 4\nset b to list of 3, 4, 5\nsay list of x for each x in a where x is in b\nsay list of x for each x in a where not (x is in b)\nset both to empty list\nfor each x in a\n    add x to both\nend\nfor each x in b\n    add x to both\nend\nsay both without repeats\nsay (list of (list of 1, 2), (list of 1, 2), (record with n 1), (record with n 1)) without repeats\nsay length of (empty list without repeats)\nset seen to dictionary where \"x\" is yes\nsay \"x\" is in seen\nset without to 4\nsay without + 1",
+  "say 5 without repeats",
 ];
 
 export function machinePrograms(seed, count) {

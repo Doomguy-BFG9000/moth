@@ -178,6 +178,8 @@ export const PROGRAMS = [
   ["to dog_speaks with self\n    return name of self + \" says woof\"\nend\nto cat_speaks with self\n    return name of self + \" says meow\"\nend\nto make_pet with name, speaks\n    return record with name name, speak speaks\nend\nset pets to list of make_pet(\"Rex\", dog_speaks), make_pet(\"Tom\", cat_speaks)\nfor each pet in pets\n    say pet's speak()\nend\nto greets with self, other\n    return name of self + \" greets \" + other\nend\nset rex to item 1 of pets\nset greet of rex to greets\nsay rex's greet(\"Tom\")\nto make_puppy with name\n    set puppy to make_pet(name, dog_speaks)\n    set base to speak of puppy\n    set speak of puppy to function with self gives base(self) + \", softly\"\n    return puppy\nend\nset bit to make_puppy(\"Bit\")\nsay bit's speak()\nsay rex's speak()\nto shout with self\n    say uppercase of name of self\nend\nset loud of rex to shout\nrex's loud()\nset counter to record with count 0, step (function with self gives self)\nto bump with self, by\n    set count of self to count of self + by\n    return self\nend\nset step of counter to bump\nsay count of counter's step(2)'s step(3)", "Rex says woof\nTom says meow\nRex greets Tom\nBit says woof, softly\nRex says woof\nREX\n5"],
   ["to speak with x\n    return \"the function\"\nend\nset r to record with speak (function with s gives \"its own\")\nsay r's speak()", "the function"],
   ["set r to record with go (function with s gives 5)\ntry\n    r's nope()\nif it fails with why\n    say \"caught: \" why\nend\nsay r's go()", "caught: there is no function called 'nope'\n5"],
+  // lists as sets: without repeats
+  ["set xs to list of 3, 1, 3, 2, 1, 0.1 * 30\nsay xs without repeats\nsay \"banana\" without repeats\nset a to list of 1, 2, 3, 4\nset b to list of 3, 4, 5\nsay list of x for each x in a where x is in b\nsay list of x for each x in a where not (x is in b)\nset both to empty list\nfor each x in a\n    add x to both\nend\nfor each x in b\n    add x to both\nend\nsay both without repeats\nsay (list of (list of 1, 2), (list of 1, 2), (record with n 1), (record with n 1)) without repeats\nsay length of (empty list without repeats)\nset seen to dictionary where \"x\" is yes\nsay \"x\" is in seen\nset without to 4\nsay without + 1", "[3, 1, 2]\n[\"b\", \"a\", \"n\"]\n[3, 4]\n[1, 2]\n[1, 2, 3, 4, 5]\n[[1, 2], (record with n 1)]\n0\nyes\n5"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -555,6 +557,7 @@ export const ERRORS = [
   ["set r to record with f (function with a gives a)\nsay r's f(1)", "line 2: 'f' needs 1 input but got 2"],
   ["set xs to list of 1\nxs's speak()", "line 2: there is no function called 'speak'"],
   ["to falls with self\n    return 1 / 0\nend\nset r to record with go falls\nsay r's go()", "line 2: can't divide by zero"],
+  ["say 5 without repeats", "line 1: can only go through a list, text, dictionary or bytes, not a number"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

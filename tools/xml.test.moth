@@ -1,0 +1,74 @@
+# xml.moth's own tests: `moth test xml.test.moth`
+use "xml.moth" as xml
+
+to test_elements
+    set a to xml's parse("<a x=\"1\" y='two'><b>hi</b><b/>text &amp; more</a>")
+    expect name of a is "a"
+    expect xml's attribute(a, "x") is "1"
+    expect xml's attribute(a, "y") is "two"
+    expect xml's attribute(a, "z") is nothing
+    expect length of children of a is 3
+    expect name of item 1 of children of a is "b"
+    expect xml's text_of(item 1 of children of a) is "hi"
+    expect length of children of item 2 of children of a is 0
+    expect item 3 of children of a is (record with kind "text", text "text & more")
+end
+
+to test_finding
+    set doc to xml's parse("<feed><item><title>One</title></item><item><title>Two <i>2</i></title></item><group><item><title>Three</title></item></group></feed>")
+    set titles to empty list
+    for each entry in xml's all_named(doc, "item")
+        add xml's text_of(xml's first_named(entry, "title")) to titles
+    end
+    expect titles is list of "One", "Two 2", "Three"
+    expect length of xml's all_named(doc, "title") is 3
+    expect xml's first_named(doc, "title") is nothing
+    expect xml's text_of(doc) is "OneTwo 2Three"
+end
+
+to test_around_the_element
+    set text to "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- made by hand -->\n<!DOCTYPE note [<!ENTITY x \"y\">]>\n<note to=\"Sam\">\n  <!-- inside -->\n  <body>Hi</body>\n</note>\n<!-- after -->\n"
+    set note to xml's parse(text)
+    expect name of note is "note"
+    expect xml's attribute(note, "to") is "Sam"
+    expect xml's text_of(xml's first_named(note, "body")) is "Hi"
+    expect length of children of note is 3 # the spaces around body are text
+end
+
+to test_entities_and_cdata
+    set a to xml's parse("<a t=\"&lt;&#65;&quot;\">&lt;&gt;&amp;&quot;&apos; &#233; &#x1F600;<![CDATA[<not> & tags]]></a>")
+    expect xml's attribute(a, "t") is "<A\""
+    expect xml's text_of(a) is "<>&\"' é 😀<not> & tags"
+end
+
+to test_writing
+    set made to xml's element("p", (dictionary where "class" is "a \"b\" & c"), (list of xml's text_node("1 < 2 & 3 > 2"), xml's element("br", empty dictionary, empty list)))
+    set text to xml's written(made)
+    expect text is "<p class=\"a &quot;b&quot; &amp; c\">1 &lt; 2 &amp; 3 &gt; 2<br/></p>"
+    expect xml's parse(text) is made
+    set again to "<a x=\"1\"><b>hi</b>é<c/></a>"
+    expect xml's written(xml's parse(again)) is again
+end
+
+# what parsing the text fails with
+to mistake_of with text
+    set caught to nothing
+    try
+        xml's parse(text)
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of("<a><b></a>") is "XML, line 1: expected '</b>' but found '</a>'"
+    expect mistake_of("<a>\n<b>\n") is "XML, line 3: b has no end: expected '</b>'"
+    expect mistake_of("<a x=\"1\" x=\"2\"/>") is "XML, line 1: a has x twice"
+    expect mistake_of("<a>&nope;</a>") is "XML, line 1: there is no entity '&nope;'"
+    expect mistake_of("<a/><b/>") is "XML, line 1: there is more after the element that holds the rest"
+    expect mistake_of("hello") is "XML, line 1: expected an element, '<'"
+    expect mistake_of("<a x=1/>") is "XML, line 1: an attribute's value goes in quotes"
+    expect mistake_of("<a & b/>") is "XML, line 1: expected a name but found '&'"
+    expect mistake_of("<a><!-- no end</a>") is "XML, line 1: a comment has no end: expected '-->'"
+end

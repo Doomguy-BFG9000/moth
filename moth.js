@@ -954,6 +954,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const unit = tokens[pos++];
       left = { kind: "builtin", name: "in", args: [left, { kind: "value", value: unit.value, at: unit }], at: t };
     }
+    // `names without repeats`: each item once, where it first is
+    if (isWord("without") && !peek().nl && wordAt(pos + 1, "repeats")) {
+      const t = tokens[pos];
+      pos += 2;
+      left = withoutRepeats(left, t);
+    }
     // `total / count rounded`, `x rounded down`, `x rounded up`: the whole sum; `rounded(x)` is still a call
     if (isWord("rounded") && !peek().nl && tokens[pos + 1].type !== "(") {
       const t = tokens[pos++];
@@ -1296,6 +1302,18 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     const loop = at("each", { name: one, list: at("name", { name: items }), body: [test ? at("if", { cond: call(test), then: [adding], otherwise: [] }) : adding] });
     const builder = unnamed("building the list", [items], [at("set", { name: made, value: at("list", { items: [] }) }), loop, at("return", { value: at("name", { name: made }) })], t);
     return madeCall(builder, [over], t);
+  }
+
+  // `xs without repeats`: a call to a function, made before the statement, that adds each item it hasn't
+  // already to a new list
+  function withoutRepeats(over, t) {
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const [items, made, one] = ["the items", "the list made", "each item"];
+    const adding = at("add", { name: made, value: at("name", { name: one }) });
+    const fresh = at("compare", { op: "in", negate: true, left: at("name", { name: one }), right: at("name", { name: made }) });
+    const loop = at("each", { name: one, list: at("name", { name: items }), body: [at("if", { cond: fresh, then: [adding], otherwise: [] })] });
+    const fn = unnamed("without repeats", [items], [at("set", { name: made, value: at("list", { items: [] }) }), loop, at("return", { value: at("name", { name: made }) })], t);
+    return madeCall(fn, [over], t);
   }
 
   function argList() {
