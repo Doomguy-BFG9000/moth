@@ -1138,7 +1138,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1476,6 +1476,59 @@ say got is wait for job
 net's close(c)
 net's close(wide)`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\n127.0.0.1\nhello moth\nsecond line\nlast, without an end\nnothing\nHELLO BACK é\nping é\n127.0.0.1\nyes\ncan't receive a message: nothing came in time, or it was bigger than 100 bytes\ncan't connect to 127.0.0.1 port 1: nothing answered there\ncan't find no-such-host.invalid on the network\na port is a whole number from 0 to 65535, not 70000\n300000\nyes\n", "", 0]);
+});
+
+// tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;
+// more parts than items; none; a part that fails, which says what its copy said; and no files left behind
+test("tools/cores.moth does a list's items on every core at once, in copies of the program", { skip }, () => {
+  const ran = libraryRun(String.raw`use "cores.moth" as cores
+to primes_below with n
+    set found to 0
+    for each k from 2 to n - 1
+        set prime to yes
+        set d to 2
+        repeat while d * d is at most k and prime
+            if k is divisible by d
+                set prime to no
+            end
+            set d to d + 1
+        end
+        if prime
+            set found to found + 1
+        end
+    end
+    return found
+end
+to falls_over with n
+    if n is 3
+        return 1 / 0
+    end
+    return n
+end
+cores's work_here(primes_below)
+cores's work_here(falls_over)
+set sizes to list of 300000, 310000, 320000, 330000, 340000, 350000, 360000, 370000
+set t to the clock
+set alone to cores's each_at_once_on(1, primes_below, sizes)
+set one_way to the clock - t
+set t to the clock
+set together to cores's each_at_once(primes_below, sizes)
+set every_way to the clock - t
+say alone
+say together is alone
+say cores's count_of_cores() is at least 1
+say cores's each_at_once_on(3, primes_below, list of 10, 20)
+say cores's each_at_once(primes_below, empty list)
+try
+    cores's each_at_once_on(2, falls_over, list of 1, 2, 3, 4)
+if it fails with why
+    say why
+end
+say every_way is less than one_way * 4 # not a test of speed: the parts ran, and gave back`, ["--allow-libraries", "--allow-read", "--allow-write"]);
+  const lines = ran.stdout.split("\n");
+  assert.equal(lines.slice(0, 5).join("\n") + "\n", "[25997, 26800, 27608, 28404, 29182, 29977, 30757, 31522]\nyes\nyes\n[4, 8]\n[]\n", ran.stdout + ran.stderr);
+  assert.match(lines.slice(5).join("\n"), /^part 2 of 2 failed: p\.moth:21:18: can't divide by zero\n[^]*in 'falls_over'[^]*\nyes\n$/);
+  assert.deepEqual([ran.stderr, ran.status], ["", 0]);
 });
 
 // tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote

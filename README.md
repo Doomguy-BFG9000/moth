@@ -340,6 +340,10 @@ bytes and dictionaries:
   `serve_secure(443, answer, "cert.pem", "key.pem")`, through OpenSSL 3
   (Linux's own; on Windows, an MSVC build's two DLLs beside the program,
   such as Python's), and reads bodies sent in chunks.
+- [`cores.moth`](tools/cores.moth) does a list's items on every core at once,
+  as Python's multiprocessing does: `cores's each_at_once(work, items)`, in
+  copies of the program, each a process of its own, after a
+  `cores's work_here(work)` line that makes a copy do its part.
 - [`sockets.moth`](tools/sockets.moth) talks over a network as Python's
   `socket` does: `connect("example.com", 80)`, `listen(9000)` and `accept`,
   `send`, `receive`, `receive_line`, `receive_all`, `finish_sending`,

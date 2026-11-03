@@ -1,0 +1,156 @@
+# Work on every core at once, as Python's multiprocessing does: a list's items, each given to a function, by
+# copies of this program, each a process of its own, so each has a core to itself. A task (`start`) shares the
+# program's one turn at a time; these don't.
+#
+#   use "cores.moth" as cores
+#   to slow_square with n
+#       ... a lot of work ...
+#       return n * n
+#   end
+#   cores's work_here(slow_square)       # where a copy does its part: after the functions, before the rest
+#   say cores's each_at_once(slow_square, list of 1, 2, 3, 4, 5, 6, 7, 8)   # [1, 4, 9, 16, 25, 36, 49, 64]
+#
+# each_at_once gives what the function gave for each item, in the items' order, splitting them into as many
+# parts as there are cores (or `each_at_once_on(n, ...)` for n). Each copy starts the program again with
+# arguments of its own, so everything above the work_here line runs in each copy too, and work_here sees it's a
+# copy, does its part and stops it; the copy's part and what it gives go through files, with save and load, so
+# they're numbers, text, yes and no, nothing, lists, records and dictionaries. A mistake in a part is a
+# `fail with` that says what the copy said. Where there are no processes to start (the playground, or the
+# JavaScript engines), it does the items one after another, here, and gives the same.
+#
+# Built with --allow-libraries (to start the copies), --allow-read and --allow-write (for their files).
+
+use "tasks.moth" as tasks
+
+use the library "kernel32"
+    GetActiveProcessorCount(a whole number) gives a whole number
+end
+use the library "c"
+    sysconf(a whole number) gives a long whole number
+end
+
+set cores_part_flag to "--moth-cores-part"
+
+# how many cores this computer has, or 1 if it can't say
+to count_of_cores
+    try
+        set n to GetActiveProcessorCount(65535) # every processor group
+        if n is at least 1
+            return n
+        end
+    if it fails
+    end
+    try
+        set n to sysconf(84) # _SC_NPROCESSORS_ONLN
+        if n is at least 1
+            return n
+        end
+    if it fails
+    end
+    return 1
+end
+
+# In a copy each_at_once started for this function: its part done, saved where each_at_once looks, and the
+# copy stopped. Anywhere else, or for another function, nothing.
+to work_here with job
+    set given to arguments
+    if length of given is less than 4 or item 1 of given is not cores_part_flag or item 2 of given is not "" + job
+        return nothing
+    end
+    set part_file to item 3 of given
+    set done_file to item 4 of given
+    set part to load part_file
+    set made to empty list
+    for each one in part
+        add job(one) to made
+    end
+    save made to done_file
+    stop the program with 0
+end
+
+to each_at_once with job, items
+    return each_at_once_on(count_of_cores(), job, items)
+end
+
+# the items split into `ways` parts, each done by a copy of the program, all at once
+to each_at_once_on with ways, job, items
+    if length of items is 0
+        return empty list
+    end
+    set parts to ways
+    if parts is greater than length of items
+        set parts to length of items
+    end
+    set here_only to parts is less than 2
+    if not here_only
+        try
+            tasks's own_program() # where there are processes, a program knows where it is
+        if it fails
+            set here_only to yes
+        end
+    end
+    if here_only
+        set made to empty list
+        for each one in items
+            add job(one) to made
+        end
+        return made
+    end
+    set stem to ".moth-cores-" + (random number from 1 to 1000000000) + "-"
+    set started to empty list
+    set where to empty list
+    set at to 1
+    set problem to nothing
+    for each k from 1 to parts
+        set size to (length of items - at + 1 + parts - k) / (parts - k + 1) rounded down # the rest, shared out
+        set part to items at to (at + size - 1) of items
+        set at to at + size
+        set given to stem + k + ".part"
+        set back to stem + k + ".done"
+        add (list of given, back) to where
+        if problem is nothing
+            try
+                save part to given
+                add tasks's start_self(list of cores_part_flag, "" + job, given, back) to started
+            if it fails with why
+                set problem to "couldn't start part " + k + " of " + parts + ": " + why
+            end
+        end
+    end
+    set made to empty list
+    for each k from 1 to length of started
+        set task to item k of started
+        tasks's wait_for(task)
+        if problem is nothing
+            if tasks's code_of(task) is not 0
+                set problem to "part " + k + " of " + parts + " failed: " + tasks's output_of(task)
+            else
+                try
+                    set done_file to item 2 of item k of where
+                    for each one in load done_file
+                        add one to made
+                    end
+                if it fails with why
+                    set problem to "part " + k + " of " + parts + " gave nothing back: " + why
+                end
+            end
+        end
+    end
+    cores_tidy(where)
+    if problem is not nothing
+        fail with problem
+    end
+    return made
+end
+
+# the parts' files, gone
+to cores_tidy with where
+    for each pair in where
+        for each name in pair
+            try
+                remove the file name
+            if it fails
+            end
+        end
+    end
+end

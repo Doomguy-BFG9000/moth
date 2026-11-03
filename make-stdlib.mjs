@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 // the libraries: each file a program uses for what it does, not a program, an example or a test
-export const STANDARD = ["math.moth", ...["big", "dates", "game", "hash", "json", "linux", "server", "sockets", "sqlite", "system", "tasks",
+export const STANDARD = ["math.moth", ...["big", "cores", "dates", "game", "hash", "json", "linux", "server", "sockets", "sqlite", "system", "tasks",
   "text", "ui", "windows", "xml", "zip"].map((name) => `tools/${name}.moth`)];
 
 // a file's text as a Moth text: \ " and { escaped, line ends and tabs as \n and \t

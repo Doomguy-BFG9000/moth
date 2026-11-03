@@ -3209,3 +3209,33 @@ hold them to agreeing.
   are, and holds each one exactly; and through moth.exe, in a folder with
   nothing else, a program that uses json.moth, math.moth and big.moth, and
   big.moth's own tests, and a math.moth beside the program used instead.
+
+## 75. Every core at once
+
+- **Why.** A task (§62) is a thread of the program's own, and the threads
+  take turns, as Python's do under its lock, so a long sum is no quicker in
+  four of them than in one. Python's answer is multiprocessing: copies of
+  the program, each a process with a core to itself.
+- **What it is.** tools/cores.moth, on tasks.moth's `start_self`, which
+  starts the same program again with other arguments. `each_at_once(work,
+  items)` shares the items out into as many parts as there are cores
+  (GetActiveProcessorCount on Windows, sysconf on Linux), or
+  `each_at_once_on(n, work, items)` into n; saves each part to a file;
+  starts a copy for each, with the work's name, `<function work>`, and its
+  files as arguments; waits for them all; and gives back what each gave, in
+  the items' order. In a copy, `work_here(work)` finds its part, does it,
+  saves what it gave, and stops the copy; a `work_here` for any other
+  function does nothing, so a program can have several.
+- **What it asks of a program.** Each copy runs the program from the top,
+  so the `work_here` lines go after the functions they name and before
+  anything that should run once, as Python wants `if __name__ ==
+  "__main__"`; and what goes between them is what `save` keeps.
+- **Mistakes.** A part that fails ends its copy; each_at_once waits for the
+  rest, takes their files away, and fails with what the copy said, its line
+  and trail. Where processes can't be started (the JavaScript engines), it
+  does the items one after another, in the program, giving the same.
+- **What it gave.** Counting the primes below 3 to 4.1 million, 12 items:
+  24.8 s in one part, 5.1 s in a part a core, on a computer with 12.
+- **Tested.** In machine code on Windows and Linux: one part and a part a
+  core give the same, more parts than items, no items, and a part that fails
+  in its copy; and nothing left behind.
