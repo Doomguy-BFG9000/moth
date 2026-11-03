@@ -2929,3 +2929,49 @@ hold them to agreeing.
   apart from the program's, lists added to, a loop's names, a file used, a
   mistake in a function made earlier, with its trail, a function that can't be
   kept, text past one byte, a block dropped, `quit`, and no file left behind.
+
+## 66. Inputs left out, functions with no name, lists built from lists
+
+- **Why.** Next to Python, Moth had no default inputs, no lambdas, no list
+  comprehensions, no slices and no `**`: each a line of Python that took a
+  loop or a helper function in Moth.
+- **Only the parsers.** Each is written in terms of what Moth already had, so
+  the VM, the JIT, WebAssembly and machine code needed nothing new: moth.js
+  and compiler.moth make the same tree, and every back end compiles it as it
+  compiles the rest.
+- **Inputs left out.** `to greet with name, greeting or "Hello"`. Once the
+  whole program is read (files it uses too), each call by the function's name
+  that gives fewer inputs gets the rest written in, each a copy, so a list
+  given this way is a new one each call. A name made more than once: its last
+  `to`. A call through a variable (`set f to greet`) isn't seen by name, so it
+  gives every input. After `or` only values written out, as anything else
+  would be worked out where the call is, not where the function is.
+- **Functions with no name.** `function with x gives x * 2` is a `to` block
+  put before the statement it's in, named `function on line 3` (then `(2)`,
+  and so on), a name no program can write, and the value is that name: so it
+  remembers the variables around it, as any function does, and a mistake in
+  it says where it is. One inside another's value goes inside that one, where
+  its inputs are.
+- **Lists built from lists.** `list of x * 2 for each x in xs where x is
+  greater than 1` makes three such functions: one for an item's value, one
+  for whether to keep it, each with x as its own input, so x is nobody else's,
+  and one that goes through the list, adding each kept value, which the
+  statement calls with `xs`. `for each` on the next line is a loop, as it was.
+- **Items from one to another, and powers.** `items 2 to 4 of xs` (a list,
+  text or bytes) and `x to the power of n` are builtins, as `in order` is:
+  items 3 to 2 are none, and past the end is the mistake `item` makes. Powers
+  are whole ones, worked out by squaring, so `2 to the power of 10` is exactly
+  1024; math.moth's `power(x, y)` takes any, through `exp` and `ln`, which it
+  has now, with `log10`, `log2`, `tangent`, `arctangent`, `arcsine`,
+  `arccosine`, `angle_of`, `ceiling`, `round`, `absolute`, `radians` and
+  `degrees`, tested in math.test.moth.
+- **compiler.moth's numbers.** Functions are numbered in the order they're
+  written, once the program is read, as scope.js counts them (§27), since
+  the ones a statement's values make are read before the statement but go in
+  front of it; and on from the last program's, so a build that reads two
+  (the debugger's and the program) has no two functions of one number.
+- **Tested.** Each, and each mistake (a power that isn't whole, of 0 below 0,
+  items of a number or past the end, an `or` that isn't a value written out,
+  an input after one with `or` without, a list built with a mistake in an
+  item, and where it says it is), on the three engines and in compiler.moth,
+  in machine code on Windows and Linux, and in the randomly broken programs.

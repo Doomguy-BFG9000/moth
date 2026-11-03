@@ -165,6 +165,12 @@ export const PROGRAMS = [
   // a library's functions, declared but not called: a program's own, with inputs that say what they are
   ["use the library \"kernel32\" or \"c\" as k\n    GetCurrentProcessId() gives a whole number\n    \"remove\" as remove_file(text) gives a whole number\n    f(a number, a whole number, a long whole number, a pointer, text, wide text, bytes, yes or no) gives yes or no\nend\nuse the library \"msvcrt\" or \"m\"\n    sqrt(a number) gives a number\n    Beep()\nend\nsay \"declared\"", "declared"],
   ["use the library \"user32\"\n    structure point with x as a whole number, y as a float\n    callback seen(a point, text) gives a whole number\n    structure holder with at as a point, name as 8 bytes, call as a seen, label as wide text\n    Find(a holder, a seen) gives a point\nend\nto f with p, t\n    return 1\nend\nsay \"declared\"", "declared"],
+  // powers, items from one to another, inputs a call can leave out, functions with no name, and lists built from lists
+  ["say 2 to the power of 10\nsay 2 to the power of -2\nsay (1 / 2) to the power of 3\nsay 10 to the power of 0\nsay -3 to the power of 3\nsay 2 to the power of 3 to the power of 2\nsay 2 * 3 to the power of 2\nset x to 5\nsay x to the power of 2 + 1", "1024\n0.25\n0.125\n1\n-27\n512\n18\n26"],
+  ["set xs to list of 1, 2, 3, 4, 5\nsay items 2 to 4 of xs\nsay items 3 to 2 of xs\nsay items 1 to 5 of xs is xs\nsay items 2 to 3 of \"héllo\"\nsay items 1 to 2 of (\"abc\" as bytes)\nset items to list of 7, 8\nsay length of items - 1\nsay items", "[2, 3, 4]\n[]\nyes\nél\n(2 bytes: 97, 98)\n1\n[7, 8]"],
+  ["to greet with name, greeting or \"Hello\", mark or \"!\"\n    say greeting \", \" name mark\nend\ngreet(\"Sam\")\ngreet(\"Ana\", \"Hi\")\ngreet \"Bo\", \"Hey\", \"?\"\nto pad with xs or list of 0, -1\n    add 9 to xs\n    return xs\nend\nsay pad()\nsay pad()\nsay pad(list of 1)", "Hello, Sam!\nHi, Ana!\nHey, Bo?\n[0, -1, 9]\n[0, -1, 9]\n[1, 9]"],
+  ["set double to function with x gives x * 2\nsay double(21)\nto apply with f, v\n    return f(v)\nend\nsay apply(function with n gives n + 1, 41)\nset seven to function gives 7\nsay seven()\nto make_adder with k\n    return function with x gives x + k\nend\nset add5 to make_adder(5)\nsay add5(10)\nset adder to function with a gives function with b gives a + b\nset add2 to adder(2)\nsay add2(3)\nset fs to list of (function with a, b gives a + b), (function with a and b gives a * b)\nfor each f in fs\n    say f(3, 4)\nend\nsay double\nset function to 1\nsay function + 1", "42\n42\n7\n15\n5\n7\n12\n<function function on line 1>\n2"],
+  ["set xs to list of 1, 2, 3, 4\nsay list of x * x for each x in xs\nsay list of x for each x in xs where x is greater than 2\nset x to \"kept\"\nsay list of x + 1 for each x in xs\nsay x\nsay list of (list of x * y for each y in xs) for each x in list of 1, 2\nset total to 0\nfor each n in list of n * 10 for each n in xs\n    set total to total + n\nend\nsay total\nsay list of x for each x in xs where x is greater than 9\nset even to function with m gives m is divisible by 2\nsay list of c for each c in \"a1b2\" where not (c is in \"0123456789\")\nsay list of n for each n in xs where even(n)\nset own to list of 1\nfor each k in own\n    say k\nend", "[1, 4, 9, 16]\n[3, 4]\n[2, 3, 4, 5]\nkept\n[[1, 2, 3, 4], [2, 4, 6, 8]]\n100\n[]\n[\"a\", \"b\"]\n[2, 4]\n1"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -516,6 +522,19 @@ export const ERRORS = [
   ["use the library \"x\"\n    callback c()\n    f() gives a c\nend", "line 3: only a function's input or a structure's field can be a callback"],
   ["use the library \"x\"\n    structure p with a as a whole number, a as a number\nend", "line 2: 'a' is already one of its fields"],
   ["use the library \"x\"\n    callback c(a pointer)\n    f(a c)\nend\nsay f(5)", "line 5: 'f' needs input 1 to be a function, not a number"],
+  ["say 2 to the power of 0.5", "line 1: 'to the power of' needs a whole number, not 0.5: math.moth's power(x, y) takes any"],
+  ["say 0 to the power of -1", "line 1: can't raise 0 to a power below 0"],
+  ["say 2 to the power of \"3\"", "line 1: 'to the power of' needs a number, not text"],
+  ["say items 1 to 2 of 5", "line 1: can only take items of a list, text or bytes, not a number"],
+  ["say items 2 to 9 of list of 1, 2", "line 1: there is no item 9, the list only has 2 items"],
+  ["say items 0 to 1 of \"ab\"", "line 1: there is no item 0, items are counted from 1"],
+  ["to f with a or b\nend", "line 1: an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out"],
+  ["to f with a or 1, b\nend", "line 1: 'b' needs an 'or' too, as an input before it has one"],
+  ["to f with a or 1\n    return a\nend\nsay f(1, 2)", "line 4: 'f' needs 1 input but got 2"],
+  ["say list of 10 / x for each x in list of 2, 0", "line 1: can't divide by zero"],
+  ["set f to function with x gives\nsay f(1)", "line 2: expected a value but found 'say'"],
+  ["say list of x for each in list of 1", "line 1: 'in' is a Moth word, so it can't be used as a variable name"],
+  ["set f to function with x gives x\nsay f()", "line 2: 'f' needs 1 input but got 0"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

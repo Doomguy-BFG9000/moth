@@ -1,4 +1,5 @@
-# Maths Moth doesn't have built in, written in Moth: random numbers, sine and cosine, and rounding.
+# Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots,
+# logarithms and powers of any number.
 # Any program can have them with `use "math.moth"`, as neural.moth does.
 
 # ---------- random numbers (Park and Miller, 1988) ----------
@@ -122,4 +123,159 @@ end
 # a random number from low up to high
 to between with low, high
     return low + random() * (high - low)
+end
+
+# ---------- logarithms, powers of any number, and the rest of trigonometry ----------
+
+set ln10 to 2.302585092994046
+
+# The natural logarithm. With x = m·2^k, m from 1/√2 up to √2, ln x = k·ln 2 + ln m, and ln m is
+# 2(z + z³/3 + z⁵/5 + ...) for z = (m - 1) / (m + 1), below 0.18, where 24 terms are plenty.
+to ln with x
+    if x is at most 0
+        fail with "'ln' needs a number above 0, not " + x
+    end
+    if x - x is not 0 # infinity, or NaN
+        return x
+    end
+    set m to x
+    set k to 0
+    repeat while m is greater than 1.4142135623730951
+        set m to m / 2
+        add 1 to k
+    end
+    repeat while m is less than 0.7071067811865476
+        set m to m * 2
+        set k to k - 1
+    end
+    set z to (m - 1) / (m + 1)
+    set z2 to z * z
+    set term to z
+    set total to z
+    for each n from 1 to 24
+        set term to term * z2
+        add term / (2 * n + 1) to total
+    end
+    return k * ln2 + 2 * total
+end
+
+# the logarithm to base 10, and to base 2
+to log10 with x
+    return ln(x) / ln10
+end
+
+to log2 with x
+    return ln(x) / ln2
+end
+
+# x to the power y, y any number: a whole y as `to the power of` works it out, by squaring, and for the rest
+# e^(y·ln x), which needs x above 0
+to power with x, y
+    if y is floor(y)
+        return x to the power of y
+    end
+    if x is 0 and y is greater than 0
+        return 0
+    end
+    if x is at most 0
+        fail with "'power' can't raise " + x + " to " + y + ", which isn't a whole number"
+    end
+    return exp(y * ln(x))
+end
+
+# how far from 0, either way
+to absolute with x
+    if x is less than 0
+        return 0 - x
+    end
+    return x
+end
+
+# the whole number nearest above, and the nearest of all (a half going up)
+to ceiling with x
+    return 0 - floor(0 - x)
+end
+
+to round with x
+    return floor(x + 0.5)
+end
+
+# tangent, and the angles back from a tangent, a sine and a cosine, in radians
+to tangent with x
+    return sine(x) / cosine(x)
+end
+
+# Past 1, from 1 / x; then halving the angle until x is below 0.1 (tan(θ/2) = x / (1 + √(1 + x²))), then x - x³/3 + x⁵/5 - ...
+to arctangent with x
+    if x is less than 0
+        return 0 - arctangent(0 - x)
+    end
+    if x is greater than 1 # infinity too, as 1 / x is 0
+        return pi / 2 - arctangent(1 / x)
+    end
+    set halvings to 0
+    repeat while x is greater than 0.1
+        set x to x / (1 + sqrt(1 + x * x))
+        add 1 to halvings
+    end
+    set x2 to x * x
+    set term to x
+    set total to x
+    for each n from 1 to 12
+        set term to 0 - term * x2
+        add term / (2 * n + 1) to total
+    end
+    repeat halvings times
+        set total to total * 2
+    end
+    return total
+end
+
+to arcsine with x
+    if x is less than -1 or x is greater than 1
+        fail with "'arcsine' needs a number from -1 to 1, not " + x
+    end
+    if x is 1
+        return pi / 2
+    end
+    if x is -1
+        return 0 - pi / 2
+    end
+    return arctangent(x / sqrt(1 - x * x))
+end
+
+to arccosine with x
+    if x is less than -1 or x is greater than 1
+        fail with "'arccosine' needs a number from -1 to 1, not " + x
+    end
+    return pi / 2 - arcsine(x)
+end
+
+# the angle from the x axis to the point x, y, from -pi to pi
+to angle_of with x, y
+    if x is greater than 0
+        return arctangent(y / x)
+    end
+    if x is less than 0 and y is at least 0
+        return arctangent(y / x) + pi
+    end
+    if x is less than 0
+        return arctangent(y / x) - pi
+    end
+    if y is greater than 0
+        return pi / 2
+    end
+    if y is less than 0
+        return 0 - pi / 2
+    end
+    return 0
+end
+
+# degrees as radians, and back
+to radians with angle
+    return angle * pi / 180
+end
+
+to degrees with angle
+    return angle * 180 / pi
 end

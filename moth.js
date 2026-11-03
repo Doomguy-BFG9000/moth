@@ -199,18 +199,28 @@ const CARRY_ON = ["at", "of", "bit", "is", "and", "or", "in", "as", "bytes"];
 // files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
 // once), and `open` the files being read right now, to catch two that use each other.
 function parse(tokens, reading = { loaded: new Set(), open: [] }) {
+  if (!reading.depth) [reading.calls, reading.defines] = [[], []]; // for inputs a call leaves out (see fillDefaults)
+  reading.depth = (reading.depth ?? 0) + 1;
   let pos = 0;
   const aliases = new Set(); // the names this file used files and libraries `as`: `x's` is theirs, and any other `x's` a value's
   let atTop = false; // directly in the program, not in a block or a function
   let fnDepth = 0;
   let loopDepth = 0; // loops around this spot, in this function: `stop` needs one
   let indexing = false; // inside `item ... of`, where a name followed by `of` is the item number, not a field
+  let hoisted = []; // functions the statement being read makes for its values (see unnamed)
+  const unnamedOnLine = new Map(); // how many each line has made, so each has a name of its own
   let converting = true; // `trip in miles`; not in `position of ... in`, whose `in` is its own
   const unitAt = (i) => tokens[i].type === "word" && !tokens[i].nl && unitNamed(tokens[i].value) !== undefined;
   const peek = () => tokens[pos];
   const check = (type) => tokens[pos].type === type;
   const match = (type) => check(type) && tokens[pos++];
   const isWord = (w) => check("word") && tokens[pos].value === w;
+  // a call by a name, noted for the inputs it may leave out (see fillDefaults)
+  const madeCall = (name, args, at) => {
+    const made = { kind: "call", name, args, at };
+    reading.calls.push(made);
+    return made;
+  };
   const word = (w) => isWord(w) && tokens[pos++];
   const describe = (t) => (t.type === "eof" ? "the end of the code" : t.type === "string" ? `"${t.value}"` : `'${t.text ?? t.value}'`);
   const expected = (what) => fail(peek(), `expected ${what} but found ${describe(peek())}`);
@@ -224,7 +234,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // A phrase that starts with a word that could be a name: `wait 2 seconds`, `save x to "f"`. `parsed` reads the
   // rest, and gives a node, or nothing if this isn't the phrase after all, which makes the line a call again.
   function phrase(parsed) {
-    const start = pos;
+    const [start, marks] = [pos, tightMarks.length];
     let node = null;
     try {
       pos++;
@@ -232,7 +242,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     } catch (err) {
       if (!(err instanceof MothError)) throw err;
     }
-    if (!node) pos = start;
+    if (!node) {
+      pos = start;
+      for (const key of tightMarks.splice(marks)) reading.tight.delete(key);
+    }
     return node;
   }
   // these words from token i on, on the line before them
@@ -273,7 +286,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // and the pieces written with no space after them: a negating minus, and a call's bracket (no space before)
   let nesting = 0;
   const lay = (t) => reading.layout && !t.file && reading.layout.set(`${t.line}:${t.col}`, nesting);
-  const tight = (t) => (reading.tight && t && !t.file && reading.tight.add(`${t.line}:${t.col}`), t);
+  const tightMarks = []; // the marks tight made, in order, so a phrase that isn't one can take its own back
+  const tight = (t) => {
+    const key = t && `${t.line}:${t.col}`;
+    if (reading.tight && t && !t.file && !reading.tight.has(key)) {
+      reading.tight.add(key);
+      tightMarks.push(key);
+    }
+    return t;
+  };
 
   // `inTry`: the statements of a `try`, which also end at its `if it fails`
   function statements(opener, inTry = false) {
@@ -284,7 +305,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     while (opener ? !isWord("end") && !isWord("else") && !(inTry && isIfItFails()) : !check("eof")) {
       if (check("eof")) fail(peek(), `'${opener.value}' from line ${opener.line} is missing its 'end'`);
       lay(peek());
+      const madeBefore = hoisted;
+      hoisted = [];
       const s = statement();
+      body.push(...hoisted); // functions its values made, made before it runs
+      hoisted = madeBefore;
       if (s.kind === "use") body.push(...s.body); // the file's code, in its place
       else body.push(s);
       if (!peek().nl) expected("a new line");
@@ -457,7 +482,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos++;
       const t = peek();
       const named = name("a function's or a field's name");
-      node = tight(match("(")) ? { kind: "call", name: named, args: [node, ...argList()], at: t } : { kind: "field", name: named, of: node, at: t };
+      node = tight(match("(")) ? madeCall(named, [node, ...argList()], t) : { kind: "field", name: named, of: node, at: t };
     }
     return node;
   }
@@ -548,13 +573,22 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const fnName = name("a function name");
       const params = [];
       const kinds = []; // what each input says it is: `with width as a number`
+      const defaults = []; // what each is when a call leaves it out: `greeting or "Hello"`, or null
       if (word("with")) {
         do {
+          const at = peek();
           params.push(name("an input name"));
           kinds.push(word("as") ? kind() : -1);
+          const fallback = word("or") ? unary() : null;
+          if (fallback && !fallbackFits(fallback)) fail(fallback.at, `an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out`);
+          if (!fallback && defaults.some((d) => d)) fail(at, `'${params.at(-1)}' needs an 'or' too, as an input before it has one`);
+          defaults.push(fallback);
         } while (match(",") || word("and"));
       }
-      return { ...func(fnName, params, t), kinds };
+      const made = { ...func(fnName, params, t), kinds };
+      if (defaults.some((d) => d)) made.defaults = defaults;
+      reading.defines.push(made);
+      return made;
     }
     if (word("when")) { // `when a key is pressed with key`, `when the mouse is clicked with x and y`
       const start = pos;
@@ -818,13 +852,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         if (made.kind === "call") return made;
         const args = [made.of];
         if (!peek().nl) do args.push(expression()); while (match(","));
-        return { kind: "call", name: made.name, args, at: made.at };
+        return madeCall(made.name, args, made.at);
       }
       if (isWord("is")) fail(t, `to give '${called}' a value write 'set ${called} to ...'`);
       let args = [];
       if (tight(match("("))) args = argList();
       else if (!peek().nl) do args.push(expression()); while (match(","));
-      return { kind: "call", name: called, args, at: t };
+      return madeCall(called, args, t);
     }
     fail(t, `a line can't start with ${describe(t)}`);
   }
@@ -942,7 +976,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   function postfix(e) {
     for (;;) {
       const t = peek();
-      if (word("bytes")) e = { kind: "builtin", name: "bytes", args: [e], at: t };
+      if (isWord("to") && !t.nl && wordAt(pos + 1, "the") && wordAt(pos + 2, "power") && wordAt(pos + 3, "of")) { // `2 to the power of 10`
+        pos += 4;
+        e = { kind: "builtin", name: "power", args: [e, postfix(unary())], at: t };
+      } else if (word("bytes")) e = { kind: "builtin", name: "bytes", args: [e], at: t };
       else if (word("as")) {
         const to = AS_WORDS.find(isWord) ?? expected(AS_WORDS.map((w) => `'${w}'`).join(" or "));
         pos++;
@@ -970,7 +1007,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (word("list")) {
       expectWord("of");
       const items = [];
-      do items.push(expression()); while (match(","));
+      const before = hoisted.length;
+      do {
+        items.push(expression());
+        if (items.length === 1 && isWord("for") && !peek().nl && wordAt(pos + 1, "each")) return builtList(items[0], hoisted.splice(before), t);
+      } while (match(","));
       return { kind: "list", items, at: t };
     }
     if (word("record")) {
@@ -1111,6 +1152,32 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("by");
       return { kind: "builtin", name: `shift ${way}`, args: [value, additive()], at: t };
     }
+    if (isWord("function") && (wordAt(pos + 1, "with") || wordAt(pos + 1, "gives")) && !tokens[pos + 1].nl) { // `function with x gives x * 2`
+      pos++;
+      const params = [];
+      if (word("with")) do params.push(name("an input name")); while (match(",") || word("and"));
+      expectWord("gives");
+      const outside = hoisted;
+      hoisted = [];
+      const value = expression();
+      const body = [...hoisted, { kind: "return", value, at: t }]; // functions its value makes are its own
+      hoisted = outside;
+      return { kind: "name", name: unnamed("function", params, body, t), at: t };
+    }
+    if (isWord("items") && !tokens[pos + 1].nl) { // `items 2 to 4 of xs`; `items` alone is still a name
+      const outside = indexing;
+      const slice = phrase(() => {
+        indexing = true;
+        const from = additive();
+        expectWord("to");
+        const upto = additive();
+        indexing = outside;
+        expectWord("of");
+        return { kind: "builtin", name: "items", args: [from, upto, unary()], at: t };
+      });
+      indexing = outside;
+      if (slice) return slice;
+    }
     if (word("item") || word("byte")) { // `byte 5 of block` is another way to say `item 5 of block`
       const outside = indexing;
       indexing = true;
@@ -1130,7 +1197,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (t.type === "word" && !RESERVED.has(t.value)) {
       pos++;
       const full = member(t.value);
-      if (tight(match("("))) return possessive({ kind: "call", name: full, args: argList(), at: t });
+      if (tight(match("("))) return possessive(madeCall(full, argList(), t));
       if (full === t.value && !indexing && word("of")) return { kind: "field", name: t.value, of: unary(), at: t }; // `name of person`
       return possessive({ kind: "name", name: full, at: t });
     }
@@ -1177,6 +1244,41 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return node;
   }
 
+  // A function with no name of its own, made before the statement it's in runs, with one that no name can be:
+  // `function on line 3`, then `function on line 3 (2)`. Gives that name.
+  function unnamed(what, params, body, t) {
+    const n = (unnamedOnLine.get(`${what} ${t.line}`) ?? 0) + 1;
+    unnamedOnLine.set(`${what} ${t.line}`, n);
+    const named = `${what} on line ${t.line}${n > 1 ? ` (${n})` : ""}`;
+    hoisted.push({ kind: "define", name: named, params, body, at: t, kinds: params.map(() => -1) });
+    return named;
+  }
+
+  // `list of x * 2 for each x in xs where x is greater than 1`: a call to a function, made before the statement,
+  // that goes through what it's given, calling one function of x for each item (`list on line 3`) and, with
+  // `where`, another that says whether to keep it, as each item's own input, so x is theirs alone
+  // `valueMade`: the functions the item's value made, which are the first function's own.
+  function builtList(value, valueMade, t) {
+    pos += 2;
+    const variable = name("a variable name");
+    expectWord("in");
+    const over = expression();
+    const outside = hoisted;
+    hoisted = [];
+    const keep = word("where") ? expression() : null;
+    const keepMade = hoisted;
+    hoisted = outside;
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const each = unnamed("list", [variable], [...valueMade, at("return", { value })], t);
+    const test = keep && unnamed("test for the list", [variable], [...keepMade, at("return", { value: keep })], t);
+    const [items, made, one] = ["the items", "the list made", "each item"];
+    const call = (named) => at("call", { name: named, args: [at("name", { name: one })] });
+    const adding = at("add", { name: made, value: call(each) });
+    const loop = at("each", { name: one, list: at("name", { name: items }), body: [test ? at("if", { cond: call(test), then: [adding], otherwise: [] }) : adding] });
+    const builder = unnamed("building the list", [items], [at("set", { name: made, value: at("list", { items: [] }) }), loop, at("return", { value: at("name", { name: made }) })], t);
+    return madeCall(builder, [over], t);
+  }
+
   function argList() {
     const outside = indexing;
     indexing = false;
@@ -1190,8 +1292,29 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return args;
   }
 
-  return statements(null);
+  const made = statements(null);
+  if (--reading.depth === 0) fillDefaults(reading);
+  return made;
 }
+
+// A call by a function's name that leaves inputs out, `greet("Sam")` for `to greet with name, greeting or
+// "Hello"`, gets what each was given after its `or`, once the whole program is read, so every engine sees a
+// call with all of them. A function made more than once with that name: its last. Through a value, a call
+// needs them all.
+function fillDefaults(reading) {
+  const withDefaults = new Map();
+  for (const f of reading.defines) withDefaults.set(f.name, f.defaults ? f : null);
+  for (const call of reading.calls) {
+    const f = withDefaults.get(call.name);
+    if (!f || call.args.length >= f.params.length || f.defaults.slice(call.args.length).includes(null)) continue;
+    call.args.push(...f.defaults.slice(call.args.length).map(copied));
+  }
+}
+const copied = (node) => (Array.isArray(node) ? node.map(copied) : node?.kind ? Object.fromEntries(Object.entries(node).map(([k, v]) => [k, k === "at" ? v : copied(v)])) : node);
+
+// what can come after an input's `or`: a value written out, or a list of them
+const fallbackFits = (e) => e.kind === "value" || (e.kind === "negate" && e.operand.kind === "value" && typeof e.operand.value === "number")
+  || (e.kind === "list" && e.items.every(fallbackFits)) || (e.kind === "dictionary" && e.items.length === 0) || (e.kind === "record" && e.fields.length === 0);
 
 // `use "math.moth" as math`: each name in the file becomes `math's pi`, `math's sine`, which no name in the
 // program can be, so the file keeps its own top level, as if it ran alone. The file's code is then the

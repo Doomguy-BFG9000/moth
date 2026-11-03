@@ -1064,6 +1064,15 @@ test("text.moth, dates.moth and hash.moth pass their own tests on all three engi
   }
 });
 
+test("math.moth passes its own tests, math.test.moth, on all three engines", () => {
+  const here = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
+  for (const engine of ENGINES) {
+    const results = testMoth(here("math.test.moth"), { engine, files: here });
+    assert.deepEqual(results.map((r) => [r.name, r.error?.message]),
+      ["test_logarithms", "test_powers", "test_angles", "test_rounding", "test_mistakes"].map((n) => [n, undefined]), engine);
+  }
+});
+
 // ---------- a file used inside a module ----------
 
 // A module that uses a file plainly gets its own copy of it, under the module's name, and the program can

@@ -1,0 +1,83 @@
+# math.moth's tests: what JavaScript's Math gives, to 13 digits, which moth.test.js runs on every engine and
+# machine.test.js in machine code
+
+use "math.moth" as math
+
+# whether two numbers are the same to 13 digits
+to close with got, wanted
+    set allowed to 0.0000000000001
+    if math's absolute(wanted) is greater than 1
+        set allowed to allowed * math's absolute(wanted)
+    end
+    return math's absolute(got - wanted) is at most allowed
+end
+
+to test_logarithms
+    expect close(math's ln(2), 0.6931471805599453)
+    expect close(math's ln(10), 2.302585092994046)
+    expect close(math's ln(0.001), -6.907755278982137)
+    expect close(math's ln(10 to the power of 300), 690.7755278982137)
+    expect close(math's ln(10 to the power of -300), -690.7755278982137)
+    expect math's ln(1) is 0
+    expect close(math's log10(1000), 3)
+    expect close(math's log10(2), 0.3010299956639812)
+    expect close(math's log2(1024), 10)
+    expect close(math's exp(math's ln(5)), 5)
+end
+
+to test_powers
+    expect 2 to the power of 10 is 1024
+    expect 2 to the power of -2 is 0.25
+    expect 3 * 2 to the power of 2 to the power of 2 is 48
+    expect close(math's power(2, 0.5), 1.4142135623730951)
+    expect close(math's power(10, 2.5), 316.22776601683796)
+    expect close(math's power(0.5, -1.5), 2.8284271247461903)
+    expect math's power(7, 3) is 343
+    expect math's power(0, 0.5) is 0
+end
+
+to test_angles
+    expect close(math's tangent(1), 1.5574077246549023)
+    expect close(math's arctangent(1), 0.7853981633974483)
+    expect close(math's arctangent(0.05), 0.04995839572194276)
+    expect close(math's arctangent(1000), 1.5697963271282298)
+    expect close(math's arctangent(-3), -1.2490457723982544)
+    expect close(math's arcsine(0.5), 0.5235987755982989)
+    expect close(math's arccosine(0.5), 1.0471975511965979)
+    expect close(math's arcsine(1), 1.5707963267948966)
+    expect close(math's angle_of(-1, -1), -2.356194490192345)
+    expect close(math's angle_of(-1, 1), 2.356194490192345)
+    expect close(math's angle_of(0, -2), -1.5707963267948966)
+    expect close(math's degrees(math's pi), 180)
+    expect close(math's radians(90), 1.5707963267948966)
+end
+
+to test_rounding
+    expect math's ceiling(2.1) is 3
+    expect math's ceiling(-2.1) is -2
+    expect math's round(2.5) is 3
+    expect math's round(-2.5) is -2
+    expect math's absolute(-4) is 4
+    expect math's absolute(4) is 4
+end
+
+to test_mistakes
+    try
+        set x to math's ln(0)
+        expect no
+    if it fails with why
+        expect why is "'ln' needs a number above 0, not 0"
+    end
+    try
+        set x to math's power(-8, 0.5)
+        expect no
+    if it fails with why
+        expect why is "'power' can't raise -8 to 0.5, which isn't a whole number"
+    end
+    try
+        set x to math's arcsine(2)
+        expect no
+    if it fails with why
+        expect why is "'arcsine' needs a number from -1 to 1, not 2"
+    end
+end

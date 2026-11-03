@@ -417,7 +417,7 @@ set builtin_names to list of "uppercase", "lowercase", "split", "join", "number"
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
     "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
-    "library call", "start", "wait for"
+    "library call", "power", "items", "start", "wait for"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -508,6 +508,17 @@ set functions_made to 0
 # `reading` is shared with the files the program uses: `files` (a list of records with a name and a text),
 # `loaded` (every file read so far, since each is read once), and `open` (the files being read right now).
 to parse with tokens, reading
+    set depth_now to 0 # how many files are being read: the program's first (see fill_defaults)
+    try
+        set depth_now to depth of reading
+    if it fails
+    end
+    if depth_now is 0
+        set calls of reading to empty list
+        set defines of reading to empty list
+    end
+    set depth of reading to depth_now + 1
+    set orders_from to functions_made # functions are numbered on from here (see numbered)
     set pos to 1
     set aliases to empty list # the names this file used files and libraries `as`: `x's` is theirs, any other a value's
     set at_top to no # directly in the program, not in a block or a function
@@ -516,6 +527,9 @@ to parse with tokens, reading
     set indexing to no # inside `item ... of`, where a name followed by `of` is the item number, not a field
     set converting to yes # `trip in miles`; not in `position of ... in`, whose `in` is its own
     set nesting to 0 # blocks around the statement being read, for `lay`
+    set hoisted to empty list # functions the statement being read makes for its values (see unnamed)
+    set unnamed_on_line to empty dictionary # how many each line has made, so each has a name of its own
+    set tight_marks to empty list # the marks tight made, in order, so a phrase that isn't one can take its own back
 
     # where a statement starts, and how deep it is, for tidying
     to lay with t
@@ -527,7 +541,11 @@ to parse with tokens, reading
     # a piece with no space after it, for tidying; gives it back, so it can mark one as it takes it
     to tight with t
         if t and tight of reading is not nothing and file of t is ""
-            set item (line of t + ":" + col of t) of (tight of reading) to yes
+            set mark_key to line of t + ":" + col of t
+            if not (mark_key is in tight of reading)
+                set item mark_key of (tight of reading) to yes
+                add mark_key to tight_marks
+            end
         end
         return t
     end
@@ -556,6 +574,14 @@ to parse with tokens, reading
 
     to is_word with w
         return check("word") and value of peek() is w
+    end
+
+    # a call by a name, noted for the inputs it may leave out (see fill_defaults)
+    to made_call with call_name, call_args, call_at
+        set made_one to record with kind "call", name call_name, args call_args, at call_at
+        set noted to calls of reading
+        add made_one to noted
+        return made_one
     end
 
     to word with w
@@ -645,6 +671,7 @@ to parse with tokens, reading
     # node, or nothing if this isn't the phrase after all, which makes the line a call again.
     to try_phrase with which, t
         set start to pos
+        set marks_before to length of tight_marks
         set node to nothing
         try
             set pos to pos + 1
@@ -652,6 +679,8 @@ to parse with tokens, reading
                 set node to wait_rest(t)
             else if which is "start" or which is "start value"
                 set node to start_rest(which is "start")
+            else if which is "items"
+                set node to items_rest(t)
             else
                 set node to save_rest(t)
             end
@@ -660,8 +689,91 @@ to parse with tokens, reading
         end
         if node is nothing
             set pos to start
+            set kept_marks to empty list
+            for each k from 1 to length of tight_marks
+                if k is at most marks_before
+                    add item k of tight_marks to kept_marks
+                else
+                    remove item k of tight_marks from (tight of reading)
+                end
+            end
+            set tight_marks to kept_marks
         end
         return node
+    end
+
+    # A function with no name of its own, made before the statement it's in runs, with one that no name can be:
+    # `function on line 3`, then `function on line 3 (2)`. Gives that name.
+    to unnamed with what, fn_params, fn_body, t
+        set line_key to what + " " + line of t
+        set n to 1
+        if line_key is in unnamed_on_line
+            set n to item line_key of unnamed_on_line + 1
+        end
+        set item line_key of unnamed_on_line to n
+        set named to what + " on line " + line of t
+        if n is greater than 1
+            set named to named + " (" + n + ")"
+        end
+        set fn_kinds to empty list
+        for each p in fn_params
+            add -1 to fn_kinds
+        end
+        add (record with kind "define", name named, params fn_params, kinds fn_kinds, body fn_body, at t, order 0, native nothing, defaults nothing) to hoisted
+        return named
+    end
+
+    # `list of x * 2 for each x in xs where x is greater than 1`: a call to a function, made before the statement,
+    # that goes through what it's given, calling one function of x for each item (`list on line 3`) and, with
+    # `where`, another that says whether to keep it, as each item's own input, so x is theirs alone
+    # `value_fns`: the functions the item's value made, which are the first function's own.
+    to built_list with value, value_fns, t
+        set pos to pos + 2
+        set variable to take_name("a variable name")
+        expect_word("in")
+        set over to expression()
+        set outside_fns to hoisted
+        set hoisted to empty list
+        set keep to nothing
+        if word("where")
+            set keep to expression()
+        end
+        set keep_fns to hoisted
+        set hoisted to outside_fns
+        set each_body to value_fns
+        add (record with kind "return", value value, at t) to each_body
+        set each_fn to unnamed("list", (list of variable), each_body, t)
+        set test_fn to nothing
+        if keep is not nothing
+            set test_body to keep_fns
+            add (record with kind "return", value keep, at t) to test_body
+            set test_fn to unnamed("test for the list", (list of variable), test_body, t)
+        end
+        set one_item to list of (record with kind "name", name "each item", at t)
+        set adding to record with kind "add", name "the list made", value (record with kind "call", name each_fn, args one_item, at t), at t
+        set loop_body to list of adding
+        if test_fn is not nothing
+            set kept_if to record with kind "if", cond (record with kind "call", name test_fn, args one_item, at t), then (list of adding), otherwise empty list, at t
+            set loop_body to list of kept_if
+        end
+        set loop to record with kind "each", name "each item", over (record with kind "name", name "the items", at t), body loop_body, at t
+        set start_made to record with kind "set", name "the list made", value (record with kind "list", items empty list, at t), at t
+        set give_made to record with kind "return", value (record with kind "name", name "the list made", at t), at t
+        set builder to unnamed("building the list", (list of "the items"), (list of start_made, loop, give_made), t)
+        return made_call(builder, (list of over), t)
+    end
+
+    # `items 2 to 4 of xs`
+    to items_rest with t
+        set outside to indexing
+        set indexing to yes
+        set slice_from to additive()
+        expect_word("to")
+        set slice_upto to additive()
+        set indexing to outside
+        expect_word("of")
+        set slice_args to list of slice_from, slice_upto, unary()
+        return record with kind "builtin", name "items", args slice_args, at t
     end
 
     # `start count(10)`: the call, or nothing if what follows `start` isn't one (or, for a line of its own, if
@@ -793,7 +905,13 @@ to parse with tokens, reading
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
             lay(peek())
+            set made_before to hoisted
+            set hoisted to empty list
             set made to statement()
+            for each made_fn in hoisted # functions its values made, made before it runs
+                add made_fn to body
+            end
+            set hoisted to made_before
             if kind of made is "use" # the file's code, in its place
                 for each inner in body of made
                     add inner to body
@@ -1002,7 +1120,7 @@ to parse with tokens, reading
         if check("string")
             set symbol to value of match("string")
             expect_word("as")
-        else
+        else if check("word") # anything else isn't a name, which take_name says
             set symbol to raw of t
         end
         set fn_name to take_name("the name of one of the library's functions")
@@ -1145,7 +1263,7 @@ to parse with tokens, reading
                 for each own_one in arg_list()
                     add own_one to own_given
                 end
-                set own_made to record with kind "call", name own_named, args own_given, at own_at
+                set own_made to made_call(own_named, own_given, own_at)
             else
                 set own_made to record with kind "field", name own_named, subject own_made, at own_at
             end
@@ -1302,20 +1420,40 @@ to parse with tokens, reading
             set fn_name to take_name("a function name")
             set params to empty list
             set kinds to empty list # what each input says it is: `with width as a number`
+            set fallbacks to empty list # what each is when a call leaves it out: `greeting or "Hello"`, or nothing
+            set any_fallback to no
             if word("with")
                 set another to yes
                 repeat while another
+                    set input_at to peek()
                     add take_name("an input name") to params
                     if word("as")
                         add input_kind() to kinds
                     else
                         add -1 to kinds
                     end
+                    set fallback to nothing
+                    if word("or")
+                        set fallback to unary()
+                        if not fallback_fits(fallback)
+                            fail with problem(at of fallback, "an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out")
+                        end
+                        set any_fallback to yes
+                    else if any_fallback
+                        fail with problem(input_at, "'" + item (length of params) of params + "' needs an 'or' too, as an input before it has one")
+                    end
+                    add fallback to fallbacks
                     set another to match(",") or word("and")
                 end
             end
             set made to func(fn_name, params, t)
             set kinds of made to kinds
+            set defaults of made to nothing
+            if any_fallback
+                set defaults of made to fallbacks
+            end
+            set made_defines to defines of reading
+            add made to made_defines
             return made
         end
         if word("when") # `when a key is pressed with key`, `when the mouse is clicked with x and y`
@@ -1779,7 +1917,7 @@ to parse with tokens, reading
                         add expression() to own_given
                     end
                 end
-                return record with kind "call", name name of own_made, args own_given, at at of own_made
+                return made_call(name of own_made, own_given, at of own_made)
             end
             if is_word("is")
                 fail with problem(t, "to give '" + called + "' a value write 'set " + called + " to ...'")
@@ -1793,7 +1931,7 @@ to parse with tokens, reading
                     add expression() to args
                 end
             end
-            return record with kind "call", name called, args args, at t
+            return made_call(called, args, t)
         end
         fail with problem(t, "a line can't start with " + describe(t))
     end
@@ -1993,7 +2131,11 @@ to parse with tokens, reading
         set going to yes
         repeat while going
             set t to peek()
-            if word("bytes")
+            if is_word("to") and not nl of t and word_at(pos + 1, "the") and word_at(pos + 2, "power") and word_at(pos + 3, "of")
+                set pos to pos + 4
+                set inputs to list of e, postfix(unary())
+                set e to record with kind "builtin", name "power", args inputs, at t
+            else if word("bytes")
                 set inputs to list of e
                 set e to record with kind "builtin", name "bytes", args inputs, at t
             else if word("as")
@@ -2052,7 +2194,21 @@ to parse with tokens, reading
         if word("list")
             expect_word("of")
             set items to empty list
+            set fns_before to length of hoisted
             add expression() to items
+            if is_word("for") and not nl of peek() and word_at(pos + 1, "each") # `list of x * 2 for each x in xs`
+                set kept_fns to empty list
+                set value_fns to empty list
+                for each k from 1 to length of hoisted
+                    if k is at most fns_before
+                        add item k of hoisted to kept_fns
+                    else
+                        add item k of hoisted to value_fns
+                    end
+                end
+                set hoisted to kept_fns
+                return built_list(item 1 of items, value_fns, t)
+            end
             repeat while match(",")
                 add expression() to items
             end
@@ -2255,6 +2411,33 @@ to parse with tokens, reading
             set inputs to list of shifted, additive()
             return record with kind "builtin", name "shift " + way, args inputs, at t
         end
+        if is_word("function") and (word_at(pos + 1, "with") or word_at(pos + 1, "gives")) and not nl of item (pos + 1) of tokens # `function with x gives x * 2`
+            set pos to pos + 1
+            set fn_params to empty list
+            if word("with")
+                set another to yes
+                repeat while another
+                    add take_name("an input name") to fn_params
+                    set another to match(",") or word("and")
+                end
+            end
+            expect_word("gives")
+            set outside_fns to hoisted
+            set hoisted to empty list
+            set fn_value to expression()
+            set fn_body to hoisted # functions its value makes are its own
+            add (record with kind "return", value fn_value, at t) to fn_body
+            set hoisted to outside_fns
+            return record with kind "name", name unnamed("function", fn_params, fn_body, t), at t
+        end
+        if is_word("items") and not nl of item (pos + 1) of tokens # `items 2 to 4 of xs`; `items` alone is still a name
+            set outside to indexing
+            set sliced to try_phrase("items", t)
+            set indexing to outside
+            if sliced is not nothing
+                return sliced
+            end
+        end
         if word("item") or word("byte") # `byte 5 of block` is another way to say `item 5 of block`
             set outside to indexing
             set indexing to yes
@@ -2280,7 +2463,7 @@ to parse with tokens, reading
             set pos to pos + 1
             set full to member(value of t)
             if tight(match("("))
-                return possessive(record with kind "call", name full, args arg_list(), at t)
+                return possessive(made_call(full, arg_list(), t))
             end
             if full is value of t and not indexing and word("of") # `name of person`
                 return record with kind "field", name value of t, subject unary(), at t
@@ -2387,7 +2570,123 @@ to parse with tokens, reading
         return args
     end
 
-    return statements(nothing, no)
+    set made to statements(nothing, no)
+    set depth of reading to depth of reading - 1
+    if depth of reading is 0
+        fill_defaults(reading)
+        set counted to record with n orders_from
+        numbered(made, counted)
+        set functions_made to n of counted
+    end
+    return made
+end
+
+# Each function's number, in the order they're written, inside one another's too (see made_order): what
+# scope.js counts. Not the order they're read in, since the functions a statement's values make go before it.
+# On from the functions read before, so no two have the same number however many programs are read.
+to numbered with body, count
+    for each s in body
+        set what to kind of s
+        set fn_made to nothing
+        if what is "define"
+            set fn_made to s
+        else if what is "when" or what is "every"
+            set fn_made to fn of s
+        end
+        if fn_made is not nothing
+            set n of count to n of count + 1
+            set order of fn_made to n of count
+            numbered(body of fn_made, count)
+        end
+        if what is "if"
+            numbered(then of s, count)
+            numbered(otherwise of s, count)
+        end
+        if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "try"
+            numbered(body of s, count)
+        end
+        if what is "try"
+            numbered(handler of s, count)
+        end
+    end
+end
+
+# A call by a function's name that leaves inputs out, `greet("Sam")` for `to greet with name, greeting or
+# "Hello"`, gets what each was given after its `or`, once the whole program is read, so every engine sees a
+# call with all of them. A function made more than once with that name: its last. Through a value, a call
+# needs them all.
+to fill_defaults with reading
+    set with_defaults to empty dictionary
+    for each f in defines of reading
+        set item (name of f) of with_defaults to f
+    end
+    for each call in calls of reading
+        if name of call is in with_defaults
+            set f to item (name of call) of with_defaults
+            set given to length of args of call
+            if defaults of f is not nothing and given is less than length of params of f
+                set fits to yes
+                for each k from given + 1 to length of params of f
+                    if item k of defaults of f is nothing
+                        set fits to no
+                    end
+                end
+                if fits
+                    set call_args to args of call
+                    for each k from given + 1 to length of params of f
+                        add copied(item k of defaults of f) to call_args
+                    end
+                end
+            end
+        end
+    end
+end
+
+# a value written out after an input's `or`, made again for a call: a list's own items too
+to copied with e
+    if kind of e is "list"
+        set made_items to empty list
+        for each part in items of e
+            add copied(part) to made_items
+        end
+        return record with kind "list", items made_items, at at of e
+    end
+    if kind of e is "negate"
+        return record with kind "negate", operand copied(operand of e), at at of e
+    end
+    if kind of e is "dictionary"
+        return record with kind "dictionary", items empty list, at at of e
+    end
+    if kind of e is "record"
+        return record with kind "record", fields empty list, values empty list, at at of e
+    end
+    return record with kind "value", type type of e, value value of e, at at of e
+end
+
+# what can come after an input's `or`: a value written out, or a list of them
+to fallback_fits with e
+    set what to kind of e
+    if what is "value"
+        return yes
+    end
+    if what is "negate"
+        return kind of operand of e is "value" and type of operand of e is "number"
+    end
+    if what is "list"
+        for each part in items of e
+            if not fallback_fits(part)
+                return no
+            end
+        end
+        return yes
+    end
+    if what is "dictionary"
+        return length of items of e is 0
+    end
+    if what is "record"
+        return length of fields of e is 0
+    end
+    return no
 end
 
 # ---------- which variable each name means ----------

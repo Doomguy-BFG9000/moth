@@ -423,6 +423,17 @@ to greet with person
     say "Hello, " person
 end
 greet "Sam"                         # or call it on its own line
+to welcome with person, greeting or "Hello"   # an input a call can leave out
+    say greeting ", " person
+end
+welcome("Ana")                      # Hello, Ana
+
+set double to function with x gives x * 2   # a function with no name, as a value
+say double(21)
+set squares to list of n * n for each n in list of 1, 2, 3, 4   # a list built from another
+say list of n for each n in squares where n is greater than 5  # [9, 16]: the ones that pass
+say items 2 to 3 of squares         # [4, 9]: of a list, text or bytes
+say 2 to the power of 10            # 1024
 
 set sam to record with name "Sam", age 20   # a record keeps named values together
 set age of sam to 21
@@ -444,7 +455,7 @@ say uppercase of item 2 of words " " join words with "-"
 say position of "fox" in "the quick fox"    # 11: where it starts, or 0
 set age to number of ask "How old are you?" # ask: the answer typed in, as text
 
-use "math.moth"                     # another file's code: random numbers, sine, exp, sqrt
+use "math.moth"                     # another file's code: random numbers, sine, sqrt, logs, rounding
 
 # drawing: the turtle starts in the middle, facing up, with its pen down
 move forward 100                    # or: move back 50
@@ -656,7 +667,12 @@ set name to choose a file to open           # or: to save; nothing if none is ch
 - **Comparisons:** `is`, `is not`, `is less than`, `is greater than`,
   `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
   `or`, `not`.
-- **Maths:** `+ - * /`. Adding text to anything joins them into text.
+- **Maths:** `+ - * /` and `to the power of`, a whole power (math.moth's
+  `power(x, y)` takes any). Adding text to anything joins them into text.
+- **Inputs left out:** `with name, greeting or "Hello"`: after `or`, a value
+  written out (or a list of them), which each call that leaves the input out
+  gets afresh. Every input after one with `or` needs one too. A call through a
+  variable gives them all.
 - **Variables:** inside a function, `set` (or `add`, `for each`) changes a
   variable the top level, or an enclosing function, made above the function's
   `to` line; otherwise the variable is the function's own. A name a function

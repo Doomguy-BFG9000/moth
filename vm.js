@@ -775,9 +775,53 @@ export const BUILTINS = [
     run: ([library], error) => error(`can't use the library '${library}' here: only a program made by moth build can`),
   },
   // `start count(10)` and `wait for job` (see taskOf)
+  { name: "power", needs: [["number"], ["number"]], gives: "number", run: ([x, n], error) => power(x, n, error) },
+  { name: "items", needs: [["number"], ["number"], ["list", "text", "bytes"]], gives: null, run: ([from, upto, x], error) => slice(from, upto, x, error) },
   { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
   { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
 ];
+
+// `x to the power of n` (DESIGN §66): n a whole number to 15 digits, as an item's number is, and x multiplied by
+// itself by squaring, the bits of n from the lowest, so machine code, doing the same multiplications in the
+// same order, gives the same bits. Past 2^62 a whole number is even, as 2^62 is, so it counts as that.
+function power(x, n, error) {
+  if (typeof x !== "number") error(`'to the power of' needs a number, not ${kindOf(x)}`);
+  if (typeof n !== "number") error(`'to the power of' needs a number, not ${kindOf(n)}`);
+  let k = canon(n);
+  if (!Number.isInteger(k)) error(`'to the power of' needs a whole number, not ${show(n)}: math.moth's power(x, y) takes any`);
+  k = Math.max(-(2 ** 62), Math.min(2 ** 62, k));
+  if (x === 0 && k < 0) error("can't raise 0 to a power below 0");
+  let [made, base, left] = [1, x, Math.abs(k)];
+  while (left > 0) {
+    if (left % 2 === 1) made *= base;
+    left = Math.floor(left / 2);
+    if (left > 0) base *= base;
+  }
+  return k < 0 ? 1 / made : made;
+}
+
+// `items 2 to 4 of xs` (DESIGN §66): a list's items, text's letters or bytes from one place to another, both
+// kept, as a new one of them; none if the second is before the first. The places are as item's are: whole to
+// 15 digits, from 1, up to how many there are.
+function slice(from, upto, x, error) {
+  if (!isList(x) && !isBytes(x) && typeof x !== "string") error(`can only take items of a list, text or bytes, not ${kindOf(x)}`);
+  const place = (n) => {
+    if (typeof n === "number") n = canon(n);
+    if (!Number.isInteger(n)) error(`item numbers must be whole numbers, not ${show(n, true)}`);
+    return n;
+  };
+  const [a, b] = [place(from), place(upto)];
+  const seq = typeof x === "string" ? [...x] : x;
+  if (b >= a) {
+    if (a < 1) error(`there is no item ${a}, items are counted from 1`);
+    if (b > seq.length) {
+      if (isBytes(x)) error(`there is no item ${b}, there are only ${plural(seq.length, "byte")}`);
+      error(`there is no item ${b}, the ${isList(x) ? "list" : "text"} only has ${plural(seq.length, isList(x) ? "item" : "letter")}`);
+    }
+  }
+  const part = b >= a ? seq.slice(a - 1, b) : seq.slice(0, 0);
+  return typeof x === "string" ? part.join("") : part;
+}
 
 // Tasks (DESIGN §62): `start count(10)` gives one, a record of its number, and in a program moth build makes
 // the call runs on a thread of its own. Here it has run already, as starting a task runs it to its end at
