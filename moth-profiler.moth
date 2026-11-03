@@ -1,0 +1,195 @@
+# The profiler `moth profile` builds into a program, in the debugger's place (DESIGN §76). Before each line of
+# the program, and of the files it uses, wants() counts it, and gives the time since the line before to that
+# line, and to the function it was in; a line one call deeper than the one before starts a call. When the
+# program ends, finish() says where the time went, on the error output. It never stops the program.
+#
+# The clock moves a millisecond at a time, so each millisecond goes to the line that was running when it
+# passed: over a run long enough to be worth profiling, that's where the time is.
+
+set program_name to "" # the program's own file, for saying where a line is
+set sources to empty dictionary # each file's lines, by its name ("" for the program's own)
+set runs to empty dictionary # how many times each line ran, by its key (see line_key)
+set line_times to empty dictionary # the seconds each line took
+set function_times to empty dictionary # the seconds each function's own lines took, by its name
+set calls to empty dictionary # how many times each function was called
+set places to empty dictionary # each key's file and line, for the report
+set last_key to nothing # the line before this one
+set last_function to ""
+set last_depth to 0
+set last_time to 0
+set first_time to 0
+
+# Before the program's first line: its name, and each file's name and text
+to start with name, file_names, texts
+    set program_name to name
+    for each k from 1 to length of file_names
+        set item (item k of file_names) of sources to split item k of texts by "\n"
+    end
+    set first_time to the clock
+    set last_time to first_time
+end
+
+# a line's key: its number, in the program's own file; else the file's name and its number
+to line_key with line, file
+    if file is ""
+        return line
+    end
+    return file + ":" + line
+end
+
+# before each line: counted, and the time since the line before given to that one
+to wants with line, file, depth, fn
+    set now to the clock
+    if last_key is not nothing and now is not last_time
+        spend(now - last_time)
+    end
+    set key to line_key(line, file)
+    if key is in runs
+        set item key of runs to item key of runs + 1
+    else
+        set item key of runs to 1
+        set item key of places to record with file file, line line
+    end
+    if depth is greater than last_depth
+        if fn is in calls
+            set item fn of calls to item fn of calls + 1
+        else
+            set item fn of calls to 1
+        end
+    end
+    set last_key to key
+    set last_function to fn
+    set last_depth to depth
+    set last_time to now
+    return no
+end
+
+# the seconds since the line before, given to it and its function
+to spend with seconds
+    if last_key is in line_times
+        set item last_key of line_times to item last_key of line_times + seconds
+    else
+        set item last_key of line_times to seconds
+    end
+    if last_function is in function_times
+        set item last_function of function_times to item last_function of function_times + seconds
+    else
+        set item last_function of function_times to seconds
+    end
+end
+
+# never called: wants never stops the program
+to here with line, file, depth, fn, names, values, given
+end
+
+# When the program ends: the functions by the time their own lines took, then the lines that took longest
+to finish
+    set now to the clock
+    if last_key is not nothing and now is not last_time
+        spend(now - last_time)
+    end
+    set total to now - first_time
+    set lines_run to 0
+    for each key in runs
+        set lines_run to lines_run + item key of runs
+    end
+    say "moth profile: " + seconds_of(total) + " in all, " + lines_run + " lines run" to the error output
+    set by_function to empty list
+    for each fn in calls
+        add (record with name fn, time time_of(function_times, fn), calls item fn of calls) to by_function
+    end
+    if not ("" is in calls)
+        add (record with name "", time time_of(function_times, ""), calls 1) to by_function
+    end
+    say "" to the error output
+    say "  own time        calls  function" to the error output
+    set by_function to by_function in reverse order by calls # so the same time goes by calls
+    for each f in by_function in reverse order by time
+        set named to name of f
+        if named is ""
+            set named to "(the program)"
+        end
+        say "  " + padded(seconds_of(time of f), 8) + " " + padded(share_of(time of f, total), 6) + " " + padded("" + calls of f, 7) + "  " + named to the error output
+    end
+    set by_line to empty list
+    for each key in runs
+        add (record with key key, time time_of(line_times, key), runs item key of runs) to by_line
+    end
+    say "" to the error output
+    say "  time                 runs  line" to the error output
+    set shown to 0
+    set by_line to by_line in reverse order by runs # so the same time goes by runs
+    for each l in by_line in reverse order by time
+        if shown is less than 15 and (time of l is greater than 0 or shown is less than 5)
+            set p to item (key of l) of places
+            say "  " + padded(seconds_of(time of l), 8) + " " + padded(share_of(time of l, total), 6) + " " + padded("" + runs of l, 10) + "  " + place_name(file of p, line of p) + "  " + line_of(file of p, line of p) to the error output
+            set shown to shown + 1
+        end
+    end
+end
+
+to time_of with times, key
+    if key is in times
+        return item key of times
+    end
+    return 0
+end
+
+# seconds as "1.234 s"
+to seconds_of with seconds
+    set thousandths to (seconds * 1000) rounded
+    set whole to (thousandths - remainder of thousandths divided by 1000) / 1000
+    set rest to "" + remainder of thousandths divided by 1000
+    repeat while length of rest is less than 3
+        set rest to "0" + rest
+    end
+    return whole + "." + rest + " s"
+end
+
+# a part of the whole, as "42.5%"
+to share_of with part, whole
+    if whole is 0
+        return "0.0%"
+    end
+    set tenths to (part / whole * 1000) rounded
+    return (tenths - remainder of tenths divided by 10) / 10 + "." + remainder of tenths divided by 10 + "%"
+end
+
+# text with spaces before it, to `width` letters
+to padded with words, width
+    set made to words
+    repeat while length of made is less than width
+        set made to " " + made
+    end
+    return made
+end
+
+# a line, as a person finds it: the file's name and the line's number
+to place_name with file, line
+    if file is ""
+        return program_name + ":" + line
+    end
+    return file + ":" + line
+end
+
+# what a line holds, without the spaces before it, as written
+to line_of with file, line
+    if not (file is in sources)
+        return ""
+    end
+    set lines to item file of sources
+    if line is less than 1 or line is greater than length of lines
+        return ""
+    end
+    set made to ""
+    set started to no
+    for each c in item line of lines
+        if started or (c is not " " and c is not "\t")
+            set started to yes
+            if byte 1 of (c as bytes) is not 13 # a Windows line end's carriage return
+                add c to made
+            end
+        end
+    end
+    return made
+end

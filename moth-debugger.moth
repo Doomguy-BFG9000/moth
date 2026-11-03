@@ -94,6 +94,10 @@ to follow with line, file, depth, fn
     set last to record with file file, line line, fn fn
 end
 
+# once the program's last line has run: nothing more to do (the profiler, in the debugger's place, says what it found)
+to finish
+end
+
 # whether to stop at this line, before it runs
 to wants with line, file, depth, fn
     follow(line, file, depth, fn)

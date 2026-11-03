@@ -7,8 +7,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-// the libraries: each file a program uses for what it does, not a program, an example or a test
-export const STANDARD = ["math.moth", ...["big", "cores", "dates", "game", "hash", "json", "linux", "server", "sockets", "sqlite", "system", "tasks",
+// the libraries: each file a program uses for what it does, not a program, an example or a test; and the
+// profiler `moth profile` builds into a program
+export const STANDARD = ["math.moth", "moth-profiler.moth", ...["big", "cores", "dates", "game", "hash", "json", "linux", "server", "sockets", "sqlite", "system", "tasks",
   "text", "ui", "windows", "xml", "zip"].map((name) => `tools/${name}.moth`)];
 
 // a file's text as a Moth text: \ " and { escaped, line ends and tabs as \n and \t

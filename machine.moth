@@ -37069,6 +37069,7 @@ to with_debugger with debugger_body, body, files, source, program_name
     for each s in body
         add s to made
     end
+    add record with kind "call", name "moth_debugger's finish", args empty list, at at to made # once the program has ended
     return made
 end
 
@@ -38066,6 +38067,9 @@ end
 # whole number from 0 to 255; no `try` stops it
 to gen_exit with fc, s
     set a to a of fc
+    if debugging of st of fc # the debugger's, or the profiler's, last word, as when the program ends
+        gen_expr(fc, record with kind "call", name "moth_debugger's finish", args empty list, at at of s)
+    end
     if value of s is nothing
         movi(a, rcx, 0)
     else

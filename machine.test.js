@@ -464,6 +464,30 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
 });
 
+// `moth profile`: the program runs as moth run runs it, and then the error output says each function's own time
+// and calls, and the lines that took longest, with how often each ran; also when it stops itself
+test("moth.exe profile runs a program, then says where its time went", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "profiling");
+  mkdirSync(sub);
+  writeFileSync(join(sub, "work.moth"), "to slow_sum with n\n    set total to 0\n    for each k from 1 to n\n        set total to total + k * k\n    end\n    return total\nend\n"
+    + "to quick with x\n    return x + 1\nend\nset grand to 0\nfor each i from 1 to 40\n    set grand to grand + slow_sum(20000)\n    set grand to quick(grand)\nend\nsay grand\nsay arguments\n");
+  const ran = spawnSync(exe, ["profile", "work.moth", "a", "b"], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  assert.deepEqual([ran.stdout, ran.status], ["106674666800040\n[\"a\", \"b\"]\n", 0], ran.stderr);
+  const lines = ran.stderr.split("\n");
+  assert.match(lines[0], /^moth profile: \d+\.\d{3} s in all, 800246 lines run$/);
+  assert.equal(lines[2], "  own time        calls  function");
+  assert.match(lines[3], /^ +\d+\.\d{3} s +\d+\.\d% +40  slow_sum$/);
+  assert.ok(lines.some((l) => / 40  quick$/.test(l)) && lines.some((l) => / 1  \(the program\)$/.test(l)), ran.stderr);
+  const top = lines.indexOf("  time                 runs  line");
+  assert.match(lines[top + 1], /^ +\d+\.\d{3} s +\d+\.\d% +800000  work\.moth:4  set total to total \+ k \* k$/);
+  writeFileSync(join(sub, "stops.moth"), 'say "before"\nstop the program with 3\n');
+  const stops = spawnSync(exe, ["profile", "stops.moth"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([stops.stdout, stops.status], ["before\n", 3]);
+  assert.match(stops.stderr, /^moth profile: 0\.\d{3} s in all, 2 lines run\n[^]*stops\.moth:2  stop the program with 3\n$/);
+  assert.deepEqual(readdirSync(sub).sort(), ["stops.moth", "work.moth"], "the program built to profile was left behind");
+});
+
 // The standard library: in a folder with nothing else in it, a program uses json.moth, math.moth and big.moth,
 // and big.moth's tests run, from moth's own copies; a file of a standard name beside the program is used instead
 test("moth.exe has the standard library, so a program anywhere can use it, and a file beside it comes first", { skip }, () => {

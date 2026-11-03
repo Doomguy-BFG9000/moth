@@ -3239,3 +3239,33 @@ hold them to agreeing.
 - **Tested.** In machine code on Windows and Linux: one part and a part a
   core give the same, more parts than items, no items, and a part that fails
   in its copy; and nothing left behind.
+
+## 76. A profiler
+
+- **Why.** Python has cProfile: which functions a slow program's time goes
+  to. Moth had the clock, and guessing.
+- **What it does.** `moth profile file.moth args` runs the program as `moth
+  run` does, then says on the error output how long it took and how many
+  lines ran; each function's own time (its lines', not what it calls), as a
+  share of the whole, and how often it was called; and the 15 lines that
+  took longest, with how often each ran.
+- **How.** It builds the program as `moth debug` does (§59), with
+  moth-profiler.moth in the debugger's place: before each line, `wants`
+  counts it and gives the time since the line before to that line and its
+  function, and never stops; a line one call deeper than the one before
+  starts a call. The debug build now calls the debugger's `finish` when the
+  program ends or stops itself, which for the profiler says what it found
+  (and for the debugger does nothing). The profiler is in the standard
+  library (§74), so moth carries it and builds itself as it did.
+- **Time** comes from `the clock`, which moves a millisecond at a time, each
+  call about 40 ns: so each millisecond goes to the line that was running
+  when it passed, which over a run worth profiling is where the time is, and
+  counts are exact. A program profiled runs several times slower.
+- **Not yet.** A program that ends with a mistake says nothing (the runtime
+  has no Moth code to call there); nor does an app, whose handlers run after
+  its last line.
+- **Tested.** Through moth.exe: a program with a slow function and a quick
+  one, its output and arguments as moth run gives them, every line's count,
+  each function's calls, the slowest line first, a program that stops
+  itself, and nothing left behind.
+
