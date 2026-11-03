@@ -464,6 +464,34 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
 });
 
+// `moth notebook`: each ```moth block run in turn, as the shell's entries, and what it said written under it,
+// in place of the ```output block there was; a block that ends in a value shows it; a mistake is written there
+// too, and the next block still has what came before. Run again, the file stays the same.
+test("moth.exe notebook runs a Markdown file's blocks, and writes what each said under it", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "notebook");
+  mkdirSync(sub);
+  writeFileSync(join(sub, "notes.md"), "# Squares\n\nSome numbers first.\n\n```moth\nset xs to list of 1, 2, 3, 4\nsay \"made \" + length of xs\n```\n\nTheir squares, with a function:\n\n```moth\nto square with n\n    return n * n\nend\nlist of square(x) for each x in xs\n```\n\n```output\nan old output, which goes\n```\n\nA mistake:\n\n```moth\nsay 1 / 0\n```\n\nAnd the names from before are still there:\n\n```moth\nsay xs\nsay square(12)\n```\n");
+  const after = "# Squares\n\nSome numbers first.\n\n```moth\nset xs to list of 1, 2, 3, 4\nsay \"made \" + length of xs\n```\n\n```output\nmade 4\n```\n\nTheir squares, with a function:\n\n```moth\nto square with n\n    return n * n\nend\nlist of square(x) for each x in xs\n```\n\n```output\n[1, 4, 9, 16]\n```\n\nA mistake:\n\n```moth\nsay 1 / 0\n```\n\n```output\nblock 3:1:7: can't divide by zero\nsay 1 / 0\n      ^\n```\n\nAnd the names from before are still there:\n\n```moth\nsay xs\nsay square(12)\n```\n\n```output\n[1, 2, 3, 4]\n144\n```\n";
+  for (const time of [1, 2]) {
+    const ran = spawnSync(exe, ["notebook", "notes.md"], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["notes.md: 4 blocks run, 1 of them with a mistake\n", "", 1], `run ${time}`);
+    assert.equal(readFileSync(join(sub, "notes.md"), "utf8"), after, `run ${time}`);
+  }
+  assert.deepEqual(readdirSync(sub), ["notes.md"], "what it built to run the blocks was left behind");
+});
+
+// The shell: a line whose value makes functions of its own (a list built from a list) runs once, not again in
+// every entry after it
+test("moth.exe shell runs an entry that builds a list once", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "shell-lists");
+  mkdirSync(sub);
+  const ran = spawnSync(exe, ["shell"], { cwd: sub, encoding: "utf8", input: "set xs to list of 1, 2\nsay list of x * 2 for each x in xs\nsay 5\nxs\n", timeout: 120_000 });
+  assert.equal(ran.stdout.split("\n").filter((l) => !l.startsWith("Moth shell")).join("\n"),
+    "moth> set xs to list of 1, 2\nmoth> say list of x * 2 for each x in xs\n[2, 4]\nmoth> say 5\n5\nmoth> xs\n[1, 2]\nmoth> \n\n");
+});
+
 // `moth profile`: the program runs as moth run runs it, and then the error output says each function's own time
 // and calls, and the lines that took longest, with how often each ran; also when it stops itself
 test("moth.exe profile runs a program, then says where its time went", { skip }, () => {

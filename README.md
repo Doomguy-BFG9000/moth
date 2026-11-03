@@ -802,6 +802,7 @@ moth build hello.moth                    compile it to machine code: hello.exe, 
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
+moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
 moth get                                 fetch every package moth.packages lists, at its commit (on another computer, say)
 moth update                              move the packages to their newest commits (or moth update json, one)

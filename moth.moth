@@ -23,7 +23,7 @@ use "stdlib.moth" as standard # the libraries a program anywhere can use (see cl
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  get fetches every package listed, at its commit; update moves them, or one, to their newest; remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  get fetches every package listed, at its commit; update moves them, or one, to their newest; remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -164,19 +164,22 @@ end
 
 # a mistake in the program, as Moth shows one
 to cli_report with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
+    say cli_report_text(cli_why, cli_main_file, cli_main_source, cli_names, cli_texts) to the error output
+end
+
+to cli_report_text with cli_why, cli_main_file, cli_main_source, cli_names, cli_texts
     set cli_at to nothing
     try
         set cli_at to at of cli_why
     if it fails # a mistake in what the build was given, as its icon, not in the program: it has no place
-        say "moth: " + cli_why to the error output
-        return nothing
+        return "moth: " + cli_why
     end
     set cli_where to cli_main_file
     if file of cli_at is not ""
         set cli_where to file of cli_at
     end
-    cli_say_problem(cli_where, line of cli_at, col of cli_at, reason of cli_why,
-        cli_text_for(file of cli_at, cli_main_source, cli_names, cli_texts), yes)
+    return cli_where + ":" + line of at of cli_why + ":" + col of cli_at + ": " + reason of cli_why + "\n"
+        + cli_excerpt(cli_text_for(file of cli_at, cli_main_source, cli_names, cli_texts), line of cli_at, col of cli_at)
 end
 
 # the files a program uses, by the names its `use` lines give, each with its text: records for the compiler
@@ -2027,7 +2030,7 @@ to cli_sh_replay with cli_text, cli_body, cli_file, cli_known
                 set cli_upto to cli_start - 1
             end
         end
-        if kind of cli_s is "define"
+        if kind of cli_s is "define" and position of " " in name of cli_s is 0 # not one the parser made for a line's value
             for each cli_k from cli_from to cli_upto
                 set item cli_k of cli_kept to item cli_k of cli_lines
             end
@@ -2159,6 +2162,10 @@ to cli_sh_entry with cli_sh, cli_typed
     set cli_text to cli_sh_showing(cli_sh, cli_typed, cli_read, cli_files)
     set typed of cli_sh to typed of cli_sh + 1
     set cli_file to "[" + typed of cli_sh + "]"
+    if keeping of cli_sh # a notebook's: its blocks, by their number
+        set cli_file to "block " + typed of cli_sh
+    end
+    set said of cli_sh to ""
     set cli_names to empty list
     for each cli_name in known of cli_sh
         add cli_name to cli_names
@@ -2187,6 +2194,11 @@ to cli_sh_entry with cli_sh, cli_typed
         set cli_bytes to machine's compile_shipping(cli_source, cli_all_names, cli_all_texts, host of cli_sh, "moth shell",
             allowing of cli_sh, nothing, nothing, empty list, empty list)
     if it fails with cli_why
+        if keeping of cli_sh
+            set said of cli_sh to cli_report_text(cli_why, "moth shell", cli_source, cli_all_names, cli_all_texts)
+            set failed of cli_sh to yes
+            return nothing
+        end
         cli_report(cli_why, "moth shell", cli_source, cli_all_names, cli_all_texts)
         return nothing
     end
@@ -2196,7 +2208,8 @@ to cli_sh_entry with cli_sh, cli_typed
         say "moth: " + cli_whynot to the error output
         return nothing
     end
-    if cli_sh_run(program of cli_sh) is not 0 # a mistake, or `stop the program`: nothing it did is kept
+    if cli_sh_run(cli_sh) is not 0 # a mistake, or `stop the program`: nothing it did is kept
+        set failed of cli_sh to yes
         return nothing
     end
     set cli_replayed to cli_sh_replay(cli_text, body of cli_read, "", known of cli_sh)
@@ -2212,11 +2225,19 @@ to cli_sh_entry with cli_sh, cli_typed
     cli_sh_functions(body of cli_read, functions of cli_sh)
 end
 
-# the program for an entry run, and removed: the number it ended with
-to cli_sh_run with cli_program
+# the program for an entry run, and removed: the number it ended with. A notebook keeps what it said, its
+# output and then its mistakes, in `said`.
+to cli_sh_run with cli_sh
+    set cli_program to program of cli_sh
     set cli_ended to 1
     try
-        set cli_ended to run program cli_program with empty list
+        if keeping of cli_sh
+            set cli_answer to run program cli_program with empty list keeping its output
+            set cli_ended to code of cli_answer
+            set said of cli_sh to output of cli_answer + mistakes of cli_answer
+        else
+            set cli_ended to run program cli_program with empty list
+        end
     if it fails with cli_why
         say "moth: " + cli_why to the error output
     end
@@ -2225,6 +2246,151 @@ to cli_sh_run with cli_program
     if it fails
     end
     return cli_ended
+end
+
+# what the shell (or a notebook, `keeping` what each entry says) knows: the entries so far, and the rest
+to cli_sh_new with cli_host_now, cli_allowing, cli_program, cli_keeping
+    return record with entries empty list, labels empty list, typed 0, early empty list, known empty list, functions empty list,
+        file_names empty list, file_texts empty list, host cli_host_now, allowing cli_allowing, program cli_program,
+        keeping cli_keeping, said "", failed no
+end
+
+# ---------- notebooks ----------
+# `moth notebook notes.md`: each ```moth block, in turn, an entry of the shell's (so a block has what the blocks
+# before it made), and what it said, its output and then its mistakes, written under it in an ```output
+# block, in place of the one there was. Everything else in the file stays as it is. (DESIGN §77)
+
+to cli_notebook with cli_path, cli_flags
+    set cli_text to cli_text_of(cli_path)
+    if cli_text is nothing
+        return 1
+    end
+    set cli_host_now to cli_host()
+    set cli_program to "./.moth-notebook"
+    if cli_host_now is "windows"
+        set cli_program to "./.moth-notebook.exe"
+    end
+    set cli_allowing to empty list
+    for each cli_flag in cli_flags
+        add cli_flag to cli_allowing
+    end
+    add "--allow-read=" + cli_sh_state to cli_allowing
+    add "--allow-write=" + cli_sh_state to cli_allowing
+    set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, yes)
+    set cli_lines to split cli_text by "\n"
+    set cli_out to empty list
+    set cli_blocks to 0
+    set cli_failures to 0
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_lines
+        set cli_line to item cli_k of cli_lines
+        add cli_line to cli_out
+        add 1 to cli_k
+        if cli_sh_strip(cli_line) is "```moth"
+            set cli_code to empty list
+            repeat while cli_k is at most length of cli_lines and cli_sh_strip(item cli_k of cli_lines) is not "```"
+                add item cli_k of cli_lines to cli_code
+                add item cli_k of cli_lines to cli_out
+                add 1 to cli_k
+            end
+            if cli_k is at most length of cli_lines
+                add item cli_k of cli_lines to cli_out
+                add 1 to cli_k
+            end
+            set cli_after to cli_k # past an ```output block there was, and the empty lines before it
+            repeat while cli_after is at most length of cli_lines and cli_sh_strip(item cli_after of cli_lines) is ""
+                add 1 to cli_after
+            end
+            if cli_after is at most length of cli_lines and cli_sh_strip(item cli_after of cli_lines) is "```output"
+                set cli_k to cli_after + 1
+                repeat while cli_k is at most length of cli_lines and cli_sh_strip(item cli_k of cli_lines) is not "```"
+                    add 1 to cli_k
+                end
+                add 1 to cli_k
+            end
+            add 1 to cli_blocks
+            set failed of cli_sh to no
+            set said of cli_sh to ""
+            cli_sh_entry(cli_sh, cli_nb_showing(cli_sh, cli_code))
+            if failed of cli_sh
+                add 1 to cli_failures
+            end
+            set cli_said to said of cli_sh
+            if length of cli_said is greater than 0 and item (length of cli_said) of cli_said is "\n"
+                set cli_said to items 1 to (length of cli_said - 1) of cli_said
+            end
+            if cli_said is not ""
+                add "" to cli_out
+                add "```output" to cli_out
+                for each cli_said_line in split cli_said by "\n"
+                    add cli_said_line to cli_out
+                end
+                add "```" to cli_out
+            end
+            if cli_k is at most length of cli_lines and cli_sh_strip(item cli_k of cli_lines) is not ""
+                add "" to cli_out # a line between the output and what follows
+            end
+        end
+    end
+    try
+        remove the file cli_sh_state
+    if it fails
+    end
+    try
+        write join cli_out with "\n" to cli_path
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+        return 1
+    end
+    set cli_told to cli_path + ": " + cli_blocks + " blocks run"
+    if cli_failures is greater than 0
+        set cli_told to cli_told + ", " + cli_failures + " of them with a mistake"
+    end
+    say cli_told
+    if cli_failures is greater than 0
+        return 1
+    end
+    return 0
+end
+
+# A block of more than one line whose last line is a value, as `xs` or `square(4)`, as code that shows it, as
+# the shell shows an entry of one line: `say` it, or, for a call to a function made before or in the block,
+# show what it gives unless that's nothing. Anything else as it is.
+to cli_nb_showing with cli_sh, cli_code
+    set cli_whole to join cli_code with "\n"
+    set cli_last to length of cli_code
+    repeat while cli_last is at least 1 and cli_sh_strip(item cli_last of cli_code) is ""
+        set cli_last to cli_last - 1
+    end
+    if cli_last is less than 2
+        return cli_whole
+    end
+    set cli_line to item cli_last of cli_code
+    if item 1 of cli_line is " " or item 1 of cli_line is "\t" # inside a block of its own
+        return cli_whole
+    end
+    set cli_files to cli_files_of(file_names of cli_sh, file_texts of cli_sh)
+    set cli_rest to join (items 1 to (cli_last - 1) of cli_code) with "\n"
+    set cli_read to cli_sh_read(cli_whole, cli_files)
+    set cli_shown to nothing
+    if body of cli_read is nothing
+        set cli_shown to cli_rest + "\n" + "say " + cli_line
+    else
+        set cli_body to body of cli_read
+        set cli_final to item (length of cli_body) of cli_body
+        set cli_made to empty list
+        for each cli_name in functions of cli_sh
+            add cli_name to cli_made
+        end
+        cli_sh_functions(cli_body, cli_made)
+        if kind of cli_final is "call" and name of cli_final is in cli_made and line of at of cli_final is cli_last
+            set cli_shown to cli_rest + "\n" + "moth_shell_show(" + cli_line + ")"
+        end
+    end
+    if cli_shown is nothing or body of cli_sh_read(cli_shown, cli_files) is nothing
+        return cli_whole
+    end
+    return cli_shown
 end
 
 to cli_shell with cli_flags
@@ -2239,8 +2405,7 @@ to cli_shell with cli_flags
     end
     add "--allow-read=" + cli_sh_state to cli_allowing
     add "--allow-write=" + cli_sh_state to cli_allowing
-    set cli_sh to record with entries empty list, labels empty list, typed 0, early empty list, known empty list, functions empty list,
-        file_names empty list, file_texts empty list, host cli_host_now, allowing cli_allowing, program cli_program
+    set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, no)
     say "Moth shell. Type Moth code: a block runs once its 'end' is typed, and a value shows itself. 'quit' ends it."
     set cli_pending to ""
     set cli_blank to 0
@@ -2329,7 +2494,7 @@ to cli_main
         end
         stop the program with cli_package_command(cli_command, cli_rest)
     end
-    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
+    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "notebook" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
@@ -2382,6 +2547,9 @@ to cli_main
     end
     if cli_command is "check"
         stop the program with cli_check_file(cli_file)
+    end
+    if cli_command is "notebook"
+        stop the program with cli_notebook(cli_file, cli_flags)
     end
     if cli_command is "test"
         if length of cli_paths is 0 # none named: every one here and in the folders inside

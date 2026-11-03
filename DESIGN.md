@@ -3269,3 +3269,28 @@ hold them to agreeing.
   each function's calls, the slowest line first, a program that stops
   itself, and nothing left behind.
 
+## 77. Notebooks
+
+- **Why.** Jupyter is how much of Python is written: code in pieces, with
+  words between them and what each piece said beneath it, kept in one file.
+- **What it does.** `moth notebook notes.md` runs each ```moth block of a
+  Markdown file in turn, as the shell runs entries (§65), so a block has what
+  the blocks before it made, and writes what it said, its output and then
+  its mistakes, beneath it in an ```output block, in place of the one there
+  was; everything else in the file stays as it is. A block whose last line
+  is a value shows it, as a cell's does. A mistake says the block and line
+  (`block 3:1:7: can't divide by zero`), and, as in the shell, a block that
+  fails keeps nothing it made. moth then says how many blocks ran and how
+  many had a mistake, and ends with 1 if any did.
+- **Plain Markdown.** The file stays one any editor, GitHub or a site shows
+  as it is, its outputs as code blocks, and running it again gives the same
+  file when the code does the same.
+- **The shell, fixed.** A line whose value makes functions of its own (a
+  list built from a list, a function with no name) gives them the line's
+  number, and the shell kept every `to` block's lines for the entries after,
+  so the whole line ran again in each. It keeps only the program's own.
+- **Tested.** Through moth.exe: a notebook with a value, a function, a block
+  that ends in a value, an old output to replace, a mistake, and a block
+  after it, run twice to the same file, with nothing left behind; and the
+  shell running a list built from a list once.
+
