@@ -1,0 +1,106 @@
+{
+  "name": "moth",
+  "displayName": "Moth",
+  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, and Run, Debug and Build",
+  "version": "0.1.0",
+  "publisher": "samyyy2423",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samyyy2423/moth"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters",
+    "Snippets"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:moth"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "moth",
+        "aliases": [
+          "Moth",
+          "moth"
+        ],
+        "extensions": [
+          ".moth"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "moth",
+        "scopeName": "source.moth",
+        "path": "./syntaxes/moth.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "moth",
+        "path": "./snippets/moth.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "moth.run",
+        "title": "Run this file",
+        "category": "Moth"
+      },
+      {
+        "command": "moth.debug",
+        "title": "Debug this file",
+        "category": "Moth"
+      },
+      {
+        "command": "moth.build",
+        "title": "Build this file",
+        "category": "Moth"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "moth.run",
+          "when": "resourceLangId == moth"
+        },
+        {
+          "command": "moth.debug",
+          "when": "resourceLangId == moth"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "moth.run",
+          "when": "editorLangId == moth"
+        },
+        {
+          "command": "moth.debug",
+          "when": "editorLangId == moth"
+        },
+        {
+          "command": "moth.build",
+          "when": "editorLangId == moth"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Moth",
+      "properties": {
+        "moth.path": {
+          "type": "string",
+          "default": "moth",
+          "description": "The moth command line that Run, Debug and Build use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+        }
+      }
+    }
+  }
+}

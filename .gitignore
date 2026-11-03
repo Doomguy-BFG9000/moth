@@ -7,3 +7,5 @@ apps/*.html
 /moth
 # where npm run bench and npm run versus put the programs they time, while they do
 /.bench-*
+# the VS Code extension, packed (by node editors/vscode/make-vsix.mjs)
+editors/vscode/*.vsix

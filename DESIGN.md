@@ -2671,3 +2671,36 @@ hold them to agreeing.
   one that uses it brought along at its listed commit; every mistake; and
   `remove`, through moth.exe, on Windows and Linux. Files in folders and
   packages on the three engines, and compiler.moth held to moth.js.
+
+## 61. VS Code
+
+- **Why.** The playground colours code, finds problems as it's typed and tidies
+  it, but most people write programs in an editor, and VS Code is the one most
+  of them use.
+- **[`editors/vscode`](editors/vscode).** The colours are a TextMate grammar:
+  comments, text, numbers, `to name`, calls, `'s`, and the words the playground
+  colours, the same list, which a test holds them to (`package` was added to
+  both). Text's values are a begin/end rule inside text that includes the
+  whole grammar again, so text inside a value inside text is coloured as the
+  tokenizer reads it. The rest is `extension.js`: it runs `check()` from
+  moth.js a quarter of a second after each change, the files a program uses
+  read from beside it, or from the editor where one is open and not saved,
+  and shows each problem on the word at its column, red for a mistake or a
+  line sure to fail and yellow for the rest; a mistake in a used file goes on
+  the line that uses it. `suggestedFix` is its Quick Fix, `format()` is
+  Format Document, `to` lines are the outline (by their indents, so it works on
+  code with a mistake in it) and where Go to Definition goes, and Run, Debug
+  and Build start `moth` (or `moth.path`) on the file as a terminal's own
+  process, so nothing is quoted for a shell.
+- **The engine goes with it.** `make-vsix.mjs` packs the extension, with
+  moth.js and the seven files it needs as `engine/`, beside a package.json that
+  makes them modules, into a .vsix: a zip with a manifest and a list of
+  content types, written by the script itself (deflated, every file dated
+  1980, so the same files make the same bytes), so there's nothing to install
+  to make it.
+- **Tested.** The grammar through a TextMate tokenizer the tests have, enough
+  of one for this grammar; the extension against a stand-in for VS Code's API;
+  the .vsix unzipped and compared, file for file; `code --install-extension`
+  with a profile of its own; and, with MOTH_VSCODE=1, VS Code 1.142 itself,
+  running the extension in its extension host: the problems, the Quick Fix,
+  Format Document, the outline and the commands.

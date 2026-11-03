@@ -858,6 +858,19 @@ Until 1.5 Moth also had a command line written for Node.js, with a shell and
 builds to JavaScript and web pages. Those went with the Rust engine; the
 debugger and finding problems as you type are the playground's.
 
+## In VS Code
+
+[`editors/vscode`](editors/vscode) is an extension for VS Code: colours,
+problems as you type from Moth's own checker (with a Quick Fix for a misspelled
+name or a symbol from another language), Format Document as `moth tidy` writes
+code, the file's functions in the outline and Go to Definition, snippets, and
+Run, Debug and Build, which start `moth` on the file. Make it and install it:
+
+```text
+node editors/vscode/make-vsix.mjs
+code --install-extension editors/vscode/moth-0.1.0.vsix
+```
+
 ## Without JavaScript
 
 The playground's engines are written in JavaScript, so a bug in JavaScript
@@ -919,6 +932,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
 | [`moth-debugger.moth`](moth-debugger.moth) | The debugger `moth debug` builds into the program it debugs, in Moth; moth.exe carries it |
+| [`editors/vscode/`](editors/vscode) | The VS Code extension, and `make-vsix.mjs`, which packs it with Moth's engine inside |
 | [`versus/`](versus) | The same four programs in Moth, C, Rust and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
@@ -1034,6 +1048,12 @@ calls that led there.
   bringing it at its commit, the mistakes, and removed, through moth.exe on
   Windows and Linux; and files in folders and `use the package` on all three
   engines and in the compiler written in Moth
+- the VS Code extension: its colours, run through a TextMate tokenizer of the
+  tests' own, on the words the playground colours, values in text and every
+  example; its indenting; its problems, fixes, tidying, outline, definitions
+  and commands, against a stand-in for VS Code's API; the .vsix, unzipped and
+  compared with the files here; VS Code installing it; and, with
+  MOTH_VSCODE=1, the extension in VS Code's own extension host
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
