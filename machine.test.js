@@ -291,8 +291,8 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
@@ -462,6 +462,26 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "remove", "greet"), ["removed greet\n", "", 0]);
   assert.deepEqual(readdirSync(join(other, "packages")), ["shout"]);
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
+});
+
+// The standard library: in a folder with nothing else in it, a program uses json.moth, math.moth and big.moth,
+// and big.moth's tests run, from moth's own copies; a file of a standard name beside the program is used instead
+test("moth.exe has the standard library, so a program anywhere can use it, and a file beside it comes first", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "anywhere");
+  mkdirSync(sub);
+  writeFileSync(join(sub, "p.moth"), 'use "json.moth" as json\nuse "math.moth"\nuse "big.moth" as big\nsay item "a" of json\'s parse("\\{\\"a\\": [1, 2]}")\nsay sqrt(16)\nsay big\'s power(2, 70)\n');
+  const ran = spawnSync(exe, ["run", "p.moth"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["[1, 2]\n4\n1180591620717411303424\n", "", 0]);
+  writeFileSync(join(sub, "big.test.moth"), here("tools/big.test.moth"));
+  const tested = spawnSync(exe, ["test", "big.test.moth"], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  assert.deepEqual([tested.stdout.split("\n").at(-2), tested.status], ["6 passed", 0], tested.stdout);
+  writeFileSync(join(sub, "math.moth"), "to sqrt with x\n    return \"my own\"\nend\n");
+  const own = spawnSync(exe, ["run", "p.moth"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([own.stdout, own.status], ["[1, 2]\nmy own\n1180591620717411303424\n", 0]);
+  writeFileSync(join(sub, "q.moth"), 'use "nowhere.moth"\n');
+  const missing = spawnSync(exe, ["run", "q.moth"], { cwd: sub, encoding: "utf8" });
+  assert.match(missing.stderr, /there is no file called 'nowhere\.moth'/);
 });
 
 test("moth.exe builds a program, and itself into the same bytes", { skip }, () => {

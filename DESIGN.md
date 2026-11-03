@@ -3188,3 +3188,24 @@ hold them to agreeing.
   test makes: a page, a body in chunks and one with a length, a page that
   isn't there, a client that doesn't trust the certificate, and a
   certificate and a key it can't use.
+
+## 74. The standard library, everywhere
+
+- **Why.** Python's `import json` works in any folder. Moth's libraries were
+  files in tools/, so a program used one only with a copy beside it.
+- **What it does.** moth (the command, moth.moth) carries math.moth and the
+  libraries in tools/ (not their tests or the example programs): when a file
+  a program uses isn't beside the file that uses it, and has a standard
+  library's name, moth uses its own copy, and so do the files that copy
+  uses. A file beside the program comes first, as Python's own modules shadow
+  its library's.
+- **stdlib.moth** holds them, each file's text as a Moth text in a function
+  that gives it by name, and moth.moth uses it as it uses machine.moth. It is
+  made by make-stdlib.mjs, so moth still builds itself from its source
+  alone, into the same bytes. Not `--include`: a file built into a program
+  is found before the disk, so a program's own math.moth would lose to moth's,
+  and a folder built in would take whatever else is in it.
+- **Tested.** stdlib.moth is what make-stdlib.mjs makes of the files as they
+  are, and holds each one exactly; and through moth.exe, in a folder with
+  nothing else, a program that uses json.moth, math.moth and big.moth, and
+  big.moth's own tests, and a math.moth beside the program used instead.

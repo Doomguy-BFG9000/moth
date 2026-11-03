@@ -319,6 +319,10 @@ bytes and dictionaries:
   it    ███████ 11
   moth  ██████ 10
   ```
+- **The standard library:** math.moth and the libraries below (not the
+  example programs) are built into moth, so `use "json.moth"` works in any
+  folder; a file of that name beside the program comes first.
+  [`stdlib.moth`](stdlib.moth) holds them, made by `node make-stdlib.mjs`.
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
   tests it, with Moth's own test runner, on every push.

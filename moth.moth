@@ -18,6 +18,7 @@
 # with the program's top level (DESIGN.md, section 27).
 
 use "machine.moth" as machine
+use "stdlib.moth" as standard # the libraries a program anywhere can use (see cli_sources_of)
 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list
@@ -187,8 +188,10 @@ to cli_files_of with cli_names, cli_texts
     return cli_made
 end
 
-# every file the program uses, and the files those use, by the names their `use` lines give. A file that
-# can't be read is left out: compile_machine says there is no file called that, at the line that uses it.
+# every file the program uses, and the files those use, by the names their `use` lines give: beside the file
+# that uses it, or else, for one of the standard library's (json.moth, math.moth and the rest), moth's own
+# copy. A file that's neither is left out: compile_machine says there is no file called that, at the line
+# that uses it.
 to cli_sources_of with cli_path, cli_source
     set cli_folder to cli_folder_of(cli_path)
     set cli_names to empty list
@@ -199,14 +202,18 @@ to cli_sources_of with cli_path, cli_source
         set cli_name to item cli_k of cli_waiting
         add 1 to cli_k
         if not (cli_name is in cli_names)
+            set cli_text to nothing
             try
                 set cli_text to read cli_folder + cli_name
+            if it fails
+                set cli_text to standard's standard_text(cli_name)
+            end
+            if cli_text is not nothing
                 add cli_name to cli_names
                 add cli_text to cli_texts
                 for each cli_more in cli_used_by(cli_text, cli_name)
                     add cli_more to cli_waiting
                 end
-            if it fails
             end
         end
     end

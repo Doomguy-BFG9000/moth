@@ -1071,6 +1071,11 @@ test("text.moth, dates.moth, hash.moth, big.moth, xml.moth and zip.moth pass the
   }
 });
 
+test("stdlib.moth is what make-stdlib.mjs makes of the standard library's files as they are", async () => {
+  const { stdlib } = await import("./make-stdlib.mjs");
+  assert.ok(readFileSync(new URL("./stdlib.moth", import.meta.url), "utf8") === stdlib(), "stdlib.moth is behind: run node make-stdlib.mjs");
+});
+
 test("math.moth passes its own tests, math.test.moth, on all three engines", () => {
   const here = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
   for (const engine of ENGINES) {
