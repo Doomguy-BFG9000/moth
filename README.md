@@ -12,7 +12,7 @@ Written from scratch in JavaScript, with no dependencies.</p>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
-<a href="https://github.com/samyyy2423/moth/releases/tag/v1.9.0">Release 1.9.0</a>
+<a href="https://github.com/samyyy2423/moth/releases/tag/v1.10.0">Release 1.10.0</a>
 </p>
 
 <p>
