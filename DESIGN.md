@@ -2222,7 +2222,7 @@ hold them to agreeing.
   passed on, an input changed to text, and `is divisible by` of inputs.
 - **Not yet.** Inputs in registers instead of on the stack, a function's
   variables kept in registers through the calls it makes, and functions put
-  in line where they're called.
+  in line where they're called. (The first and the last are §63.)
 
 ## 49. Linux's own controls, and one module for both
 
@@ -2775,12 +2775,116 @@ hold them to agreeing.
   against the JavaScript engine, with names shared, a thousand tasks one after
   another, two thousand started before one is waited for, tasks starting tasks
   past the slots there are, five threads making far more than they keep, and
-  files read and written by tasks at once; a task counting while the program waits for a line typed half a
-  second late, a task running a program, one sleeping 300 ms in a library's
-  function while the program counts to 3 million, `qsort` calling a task back,
-  and a window's timer ticking while a task sums to 50 million; and every
-  program that starts no task, the same bytes as before. A thousand tasks
-  start and end in about a tenth of a second.
+  files read and written by tasks at once; a task counting while the program
+  waits for a line typed half a second late, a task running a program, one
+  sleeping 300 ms in a library's function while the program counts to 3
+  million, `qsort` calling a task back, and a window's timer ticking while a
+  task sums to 50 million; and, by hand at the time, every example and table
+  program that starts no task made to the same bytes as before. A thousand
+  tasks start and end in about a tenth of a second.
 - **Not yet.** Two threads running Moth at the same moment, which needs a
   collector that can stop them all; a lock a program can take; and asking
   whether a task has ended without waiting for it.
+
+## 63. Functions put in line, and inputs in registers
+
+- **Why.** A loop that called a function kept nothing in registers (§32), as
+  the function could use them, and every call cost about 25 instructions: a
+  helper as small as `return x * x`, called in a loop, made it 2.5 times as
+  slow as the sum written out.
+- **What's put in line.** A function made once at the top of the program, and
+  called by its name, whose code is one `return` of a small value (24 pieces
+  at most) of its inputs: numbers, text, yes, no and nothing written out, `+`,
+  `-`, `*` and `/`, comparisons, `and`, `or` and `not`, `-x`, `length of`, a
+  field and an item; or a few `if ... return x ... end` before such a `return`,
+  or with an `else` that returns. A name in it must be one of its inputs, so it
+  means the same wherever it's put. Not in a program built to be debugged,
+  where every line of the function is a line to stop at.
+- **The call's checks stay.** That the function has been made by now, its
+  inputs worked out in order and each kept in the caller's frame, checked if
+  the function says what they must be, and that there's room for one more
+  call (§48's 100,000): each as the call made it, at the call. Then the
+  function's code, each input read from where it's kept. A mistake in there
+  shows the trail it would have if the call had been made: the code that
+  writes the mistake notes which function it's in and where it was called
+  from (`err_fake_fn`, `err_fake_site`), and rt_e_end, before it goes
+  through the frames, makes one for that call, going back to a call's number
+  as a real call does. A mistake caught by a `try` leaves nothing noted.
+- **Everywhere code is looked at before it's written.** What a loop does
+  (`scan_expr`), what kind of value something gives (`expr_kind`), the guess
+  at what each function is given (§48), and whether a loop can run as whole
+  numbers (§32) all see such a call as its code, each input the expression
+  given for it, and see no call. So a loop with one keeps its variables in
+  registers, and in a loop of whole numbers `add square(i) to total` is
+  `i * i` in whole numbers, the call's checks going the ordinary way if
+  they'd fail.
+- **Inputs in registers.** A function only ever called by its name (never
+  used as a value, started as a task, or called back by C), with one to four
+  inputs that don't say what they must be, and that makes no functions, gets
+  its inputs in xmm0 to xmm3: the last isn't pushed at all, and the others are
+  popped into their registers just before the call. It keeps them in its frame
+  as its first variables. Whether a function is only called by its name is
+  guessed with the rest of §48's guess, and checked the same way as its code
+  is written, the program written again if it was wrong.
+- **A value stored and read straight back** isn't read again: a load of what
+  the instruction just before stored, from the same place, is no load at all
+  (or a move between registers). A label marked in between, where code could
+  jump in, forgets it.
+- **What it gave.** A loop calling `square(i)` 20 million times went from 74
+  ms to 30; one calling a function of three inputs from a function's loop,
+  from 142 ms to 24; one calling a function with early returns and another,
+  from 77 ms to 50; fib(32), from 27 ms to 24.5, against C's 19 (each a whole
+  program, started up and all).
+- **Tested.** Programs written to break it, said, failed and exited on as the
+  JavaScript engine does them, trails and all, on Windows and Linux: sums
+  past 2^53 in loops of whole numbers, mistakes in a function put in line
+  with and without a `try`, one called before it's made and at the most calls
+  there can be, inputs that say what they must be and ones with no value yet,
+  fields, items, lengths, comparisons and text, early returns, an input that
+  hides a name of the program's, a function also used as a value, and the
+  wrong number of inputs; one to five inputs in registers, worked out by
+  calls; and every other program the tests have.
+- **Not yet.** A function that calls another put in line in it, and a
+  function's variables kept in registers through its calls.
+
+## 64. Lists, text and records, where the code is
+
+- **Why.** `item i of xs`, `set item i of xs to v` and `add x to xs` went to
+  the runtime each time, which works out what kind of value it was given;
+  joining two texts went through the builder, copying both twice and counting
+  every character again; and `x of p` looked through the record's fields one
+  by one, which for the compiler's records, of 30 fields and more, was much of
+  its work.
+- **Lists.** If it's a list and the number is a whole number from 1 to its
+  length, the item is read or set right there; anything else goes to the
+  runtime as before, which says what's wrong. `add x to xs` puts x at the
+  list's end itself when there's room. `set item` finds the item again after
+  the value is worked out, as working it out may have moved the list's items.
+- **Text.** Two texts, or text and a whole number below 10^15, are joined
+  without the builder: the second's bytes after the first's, in the first's
+  block if it ends there and has room (§25), else in a new block with room to
+  grow, and the characters, both counts added up. A number's digits come from
+  multiplying by a tenth's reciprocal rather than dividing, `x as text` of a
+  whole number writes its digits out the same way, and the builder copies
+  short bytes eight at a time and counts characters eight bytes at a time (a
+  byte that isn't a character's first is 10xxxxxx: its top bit and not the one
+  below, added up across the eight by one multiplication). `join` puts each
+  text in as it is, not as `say` would show it.
+- **Records.** Each place the program reads or sets a field has 8 bytes of its
+  own saying where among the record's fields it found it last time. If the
+  record has a field there, and it's that one, it's read or set there and
+  then; else the runtime looks for it, and notes where.
+- **What it gave.** Adding 3 million items and reading them back, 61 ms to
+  about 45; setting 5 million, 82 ms to 34; joining a text to a text a million
+  times, 87 ms to about 60; adding to one 2 million times, 122 ms to 60; text
+  joined to a number a million times, 113 ms to 63; `as text`, 95 ms to 60
+  (each a whole program, started up and all). And moth.exe builds itself in
+  9.2 seconds, from 10.9, as the compiler reads fields all the time. With
+  §63, it's 4.6% bigger: 19,020,288 bytes.
+- **Tested.** Items read, set and added, with every number that isn't one of
+  a list's (0, a fraction, one past the end, text, nothing) and a value worked
+  out that grows the list being set; text joined to text, to digits (0, -0,
+  the most digits, past them, fractions) and to anything else, in place and
+  not, with characters past one byte; joins of every kind of value; records of
+  other shapes at the same place, fields added later, and every mistake; on
+  Windows and Linux, against the JavaScript engine.

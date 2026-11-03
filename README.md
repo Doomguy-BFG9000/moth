@@ -145,29 +145,29 @@ randomly broken programs check that they do on every push:
 
 | `npm run bench` | VM | JIT | WebAssembly | Machine code |
 |:--|--:|--:|--:|--:|
-| a program that only starts | 0.1 ms | 0.1 ms | 2.4 ms | 16 ms |
-| fib(25), function calls | 63 ms | 10 ms | **6.4 ms** | 16 ms |
-| a million-round loop | 62 ms | 7.9 ms | **5.4 ms** | 16 ms |
-| primes up to 5,000 | 166 ms | 19 ms | **14 ms** | 28 ms |
-| 200,000 records | 90 ms | 16 ms | **7.7 ms** | 26 ms |
-| a million bytes, filled and summed | 405 ms | 94 ms | **40 ms** | 42 ms |
-| 200,000 words counted in a dictionary | 103 ms | 33 ms | **24 ms** | 26 ms |
+| a program that only starts | 0.1 ms | 0.1 ms | 3.4 ms | 9.0 ms |
+| fib(25), function calls | 66 ms | 11 ms | **7.1 ms** | 10 ms |
+| a million-round loop | 70 ms | 8.4 ms | **5.6 ms** | 9.3 ms |
+| primes up to 5,000 | 173 ms | 21 ms | **15 ms** | 24 ms |
+| 200,000 records | 100 ms | 20 ms | **9.4 ms** | 21 ms |
+| a million bytes, filled and summed | 495 ms | 136 ms | 50 ms | **43 ms** |
+| 200,000 words counted in a dictionary | 116 ms | 31 ms | 30 ms | **18 ms** |
 
 Machine code is timed from start to finish, starting up included, which is most
 of these short runs on Windows (the first row); the others inside a program
 that's already running. With work big enough that starting up hardly counts, and
-taken off, machine code is the quickest of them, but at making records, where
-WebAssembly makes none at all when they don't outlive the loop:
+taken off, machine code is the quickest of them at all of these, even making
+records, which WebAssembly doesn't make at all when they don't outlive the loop:
 
 | `npm run bench -- --big` | JIT | WebAssembly | Machine code |
 |:--|--:|--:|--:|
-| 2,000,000 records, made and read | 166 ms | **61 ms** | 64 ms |
-| a list: 3,000,000 added, then summed | 116 ms | 279 ms | **54 ms** |
-| a list: `for each` over 3,000,000 | 142 ms | 223 ms | **43 ms** |
-| `set item` 5,000,000 times | 235 ms | 94 ms | **69 ms** |
-| 2,000,000 words counted in a dictionary | 274 ms | 218 ms | **101 ms** |
-| 300,000 records in a list | 108 ms | 177 ms | **46 ms** |
-| 200,000 pieces of text joined | 54 ms | 140 ms | **26 ms** |
+| 2,000,000 records, made and read | 209 ms | 68 ms | **63 ms** |
+| a list: 3,000,000 added, then summed | 158 ms | 337 ms | **41 ms** |
+| a list: `for each` over 3,000,000 | 170 ms | 318 ms | **34 ms** |
+| `set item` 5,000,000 times | 321 ms | 118 ms | **24 ms** |
+| 2,000,000 words counted in a dictionary | 348 ms | 243 ms | **92 ms** |
+| 300,000 records in a list | 135 ms | 208 ms | **33 ms** |
+| 200,000 pieces of text joined | 57 ms | 164 ms | **20 ms** |
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 2,400
 lines of Moth that compile any Moth program, itself included, to exactly the
@@ -197,15 +197,15 @@ $ ./fib.exe
 Against C, Rust and Python, with the same four programs written in each
 ([`versus/`](versus)), every one timed from start to finish, it's about as fast
 as C and Rust on primes and decimal maths, as fast as C on a plain loop (which
-Rust does three times as fast again), 1.35 times as slow as C on function calls
-and 1.5 times as slow as Rust, and 19 to 290 times as fast as Python:
+Rust does three times as fast again), 1.25 times as slow as C on function calls
+and 1.4 times as slow as Rust, and 20 to 300 times as fast as Python:
 
 | `npm run versus` | C | Rust | Moth, machine code | JavaScript engine | Python |
 |:--|--:|--:|--:|--:|--:|
-| fib(32): 7 million calls | 20 ms | 18 ms | 27 ms | 265 ms | 517 ms |
-| adding 1 to 100,000,000 | 36 ms | 11 ms | 35 ms | 720 ms | 10.1 s |
-| primes up to 300,000 | 71 ms | 72 ms | 71 ms | 250 ms | 2.1 s |
-| 30,000,000 steps of decimal maths | 48 ms | 48 ms | 48 ms | 342 ms | 4.3 s |
+| fib(32): 7 million calls | 20 ms | 18 ms | 25 ms | 281 ms | 521 ms |
+| adding 1 to 100,000,000 | 36 ms | 10 ms | 37 ms | 767 ms | 11.1 s |
+| primes up to 300,000 | 71 ms | 71 ms | 72 ms | 262 ms | 2.2 s |
+| 30,000,000 steps of decimal maths | 48 ms | 51 ms | 49 ms | 357 ms | 4.6 s |
 
 On Windows 11, with MSVC's `cl /O2`, `rustc -O` (Rust 1.89) and Python 3.13,
 each program run once to warm up, which Windows' virus checker would otherwise
@@ -215,8 +215,8 @@ that could go wrong is checked. machine.moth gets there by knowing, as it
 writes the code, what each variable is sure to hold, and leaving out the
 checks that can't fail; by working out, across the whole program, what each
 function is always given and always gives back, so a call needs no checks
-either; by keeping a loop's busiest variables in the
-processor's registers; and by running a loop that only works out whole
+either, and putting a small function's code in line where it's called; by
+keeping a loop's busiest variables in the processor's registers; and by running a loop that only works out whole
 numbers as 64-bit whole numbers, which goes back to decimals the moment a sum
 gets too big to be exact.
 
@@ -225,11 +225,11 @@ line, written in Moth: it reads a program and the files it uses, compiles it
 with machine.moth and writes the program it makes. Made into machine code, it's
 `moth.exe` (`moth` on Linux), which needs neither JavaScript nor Rust, nor any
 other compiler, and builds itself into exactly the bytes Node.js built it into,
-in about 4 seconds:
+in about 9 seconds:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (18,177,024 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (19,020,288 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -886,10 +886,10 @@ machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
 $ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
-compiled moth.moth to machine code for Windows -> moth.exe (18,177,024 bytes)
+compiled moth.moth to machine code for Windows -> moth.exe (19,020,288 bytes)
 ```
 
-That's the same 18,177,024 bytes Node.js made of it, and the moth.exe they make
+That's the same 19,020,288 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -1060,11 +1060,19 @@ calls that led there.
   MOTH_VSCODE=1, the extension in VS Code's own extension host
 - tasks: what they say, fail with and give back, against the JavaScript engine,
   with names shared, thousands of them, tasks starting tasks past the threads
-  there are, five threads making far more than they keep, and files read and written by tasks at once; a task counting while
-  the program waits for a line typed half a second late, running a program,
-  sleeping in a library's function while the program counts, `qsort` calling a
-  task back, and a window's timer ticking while a task works, on Windows and
-  Linux; and a program that starts no task made to the same bytes as before
+  there are, five threads making far more than they keep, and files read and
+  written by tasks at once; a task counting while the program waits for a line
+  typed half a second late, running a program, sleeping in a library's
+  function while the program counts, `qsort` calling a task back, and a
+  window's timer ticking while a task works, on Windows and Linux
+- functions put in line and inputs in registers: mistakes inside with the
+  trail a call shows, a try around them, called before they're made and at the
+  most calls there can be, inputs that say what they must be and ones with no
+  value yet, early returns, sums past 2^53, and one to five inputs; and lists,
+  text and records where the code is: every number that isn't one of a list's,
+  text joined to text and digits in place and not, and records of other shapes
+  at the same place; in machine code on Windows and Linux, against the
+  JavaScript engine
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,

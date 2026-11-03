@@ -234,7 +234,7 @@ to new_asm
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
         library_callbacks empty dictionary, callback_jobs empty list, shipping nothing, task_runtime no, threading no,
-        guarded empty list, released empty list
+        guarded empty list, released empty list, last_store nothing, field_spots 0
     set code of made to hot of made
     return made
 end
@@ -270,6 +270,7 @@ end
 to mark with a, name
     set table to labels of a
     set item name of table to record with section buffer of a, at length of code of a
+    set last_store of a to nothing
 end
 
 to fixup with a, name, addend, extra
@@ -676,12 +677,36 @@ to sse with a, pre, op, x, at
     enc(a, (list of pre), no, (list of 0x0F, op), x, at, empty list)
 end
 
+# A load of what the instruction just before stored, from where it stored it, with nothing that can jump
+# in between (a label marked there forgets it), is the register it was stored from: no load at all, or a
+# move between registers.
 to movsd_load with a, x, at
+    set was to last_store of a
+    if was is not nothing and buffer of was is buffer of a and at of was is length of code of a and same_place(place of was, at)
+        if x of was is not x
+            movapd(a, x, x of was)
+        end
+        return nothing
+    end
     sse(a, 0xF2, 0x10, x, at)
 end
 
 to movsd_store with a, at, x
     sse(a, 0xF2, 0x11, x, at)
+    set last_store of a to record with buffer buffer of a, at length of code of a, place at, x x
+end
+
+to same_place with p, q
+    if mode of p is not mode of q
+        return no
+    end
+    if mode of p is "base"
+        return r of p is r of q and disp of p is disp of q
+    end
+    if mode of p is "rip"
+        return label of p is label of q and addend of p is addend of q
+    end
+    return no
 end
 
 to movapd with a, x, y
@@ -824,6 +849,20 @@ end
 # fewest digits that read back as it (Steele and White's method, as Burger and Dybvig put it), also with
 # big whole numbers.
 
+# rax a whole number from 0 to 2^64 - 1: rax gets a tenth of it, rounded down, and rdx what's left over, as
+# `div` by 10 would, but with a multiplication: by 2^67 / 10, rounded up, then the top 67 bits (exact for
+# every such number). Uses rcx and r9.
+to tenth with a
+    mov_rr(a, r9, rax)
+    movi64(a, rcx, list of 0xCD, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC)
+    unary(a, "mul", rcx)
+    shifti(a, "shr", rdx, 3)
+    mov_rr(a, rax, rdx)
+    imul_ri(a, rcx, rdx, 10)
+    mov_rr(a, rdx, r9)
+    alu(a, "sub", rdx, rcx)
+end
+
 to emit_numbers with a
     # rt_digits: rax: a whole number's digits go in dbuf; rcx: how many
     set again to new_label(a)
@@ -831,10 +870,8 @@ to emit_numbers with a
     push_r(a, rdi)
     lea(a, rsi, rip_plus("dbuf", 40))
     mov_rr(a, r8, rsi)
-    movi(a, r9, 10)
     mark(a, again)
-    movi(a, rdx, 0)
-    unary(a, "div", r9)
+    tenth(a)
     alui(a, "add", rdx, 48)
     dec_r(a, rsi)
     store8(a, mem(rsi, 0), rdx)
@@ -2298,6 +2335,7 @@ to emit_mistakes with a
     load(a, rax, rip("try_top")) # inside a try: what failed, or the mistake's message, goes to its `if it fails`
     test_rr(a, rax, rax)
     jcc(a, cc_e, uncaught)
+    storei(a, rip("err_fake_fn"), 0)
     load(a, rcx, rip("fail_has"))
     test_rr(a, rcx, rcx)
     jcc(a, cc_e, as_text)
@@ -2341,6 +2379,22 @@ to emit_mistakes with a
     point_at_text(a, "^")
     call_to(a, "rt_e_text")
     mov_rr(a, rbx, rbp) # the calls in progress, innermost first, one line for a run of the same call
+    set real_frames to new_label(a)
+    load(a, rax, rip("err_fake_fn")) # in a function put in line: first a frame as its call would have made,
+    test_rr(a, rax, rax) # going back to a call's number, as after a call, and on to the frame it was in
+    jcc(a, cc_e, real_frames)
+    dec_r(a, rax)
+    load(a, rdx, rip("err_fake_site"))
+    shifti(a, "shl", rdx, 8)
+    alui(a, "or", rdx, 0xA9)
+    lea(a, rcx, rip("err_fake_mark"))
+    store(a, mem(rcx, 0), rdx)
+    alui(a, "sub", rsp, 24)
+    store(a, mem(rsp, 0), rax)
+    store(a, mem(rsp, 8), rbp)
+    store(a, mem(rsp, 16), rcx)
+    lea(a, rbx, mem(rsp, 8))
+    mark(a, real_frames)
     movi(a, r12, -1)
     movi(a, r13, 0)
     movi(a, r14, 0)
@@ -3449,8 +3503,7 @@ to emit_builder with a
     alu(a, "add", rdi, rax)
     alu(a, "add", rax, rcx)
     store(a, rip("b_len"), rax)
-    rep_movsb(a)
-    ret(a)
+    jmp_to(a, "rt_copy")
 
     # rt_b_byte: the byte in al; uses rax, rcx and rdi
     mark(a, "rt_b_byte")
@@ -3470,8 +3523,31 @@ to emit_builder with a
     set counting to new_label(a)
     set follower to new_label(a)
     set counted to new_label(a)
+    # Eight at a time first: a byte that follows another in a character is 10xxxxxx, so its top bit and not
+    # the one below it; those top bits, one in each byte, added up by a multiplication into the top byte,
+    # are how many of the eight aren't a character's first.
+    set eights to new_label(a)
     mark(a, "rt_b_chars")
     movi(a, rax, 0)
+    push_r(a, r8)
+    mark(a, eights)
+    alui(a, "cmp", rcx, 8)
+    jcc(a, cc_b, counting)
+    load(a, rdx, mem(rsi, 0))
+    mov_rr(a, r8, rdx)
+    shifti(a, "shl", r8, 1)
+    unary(a, "not", r8)
+    alu(a, "and", rdx, r8)
+    shifti(a, "shr", rdx, 7)
+    movi64(a, r8, list of 1, 1, 1, 1, 1, 1, 1, 1)
+    alu(a, "and", rdx, r8)
+    imul_rr(a, rdx, r8)
+    shifti(a, "shr", rdx, 56)
+    alui(a, "add", rax, 8)
+    alu(a, "sub", rax, rdx)
+    alui(a, "add", rsi, 8)
+    alui(a, "sub", rcx, 8)
+    jmp_to(a, eights)
     mark(a, counting)
     test_rr(a, rcx, rcx)
     jcc(a, cc_e, counted)
@@ -3485,6 +3561,7 @@ to emit_builder with a
     dec_r(a, rcx)
     jmp_to(a, counting)
     mark(a, counted)
+    pop_r(a, r8)
     ret(a)
 
     # rt_text_from: rsi, rcx: a new text of those bytes, in rax; rt_text_from_room: with rdx bytes more to
@@ -3517,6 +3594,38 @@ to emit_builder with a
     pop_r(a, r13)
     pop_r(a, r12)
     pop_r(a, rbx)
+    ret(a)
+
+    # rt_copy: rcx bytes from rsi to rdi, which end up past them; short ones eight at a time, as `rep movsb`
+    # takes a while to start
+    set copy_big to new_label(a)
+    set copy_eights to new_label(a)
+    set copy_bytes to new_label(a)
+    set copied to new_label(a)
+    mark(a, "rt_copy")
+    alui(a, "cmp", rcx, 64)
+    jcc(a, cc_ae, copy_big)
+    mark(a, copy_eights)
+    alui(a, "cmp", rcx, 8)
+    jcc(a, cc_b, copy_bytes)
+    load(a, rax, mem(rsi, 0))
+    store(a, mem(rdi, 0), rax)
+    alui(a, "add", rsi, 8)
+    alui(a, "add", rdi, 8)
+    alui(a, "sub", rcx, 8)
+    jmp_to(a, copy_eights)
+    mark(a, copy_bytes)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, copied)
+    load8(a, rax, mem(rsi, 0))
+    store8(a, mem(rdi, 0), rax)
+    inc_r(a, rsi)
+    inc_r(a, rdi)
+    dec_r(a, rcx)
+    jmp_to(a, copy_bytes)
+    mark(a, copy_big)
+    rep_movsb(a)
+    mark(a, copied)
     ret(a)
 
     mark(a, "rt_b_text") # the builder's bytes as a new text, in rax
@@ -3567,7 +3676,111 @@ to emit_builder with a
     set fits_after to new_label(a)
     set too_long to new_label(a)
     set short_join to new_label(a)
+    # rt_join, two texts, or text and a whole number below 10^15, whose digits are written out as a text of
+    # their own in jn_head and jn_buf, and not so long together that they could be past JavaScript's
+    # longest: the second's bytes after the first's, in the first's block if it ends it and has room, else in
+    # a new one with room to grow, as below; the characters, the two counts added up
+    set by_builder to new_label(a)
+    set not_joined to new_label(a)
+    set new_room to new_label(a)
+    set small_room to new_label(a)
+    set made_bytes to new_label(a)
+    set first_text to new_label(a)
+    set second_text to new_label(a)
+    set sides_known to new_label(a)
     mark(a, "rt_join")
+    for each r in list of rbx, r12, r13, rsi, rdi
+        push_r(a, r)
+    end
+    movq_rx(a, rbx, xmm2) # the first and the second, which the collector sees in these registers
+    mov_rr(a, rdx, rbx)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, first_text)
+    small_digits(a, xmm2, not_joined) # a number first: the second must be text
+    lea(a, rbx, rip("jn_head"))
+    movq_rx(a, r12, xmm1)
+    mov_rr(a, rdx, r12)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_ne, not_joined)
+    untag(a, r12)
+    jmp_to(a, sides_known)
+    mark(a, first_text)
+    untag(a, rbx)
+    movq_rx(a, r12, xmm1)
+    mov_rr(a, rdx, r12)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_e, second_text)
+    small_digits(a, xmm1, not_joined)
+    lea(a, r12, rip("jn_head"))
+    jmp_to(a, sides_known)
+    mark(a, second_text)
+    untag(a, r12)
+    mark(a, sides_known)
+    load(a, rcx, mem(rbx, 0))
+    alu_load(a, "add", rcx, mem(r12, 0))
+    alui(a, "cmp", rcx, max_text)
+    jcc(a, cc_a, not_joined)
+    mov_rr(a, rax, rbx)
+    call_to(a, "rt_tail_block")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, new_room)
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "add", rcx, mem(r12, 0))
+    alu_load(a, "cmp", rcx, mem(rax, 8))
+    jcc(a, cc_a, new_room)
+    load(a, rdi, mem(rax, 0)) # in place: after the first's bytes, which are the block's last
+    store(a, mem(rax, 0), rcx)
+    alu(a, "add", rdi, rax)
+    alui(a, "add", rdi, 16)
+    load(a, rsi, mem(r12, 16))
+    load(a, rcx, mem(r12, 0))
+    call_to(a, "rt_copy")
+    load(a, r13, mem(rbx, 16))
+    jmp_to(a, made_bytes)
+    mark(a, new_room)
+    load(a, rcx, mem(rbx, 0))
+    alu_load(a, "add", rcx, mem(r12, 0))
+    movi(a, rdx, 0)
+    alui(a, "cmp", rcx, 256)
+    jcc(a, cc_b, small_room)
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shr", rdx, 1)
+    mark(a, small_room)
+    call_to(a, "rt_bytes_room")
+    mov_rr(a, r13, rax)
+    mov_rr(a, rdi, rax)
+    load(a, rsi, mem(rbx, 16))
+    load(a, rcx, mem(rbx, 0))
+    call_to(a, "rt_copy")
+    load(a, rsi, mem(r12, 16))
+    load(a, rcx, mem(r12, 0))
+    call_to(a, "rt_copy")
+    mark(a, made_bytes)
+    movi(a, rcx, 24)
+    call_to(a, "rt_alloc")
+    load(a, rcx, mem(rbx, 0))
+    alu_load(a, "add", rcx, mem(r12, 0))
+    store(a, mem(rax, 0), rcx)
+    load(a, rcx, mem(rbx, 8))
+    alu_load(a, "add", rcx, mem(r12, 8))
+    store(a, mem(rax, 8), rcx)
+    store(a, mem(rax, 16), r13)
+    movi64(a, rcx, tag_text)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    for each r in list of rdi, rsi, r13, r12, rbx
+        pop_r(a, r)
+    end
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_joined)
+    for each r in list of rdi, rsi, r13, r12, rbx
+        pop_r(a, r)
+    end
+    mark(a, by_builder)
     movsd_store(a, rip("j_a"), xmm2)
     movsd_store(a, rip("j_b"), xmm1)
     call_to(a, "rt_b_reset")
@@ -5464,6 +5677,28 @@ to emit_records with a
     movi(a, rax, 2)
     ret(a)
 
+    # rt_field_noted: as rt_field, and where the field was among the record's, 16 bytes each, goes where r10
+    # points, for that `x of p` to look first next time (see gen_field)
+    mark(a, "rt_field_noted")
+    movsd_store(a, rip("err_a"), xmm0)
+    store(a, rip("err_field"), rdx)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_record)
+    jcc(a, cc_ne, not_record)
+    untag(a, rax)
+    load(a, r9, mem(rax, 16))
+    call_to(a, "rt_record_find")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, missing)
+    mov_rr(a, rcx, rax)
+    alu(a, "sub", rcx, r9)
+    store(a, mem(r10, 0), rcx)
+    movsd_load(a, xmm0, mem(rax, 8))
+    movi(a, rax, 0)
+    ret(a)
+
     # rt_record_ref: checks that field rdx of xmm0 can be changed: rax 0, or 2 with err_why 3
     set changeable to new_label(a)
     mark(a, "rt_record_ref")
@@ -5486,6 +5721,25 @@ to emit_records with a
     untag(a, rax)
     movq_rx(a, r8, xmm2)
     jmp_to(a, "rt_record_put")
+
+    # rt_set_field_noted: as rt_set_field, and where the field is now among the record's goes where r10
+    # points (see gen_field)
+    mark(a, "rt_set_field_noted")
+    movq_rx(a, rax, xmm0)
+    untag(a, rax)
+    movq_rx(a, r8, xmm2)
+    push_r(a, rax)
+    push_r(a, rdx)
+    push_r(a, r10)
+    call_to(a, "rt_record_put")
+    pop_r(a, r10)
+    pop_r(a, rdx)
+    pop_r(a, rax)
+    load(a, r9, mem(rax, 16))
+    call_to(a, "rt_record_find")
+    alu(a, "sub", rax, r9)
+    store(a, mem(r10, 0), rax)
+    ret(a)
 
     # rt_why_field: what was wrong with a field, into the builder
     set why_2 to new_label(a)
@@ -6642,8 +6896,21 @@ to emit_builtins with a
     shifti(a, "shl", rcx, 3)
     alu(a, "add", rax, rcx)
     load(a, rax, mem(rax, 0))
+    set shown_item to new_label(a)
+    set next_item to new_label(a)
+    mov_rr(a, rdx, rax) # text, as it is
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_text)
+    jcc(a, cc_ne, shown_item)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    load(a, rsi, mem(rax, 16))
+    call_to(a, "rt_b_bytes")
+    jmp_to(a, next_item)
+    mark(a, shown_item)
     movi(a, rdx, 0)
     call_to(a, "rt_b_value")
+    mark(a, next_item)
     inc_r(a, r13)
     jmp_to(a, joining)
     mark(a, joined)
@@ -6867,7 +7134,16 @@ to emit_builtins with a
     # `as text`: bytes read as UTF-8, a mistake in it as U+FFFD and a byte order mark at the start dropped;
     # anything else as `say` shows it
     set decode_bytes to new_label(a)
+    set not_digits to new_label(a)
     mark(a, "rt_as_text")
+    small_digits(a, xmm0, not_digits) # a whole number below 10^15: its digits, written straight out
+    load(a, rsi, rip_plus("jn_head", 16))
+    load(a, rcx, rip("jn_head"))
+    call_to(a, "rt_text_from")
+    movq_xr(a, xmm0, rax)
+    movi(a, rax, 0)
+    ret(a)
+    mark(a, not_digits)
     movq_rx(a, rax, xmm0)
     shifti(a, "shr", rax, 48)
     alui(a, "cmp", rax, kind_bytes)
@@ -27914,8 +28190,13 @@ to emit_runtime with st
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
         "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d",
-        "err_file", "err_reason", "asked"
+        "err_file", "err_reason", "asked", "err_fake_fn", "err_fake_site", "err_fake_mark"
         reserve(a, name, 8, 8)
+    end
+    reserve(a, "jn_head", 24, 8)
+    reserve(a, "jn_buf", 24, 8)
+    for each k from 1 to field_spots of a # where each `x of p` found its field last
+        reserve(a, "FS" + k, 8, 8)
     end
     if net of a # going online's own: the names it reads and the memory it reads a site into
         for each name in list of "net_name", "net_url", "net_next", "net_copy", "net_buf", "net_whost", "net_wpath", "net_argv",
@@ -36211,7 +36492,7 @@ to new_state with a, program_name, files, source, target
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
         uses_controls no, uses_choose no, uses_files no, sigs nothing, seen_inputs empty dictionary,
         seen_gives empty dictionary, escaped empty dictionary, live no, debugging no, uses_threads no, uses_waitfor no,
-        threaded no
+        threaded no, inline_bodies empty dictionary
 end
 
 # The program with the debugger's code before it, and between them the debugger told the program's name and
@@ -36247,7 +36528,7 @@ to new_fc with st, scope, main, name, inputs, own
     return record with st st, a a of st, scope scope, main main, name name, inputs inputs, own own, hidden 0,
         most_hidden 0, pushed 0, most_pushed 0, loops nothing, done nothing, tries 0, saved_try nothing, level 0,
         env_slot nothing, outer_slot nothing, facts empty dictionary, cache empty dictionary, next_reg 8, open no, fn nothing,
-        marks nothing, marked 0
+        marks nothing, marked 0, inlining nothing
 end
 
 # where a mistake at `at` happened, in the read-only data: "file:line:col: ", then "\n", the line, and a
@@ -36404,6 +36685,7 @@ to fail_stub with fc, at, message
     end
     set label to new_label(a)
     mark(a, label)
+    fake_call(fc)
     lea(a, rsi, rip(site))
     call_to(a, "rt_e_start")
     point_at_text(a, message)
@@ -36414,9 +36696,19 @@ to fail_stub with fc, at, message
     return label
 end
 
+# in the code of a function put in line, a mistake's trail starts with the call it would have been: which
+# function, and where it was called from (see rt_e_end)
+to fake_call with fc
+    if inlining of fc is not nothing
+        storei(a of fc, rip("err_fake_fn"), (id of f of inlining of fc) + 1)
+        storei(a of fc, rip("err_fake_site"), site of inlining of fc)
+    end
+end
+
 # the start of a mistake whose message is put together as it happens: after it, the pieces, then rt_e_end
 to stub_start with fc, at
     set a to a of fc
+    fake_call(fc)
     lea(a, rsi, rip(site_of(fc, at)))
     call_to(a, "rt_e_start")
 end
@@ -36827,21 +37119,35 @@ to gen_function with st, f
     set total to length of names of scope
     set with_env to makes_functions(body of f)
     set own to total - n
+    set given_in to n # how many inputs are where the call pushed them, above where rbp points
+    set in_regs to regs_in(st, f)
     if with_env
         set own to 0
+    else if in_regs
+        set own to total
+        set given_in to 0
     end
     mark(a, label of f)
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
     push_i32(a, id of f)
     set sized to frame_size(a, nothing)
-    if own is greater than 0
+    set first_own to 0
+    if in_regs
+        set first_own to n
+    end
+    if own is greater than first_own
         movi64(a, rax, bits_unset)
-        for each j from 0 to own - 1
+        for each j from first_own to own - 1
             store(a, mem(rbp, -16 - 8 * j), rax)
         end
     end
-    set fc to new_fc(st, scope, no, name of f, n, own)
+    if in_regs # its inputs, from xmm0 up, into the frame as its first variables
+        for each i from 1 to n
+            movsd_store(a, mem(rbp, -16 - 8 * (i - 1)), i - 1)
+        end
+    end
+    set fc to new_fc(st, scope, no, name of f, given_in, own)
     set level of fc to level of f
     set fn of fc to f
     if not with_env # its inputs have values, and one that must be a number is one
@@ -37074,9 +37380,18 @@ to gen_statement with fc, s
         gen_expr(fc, value of s)
     else if what is "setItem" # checked before the value is worked out, as the engines check it
         set target to target of s
-        gen_pair(fc, subject of target, index of target)
+        set kinds to gen_pair(fc, subject of target, index of target)
+        set slow to new_label(a)
+        set checked to new_label(a)
+        set of_list to new_label(a)
+        list_kind(a, of_list) # a list and an item it has: nothing for the runtime to look at
+        mark(a, slow)
         call_to(a, "rt_item_ref")
         why_stub(fc, at of target, "rt_why_item")
+        jmp_to(a, checked)
+        mark(a, of_list)
+        list_slot(fc, item 2 of kinds, slow)
+        mark(a, checked)
         push_value(fc)
         movapd(a, xmm0, xmm1)
         push_value(fc)
@@ -37084,8 +37399,30 @@ to gen_statement with fc, s
         movapd(a, xmm2, xmm0)
         pop_value(fc, xmm1)
         pop_value(fc, xmm0)
+        set set_slow to new_label(a)
+        set was_set to new_label(a)
+        movq_rx(a, rax, xmm0) # a list: its item, where it is now, as the value worked out may have moved it
+        mov_rr(a, rdx, rax)
+        shifti(a, "shr", rdx, 48)
+        alui(a, "cmp", rdx, kind_list)
+        jcc(a, cc_ne, set_slow)
+        untag(a, rax)
+        cvttsd2si(a, rcx, xmm1)
+        dec_r(a, rcx)
+        shifti(a, "shl", rcx, 3)
+        load(a, rax, mem(rax, 16))
+        alu(a, "add", rax, rcx)
+        movsd_store(a, mem(rax, 0), xmm2)
+        mark(a, was_set)
+        set was_cold to enter_cold(a)
+        mark(a, set_slow)
         call_to(a, "rt_set_item")
-        why_stub(fc, at of target, "rt_why_item")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, was_set)
+        stub_start(fc, at of target)
+        call_to(a, "rt_why_item")
+        jmp_to(a, "rt_e_end")
+        leave_cold(a, was_cold)
     else if what is "each"
         gen_each(fc, s)
     else if what is "try"
@@ -37099,8 +37436,32 @@ to gen_statement with fc, s
         gen_expr(fc, value of s)
         movapd(a, xmm2, xmm0)
         pop_value(fc, xmm0)
-        lea(a, rdx, rip(text_object(a, name of s)))
-        call_to(a, "rt_set_field")
+        set field_spots of a to field_spots of a + 1 # where it found the field last, looked at first (see gen_field)
+        set spot to "FS" + field_spots of a
+        set named to text_object(a, name of s)
+        set slow to new_label(a)
+        set put to new_label(a)
+        movq_rx(a, rax, xmm0)
+        untag(a, rax)
+        load(a, r8, rip(spot))
+        load(a, rcx, mem(rax, 0))
+        shifti(a, "shl", rcx, 4)
+        alu(a, "cmp", r8, rcx)
+        jcc(a, cc_ae, slow)
+        load(a, r9, mem(rax, 16))
+        alu(a, "add", r9, r8)
+        lea(a, rdx, rip(named))
+        alu_load(a, "cmp", rdx, mem(r9, 0))
+        jcc(a, cc_ne, slow)
+        movsd_store(a, mem(r9, 8), xmm2)
+        mark(a, put)
+        set was to enter_cold(a)
+        mark(a, slow)
+        lea(a, rdx, rip(named))
+        lea(a, r10, rip(spot))
+        call_to(a, "rt_set_field_noted")
+        jmp_to(a, put)
+        leave_cold(a, was)
     else if what is "remove"
         gen_pair(fc, key of s, target of s)
         call_to(a, "rt_remove")
@@ -37353,6 +37714,25 @@ to gen_add with fc, s
     set in_memory to new_label(a)
     set kinds to new_label(a)
     mark(a, odd_before) # the variable is NaN: no value yet, nothing, yes or no, text or a list, or the number NaN
+    set not_roomy to new_label(a)
+    movq_rx(a, rax, xmm0) # a list with room: the value goes at its end, here
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_ne, not_roomy)
+    untag(a, rax)
+    load(a, rcx, mem(rax, 0))
+    alu_load(a, "cmp", rcx, mem(rax, 8))
+    jcc(a, cc_ae, not_roomy)
+    load(a, r8, mem(rax, 16))
+    mov_rr(a, r9, rcx)
+    shifti(a, "shl", r9, 3)
+    alu(a, "add", r8, r9)
+    movsd_store(a, mem(r8, 0), xmm1)
+    inc_r(a, rcx)
+    store(a, mem(rax, 0), rcx)
+    jmp_to(a, added)
+    mark(a, not_roomy)
     movq_rx(a, rax, xmm0)
     movi64(a, rcx, bits_unset)
     alu(a, "cmp", rax, rcx)
@@ -37826,7 +38206,18 @@ to expr_kind with fc, e, known
         return "whole"
     end
     if what is "call"
+        set put_in_line to inline_target(fc, e)
+        if put_in_line is not nothing
+            return expr_kind(fc, inline_subst(body of put_in_line, args of e), known)
+        end
         return call_kind(fc, e)
+    end
+    if what is "choose"
+        set made to expr_kind(fc, last of e, known)
+        for each g in guards of e
+            set made to kind_join(made, expr_kind(fc, value of g, known))
+        end
+        return made
     end
     return "value"
 end
@@ -37928,6 +38319,7 @@ to note_escaped with held, f
     end
     set sig to sig_of(st of held, f)
     if sig is not nothing
+        set direct of sig to no
         set ins to inputs of sig
         for each i from 1 to length of ins
             if item i of ins is not "value"
@@ -37989,7 +38381,8 @@ to sigs_met with sigs, held
         if id is in seen_gives of held
             set gives to kind_meet(gives, item id of seen_gives of held)
         end
-        set item id of made to record with inputs ins, gives gives
+        set reached_by_name to direct of sig and not (id is in escaped of held)
+        set item id of made to record with inputs ins, gives gives, direct reached_by_name
     end
     return made
 end
@@ -37998,7 +38391,7 @@ to sigs_same with x, y
     for each id in keys of x
         set one to item id of x
         set other to item id of y
-        if gives of one is not gives of other
+        if gives of one is not gives of other or direct of one is not direct of other
             return no
         end
         for each i from 1 to length of inputs of one
@@ -38013,6 +38406,27 @@ end
 # whether the code just written gave every function what its sig says, and every function gave it
 to sigs_hold with st
     return sigs_same(sigs_met(sigs of st, st), sigs of st)
+end
+
+# Whether a function gets its inputs in xmm0 to xmm3, rather than pushed: one only ever called by its name
+# (never used as a value, started as a task, or called back), as the guess says and writing the code
+# checks, with one to four inputs that say nothing of what they must be, that makes no functions. It keeps
+# them in its frame, below where rbp points, before its own variables, as if they were its first ones.
+to regs_in with st, f
+    set sig to sig_of(st, f)
+    if sig is nothing or not direct of sig or native of f is not nothing
+        return no
+    end
+    set n to length of params of f
+    if n is less than 1 or n is greater than 4 or makes_functions(body of f)
+        return no
+    end
+    for each k in kinds of f
+        if k is not -1
+            return no
+        end
+    end
+    return yes
 end
 
 # whether code always leaves before its end: by a return, a mistake or the program stopping
@@ -38046,7 +38460,7 @@ to guess_sigs with st, body
             for each p in params of f
                 add "whole" to ins
             end
-            set item (id of f) of sigs to record with inputs ins, gives "whole"
+            set item (id of f) of sigs to record with inputs ins, gives "whole", direct yes
         end
     end
     set sigs of st to sigs
@@ -38288,6 +38702,10 @@ to ga_expr with held, fc, e, known
         return "value"
     end
     if what is "call"
+        set put_in_line to inline_target(fc, e)
+        if put_in_line is not nothing # the function isn't called: what it works out is worked out here
+            return ga_expr(held, fc, inline_subst(body of put_in_line, args of e), known)
+        end
         set kinds to empty list
         for each arg in args of e
             add ga_expr(held, fc, arg, known) to kinds
@@ -38300,6 +38718,14 @@ to ga_expr with held, fc, e, known
         end
         ga_forget_main(known)
         return made
+    end
+    if what is "choose" # a function put in line that returns early
+        set made to nothing
+        for each g in guards of e
+            ga_expr(held, fc, cond of g, known)
+            set made to kind_or_first(made, ga_expr(held, fc, value of g, known))
+        end
+        return kind_join(made, ga_expr(held, fc, last of e, known))
     end
     set made to "value"
     if what is "math"
@@ -38412,6 +38838,10 @@ to scan_expr with fc, info, e, weight
         for each part in args of e
             scan_expr(fc, info, part, weight)
         end
+    else if what is "call" and inline_target(fc, e) is not nothing # put in line: no call
+        for each part in args of e
+            scan_expr(fc, info, part, weight)
+        end
     else if what is "call" or what is "ask"
         set calls of info to yes
     else # anything else may do anything
@@ -38479,6 +38909,10 @@ to scan_statement with fc, info, s, weight
         scan_expr(fc, info, target of s, weight)
     else if what is "expect"
         scan_expr(fc, info, cond of s, weight)
+    else if what is "call" and inline_target(fc, s) is not nothing # put in line: no call
+        for each part in args of s
+            scan_expr(fc, info, part, weight)
+        end
     else if what is "call"
         set calls of info to yes
     else if what is not "stop" # anything else may do anything
@@ -38750,6 +39184,13 @@ to whole_shape with fc, e, reads
     if what is "negate"
         return whole_shape(fc, operand of e, reads)
     end
+    if what is "call" # a function put in line, with each input in its place
+        set put_in_line to inline_target(fc, e)
+        if put_in_line is nothing or not inline_whole(f of put_in_line)
+            return no
+        end
+        return whole_shape(fc, inline_subst(body of put_in_line, args of e), reads)
+    end
     return no
 end
 
@@ -38973,6 +39414,17 @@ to whole_expr with fc, plan, e, target
     set what to kind of e
     if what is "value" or what is "name"
         whole_operand(fc, plan, rax, e)
+    else if what is "call" # a function put in line: the call's checks, which go the other way if they'd fail
+        set put_in_line to inline_target(fc, e)
+        set bail to whole_bail(fc, plan, target, depth of plan)
+        if fn of fc is nothing or id of fn of fc is not id of f of put_in_line
+            movi64(a, rcx, bits_unset)
+            alu_load(a, "cmp", rcx, place_of(fc, front's resolve(scope of fc, name of e)))
+            jcc(a, cc_e, bail)
+        end
+        alui(a, "cmp", r15, deepest)
+        jcc(a, cc_ae, bail)
+        whole_expr(fc, plan, inline_subst(body of put_in_line, args of e), target)
     else if what is "negate"
         whole_expr(fc, plan, operand of e, target)
         set bail to whole_bail(fc, plan, target, depth of plan)
@@ -39611,6 +40063,26 @@ to gen_expr with fc, e
         cvtsi2sd(a, xmm0, r15)
     else if what is "call"
         set made to gen_call(fc, e, no)
+    else if what is "param" # an input of a function put in line (see gen_inlined), where it's kept
+        movsd_load(a, xmm0, item (index of e) of places of inlining of fc)
+        set made to item (index of e) of given of inlining of fc
+    else if what is "choose" # a function put in line that returns early: as its `if`s and `return`s go
+        set end_at to new_label(a)
+        set ends to nothing
+        set made to nothing
+        for each g in guards of e
+            set next_at to new_label(a)
+            gen_cond(fc, cond of g, next_at, no)
+            set before to facts_copy(facts of fc)
+            set made to kind_or_first(made, gen_expr(fc, value of g))
+            set ends to facts_or_first(ends, facts of fc)
+            jmp_to(a, end_at)
+            mark(a, next_at)
+            set facts of fc to before
+        end
+        set made to kind_or_first(made, gen_expr(fc, last of e))
+        set facts of fc to facts_or_first(ends, facts of fc)
+        mark(a, end_at)
     else if what is "math"
         set made to gen_math(fc, e)
     else if what is "compare"
@@ -39664,9 +40136,19 @@ to gen_expr with fc, e
         kind_stub(fc, at of e, "'length of' needs a list, text, dictionary or bytes, not ")
         set made to "whole"
     else if what is "item"
-        gen_pair(fc, subject of e, index of e)
+        set kinds to gen_pair(fc, subject of e, index of e)
+        set slow to new_label(a)
+        set got to new_label(a)
+        set of_list to new_label(a)
+        list_kind(a, of_list)
+        mark(a, slow) # not a list, or not one of its items: the runtime's way, which says what's wrong
         call_to(a, "rt_item")
         why_stub(fc, at of e, "rt_why_item")
+        jmp_to(a, got)
+        mark(a, of_list)
+        list_slot(fc, item 2 of kinds, slow)
+        movsd_load(a, xmm0, mem(rax, 0))
+        mark(a, got)
     else if what is "record"
         for each part in values of e
             gen_expr(fc, part)
@@ -39708,9 +40190,7 @@ to gen_expr with fc, e
         end
     else if what is "field"
         gen_expr(fc, subject of e)
-        lea(a, rdx, rip(text_object(a, name of e)))
-        call_to(a, "rt_field")
-        why_stub(fc, at of e, "rt_why_field")
+        gen_field(fc, e)
     else if what is "dictionary"
         for each part in items of e
             gen_expr(fc, part)
@@ -39864,10 +40344,81 @@ to gen_expr with fc, e
 end
 
 # the values whose code calls no function the program made, or forgets what's known when it does
-set plain_values to dictionary where "value" is yes, "name" is yes, "call" is yes, "math" is yes, "compare" is yes,
+set plain_values to dictionary where "value" is yes, "name" is yes, "call" is yes, "param" is yes, "choose" is yes, "math" is yes, "compare" is yes,
     "and" is yes, "or" is yes, "not" is yes, "negate" is yes, "list" is yes, "length" is yes, "item" is yes,
     "record" is yes, "field" is yes, "dictionary" is yes, "builtin" is yes, "read" is yes, "ask" is yes,
     "arguments" is yes, "random" is yes
+
+# `x of p`, with p in xmm0: if it's a record and the field this found last time is where it was then
+# (`spot`, 8 bytes of the program's own for each place a field is read, says which, 16 bytes to a field), it's
+# read there and then; else the runtime looks for it, and notes where it found it
+to gen_field with fc, e
+    set a to a of fc
+    set field_spots of a to field_spots of a + 1
+    set spot to "FS" + field_spots of a
+    set slow to new_label(a)
+    set got to new_label(a)
+    set named to text_object(a, name of e)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rcx, rax)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_record)
+    jcc(a, cc_ne, slow)
+    untag(a, rax)
+    load(a, r8, rip(spot))
+    load(a, rcx, mem(rax, 0))
+    shifti(a, "shl", rcx, 4)
+    alu(a, "cmp", r8, rcx)
+    jcc(a, cc_ae, slow)
+    load(a, r9, mem(rax, 16))
+    alu(a, "add", r9, r8)
+    lea(a, rdx, rip(named))
+    alu_load(a, "cmp", rdx, mem(r9, 0))
+    jcc(a, cc_ne, slow)
+    movsd_load(a, xmm0, mem(r9, 8))
+    mark(a, got)
+    set was to enter_cold(a)
+    mark(a, slow)
+    lea(a, rdx, rip(named))
+    lea(a, r10, rip(spot))
+    call_to(a, "rt_field_noted")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, got)
+    stub_start(fc, at of e)
+    call_to(a, "rt_why_field")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+end
+
+# on to `label` if xmm0 is a list, with rax the value
+to list_kind with a, label
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, rdx, rax)
+    shifti(a, "shr", rdx, 48)
+    alui(a, "cmp", rdx, kind_list)
+    jcc(a, cc_e, label)
+end
+
+# With a list in xmm0 and rax, and an item's number in xmm1 (`index_kind` what's known of it): if the number
+# is a whole number from 1 to the list's length, rax gets where the item is, else on to `slow`, the runtime's
+# way, which says what's wrong. A number whole only to 15 digits goes that way too.
+to list_slot with fc, index_kind, slow
+    set a to a of fc
+    cvttsd2si(a, rcx, xmm1)
+    if index_kind is not "whole"
+        cvtsi2sd(a, xmm2, rcx)
+        ucomisd(a, xmm1, reg_at(xmm2))
+        jcc(a, cc_ne, slow)
+        jcc(a, cc_p, slow)
+    end
+    untag(a, rax)
+    dec_r(a, rcx)
+    alu_load(a, "cmp", rcx, mem(rax, 0))
+    jcc(a, cc_ae, slow) # as unsigned: before item 1, or past the last
+    shifti(a, "shl", rcx, 3)
+    load(a, rax, mem(rax, 16))
+    alu(a, "add", rax, rcx)
+end
 
 # after a call to the runtime: if rax isn't 0, the mistake is `message` and what kind of value err_a is
 to kind_stub with fc, at, message
@@ -39998,6 +40549,17 @@ to gen_math with fc, e
         load_bits(a, xmm1, bits)
         return gen_math_pair(fc, e, kl, kr)
     end
+    if kind of right is "param" and not left_number # an input of a function put in line, from where it's kept
+        set kl to gen_expr(fc, left)
+        set kr to item (index of right) of given of inlining of fc
+        set kept_at to item (index of right) of places of inlining of fc
+        if is_number_kind(kl) and is_number_kind(kr) and op is not "/"
+            sse_math(a, op, xmm0, kept_at)
+            return math_kind(op, kl, kr)
+        end
+        movsd_load(a, xmm1, kept_at)
+        return gen_math_pair(fc, e, kl, kr)
+    end
     if kind of right is "name" and not left_number
         set kl to gen_expr(fc, left)
         set found to front's resolve(scope of fc, name of right)
@@ -40027,6 +40589,47 @@ to gen_math with fc, e
     end
     set kinds to gen_pair(fc, left, right)
     return gen_math_pair(fc, e, item 1 of kinds, item 2 of kinds)
+end
+
+# xmm x, if it's a whole number below 10^15 either way from 0, written out in jn_buf, as `say` writes it
+# (-0 as 0), with jn_head a text of it for rt_join; else on to `other`. Uses rax, rcx, rdx, rdi, r8, r9, xmm4.
+to small_digits with a, x, other
+    set positive to new_label(a)
+    set dividing to new_label(a)
+    set signed to new_label(a)
+    movq_rx(a, rax, x)
+    bit_op(a, "btr", rax, 63)
+    movi64(a, rcx, double_bytes(1000000000000000))
+    alu(a, "cmp", rax, rcx) # NaN, which every value but a number is, and infinities are past it too
+    jcc(a, cc_ae, other)
+    cvttsd2si(a, rax, x)
+    cvtsi2sd(a, xmm4, rax)
+    ucomisd(a, x, reg_at(xmm4))
+    jcc(a, cc_ne, other)
+    mov_rr(a, r8, rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ns, positive)
+    unary(a, "neg", rax)
+    mark(a, positive)
+    lea(a, rdi, rip_plus("jn_buf", 24))
+    mark(a, dividing)
+    tenth(a)
+    alui(a, "add", rdx, 48)
+    dec_r(a, rdi)
+    store8(a, mem(rdi, 0), rdx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, dividing)
+    test_rr(a, r8, r8)
+    jcc(a, cc_ns, signed)
+    dec_r(a, rdi)
+    movi(a, rdx, 45)
+    store8(a, mem(rdi, 0), rdx)
+    mark(a, signed)
+    lea(a, rcx, rip_plus("jn_buf", 24))
+    alu(a, "sub", rcx, rdi)
+    store(a, rip("jn_head"), rcx)
+    store(a, rip_plus("jn_head", 8), rcx)
+    store(a, rip_plus("jn_head", 16), rdi)
 end
 
 # whether a double's 8 bytes, lowest first, are 0 or -0
@@ -40154,6 +40757,267 @@ to plural_of with n, word
     return "" + n + " " + word + "s"
 end
 
+# ---------- functions put in line ----------
+# A call to a function of the program's whose code is one `return` of a small sum (or comparison, or field,
+# or item) of its inputs is that worked out where the call is, with no call made (DESIGN §63). The call's own
+# checks come first, as a call makes them: that the function has been made, its inputs worked out in order
+# (each kept in the caller's frame) and checked if the function says what they must be, and that there's
+# room for one more call. Then its code, each input read from where it was kept; a mistake in there shows
+# the trail it would if the function had been called (see fake_call). As the code calls nothing, a loop with
+# such a call in it keeps its variables in registers, and a loop of whole numbers works the sum out as it
+# works out its own: there, with each input in its place, as one that's a whole number can't go wrong.
+
+set inline_kinds to dictionary where "value" is yes, "name" is yes, "math" is yes, "compare" is yes, "and" is yes,
+    "or" is yes, "not" is yes, "negate" is yes, "length" is yes, "field" is yes, "item" is yes
+
+# The code of a function that can be put in line, each input in it a "param", or no: its `return`'s value,
+# or, for `if` ... `return x` ... `end` before it (or with an `else` that returns, last), a "choose" of
+# them, each condition with what's returned when it holds, then what's returned when none does.
+to inline_body with st, f
+    set known to inline_bodies of st
+    if id of f is in known
+        return item (id of f) of known
+    end
+    set made to no
+    if native of f is nothing
+        set made to inline_choose(body of f, params of f, (record with left 24))
+    end
+    set item (id of f) of known to made
+    return made
+end
+
+# a `return` with a value of what can be put in line, as it's put in line; or no
+to inline_return with block, params, room
+    if length of block is not 1 or kind of item 1 of block is not "return" or value of item 1 of block is nothing
+        return no
+    end
+    return inline_copy(value of item 1 of block, params, room)
+end
+
+to inline_choose with body, params, room
+    set guards to empty list
+    set last to no
+    set n to length of body
+    for each i from 1 to n
+        set st_now to item i of body
+        if kind of st_now is "return" and i is n
+            set last to inline_return((list of st_now), params, room)
+        else if kind of st_now is "if"
+            set cond to inline_copy(cond of st_now, params, room)
+            set value to inline_return(then of st_now, params, room)
+            if cond is no or value is no
+                return no
+            end
+            add (record with cond cond, value value) to guards
+            if length of otherwise of st_now is greater than 0
+                if i is not n
+                    return no
+                end
+                set last to inline_return(otherwise of st_now, params, room)
+            else if i is n
+                return no
+            end
+        else
+            return no
+        end
+        if i is n and last is no
+            return no
+        end
+    end
+    if last is no
+        return no
+    end
+    if length of guards is 0
+        return last
+    end
+    return record with kind "choose", guards guards, last last
+end
+
+# `e` with each input of the function, of `params`, a "param", if it's only what can be put in line, and no
+# more than `room` pieces of it
+to inline_copy with e, params, room
+    set left of room to left of room - 1
+    if left of room is less than 0 or not (kind of e is in inline_kinds)
+        return no
+    end
+    set what to kind of e
+    if what is "value"
+        return e
+    end
+    if what is "name"
+        for each i from 1 to length of params
+            if (lowercase of item i of params) is (lowercase of name of e)
+                return record with kind "param", index i, at at of e
+            end
+        end
+        return no
+    end
+    if what is "not" or what is "negate"
+        set o to inline_copy(operand of e, params, room)
+        if o is no
+            return no
+        end
+        return record with kind what, operand o, at at of e
+    end
+    if what is "length" or what is "field" or what is "item"
+        set sub to inline_copy(subject of e, params, room)
+        if sub is no
+            return no
+        end
+        if what is "length"
+            return record with kind what, subject sub, at at of e
+        end
+        if what is "field"
+            return record with kind what, name name of e, subject sub, at at of e
+        end
+        set ix to inline_copy(index of e, params, room)
+        if ix is no
+            return no
+        end
+        return record with kind what, index ix, subject sub, at at of e
+    end
+    set l to inline_copy(left of e, params, room)
+    set r to inline_copy(right of e, params, room)
+    if l is no or r is no
+        return no
+    end
+    if what is "math"
+        return record with kind what, op op of e, left l, right r, at at of e
+    end
+    if what is "compare"
+        return record with kind what, op op of e, negate negate of e, left l, right r, at at of e
+    end
+    return record with kind what, left l, right r, at at of e
+end
+
+# The function a call `e` goes straight to, and its code, if it's put in line; or nothing. Not when the
+# program is built to be debugged, where every line of a function is a line to stop at.
+to inline_target with fc, e
+    if debugging of st of fc
+        return nothing
+    end
+    set named to functions of st of fc # first, the function of that name made at the top: if its code can't be
+    if name of e is in named and inline_body(st of fc, item (name of e) of named) is no # put in line, no call to it can
+        return nothing
+    end
+    set f to function_at(fc, front's resolve(scope of fc, name of e))
+    if f is nothing or length of args of e is not length of params of f
+        return nothing
+    end
+    if fn of fc is not nothing and id of fn of fc is id of f
+        return nothing
+    end
+    set body to inline_body(st of fc, f)
+    if body is no
+        return nothing
+    end
+    return record with f f, body body
+end
+
+# a function put in line's code with each input the call gives in its place: for working out what kind of
+# value it gives, and for a loop of whole numbers, where an input can't go wrong
+to inline_subst with e, args
+    set what to kind of e
+    if what is "param"
+        return item (index of e) of args
+    end
+    if what is "choose"
+        set guards to empty list
+        for each g in guards of e
+            add (record with cond inline_subst(cond of g, args), value inline_subst(value of g, args)) to guards
+        end
+        return record with kind what, guards guards, last inline_subst(last of e, args)
+    end
+    if what is "value"
+        return e
+    end
+    if what is "not" or what is "negate"
+        set o to inline_subst(operand of e, args)
+        return record with kind what, operand o, at at of e
+    end
+    if what is "length" or what is "field" or what is "item"
+        set sub to inline_subst(subject of e, args)
+        if what is "length"
+            return record with kind what, subject sub, at at of e
+        end
+        if what is "field"
+            return record with kind what, name name of e, subject sub, at at of e
+        end
+        set ix to inline_subst(index of e, args)
+        return record with kind what, index ix, subject sub, at at of e
+    end
+    set l to inline_subst(left of e, args)
+    set r to inline_subst(right of e, args)
+    if what is "math"
+        return record with kind what, op op of e, left l, right r, at at of e
+    end
+    if what is "compare"
+        return record with kind what, op op of e, negate negate of e, left l, right r, at at of e
+    end
+    return record with kind what, left l, right r, at at of e
+end
+
+# what two ways through code meet at: what both give, or know (the first way's, when there's been no other)
+to kind_or_first with was, now
+    if was is nothing
+        return now
+    end
+    return kind_join(was, now)
+end
+
+to facts_or_first with was, now
+    if was is nothing
+        return now
+    end
+    return facts_meet(was, now)
+end
+
+# whether a function put in line can be in a loop of whole numbers: it says nothing of its inputs, or that
+# they're numbers, which whole numbers are
+to inline_whole with f
+    for each k in kinds of f
+        if k is not -1 and k is not 0
+            return no
+        end
+    end
+    return yes
+end
+
+# the call `e` to f, put in line (see above): what kind of value it gives
+to gen_inlined with fc, e, f, body, found
+    set a to a of fc
+    if fn of fc is nothing or id of fn of fc is not id of f # a function running has been made
+        set made_yet to fail_stub(fc, at of e, "there is no function called '" + name of e + "'")
+        movi64(a, rcx, bits_unset)
+        alu_load(a, "cmp", rcx, place_of(fc, found))
+        jcc(a, cc_e, made_yet)
+    end
+    set h to hidden of fc
+    set given to empty list
+    set places to empty list
+    for each arg in args of e
+        add gen_expr(fc, arg) to given
+        set p to hidden_place(fc)
+        movsd_store(a, p, xmm0)
+        add p to places
+    end
+    for each i from 1 to length of places
+        set k to item i of kinds of f
+        if k is not -1
+            check_kind_at(fc, e, f, i, k, item i of places)
+        end
+    end
+    set deep to fail_stub(fc, at of e, "too much recursion: a function kept calling itself")
+    alui(a, "cmp", r15, deepest)
+    jcc(a, cc_ae, deep)
+    set outer to inlining of fc
+    set inlining of fc to record with f f, site call_site(fc, at of e), places places, given given
+    set made to gen_expr(fc, body)
+    set inlining of fc to outer
+    set hidden of fc to h
+    return made
+end
+
 # A call: the function must have been made by now, then its inputs are worked out and pushed in order,
 # their number and kinds checked, and the calls in progress counted. rax carries the call's number, which
 # the function keeps in its frame for the trail a mistake shows.
@@ -40170,19 +41034,34 @@ to gen_call with fc, e, statement
         gen_value_call(fc, e, found)
         return "value"
     end
+    set put_in_line to inline_target(fc, e)
+    if put_in_line is not nothing
+        return gen_inlined(fc, e, f, body of put_in_line, found)
+    end
     if fn of fc is nothing or id of fn of fc is not id of f # a function running has been made
         set made_yet to fail_stub(fc, at of e, "there is no function called '" + callee + "'")
         movi64(a, rcx, bits_unset)
         alu_load(a, "cmp", rcx, place_of(fc, found))
         jcc(a, cc_e, made_yet)
     end
-    set given to empty list
-    for each arg in args of e
-        add gen_expr(fc, arg) to given
-        push_value(fc)
-    end
     set n to length of args of e
     set wanted to length of params of f
+    set by_regs to n is wanted and regs_in(st of fc, f)
+    set given to empty list
+    for each i from 1 to n
+        add gen_expr(fc, item i of args of e) to given
+        if i is less than n or not by_regs
+            push_value(fc)
+        end
+    end
+    if by_regs and n is greater than 1 # input k in xmm(k - 1)
+        movapd(a, n - 1, xmm0)
+        set k to n - 1
+        repeat while k is at least 1
+            pop_value(fc, k - 1)
+            set k to k - 1
+        end
+    end
     if n is not wanted
         jmp_to(a, fail_stub(fc, at of e, "'" + callee + "' needs " + plural_of(wanted, "input") + " but got " + n))
     else
@@ -40202,7 +41081,7 @@ to gen_call with fc, e, statement
     note_return(fc, at of e)
     dec_r(a, r15)
     forget_main(fc)
-    if n is greater than 0
+    if n is greater than 0 and not by_regs
         alui(a, "add", rsp, 8 * n)
         set pushed of fc to pushed of fc - n
     end
@@ -40213,10 +41092,15 @@ to gen_call with fc, e, statement
 end
 
 to check_kind with fc, e, f, i, k, n
+    check_kind_at(fc, e, f, i, k, mem(rsp, 8 * (n - i)))
+end
+
+# input i of a call to f, at `place`, checked to be of kind k, as the function says it must be
+to check_kind_at with fc, e, f, i, k, place
     set a to a of fc
     set wrong to new_label(a)
     set fine to new_label(a)
-    load(a, rax, mem(rsp, 8 * (n - i)))
+    load(a, rax, place)
     if k is 0
         mov_rr(a, rdx, rax)
         movi64(a, rcx, bits_nothing)
