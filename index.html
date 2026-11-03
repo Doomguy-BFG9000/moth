@@ -398,7 +398,7 @@ Did you mean 'total'?</pre></div>
     // because the code can come from someone else's share link.
     const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
       + "move turn pen record dictionary where remove keys byte bytes as hex binary shift bit xor read write arguments expect clear draw box circle button random when every milliseconds seconds pressed clicked dragged mouse key fail stop ask use try fails uppercase lowercase split join number position by times each in from with than at least most divisible by of forward back left right up down color width "
-      + "table total average largest smallest chart picture play note beep send json headers checkbox tick untick area showing choice ticked dropdown slider moved choose library gives package function power items").split(" "));
+      + "table total average largest smallest chart picture play note beep send json headers checkbox tick untick area showing choice ticked dropdown slider moved choose library gives package function power items rounded remainder divided").split(" "));
     // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);

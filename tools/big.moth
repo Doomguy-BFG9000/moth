@@ -1,0 +1,317 @@
+# Whole numbers of any size, kept as text: "265252859812191058636308480000000". So `say` shows one, `is`
+# compares two, and save and json keep them as they are. Each function takes such text, or a whole number,
+# and gives text back: `use "big.moth" as big`, then big's times(f, 30), big's power(2, 100).
+
+set part_size to 10000000 # each part holds 7 digits: two multiplied, and what's carried, stay exact
+
+# ---------- reading and writing ----------
+
+# x as a record: whether it's below 0, and its parts, the lowest first, with no 0 part on top (0 has none)
+to read_big with x
+    set written to "" + x
+    set negative to no
+    set start to 1
+    if length of written is at least 1 and item 1 of written is "-"
+        set negative to yes
+        set start to 2
+    end
+    if start is greater than length of written
+        fail with "'" + written + "' isn't a whole number"
+    end
+    for each k from start to length of written
+        if not (item k of written is in "0123456789")
+            fail with "'" + written + "' isn't a whole number"
+        end
+    end
+    set parts to empty list
+    set upto to length of written
+    repeat while upto is at least start
+        set from to upto - 6
+        if from is less than start
+            set from to start
+        end
+        add number of (items from to upto of written) to parts
+        set upto to from - 1
+    end
+    return made_big(negative, parts)
+end
+
+# a sign and parts, without the 0 parts on top; 0 is never below 0
+to made_big with negative, parts
+    set top to length of parts
+    repeat while top is at least 1 and item top of parts is 0
+        set top to top - 1
+    end
+    set kept to items 1 to top of parts
+    return record with negative negative and top is greater than 0, parts kept
+end
+
+# the digits, a "-" first if it's below 0
+to written_big with b
+    set parts to parts of b
+    if length of parts is 0
+        return "0"
+    end
+    set pieces to empty list
+    if negative of b
+        add "-" to pieces
+    end
+    add "" + item (length of parts) of parts to pieces
+    set k to length of parts - 1
+    repeat while k is at least 1 # each part below the top one has all 7 of its digits, 0s first
+        set digits to "" + item k of parts
+        add items 1 to (7 - length of digits) of "0000000" to pieces
+        add digits to pieces
+        set k to k - 1
+    end
+    return join pieces with ""
+end
+
+# x as these functions give it: "007" is "7", and "-0" is "0"
+to whole with x
+    return written_big(read_big(x))
+end
+
+# ---------- the parts' own sums ----------
+
+# -1, 0 or 1: whether parts p are less than, the same as, or more than parts q
+to compare_parts with p, q
+    if length of p is not length of q
+        if length of p is less than length of q
+            return -1
+        end
+        return 1
+    end
+    set k to length of p
+    repeat while k is at least 1
+        if item k of p is not item k of q
+            if item k of p is less than item k of q
+                return -1
+            end
+            return 1
+        end
+        set k to k - 1
+    end
+    return 0
+end
+
+to add_parts with p, q
+    set made to empty list
+    set carry to 0
+    set longest to length of p
+    if length of q is greater than longest
+        set longest to length of q
+    end
+    for each k from 1 to longest
+        set sum to carry
+        if k is at most length of p
+            add item k of p to sum
+        end
+        if k is at most length of q
+            add item k of q to sum
+        end
+        set carry to 0
+        if sum is at least part_size
+            set sum to sum - part_size
+            set carry to 1
+        end
+        add sum to made
+    end
+    if carry is 1
+        add 1 to made
+    end
+    return made
+end
+
+# p - q, where p is at least q
+to take_parts with p, q
+    set made to empty list
+    set borrow to 0
+    for each k from 1 to length of p
+        set left to item k of p - borrow
+        if k is at most length of q
+            set left to left - item k of q
+        end
+        set borrow to 0
+        if left is less than 0
+            set left to left + part_size
+            set borrow to 1
+        end
+        add left to made
+    end
+    return made
+end
+
+to times_parts with p, q
+    if length of p is 0 or length of q is 0
+        return empty list
+    end
+    set made to empty list
+    repeat length of p + length of q times
+        add 0 to made
+    end
+    for each i from 1 to length of p
+        set carry to 0
+        set here to item i of p
+        if here is not 0
+            for each j from 1 to length of q
+                set place to i + j - 1
+                set sum to item place of made + here * item j of q + carry
+                set item place of made to remainder of sum divided by part_size
+                set carry to (sum - item place of made) / part_size
+            end
+            set place to i + length of q
+            repeat while carry is greater than 0
+                set sum to item place of made + carry
+                set item place of made to remainder of sum divided by part_size
+                set carry to (sum - item place of made) / part_size
+                set place to place + 1
+            end
+        end
+    end
+    return made
+end
+
+# parts p times a whole number n from 0 to part_size, plus a whole number `plus` below part_size
+to scaled_parts with p, n, plus
+    set made to empty list
+    set carry to plus
+    for each part in p
+        set sum to part * n + carry
+        set kept to remainder of sum divided by part_size
+        add kept to made
+        set carry to (sum - kept) / part_size
+    end
+    if carry is greater than 0
+        add carry to made
+    end
+    return made
+end
+
+# parts p divided by parts q, which aren't 0: a record with the whole number of times, and what's left
+to divide_parts with p, q
+    if length of q is 1 # one part: a part at a time, from the top
+        set by to item 1 of q
+        set made to empty list
+        repeat length of p times
+            add 0 to made
+        end
+        set left to 0
+        set k to length of p
+        repeat while k is at least 1
+            set here to left * part_size + item k of p
+            set left to remainder of here divided by by
+            set item k of made to (here - left) / by
+            set k to k - 1
+        end
+        return record with times made, left (list of left)
+    end
+    # more: a digit at a time, from the top, each the most times q goes into what's left so far
+    set digits to written_big(record with negative no, parts p)
+    set multiples to list of (empty list)
+    for each d from 1 to 9
+        add scaled_parts(q, d, 0) to multiples
+    end
+    set left to empty list
+    set times_digits to empty list
+    for each c in digits
+        set left to parts of made_big(no, scaled_parts(left, 10, number of c))
+        set d to 0
+        repeat while d is less than 9 and compare_parts(item (d + 2) of multiples, left) is at most 0
+            set d to d + 1
+        end
+        if d is greater than 0
+            set left to parts of made_big(no, take_parts(left, item (d + 1) of multiples))
+        end
+        add "" + d to times_digits
+    end
+    return record with times parts of read_big(join times_digits with ""), left left
+end
+
+# ---------- what a program uses ----------
+
+to plus with a, b
+    set x to read_big(a)
+    set y to read_big(b)
+    if negative of x is negative of y
+        return written_big(made_big(negative of x, add_parts(parts of x, parts of y)))
+    end
+    if compare_parts(parts of x, parts of y) is at least 0
+        return written_big(made_big(negative of x, take_parts(parts of x, parts of y)))
+    end
+    return written_big(made_big(negative of y, take_parts(parts of y, parts of x)))
+end
+
+to minus with a, b
+    set y to read_big(b)
+    return plus(a, written_big(made_big(not negative of y, parts of y)))
+end
+
+to times with a, b
+    set x to read_big(a)
+    set y to read_big(b)
+    return written_big(made_big(negative of x is not negative of y, times_parts(parts of x, parts of y)))
+end
+
+# a divided by b, rounded down (so -7 divided by 2 is -4), and what's left over, which has b's sign (so the
+# remainder of -7 divided by 2 is 1): as a record with `times` and `left`
+to divided_whole with a, b
+    set x to read_big(a)
+    set y to read_big(b)
+    if length of parts of y is 0
+        fail with "can't divide by zero"
+    end
+    set done to divide_parts(parts of x, parts of y)
+    set quotient to made_big(negative of x is not negative of y, times of done) # not `times`: that's the function
+    set left to made_big(negative of y, left of done)
+    if negative of x is not negative of y and length of parts of left is greater than 0
+        set quotient to made_big(yes, add_parts(parts of quotient, list of 1))
+        set left to made_big(negative of y, take_parts(parts of y, parts of left))
+    end
+    return record with times written_big(quotient), left written_big(left)
+end
+
+to divided with a, b
+    return times of divided_whole(a, b)
+end
+
+to remainder with a, b
+    return left of divided_whole(a, b)
+end
+
+# a to the power of n, a whole number of 0 or more
+to power with a, n
+    if not (n is divisible by 1) or n is less than 0
+        fail with "'power' needs a whole number of 0 or more, not " + n
+    end
+    set made to read_big(1)
+    set base to read_big(a)
+    set left to n
+    repeat while left is greater than 0
+        if not (left is divisible by 2)
+            set made to made_big(negative of made is not negative of base, times_parts(parts of made, parts of base))
+        end
+        set left to (left - remainder of left divided by 2) / 2
+        if left is greater than 0
+            set base to made_big(no, times_parts(parts of base, parts of base))
+        end
+    end
+    return written_big(made)
+end
+
+# -1, 0 or 1: whether a is less than, the same as, or more than b
+to compare with a, b
+    set x to read_big(a)
+    set y to read_big(b)
+    if negative of x is not negative of y
+        if negative of x
+            return -1
+        end
+        return 1
+    end
+    set by_size to compare_parts(parts of x, parts of y)
+    if negative of x
+        return 0 - by_size
+    end
+    return by_size
+end

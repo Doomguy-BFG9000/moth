@@ -951,6 +951,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const unit = tokens[pos++];
       left = { kind: "builtin", name: "in", args: [left, { kind: "value", value: unit.value, at: unit }], at: t };
     }
+    // `total / count rounded`, `x rounded down`, `x rounded up`: the whole sum; `rounded(x)` is still a call
+    if (isWord("rounded") && !peek().nl && tokens[pos + 1].type !== "(") {
+      const t = tokens[pos++];
+      const how = word("down") ? "rounded down" : word("up") ? "rounded up" : "rounded";
+      left = { kind: "builtin", name: how, args: [left], at: t };
+    }
     // `scores in order`, `scores in reverse order`, `people in order by age`
     if (converting && isWord("in") && !tokens[pos + 1].nl && (wordAt(pos + 1, "order") || (wordAt(pos + 1, "reverse") && wordAt(pos + 2, "order")))) {
       const t = tokens[pos++];
@@ -1163,6 +1169,16 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const body = [...hoisted, { kind: "return", value, at: t }]; // functions its value makes are its own
       hoisted = outside;
       return { kind: "name", name: unnamed("function", params, body, t), at: t };
+    }
+    if (isWord("remainder") && wordAt(pos + 1, "of") && !tokens[pos + 1].nl) { // `remainder of 17 divided by 5`; else a field
+      const left = phrase(() => {
+        expectWord("of");
+        const whole = additive();
+        expectWord("divided");
+        expectWord("by");
+        return { kind: "builtin", name: "remainder", args: [whole, postfix(unary())], at: t };
+      });
+      if (left) return left;
     }
     if (isWord("items") && !tokens[pos + 1].nl) { // `items 2 to 4 of xs`; `items` alone is still a name
       const outside = indexing;

@@ -777,6 +777,8 @@ export const BUILTINS = [
   // `start count(10)` and `wait for job` (see taskOf)
   { name: "power", needs: [["number"], ["number"]], gives: "number", run: ([x, n], error) => power(x, n, error) },
   { name: "items", needs: [["number"], ["number"], ["list", "text", "bytes"]], gives: null, run: ([from, upto, x], error) => slice(from, upto, x, error) },
+  ...["rounded down", "rounded up", "rounded"].map((how) => ({ name: how, needs: [["number"]], gives: "number", run: ([x], error) => rounded(how, x, error) })),
+  { name: "remainder", needs: [["number"], ["number"]], gives: "number", run: ([a, b], error) => remainder(a, b, error) },
   { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
   { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
 ];
@@ -798,6 +800,35 @@ function power(x, n, error) {
     if (left > 0) base *= base;
   }
   return k < 0 ? 1 / made : made;
+}
+
+// `x rounded down`, `x rounded up`, `x rounded` (DESIGN §66): a whole number, from x as it's shown, to 15
+// digits, so (0.1 * 30) rounded down is 3; a half rounds away from 0. A whole number is itself.
+function rounded(how, x, error) {
+  if (typeof x !== "number") error(`'${how}' needs a number, not ${kindOf(x)}`);
+  const c = canon(x);
+  if (Number.isInteger(c) || !Number.isFinite(c)) return c;
+  if (how === "rounded down") return Math.floor(c) + 0; // + 0: never -0
+  if (how === "rounded up") return Math.ceil(c) + 0;
+  const size = Math.abs(c);
+  const whole = Math.floor(size);
+  const near = size - whole >= 0.5 ? whole + 1 : whole;
+  return (c < 0 ? -near : near) + 0;
+}
+
+// `remainder of 17 divided by 5`: what's left over, which has the divisor's sign (so -7 by 3 leaves 2). Of two
+// whole numbers, exactly; else 0 whenever `is divisible by` says so, and a - b times a / b, to 15 digits,
+// rounded down.
+function remainder(a, b, error) {
+  if (typeof a !== "number") error(`'remainder of' needs a number, not ${kindOf(a)}`);
+  if (typeof b !== "number") error(`'remainder of' needs a number, not ${kindOf(b)}`);
+  if (b === 0) error("can't divide by zero");
+  if (Number.isInteger(a) && Number.isInteger(b)) {
+    const r = a % b;
+    return r === 0 ? 0 : (r < 0) !== (b < 0) ? r + b : r;
+  }
+  if (divisible(a, b)) return 0;
+  return a - b * Math.floor(canon(a / b));
 }
 
 // `items 2 to 4 of xs` (DESIGN §66): a list's items, text's letters or bytes from one place to another, both

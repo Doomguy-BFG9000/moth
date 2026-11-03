@@ -171,6 +171,9 @@ export const PROGRAMS = [
   ["to greet with name, greeting or \"Hello\", mark or \"!\"\n    say greeting \", \" name mark\nend\ngreet(\"Sam\")\ngreet(\"Ana\", \"Hi\")\ngreet \"Bo\", \"Hey\", \"?\"\nto pad with xs or list of 0, -1\n    add 9 to xs\n    return xs\nend\nsay pad()\nsay pad()\nsay pad(list of 1)", "Hello, Sam!\nHi, Ana!\nHey, Bo?\n[0, -1, 9]\n[0, -1, 9]\n[1, 9]"],
   ["set double to function with x gives x * 2\nsay double(21)\nto apply with f, v\n    return f(v)\nend\nsay apply(function with n gives n + 1, 41)\nset seven to function gives 7\nsay seven()\nto make_adder with k\n    return function with x gives x + k\nend\nset add5 to make_adder(5)\nsay add5(10)\nset adder to function with a gives function with b gives a + b\nset add2 to adder(2)\nsay add2(3)\nset fs to list of (function with a, b gives a + b), (function with a and b gives a * b)\nfor each f in fs\n    say f(3, 4)\nend\nsay double\nset function to 1\nsay function + 1", "42\n42\n7\n15\n5\n7\n12\n<function function on line 1>\n2"],
   ["set xs to list of 1, 2, 3, 4\nsay list of x * x for each x in xs\nsay list of x for each x in xs where x is greater than 2\nset x to \"kept\"\nsay list of x + 1 for each x in xs\nsay x\nsay list of (list of x * y for each y in xs) for each x in list of 1, 2\nset total to 0\nfor each n in list of n * 10 for each n in xs\n    set total to total + n\nend\nsay total\nsay list of x for each x in xs where x is greater than 9\nset even to function with m gives m is divisible by 2\nsay list of c for each c in \"a1b2\" where not (c is in \"0123456789\")\nsay list of n for each n in xs where even(n)\nset own to list of 1\nfor each k in own\n    say k\nend", "[1, 4, 9, 16]\n[3, 4]\n[2, 3, 4, 5]\nkept\n[[1, 2, 3, 4], [2, 4, 6, 8]]\n100\n[]\n[\"a\", \"b\"]\n[2, 4]\n1"],
+  // rounding, from a number as it's shown, and what's left over, with the divisor's sign
+  ["for each x in list of 2.5, -2.5, 2.4, -2.4, 0.5, -0.5, 0.49, -0.49, 7, -7, 0.1 * 30, 2.9999999999999996, 1 / 3\n    say x \": \" x rounded down \" \" x rounded up \" \" x rounded\nend\nset big to 2 to the power of 60\nsay big rounded is big\nsay (0 - 0.3) rounded\nsay (0 - 0.3) rounded up\nset rounded to 4\nsay rounded rounded\nsay 10 / 4 rounded down\nsay (10 / 4) rounded down", "2.5: 2 3 3\n-2.5: -3 -2 -3\n2.4: 2 3 2\n-2.4: -3 -2 -2\n0.5: 0 1 1\n-0.5: -1 0 -1\n0.49: 0 1 0\n-0.49: -1 0 0\n7: 7 7 7\n-7: -7 -7 -7\n3: 3 3 3\n3: 3 3 3\n0.333333333333333: 0 1 0\nyes\n0\n0\n4\n2\n2"],
+  ["for each a in list of 17, -17, 7.5, -7.5, 0.3, 1, 0\n    for each b in list of 5, -5, 2.5, 0.1\n        say a \" by \" b \": \" remainder of a divided by b\n    end\nend\nsay remainder of 2 to the power of 60 divided by 7\nsay remainder of 10 + 3 divided by 4\nset r to record with remainder 9\nsay remainder of r", "17 by 5: 2\n17 by -5: -3\n17 by 2.5: 2\n17 by 0.1: 0\n-17 by 5: 3\n-17 by -5: -2\n-17 by 2.5: 0.5\n-17 by 0.1: 0\n7.5 by 5: 2.5\n7.5 by -5: -2.5\n7.5 by 2.5: 0\n7.5 by 0.1: 0\n-7.5 by 5: 2.5\n-7.5 by -5: -2.5\n-7.5 by 2.5: 0\n-7.5 by 0.1: 0\n0.3 by 5: 0.3\n0.3 by -5: -4.7\n0.3 by 2.5: 0.3\n0.3 by 0.1: 0\n1 by 5: 1\n1 by -5: -4\n1 by 2.5: 1\n1 by 0.1: 0\n0 by 5: 0\n0 by -5: 0\n0 by 2.5: 0\n0 by 0.1: 0\n1\n1\n9"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -535,6 +538,13 @@ export const ERRORS = [
   ["set f to function with x gives\nsay f(1)", "line 2: expected a value but found 'say'"],
   ["say list of x for each in list of 1", "line 1: 'in' is a Moth word, so it can't be used as a variable name"],
   ["set f to function with x gives x\nsay f()", "line 2: 'f' needs 1 input but got 0"],
+  ["say \"3\" rounded", "line 1: 'rounded' needs a number, not text"],
+  ["say nothing rounded down", "line 1: 'rounded down' needs a number, not nothing"],
+  ["say (list of 1) rounded up", "line 1: 'rounded up' needs a number, not a list"],
+  ["say remainder of 7 divided by 0", "line 1: can't divide by zero"],
+  ["say remainder of \"7\" divided by 2", "line 1: 'remainder of' needs a number, not text"],
+  ["say remainder of 7 divided by yes", "line 1: 'remainder of' needs a number, not yes/no"],
+  ["set x to 5 km\nsay x rounded", "line 2: 'rounded' needs a number, not a distance"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

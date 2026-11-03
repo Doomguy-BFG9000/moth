@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError, soundSamples, soundWav } from "./moth.js";
-import { Machine, BEEP } from "./vm.js";
+import { Machine, BEEP, Ended } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
@@ -264,13 +264,15 @@ test("the checker raises no false alarms on working programs", () => {
   }
 });
 
-// The lines a program really runs (its LINE markers), and the mistake it stops at, if any.
+// The lines a program really runs (its LINE markers), and the mistake it stops at, if any. A program that
+// stops itself (`stop the program with 2`) ran its lines and made no mistake.
 function trace(source) {
   const lines = new Set();
   const machine = new Machine(compile(source, { debug: true }), () => {}, { maxSteps: 10_000 });
   try {
     while (machine.run({ pauseAtLines: true }) === "line") lines.add(machine.line);
   } catch (err) {
+    if (err instanceof Ended) return { lines };
     if (!(err instanceof MothError)) throw err;
     return { lines, error: err };
   }
@@ -1050,14 +1052,16 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
   }
 });
 
-test("text.moth, dates.moth and hash.moth pass their own tests on all three engines", () => {
+test("text.moth, dates.moth, hash.moth and big.moth pass their own tests on all three engines", () => {
   for (const engine of ENGINES) {
     for (const [file, names] of [
       ["text.test.moth", ["test_whole_matches", "test_finding", "test_replacing_and_splitting", "test_no_endless_loops",
         "test_bad_patterns", "test_numbers", "test_widths", "test_csv"]],
       ["dates.test.moth", ["test_days", "test_four_hundred_years", "test_months_and_weekdays", "test_reading_and_writing",
         "test_today", "test_mistakes"]],
-      ["hash.test.moth", ["test_known_hashes", "test_block_edges", "test_text_and_bytes"]]]) {
+      ["hash.test.moth", ["test_known_hashes", "test_block_edges", "test_text_and_bytes"]],
+      ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
+        "test_comparing", "test_mistakes"]]]) {
       const results = testMoth(tool(file), { engine, files: (name) => tool(name) });
       assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
     }

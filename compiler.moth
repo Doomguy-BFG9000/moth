@@ -417,7 +417,7 @@ set builtin_names to list of "uppercase", "lowercase", "split", "join", "number"
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
     "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
-    "library call", "power", "items", "start", "wait for"
+    "library call", "power", "items", "rounded down", "rounded up", "rounded", "remainder", "start", "wait for"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -681,6 +681,8 @@ to parse with tokens, reading
                 set node to start_rest(which is "start")
             else if which is "items"
                 set node to items_rest(t)
+            else if which is "remainder"
+                set node to remainder_rest(t)
             else
                 set node to save_rest(t)
             end
@@ -761,6 +763,16 @@ to parse with tokens, reading
         set give_made to record with kind "return", value (record with kind "name", name "the list made", at t), at t
         set builder to unnamed("building the list", (list of "the items"), (list of start_made, loop, give_made), t)
         return made_call(builder, (list of over), t)
+    end
+
+    # `remainder of 17 divided by 5`
+    to remainder_rest with t
+        expect_word("of")
+        set whole to additive()
+        expect_word("divided")
+        expect_word("by")
+        set left_args to list of whole, postfix(unary())
+        return record with kind "builtin", name "remainder", args left_args, at t
     end
 
     # `items 2 to 4 of xs`
@@ -2094,6 +2106,18 @@ to parse with tokens, reading
             add (record with kind "value", type "string", value value of unit_token, at unit_token) to unit_args
             set left to record with kind "builtin", name "in", args unit_args, at in_token
         end
+        # `total / count rounded`, `x rounded down`, `x rounded up`: the whole sum; `rounded(x)` is still a call
+        if is_word("rounded") and not nl of peek() and type of item (pos + 1) of tokens is not "("
+            set round_token to peek()
+            set pos to pos + 1
+            set how to "rounded"
+            if word("down")
+                set how to "rounded down"
+            else if word("up")
+                set how to "rounded up"
+            end
+            set left to record with kind "builtin", name how, args (list of left), at round_token
+        end
         # `scores in order`, `scores in reverse order`, `people in order by age`
         if converting and is_word("in") and not nl of item (pos + 1) of tokens and (word_at(pos + 1, "order") or (word_at(pos + 1, "reverse") and word_at(pos + 2, "order")))
             set in_token to peek()
@@ -2429,6 +2453,12 @@ to parse with tokens, reading
             add (record with kind "return", value fn_value, at t) to fn_body
             set hoisted to outside_fns
             return record with kind "name", name unnamed("function", fn_params, fn_body, t), at t
+        end
+        if is_word("remainder") and word_at(pos + 1, "of") and not nl of item (pos + 1) of tokens # `remainder of 17 divided by 5`; else a field
+            set left_over to try_phrase("remainder", t)
+            if left_over is not nothing
+                return left_over
+            end
         end
         if is_word("items") and not nl of item (pos + 1) of tokens # `items 2 to 4 of xs`; `items` alone is still a name
             set outside to indexing

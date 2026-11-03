@@ -2975,3 +2975,38 @@ hold them to agreeing.
   an input after one with `or` without, a list built with a mistake in an
   item, and where it says it is), on the three engines and in compiler.moth,
   in machine code on Windows and Linux, and in the randomly broken programs.
+
+## 67. Rounding, remainders, and whole numbers of any size
+
+- **Why.** Moth had no `//`, `%`, `round` or `floor` of its own: math.moth
+  found a number's whole part a power of two at a time, and nothing gave a
+  remainder. Python's whole numbers have no size limit; Moth's are exact to
+  2^53.
+- **Rounding.** `x rounded down`, `x rounded up` and `x rounded` come after
+  the sum they round, as `in miles` does, so `total / count rounded` rounds
+  the quotient. They round x as Moth shows it, to 15 digits, so `(0.1 * 30)
+  rounded down` is 3, like `item (0.1 * 30)`; a half rounds away from 0, as a
+  spreadsheet's does, and none gives -0. `rounded` followed by a bracket is
+  still a call, so math.moth's `rounded(x)` works as it did; a variable called
+  `rounded` after a value in `say` now rounds it.
+- **Remainders.** `remainder of a divided by b` has b's sign, as Python's `%`
+  and a spreadsheet's MOD do. Of two whole numbers it is exact: a 64-bit
+  `idiv` below 2^53 and the x87's `fprem` above, as `is divisible by` works it
+  out; of anything else it is 0 whenever `is divisible by` says so, and else
+  a - b times a / b to 15 digits, rounded down. `remainder of r` is still a
+  field, as the phrase needs `divided by`.
+- **Machine code.** `roundsd` rounds; each routine first takes the number to
+  15 digits with the routine `say` uses (§25), keeping its sign.
+- **big.moth.** Whole numbers of any size, as text, so `say`, `is`, `save` and
+  JSON need nothing new. Inside, a sign and parts of 7 digits each, the lowest
+  first, so two parts multiplied, with what's carried, stay below 2^53, and
+  each carry is a remainder, so none is rounded. Division is a part at a time
+  by a one-part divisor, else a digit at a time, each the most multiples of
+  the divisor that fit; quotients round down and remainders take the
+  divisor's sign, as Python's do.
+- **Tested.** Rounding every kind of number (halves both ways, 15-digit
+  neighbours, whole numbers past 2^53, fractions, infinities) and remainders
+  of whole numbers below and above 2^53, fractions and mixed signs, with each
+  mistake, on the three engines, in compiler.moth, and in machine code on
+  Windows and Linux, 600 random ones too; big.moth's own tests, and 800
+  random sums against BigInt, on each.

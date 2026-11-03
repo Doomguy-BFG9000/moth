@@ -332,6 +332,10 @@ bytes and dictionaries:
   [`dates.moth`](tools/dates.moth) reads, adds, counts and writes dates:
   `format_date(d, "dddd D MMMM YYYY")`. Both are in Moth alone, so they work
   on every engine, the playground's too, and test themselves.
+- [`big.moth`](tools/big.moth) works with whole numbers of any size, kept as
+  text, so `say` shows them and `is` compares them: `big's times(f, 30)`,
+  `plus`, `minus`, `divided`, `remainder`, `power` and `compare`, in Moth
+  alone, tested against JavaScript's BigInt.
 - [`hash.moth`](tools/hash.moth) gives a text's or bytes' SHA-256, in Moth alone,
   and [`system.moth`](tools/system.moth) copies, moves and removes files, makes
   and removes folders, says whether a name is a file or a folder, how big a
@@ -434,6 +438,8 @@ set squares to list of n * n for each n in list of 1, 2, 3, 4   # a list built f
 say list of n for each n in squares where n is greater than 5  # [9, 16]: the ones that pass
 say items 2 to 3 of squares         # [4, 9]: of a list, text or bytes
 say 2 to the power of 10            # 1024
+say 10 / 4 rounded down             # 2; also rounded up, and rounded (a half away from 0)
+say remainder of 17 divided by 5    # 2: what's left over, with the divisor's sign
 
 set sam to record with name "Sam", age 20   # a record keeps named values together
 set age of sam to 21
@@ -668,7 +674,10 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   `is at least`, `is at most`, `is divisible by`, `is in`, joined with `and`,
   `or`, `not`.
 - **Maths:** `+ - * /` and `to the power of`, a whole power (math.moth's
-  `power(x, y)` takes any). Adding text to anything joins them into text.
+  `power(x, y)` takes any). `rounded down`, `rounded up` and `rounded` round
+  the sum before them, as it's shown, to 15 digits, so `(0.1 * 30) rounded
+  down` is 3; `remainder of a divided by b` is exact for whole numbers. Adding
+  text to anything joins them into text.
 - **Inputs left out:** `with name, greeting or "Hello"`: after `or`, a value
   written out (or a list of them), which each call that leaves the input out
   gets afresh. Every input after one with `or` needs one too. A call through a

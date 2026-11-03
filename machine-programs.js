@@ -366,6 +366,17 @@ export const MACHINE_CASES = [
   ["set f to function with x gives\nsay f(1)", "line 2: expected a value but found 'say'"],
   ["say list of x for each in list of 1", "line 1: 'in' is a Moth word, so it can't be used as a variable name"],
   ["set f to function with x gives x\nsay f()", "line 2: 'f' needs 1 input but got 0"],
+  // rounding, from a number as it's shown, and what's left over, with the divisor's sign
+  "for each x in list of 2.5, -2.5, 2.4, -2.4, 0.5, -0.5, 0.49, -0.49, 7, -7, 0.1 * 30, 2.9999999999999996, 1 / 3\n    say x \": \" x rounded down \" \" x rounded up \" \" x rounded\nend\nset big to 2 to the power of 60\nsay big rounded is big\nsay (0 - 0.3) rounded\nsay (0 - 0.3) rounded up\nset rounded to 4\nsay rounded rounded\nsay 10 / 4 rounded down\nsay (10 / 4) rounded down",
+  "for each a in list of 17, -17, 7.5, -7.5, 0.3, 1, 0\n    for each b in list of 5, -5, 2.5, 0.1\n        say a \" by \" b \": \" remainder of a divided by b\n    end\nend\nsay remainder of 2 to the power of 60 divided by 7\nsay remainder of 10 + 3 divided by 4\nset r to record with remainder 9\nsay remainder of r",
+  "say \"3\" rounded",
+  "say nothing rounded down",
+  "say (list of 1) rounded up",
+  "say remainder of 7 divided by 0",
+  "say remainder of \"7\" divided by 2",
+  "say remainder of 7 divided by yes",
+  "set x to 5 km\nsay x rounded",
+  "say remainder of 9007199254740991 divided by 2\nsay remainder of -9007199254740991 divided by 2\nsay remainder of 2 to the power of 70 divided by 3\nsay remainder of 0 - 2 to the power of 70 divided by 3\nsay remainder of 2 to the power of 70 divided by -3\nsay remainder of 7 divided by 2 to the power of 60\nsay remainder of -7 divided by 2 to the power of 60\nsay (2 to the power of 60 + 0.5) rounded\nsay 123456789.123456789 rounded\nsay 0 - 10 to the power of 300 rounded",
 ];
 
 export function machinePrograms(seed, count) {
