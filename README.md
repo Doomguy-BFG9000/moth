@@ -799,6 +799,7 @@ source with Node.js: `node bootstrap.mjs`.
 ```text
 moth                                     the Moth shell: type Moth and see what it does (also moth shell --allow-...)
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
+moth build --web hello.moth              or hello.html: a page that runs it in any browser, Moth's engine in it
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines

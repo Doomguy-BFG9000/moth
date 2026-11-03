@@ -3035,6 +3035,7 @@ to emit_collect with a
         movsd_store(a, mem(rsp, 8 * k), k)
     end
     storei(a, rip("gc_live"), 0)
+    storei(a, rip("la_ptr"), 0) # a text rt_letter_at remembers may be gone, and its place another's
     load(a, r9, rip("gc_base"))
     load(a, r10, rip("gc_pages"))
     shifti(a, "shl", r10, 16)
@@ -5095,14 +5096,36 @@ to emit_sequences with a
     ret(a)
 
     # rt_char_at: rax a text (untagged), rcx a character's number (from 1): that character, as a text that
-    # shares its bytes, in rax
+    # shares its bytes, in rax. Of a text whose letters are a byte each, right there; else counted, from the
+    # letter rt_letter_at's memory has when it's the same bytes and not past this one (see rt_letter_at),
+    # which it then remembers; uses r8 to r11
     set seek to new_label(a)
     set not_lead to new_label(a)
     set at_char to new_label(a)
+    set counted to new_label(a)
     mark(a, "rt_char_at")
     load(a, rsi, mem(rax, 16))
-    movi(a, r8, 0)
-    movi(a, r9, 0)
+    load(a, r11, mem(rax, 0)) # how many bytes it has
+    alu_load(a, "cmp", r11, mem(rax, 8))
+    jcc(a, cc_ne, counted)
+    lea(a, rsi, mem(rsi, -1))
+    alu(a, "add", rsi, rcx) # a byte a letter: the letter's own
+    jmp_to(a, "rt_char_view")
+    mark(a, counted)
+    movi(a, r8, 0) # the byte it's at
+    movi(a, r9, 0) # the letters started before it
+    load(a, r10, rip("la_ptr"))
+    alu(a, "cmp", r10, rsi)
+    jcc(a, cc_ne, seek)
+    load(a, r10, rip("la_letters"))
+    alu(a, "cmp", rcx, r10)
+    jcc(a, cc_b, seek) # before the letter it remembers: from the start
+    load(a, r10, rip("la_byte"))
+    alu(a, "cmp", r10, r11)
+    jcc(a, cc_ae, seek) # past this text's end: another, shorter view of the bytes
+    mov_rr(a, r8, r10)
+    load(a, r9, rip("la_letters"))
+    dec_r(a, r9)
     mark(a, seek)
     mov_rr(a, rax, rsi)
     alu(a, "add", rax, r8)
@@ -5117,6 +5140,9 @@ to emit_sequences with a
     inc_r(a, r8)
     jmp_to(a, seek)
     mark(a, at_char)
+    store(a, rip("la_ptr"), rsi)
+    store(a, rip("la_letters"), rcx)
+    store(a, rip("la_byte"), r8)
     alu(a, "add", rsi, r8)
     jmp_to(a, "rt_char_view")
 
@@ -7542,13 +7568,30 @@ to emit_builtins with a
     ret(a)
 
     # rt_letter_at: rsi a text's bytes, r13 how many, rcx a number of letters: where that many letters end,
-    # in bytes, in rax (r13 if past them); uses rdx, r10 and r11
+    # in bytes, in rax (r13 if past them); uses rdx, r10 and r11. It remembers the last it found (la_ptr,
+    # la_letters, la_byte: letter la_letters, from 1, starts at byte la_byte) and, for the same bytes and a
+    # letter that far or further, counts on from there, as rt_char_at does, so going through a long text a
+    # letter at a time takes as long as the text is, not that squared. The collector makes it forget, as a
+    # text's bytes may be another's after it.
     set la_seek to new_label(a)
     set la_follow to new_label(a)
     set la_found to new_label(a)
+    set la_kept to new_label(a)
     mark(a, "rt_letter_at")
     movi(a, rax, 0)
     movi(a, r10, 0) # letters started
+    load(a, r11, rip("la_ptr"))
+    alu(a, "cmp", r11, rsi)
+    jcc(a, cc_ne, la_seek)
+    load(a, r11, rip("la_letters"))
+    dec_r(a, r11) # the letters before the one it remembers
+    alu(a, "cmp", rcx, r11)
+    jcc(a, cc_b, la_seek) # fewer than that: from the start
+    load(a, rdx, rip("la_byte"))
+    alu(a, "cmp", rdx, r13)
+    jcc(a, cc_ae, la_seek) # past this text's end: another, shorter view of the bytes
+    mov_rr(a, r10, r11)
+    mov_rr(a, rax, rdx)
     mark(a, la_seek)
     alu(a, "cmp", rax, r13)
     jcc(a, cc_ae, la_found)
@@ -7565,6 +7608,13 @@ to emit_builtins with a
     inc_r(a, rax)
     jmp_to(a, la_seek)
     mark(a, la_found)
+    alu(a, "cmp", rax, r13)
+    jcc(a, cc_ae, la_kept) # the end: nothing to remember
+    store(a, rip("la_ptr"), rsi)
+    lea(a, r11, mem(r10, 1)) # the letter that starts here
+    store(a, rip("la_letters"), r11)
+    store(a, rip("la_byte"), rax)
+    mark(a, la_kept)
     ret(a)
 
     # rt_why_slice: what was wrong with `items ... of`, into the builder
@@ -28741,7 +28791,7 @@ to emit_runtime with st
         "b_ptr", "b_len", "b_cap", "showing", "comparing", "j_a", "j_b", "keep", "err_field", "seq_writing",
         "found_entry", "keep2", "try_top", "fail_has", "fail_val", "reason_at", "err_what", "split_list", "pn_start", "pn_e10", "pn_digits", "x87_cw",
         "x87_tmp", "err_got", "err_kind", "t_prev_fn", "cd_x", "cl_a", "cl_b", "cl_n", "cl_m", "cl_w", "cl_d",
-        "err_file", "err_reason", "asked", "err_fake_fn", "err_fake_site", "err_fake_mark"
+        "err_file", "err_reason", "asked", "err_fake_fn", "err_fake_site", "err_fake_mark", "la_ptr", "la_letters", "la_byte"
         reserve(a, name, 8, 8)
     end
     reserve(a, "jn_head", 24, 8)

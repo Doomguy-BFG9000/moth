@@ -299,6 +299,15 @@ export function show(v, nested = false, showing = new Set()) {
 
 // Where `item n of target` is: [the list (or the text's letters, the bytes or the dictionary), the place in
 // it]. Any key of a dictionary can be set, but one that is read must be there.
+// A text's letters, an emoji counted as one. The last text asked about is remembered, so going through a long
+// text a letter at a time, `item k of words` for each k, takes as long as the text is, not that squared.
+let lettersText = null;
+let lettersMade = [];
+export function lettersOf(text) {
+  if (text !== lettersText) [lettersText, lettersMade] = [text, [...text]];
+  return lettersMade;
+}
+
 export function item(target, n, writing, error = oops) {
   if (typeof n === "number") n = canon(n); // 0.1 * 30 is item 3
   if (isDictionary(target)) {
@@ -308,7 +317,7 @@ export function item(target, n, writing, error = oops) {
   }
   if (writing && !isList(target) && !isBytes(target)) error(`can only change items of a list, dictionary or bytes, not ${kindOf(target)}`);
   if (!isList(target) && !isBytes(target) && typeof target !== "string") error(`can only take an item of a list, text, dictionary or bytes, not ${kindOf(target)}`);
-  const seq = typeof target === "string" ? [...target] : target; // by character, so "é" and emoji count as one
+  const seq = typeof target === "string" ? lettersOf(target) : target; // by character, so "é" and emoji count as one
   if (!Number.isInteger(n)) error(`item numbers must be whole numbers, not ${show(n, true)}`);
   if (n < 1) error(`there is no item ${n}, items are counted from 1`);
   if (n > seq.length) {
@@ -413,7 +422,7 @@ export function negate(v, error) {
 }
 
 export function lengthOf(v, error) {
-  if (typeof v === "string") return [...v].length;
+  if (typeof v === "string") return lettersOf(v).length;
   if (isDictionary(v)) return v.size;
   if (!isList(v) && !isBytes(v)) error(`'length of' needs a list, text, dictionary or bytes, not ${kindOf(v)}`);
   return v.length;
@@ -842,7 +851,7 @@ function slice(from, upto, x, error) {
     return n;
   };
   const [a, b] = [place(from), place(upto)];
-  const seq = typeof x === "string" ? [...x] : x;
+  const seq = typeof x === "string" ? lettersOf(x) : x;
   if (b >= a) {
     if (a < 1) error(`there is no item ${a}, items are counted from 1`);
     if (b > seq.length) {

@@ -390,6 +390,8 @@ export const MACHINE_CASES = [
   // lists as sets: without repeats
   "set xs to list of 3, 1, 3, 2, 1, 0.1 * 30\nsay xs without repeats\nsay \"banana\" without repeats\nset a to list of 1, 2, 3, 4\nset b to list of 3, 4, 5\nsay list of x for each x in a where x is in b\nsay list of x for each x in a where not (x is in b)\nset both to empty list\nfor each x in a\n    add x to both\nend\nfor each x in b\n    add x to both\nend\nsay both without repeats\nsay (list of (list of 1, 2), (list of 1, 2), (record with n 1), (record with n 1)) without repeats\nsay length of (empty list without repeats)\nset seen to dictionary where \"x\" is yes\nsay \"x\" is in seen\nset without to 4\nsay without + 1",
   "say 5 without repeats",
+  // a text a letter at a time: past one byte, views of one text's bytes, and the collector in between
+  "set words to \"aé😀b, ça va? ✓ plain ascii too\"\nset made to \"\"\nfor each k from 1 to length of words\n    add item k of words to made\nend\nsay made is words\nsay item 3 of words \" \" item 1 of words \" \" item (length of words) of words \" \" item 2 of words\nsay items 2 to 4 of words\nsay items 5 to 9 of words \" \" item 6 of words \" \" items 1 to 2 of words\nset other to \"x😀y\"\nsay item 2 of words \" \" item 2 of other \" \" item 3 of words \" \" item 3 of other\nset ascii to \"hello\"\nsay item 5 of ascii \" \" item 1 of ascii\nset big to \"\"\nrepeat 3000 times\n    add \"é\" to big\nend\nadd \"!\" to big\nsay item (length of big) of big\nset counted to 0\nfor each k from 1 to length of big\n    if item k of big is \"é\"\n        add 1 to counted\n    end\nend\nsay counted\nsay item 1 of big \" \" item 2999 of big",
 ];
 
 export function machinePrograms(seed, count) {

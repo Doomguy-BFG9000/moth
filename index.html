@@ -197,6 +197,11 @@
       .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
     }
     @media (min-width: 881px) and (max-width: 1100px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    /* a program made into a page of its own (moth build --web): only what it says and draws */
+    body.app .intro, body.app .toolbar, body.app .workspace > .pane:first-child, body.app #debug-panel, body.app #problems-view,
+    body.app #files-view, body.app #bytecode-view, body.app .status { display: none !important; }
+    body.app .workspace { grid-template-columns: 1fr; }
+    body.app .pane + .pane { border-left: 0; }
   </style>
 </head>
 <body>
@@ -1426,11 +1431,20 @@ Did you mean 'total'?</pre></div>
       };
     }
 
+    // A page `moth build --web` made holds one program, and the files it uses, in window.MOTH_APP: it shows
+    // only what the program says and draws, and runs it at once.
+    const app = window.MOTH_APP;
     let shared = null;
     try {
-      if (location.hash.startsWith("#code=")) shared = decodeURIComponent(location.hash.slice("#code=".length));
+      if (!app && location.hash.startsWith("#code=")) shared = decodeURIComponent(location.hash.slice("#code=".length));
     } catch {} // a broken link just opens the first example
-    if (shared === null) picker.onchange();
+    if (app) {
+      document.body.classList.add("app");
+      document.title = app.name;
+      for (const [name, text] of Object.entries(app.files)) usedFiles.set(name, text);
+      code.value = app.source;
+      runCode();
+    } else if (shared === null) picker.onchange();
     else {
       code.value = shared;
       picker.selectedIndex = -1;

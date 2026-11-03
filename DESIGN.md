@@ -3316,3 +3316,59 @@ hold them to agreeing.
   in any case, none, a package added by its name and used, a name the index
   hasn't, an index that isn't there, and one that isn't JSON.
 
+## 79. Programs as web pages
+
+- **Why.** A program anyone can run with nothing to install: a link, or a
+  file sent. The playground runs Moth in a browser already; moth.exe made
+  only programs for Windows and Linux.
+- **What it does.** `moth build --web app.moth` writes app.html: the
+  playground's page with Moth's engine in it, in app mode, holding the
+  program and every file it uses (beside it, or from the standard library,
+  §74), which runs it as soon as it opens and shows only what it says and
+  draws, its buttons, text boxes and questions, taking keys and clicks as
+  the playground does. It works from the file itself or from any site, with
+  nothing else beside it. A program with a mistake in reading it says so,
+  and makes no page.
+- **One file.** Each of the engine's modules is in the page as text, and
+  made a module from a blob: URL the first time it's imported, its own
+  imports pointing at the others', so moth.js, vm.js and the rest, and the
+  worker a run goes in, are as they are here; the page's own imports wait
+  for them. The program goes in as JSON, with every `</` made `<\/`, so no
+  text of its ends the page's script.
+- **webpage.moth** holds the page, made by make-web.mjs from index.html and
+  the modules, as stdlib.moth is made, so moth builds itself as it did; a
+  test says when it's behind them. About 520 KB a page.
+- **Tested.** The page's loader, run as a browser runs it, makes modules
+  that find each other and run a program as moth.js does, with each
+  module's text exactly its file's; through moth.exe, a page with a file of
+  the standard library's in it, a `</script>` in the program, and a program
+  with a mistake; and in a browser, a drawing, a question answered, and
+  Snake, with its keys and timer.
+
+## 80. A text a letter at a time
+
+- **Why.** moth building itself went from 10 seconds to almost six minutes
+  once it held webpage.moth, whose page is one line of half a million
+  letters: moth.moth looks through each line with `item k of line`, and
+  finding letter k of a text with letters past one byte meant counting from
+  its start, so going through a line that way took its length squared.
+  `moth tidy` did the same. Any program going through a long text by `item`
+  did.
+- **In machine code**, a text whose letters are a byte each goes straight to
+  the letter, as it should have; and the routines that find a letter
+  (`item`, and `items ... of`) remember the last one they found: where the
+  text's bytes are, the letter's number and its byte. For the same bytes
+  and that letter or one further, they count on from there. The collector
+  makes them forget, since a text's bytes, once it's gone, can be another's;
+  a view of fewer bytes than the remembered letter's counts from the start.
+- **In JavaScript**, the engines turned the text into its letters for every
+  `item`, `length of` and `items ... of`; they keep the last text's letters
+  now.
+- **What it gave.** moth builds itself in 10 seconds again, into the same
+  bytes; `moth tidy --check` of the biggest files takes 3; 20,000 letters
+  one at a time take 15 ms on the JIT.
+- **Tested.** A text with letters of one to four bytes, every letter in
+  turn, then out of order; views of its bytes; and 3,000 lookups at random
+  across six texts and views, with the collector running between them, the
+  same on the three engines and in machine code on Windows and Linux.
+

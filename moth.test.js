@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { readFileSync, readdirSync } from "node:fs";
 import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError, soundSamples, soundWav } from "./moth.js";
 import { Machine, BEEP, Ended } from "./vm.js";
@@ -1069,6 +1070,29 @@ test("text.moth, dates.moth, hash.moth, big.moth, xml.moth and zip.moth pass the
       assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
     }
   }
+});
+
+test("webpage.moth is what make-web.mjs makes of index.html and the engine as they are", async () => {
+  const { webpageMoth } = await import("./make-web.mjs");
+  assert.ok(readFileSync(new URL("./webpage.moth", import.meta.url), "utf8") === webpageMoth(), "webpage.moth is behind: run node make-web.mjs");
+});
+
+// The page moth build --web makes: its loader, run as the page runs it, with blob: URLs made data: URLs here,
+// gives modules whose imports find each other, so the engine they make runs a program as moth.js does
+test("the page moth build --web makes has the whole engine, its modules finding one another", async () => {
+  const { webpage, PLACE, MODULES } = await import("./make-web.mjs");
+  const html = webpage();
+  assert.equal(html.split(PLACE).length, 2);
+  const loader = /<script>\n(    window\.MOTH_APP[^]*?)\n  <\/script>/.exec(html)[1];
+  const page = { window: {}, Blob: class { constructor([text]) { this.text = text; } },
+    URL: { createObjectURL: (blob) => `data:text/javascript;base64,${Buffer.from(blob.text).toString("base64")}` } };
+  vm.runInNewContext(`${loader}\nwindow.mothModule = mothModule; window.mothSources = mothSources;`, page);
+  for (const name of MODULES) assert.equal(page.window.mothSources[name], readFileSync(new URL(`./${name}`, import.meta.url), "utf8"), name);
+  const engine = await import(page.window.mothModule("moth.js"));
+  const program = 'use "math.moth"\nsay sqrt(16)\nsay list of x * x for each x in list of 1, 2, 3';
+  const said = [];
+  engine.run(program, (line) => said.push(line), { files: (name) => (name === "math.moth" ? readFileSync(new URL("./math.moth", import.meta.url), "utf8") : undefined) });
+  assert.deepEqual(said, ["4", "[1, 4, 9]"]);
 });
 
 test("stdlib.moth is what make-stdlib.mjs makes of the standard library's files as they are", async () => {

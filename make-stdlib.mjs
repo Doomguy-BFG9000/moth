@@ -35,7 +35,7 @@ export function stdlib(read = (file) => readFileSync(new URL(`./${file}`, import
   return lines.join("\n");
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const made = stdlib();
   writeFileSync(new URL("./stdlib.moth", import.meta.url), made);
   console.log(`made stdlib.moth: ${STANDARD.length} files, ${made.length.toLocaleString("en")} bytes`);

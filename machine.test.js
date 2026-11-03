@@ -291,8 +291,8 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
@@ -497,6 +497,30 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "remove", "greet"), ["removed greet\n", "", 0]);
   assert.deepEqual(readdirSync(join(other, "packages")), ["shout"]);
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
+});
+
+// moth build --web: a page holding the program and the files it uses (math.moth from the standard library),
+// as JSON nothing in which ends its script; and a program with a mistake says it, and makes no page
+test("moth.exe build --web makes a page that holds the program and the files it uses", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "web");
+  mkdirSync(sub);
+  const source = 'use "math.moth"\nsay sqrt(2)\nsay "</script> stays in its text"\n';
+  writeFileSync(join(sub, "app.moth"), source);
+  const built = spawnSync(exe, ["build", "--web", "app.moth"], { cwd: sub, encoding: "utf8" });
+  assert.match(built.stdout, /^made app\.html, a page that runs app\.moth in a browser \([\d,]+ bytes\)\n$/);
+  assert.deepEqual([built.stderr, built.status], ["", 0]);
+  const html = readFileSync(join(sub, "app.html"), "utf8");
+  const json = /window\.MOTH_APP = (.*);\n/.exec(html)[1];
+  assert.ok(!/<\/script/i.test(json), "the program's text would end the page's script");
+  const app = JSON.parse(json);
+  assert.deepEqual([app.name, app.source, Object.keys(app.files)], ["app.moth", source, ["math.moth"]]);
+  assert.equal(app.files["math.moth"], here("math.moth"));
+  writeFileSync(join(sub, "bad.moth"), "say 1 +\n");
+  const bad = spawnSync(exe, ["build", "--web", "bad.moth"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([bad.stdout, bad.status], ["", 1]);
+  assert.match(bad.stderr, /^bad\.moth:2:1: expected a value but found the end of the code\n/);
+  assert.ok(!existsSync(join(sub, "bad.html")));
 });
 
 // `moth notebook`: each ```moth block run in turn, as the shell's entries, and what it said written under it,
