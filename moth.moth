@@ -11,7 +11,7 @@
 # The first moth.exe comes from GitHub's releases, or from Node.js (`node bootstrap.mjs`); after that it
 # builds itself, into the same bytes:
 #
-#     moth build moth.moth --allow-read --allow-write --allow-run
+#     moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
 #
 # Every name made here starts with cli_, from when a file used `as` a name shared its functions' variables
 # with the program's top level (DESIGN.md, section 27).
@@ -21,7 +21,7 @@ use "machine.moth" as machine
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -360,6 +360,50 @@ to cli_run with cli_path, cli_target, cli_allowing, cli_passed_on
     if not cli_build(cli_path, cli_target, cli_allowing, cli_temp, no)
         return 1
     end
+    return cli_run_built(cli_temp, cli_passed_on)
+end
+
+# `moth debug file.moth a b`: as moth run, with the debugger built into the program, which stops at its
+# first line and takes commands from this moth's input (see moth-debugger.moth). The debugger is a file
+# this moth was built with (--include moth-debugger.moth), or else one in the folder moth runs in.
+to cli_debug with cli_path, cli_target, cli_allowing, cli_passed_on
+    set cli_temp to cli_temp_for(cli_path, cli_target, "-debug")
+    if cli_in_the_way(cli_temp)
+        return 1
+    end
+    set cli_debugger to nothing
+    try
+        set cli_debugger to read "moth-debugger.moth"
+    if it fails
+        say "moth: debugging needs moth-debugger.moth, which this moth wasn't built with: build it with --include moth-debugger.moth" to the error output
+        return 1
+    end
+    set cli_source to cli_text_of(cli_path)
+    if cli_source is nothing
+        return 1
+    end
+    set cli_used to cli_sources_of(cli_path, cli_source)
+    set cli_names to names of cli_used
+    set cli_texts to texts of cli_used
+    add "moth-debugger.moth" to cli_names
+    add cli_debugger to cli_texts
+    try
+        set cli_bytes to machine's compile_debugging(cli_source, cli_names, cli_texts, cli_target, cli_name_of(cli_path), cli_allowing)
+    if it fails with cli_why
+        cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
+        return 1
+    end
+    try
+        write cli_bytes as bytes to cli_temp
+    if it fails with cli_whynot
+        say "moth: " + cli_whynot to the error output
+        return 1
+    end
+    return cli_run_built(cli_temp, cli_passed_on)
+end
+
+# the program built into `cli_temp` started, waited for and removed: the number it ended with
+to cli_run_built with cli_temp, cli_passed_on
     set cli_ended to 1
     try
         set cli_ended to run program cli_temp with cli_passed_on
@@ -1360,11 +1404,11 @@ to cli_main
     if length of cli_given is at least 1
         set cli_command to item 1 of cli_given
     end
-    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
+    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
-        if cli_file is not nothing and cli_command is "run" # after the file, everything is the program's own
+        if cli_file is not nothing and (cli_command is "run" or cli_command is "debug") # after the file, everything is the program's own
             add cli_arg to cli_passed
             add 1 to cli_k
         else if cli_command is "tidy" and cli_arg is "--check"
@@ -1433,6 +1477,9 @@ to cli_main
     end
     if cli_command is "run"
         stop the program with cli_run(cli_file, cli_target, cli_flags, cli_passed)
+    end
+    if cli_command is "debug"
+        stop the program with cli_debug(cli_file, cli_target, cli_flags, cli_passed)
     end
     if not cli_build(cli_file, cli_target, cli_flags, cli_out_for(cli_file, cli_target), yes) # a mistake in the program, or a file that can't be read: 1
         stop the program with 1

@@ -228,8 +228,8 @@ other compiler, and builds itself into exactly the bytes Node.js built it into,
 in about 4 seconds:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (16,418,304 bytes)
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+compiled moth.moth to machine code for Windows -> moth.exe (17,537,024 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
 $ tools/wordcount.exe tools/story.txt 3
@@ -724,6 +724,7 @@ source with Node.js: `node bootstrap.mjs`.
 ```text
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
+moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
 moth check hello.moth                    find problems in it without running it
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
@@ -731,7 +732,7 @@ moth test                                the same for every .test.moth file here
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-libraries, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
-moth build moth.moth --allow-read --allow-write --allow-run    moth, built by itself
+moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth    moth, built by itself
 moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (.ico or .png) and version
 moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
 ```
@@ -746,6 +747,33 @@ comes after it is the program's own. `moth tidy` and `moth test` take any
 number of files, and `moth test` with none finds every file ending in
 `.test.moth` here and in the folders inside, but not hidden ones or
 `node_modules`; `moth check` takes one.
+
+`moth debug` runs a program as `moth run` does, built with a debugger in it,
+which stops before the first line and takes commands, typed or from the input:
+`step` into the next line, `next` over a call, `out` of this call, `go` to a
+breakpoint, `break 12` (or `break math.moth 12`) and `clear 12`, `show x` or
+`vars` for what the variables hold, `where` for the calls in progress, `list`
+for the lines around, `quit`, and `help`. If the input ends, the program runs on
+to its end.
+
+```text
+$ moth debug area.moth
+area.moth:1: to area with w, h
+(moth) break 2
+breakpoint at area.moth:2
+(moth) go
+area.moth:2, in 'area': return w * h
+(moth) where
+  area.moth:2, in 'area'
+  area.moth:6
+(moth) vars
+w is 1
+h is 2
+total is 0
+i is 1
+(moth) go
+total 12
+```
 
 `moth test` runs each test on its own, in a run of its own, so one test can't
 spoil another: it builds the file once, then starts it once for each test, and
@@ -817,11 +845,11 @@ by byte, with no assembler, linker or other compiler, and
 machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run
-compiled moth.moth to machine code for Windows -> moth.exe (16,418,304 bytes)
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+compiled moth.moth to machine code for Windows -> moth.exe (17,537,024 bytes)
 ```
 
-That's the same 16,418,304 bytes Node.js made of it, and the moth.exe they make
+That's the same 17,537,024 bytes Node.js made of it, and the moth.exe they make
 makes them again. A Windows moth and a Linux one build each other byte for byte
 too. What a program in machine code does is what the JavaScript engine does: on
 every push, machine.test.js holds hundreds of programs to it, mistakes and all.
@@ -867,6 +895,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
+| [`moth-debugger.moth`](moth-debugger.moth) | The debugger `moth debug` builds into the program it debugs, in Moth; moth.exe carries it |
 | [`versus/`](versus) | The same four programs in Moth, C, Rust and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
@@ -970,7 +999,13 @@ calls that led there.
   against the checker, its own problems word for word; `moth test` on the
   tests in Moth here, said exactly as `test()` says them; and `moth test` on
   its own, finding the tests in a folder in the order the Node.js command line
-  found them
+  found them; and `moth debug` stopping where it's told, its arguments passed on
+- the debugger: three sessions word for word, on Windows and Linux, stepping
+  into and out of calls, breakpoints in the program and a file it uses, a
+  closure's variables, the calls in progress through recursion and a caught
+  mistake, the program's own question answered from the same input, the input
+  running out and `quit`; and every test program, built to be debugged and
+  told to go, saying, failing and ending exactly as its usual build does
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
@@ -990,6 +1025,11 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 ## Limits
 
+- `moth debug` stops before a line, not inside one, and shows variables by
+  name, not other values (`show x`, not `show x + 1`). A mistake ends the
+  program as it always does, with no stop to look around first. A program
+  built to be debugged is slower: before every line it asks the debugger
+  whether to stop, and keeps its loops' variables in memory.
 - A program learns about the world through `ask`, its files, the sites it
   reads, its arguments, the clock, and in an app, keys, clicks and timers. In
   the playground, files last for one run, only sites that let any page read

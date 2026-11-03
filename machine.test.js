@@ -290,8 +290,9 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"] });
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+    include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
   if (target === "linux") chmodSync(exe, 0o755);
@@ -301,6 +302,89 @@ function mothExe() {
 }
 after(() => standalone && rmSync(standalone.dir, { recursive: true, force: true }));
 
+// moth debug (DESIGN §59): a program built to be debugged stops before its first line, and before each line
+// it's told to, and says where it is, what each variable holds and which calls are in progress, from
+// commands on its input; and, told to go, does all the rest just as the program built the usual way does.
+const DEBUG_LIB = "set calls_made to 0\nto twice with t\n    add 1 to calls_made\n    return t + t\nend\n";
+const DEBUG_PROGRAM = "use \"lib.moth\" as lib\nto counter\n    set count to 0\n    to bump\n        add 1 to count\n        return count\n    end\n    return bump\nend\nto risky with n\n    if n is 0\n        fail with \"none left\"\n    end\n    return risky(n - 1)\nend\nset tick to counter()\ntick()\nset sam to record with name \"Sam\", pets (list of \"cat\")\ntry\n    risky(2)\nif it fails with why\n    say \"caught \" why\nend\nset name to ask \"Name?\"\nsay lib's twice(name) \" \" sam\nsay \"done\"";
+const DEBUG_RUNS = [
+  ["step\nstep\nwhere\nlist\nbreak prog.moth 5\ngo\nvars\nwhere\nout\nnext\nshow tick\nshow sam\nshow nope\nbreak prog.moth 12\nbreaks\ngo\nwhere\nout\nshow why\nclear prog.moth 12\nclear prog.moth 12\ngo\nAna\n\n",
+    "lib.moth:1: set calls_made to 0\n(moth) step\nlib.moth:2: to twice with t\n(moth) step\nprog.moth:2: to counter\n(moth) where\n  prog.moth:2\n(moth) list\n   1  use \"lib.moth\" as lib\n-> 2  to counter\n   3      set count to 0\n   4      to bump\n   5          add 1 to count\n(moth) break prog.moth 5\nbreakpoint at prog.moth:5\n(moth) go\nprog.moth:5, in 'bump': add 1 to count\n(moth) vars\nbump is <function bump>\ncount is 0\ntick is <function bump>\nsam has no value yet\nwhy has no value yet\nname has no value yet\n(moth) where\n  prog.moth:5, in 'bump'\n  prog.moth:17\n(moth) out\nprog.moth:18: set sam to record with name \"Sam\", pets (list of \"cat\")\n(moth) next\nprog.moth:19: try\n(moth) show tick\ntick is <function bump>\n(moth) show sam\nsam is (record with name \"Sam\", pets [\"cat\"])\n(moth) show nope\nthere's no 'nope' here\n(moth) break prog.moth 12\nbreakpoint at prog.moth:12\n(moth) breaks\nbreakpoint at prog.moth:5\nbreakpoint at prog.moth:12\n(moth) go\nprog.moth:12, in 'risky': fail with \"none left\"\n(moth) where\n  prog.moth:12, in 'risky'\n  prog.moth:14, in 'risky'\n  prog.moth:14, in 'risky'\n  prog.moth:20\n(moth) out\nprog.moth:22: say \"caught \" why\n(moth) show why\nwhy is \"none left\"\n(moth) clear prog.moth 12\nbreakpoint at prog.moth:12 taken away\n(moth) clear prog.moth 12\nthere's no breakpoint there: breaks lists them\n(moth) go\ncaught none left\nName? Ana\nAnaAna (record with name \"Sam\", pets [\"cat\"])\ndone\n"],
+  ["break lib.moth 4\ngo\nBo\nshow t\nwhere\nfrobnicate\nhelp\n",
+    "lib.moth:1: set calls_made to 0\n(moth) break lib.moth 4\nbreakpoint at lib.moth:4\n(moth) go\ncaught none left\nName? Bo\nlib.moth:4, in 'lib's twice': return t + t\n(moth) show t\nt is \"Bo\"\n(moth) where\n  lib.moth:4, in 'lib's twice'\n  prog.moth:25\n(moth) frobnicate\nI don't know 'frobnicate': help says what I do\n(moth) help\nstep (s)        run this line, and stop at the next one, in a call it makes too\nnext (n)        run this line, and stop at the next one here or after\nout (o)         run on, and stop once this call is over\ngo (g)          run on, and stop only at a breakpoint\nbreak 12 (b)    stop at line 12 of this file; break math.moth 12 for another\nclear 12        take that breakpoint away; breaks lists them\nshow x (p)      what x holds; vars (v) shows every variable\nwhere (w)       this line, and the calls in progress\nlist (l)        the lines around this one\nquit (q)        end the program here\n(moth) \nBoBo (record with name \"Sam\", pets [\"cat\"])\ndone\n"],
+  ["next\nnext\nquit\n",
+    "lib.moth:1: set calls_made to 0\n(moth) next\nlib.moth:2: to twice with t\n(moth) next\nprog.moth:2: to counter\n(moth) quit\n"],
+];
+
+test("a program built to be debugged steps, stops at breakpoints, and shows its variables and calls", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-debug-"));
+  try {
+    const exe = executable(dir, "prog");
+    writeFileSync(exe, machine(DEBUG_PROGRAM, { target, name: "prog.moth", debug: true, files: { "lib.moth": DEBUG_LIB, "moth-debugger.moth": here("moth-debugger.moth") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    for (const [input, want] of DEBUG_RUNS) {
+      const got = spawnSync(exe, [], { input, encoding: "utf8", timeout: 60_000 });
+      assert.deepEqual({ stdout: got.stdout, stderr: got.stderr, status: got.status }, { stdout: want, stderr: "", status: 0 }, input);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a program built to be debugged, told to go, says and fails just as its usual build does", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-debug-"));
+  const files = { "moth-debugger.moth": here("moth-debugger.moth") };
+  // not those that ask, whose questions would take the commands, nor those that use the clock or chance
+  const sources = [...PROGRAMS.map(([s]) => s), ...ERRORS.map(([s]) => s), ...Object.values(examples)]
+    .filter((source) => !/\b(ask|random|clock|wait|the time)\b/.test(source));
+  let compared = 0;
+  try {
+    sources.forEach((source, i) => {
+      let usual;
+      try {
+        usual = machine(source, { target, name: "p.moth" });
+      } catch (err) {
+        if (err instanceof MothError) return; // not machine code yet, or a mistake in the program
+        throw err;
+      }
+      const debugged = machine(source, { target, name: "p.moth", debug: true, files });
+      const ran = (bytes, name) => {
+        const exe = executable(dir, name);
+        writeFileSync(exe, bytes);
+        if (target === "linux") chmodSync(exe, 0o755);
+        return spawnSync(exe, [], { input: "go\n", encoding: "utf8", timeout: 60_000 });
+      };
+      const want = ran(usual, `u${i}`);
+      const got = ran(debugged, `d${i}`);
+      const first = /^[^\n]*\n\(moth\) go\n/.exec(got.stdout); // where it stopped first, and the command
+      assert.deepEqual({ stdout: first ? got.stdout.slice(first[0].length) : got.stdout, stderr: got.stderr, status: got.status },
+        { stdout: want.stdout, stderr: want.stderr, status: want.status }, source);
+      compared++;
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(compared > 200, `only ${compared} compared`);
+});
+
+test("moth.exe debug runs a program with the debugger it was built with, passing its arguments on", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "debugging");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "area.moth"), "to area with w, h\n    return w * h\nend\nset total to 0\nfor each i from 1 to 3\n    add area(i, 2) to total\nend\nsay \"total \" total \" from \" arguments\n");
+  const got = spawnSync(exe, ["debug", "area.moth", "a", "b"], { cwd: sub, input: "break 2\ngo\nwhere\nvars\nclear 2\ngo\n", encoding: "utf8", timeout: 120_000 });
+  assert.equal(got.stderr, "");
+  assert.equal(got.stdout, [
+    "area.moth:1: to area with w, h", "(moth) break 2", "breakpoint at area.moth:2", "(moth) go", "area.moth:2, in 'area': return w * h",
+    "(moth) where", "  area.moth:2, in 'area'", "  area.moth:6", "(moth) vars", "w is 1", "h is 2", "total is 0", "i is 1",
+    "(moth) clear 2", "breakpoint at area.moth:2 taken away", "(moth) go", 'total 12 from ["a", "b"]', ""].join("\n"));
+  assert.equal(got.status, 0);
+  assert.deepEqual(readdirSync(sub), ["area.moth"]); // the program it built, gone
+  const wrong = spawnSync(exe, ["debug"], { cwd: sub, encoding: "utf8" });
+  assert.equal(wrong.status, 2);
+  assert.match(wrong.stderr, /moth debug \[--allow-\.\.\.\] <file\.moth> \[arguments\.\.\.\]/);
+});
+
 test("moth.exe builds a program, and itself into the same bytes", { skip }, () => {
   const { dir, exe, made } = mothExe();
   writeFileSync(join(dir, "lib.moth"), "to twice with t\n    return t + t\nend\n");
@@ -309,7 +393,7 @@ test("moth.exe builds a program, and itself into the same bytes", { skip }, () =
   assert.equal(built.status, 0, built.stdout + built.stderr);
   assert.match(built.stdout, /^compiled hi\.moth to machine code for (Windows|Linux) -> hi(\.exe)? \(.* bytes\)\n$/);
   assert.equal(spawnSync(executable(dir, "hi"), [], { encoding: "utf8" }).stdout, "abab\nSTRASSE\n");
-  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write", "--allow-run"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write", "--allow-run", "--include", "moth-debugger.moth"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.ok(Buffer.from(made).equals(readFileSync(executable(dir, "moth"))), "moth.exe built itself into different bytes");
 });

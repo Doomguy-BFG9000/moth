@@ -2599,3 +2599,37 @@ hold them to agreeing.
   brackets; nine mistakes; compiler.moth held to moth.js on all of them;
   moth.exe tidying text with text in it as format() does; and the playground
   colours a value in text as code, the text inside it as text.
+
+## 59. A debugger for built programs
+
+- **Why.** The playground can step a program both ways and show every variable,
+  but a program built into machine code could only `say` what it was doing.
+- **`moth debug file.moth`** builds the program as `moth run` would, with a
+  debugger in it, and runs it. It stops before the first line, and before each
+  line it's told to, says where it is, and takes commands from its input,
+  typed or not: `step`, `next`, `out`, `go`, `break 12` or `break math.moth 12`,
+  `clear`, `breaks`, `show x`, `vars`, `where`, `list`, `quit` and `help`.
+- **The debugger is Moth.** [`moth-debugger.moth`](moth-debugger.moth) is used
+  `as moth_debugger`, read before the program so its functions are numbered
+  first, and its code goes before the program's. Before each line of the
+  program, and of the files it uses, machine.moth asks `wants(line, file, depth,
+  function)` whether to stop, and if so calls `here` with the variables too.
+  Stepping, breakpoints, the calls in progress (`wants` sees how deep each line
+  is, so one more than the line before means that line made a call), and
+  reading commands with `ask`, are all ordinary Moth; only the hook is machine
+  code. moth.exe carries the debugger as a file built into it, `--include
+  moth-debugger.moth`, and builds it into the programs it debugs.
+- **What the hook needs.** How deep in calls the line is, r15, as
+  `debug_depth`; and for each variable the line can see, nearest first (its
+  own, then each function out to the top, but not the functions the program
+  makes once, nor a file's names), what it holds and whether it has a value
+  yet, `debug_value` and `debug_set`, which read it where it lives and never
+  fail on one with no value.
+- **Nothing kept where the debugger can't see.** A debug build keeps no loop's
+  variables in registers, as the loop analysis never saw the hooks' calls, and
+  makes no guesses about calls (§48). Near the most calls there can be, the
+  hook doesn't call the debugger, so a program that recurses too far stops at
+  its own line, as it would built the usual way.
+- **Tested.** Three sessions word for word, on Windows and Linux; every test
+  program built to be debugged and told to `go`, against its usual build; and
+  `moth debug` through moth.exe.

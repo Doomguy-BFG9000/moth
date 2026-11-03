@@ -35164,7 +35164,36 @@ to new_state with a, program_name, files, source, target
         uses_random no, uses_read no, uses_units no, uses_tables no, uses_folders no, uses_clock no, uses_order no,
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
         uses_controls no, uses_choose no, uses_files no, sigs nothing, seen_inputs empty dictionary,
-        seen_gives empty dictionary, escaped empty dictionary, live no
+        seen_gives empty dictionary, escaped empty dictionary, live no, debugging no
+end
+
+# The program with the debugger's code before it, and between them the debugger told the program's name and
+# each file's text, for showing a line
+to with_debugger with debugger_body, body, files, source, program_name
+    set at to at of item 1 of debugger_body
+    set names to list of (text_node("", at))
+    set texts to list of (text_node(source, at))
+    for each f in files
+        if name of f is not debugger_file
+            add text_node(name of f, at) to names
+            add text_node(text of f, at) to texts
+        end
+    end
+    set args to list of (text_node(program_name, at)), (record with kind "list", items names, at at),
+        (record with kind "list", items texts, at at)
+    set made to empty list
+    for each s in debugger_body
+        add s to made
+    end
+    add record with kind "call", name "moth_debugger's start", args args, at at to made
+    for each s in body
+        add s to made
+    end
+    return made
+end
+
+to text_node with t, at
+    return record with kind "value", type "string", value t, at at
 end
 
 to new_fc with st, scope, main, name, inputs, own
@@ -35491,6 +35520,20 @@ end
 # "1.2.0"), both for Windows, and files built into it, on both: `included_names` and `included_bytes`, each
 # file's name and its bytes, which `read` and `read bytes` find there before they look on the disk
 to compile_shipping with source, file_names, file_texts, target, program_name, flags, icon, version, included_names, included_bytes
+    return compile_built(source, file_names, file_texts, target, program_name, flags, icon, version, included_names,
+        included_bytes, no)
+end
+
+# compile_allowing for `moth debug`: the program with the debugger in it, which one of the files must be,
+# named debugger_file, and asked before each of the program's lines whether to stop there (see gen_hook)
+to compile_debugging with source, file_names, file_texts, target, program_name, flags
+    return compile_built(source, file_names, file_texts, target, program_name, flags, nothing, nothing, empty list,
+        empty list, yes)
+end
+
+set debugger_file to "moth-debugger.moth"
+
+to compile_built with source, file_names, file_texts, target, program_name, flags, icon, version, included_names, included_bytes, debugging
     set shipping to record with icon icon, version version, included empty list, name program_name
     set included to included of shipping
     for each i from 1 to length of included_names
@@ -35508,11 +35551,25 @@ to compile_shipping with source, file_names, file_texts, target, program_name, f
         add record with name item i of file_names, text item i of file_texts to files
     end
     set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
+    set debugger_body to empty list
+    if debugging # read first, so its functions are numbered before the program's, as they come before them
+        if not (debugger_file is in file_names)
+            fail with front's problem(front's place(1, 1, ""), "debugging needs the debugger, " + debugger_file)
+        end
+        set debugger_body to front's parse(front's tokenize("use \"" + debugger_file + "\" as moth_debugger", ""), reading)
+    end
     set body to front's parse(front's tokenize(source, ""), reading)
+    if debugging
+        set body to with_debugger(debugger_body, body, files, source, program_name)
+    end
     set a to new_asm()
     set shipping of a to shipping
     set st to new_state(a, program_name, files, source, target)
     set allowed of st to allowing
+    set debugging of st to debugging
+    if debugging # no guesses about calls: the debugger's are made where no analysis sees them
+        set sigs of st to empty dictionary
+    end
     gen_program(st, body)
     set rounds to 0
     repeat while not sigs_hold(st) # a guess was wrong: written again with what was found, then with none
@@ -35525,6 +35582,7 @@ to compile_shipping with source, file_names, file_texts, target, program_name, f
         set shipping of a to shipping
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
+        set debugging of st to debugging
         set sigs of st to guess
         gen_program(st, body)
     end
@@ -35535,6 +35593,7 @@ to compile_shipping with source, file_names, file_texts, target, program_name, f
         set units of a to yes
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
+        set debugging of st to debugging
         set sigs of st to settled
         gen_program(st, body)
     end
@@ -35778,8 +35837,66 @@ to gen_block with fc, body
             set marked of fc to marked of fc + 1
             mark(a of fc, item (marked of fc) of marks of fc)
         end
+        if debugging of st of fc and file of at of s is not debugger_file
+            gen_hook(fc, s)
+        end
         gen_statement(fc, s)
     end
+end
+
+# Before a line of a program built to be debugged: the debugger is asked whether to stop, told where the line
+# is, how many calls are in progress, and which function it's in ("" for the program's own code), and if it
+# is to stop, told too every variable the line can see, what each holds, and whether it has a value yet.
+to gen_hook with fc, s
+    set a to a of fc
+    set at to at of s
+    set fn to name of fc
+    if main of fc
+        set fn to ""
+    end
+    set place to list of (record with kind "value", type "number", value "" + line of at, at at), text_node(file of at, at),
+        (record with kind "debug_depth", at at), text_node(fn, at)
+    set past to new_label(a)
+    alui(a, "cmp", r15, deepest - 16) # near the most calls there can be, the program's own call gets there first
+    jcc(a, cc_ge, past)
+    gen_cond(fc, (record with kind "call", name "moth_debugger's wants", args place, at at), past, no)
+    set asked to facts_copy(facts of fc)
+    set names to empty list
+    set values to empty list
+    set given to empty list
+    for each n in debug_names(fc)
+        add text_node(n, at) to names
+        add record with kind "debug_value", name n, at at to values
+        add record with kind "debug_set", name n, at at to given
+    end
+    set told to empty list
+    for each e in place
+        add e to told
+    end
+    add record with kind "list", items names, at at to told
+    add record with kind "list", items values, at at to told
+    add record with kind "list", items given, at at to told
+    gen_statement(fc, (record with kind "call", name "moth_debugger's here", args told, at at))
+    mark(a, past)
+    set facts of fc to facts_meet(asked, facts of fc)
+end
+
+# the variables a line in this function can see, nearest first: not the functions the program makes once, nor
+# a file's names used as one (`math's x`), the debugger's among them
+to debug_names with fc
+    set made to empty list
+    set seen to empty dictionary
+    set here to scope of fc
+    repeat while here is not nothing
+        for each n in names of here
+            if not (n is in seen) and position of "'s " in n is 0 and not (n is in functions of st of fc)
+                set item n of seen to yes
+                add n to made
+            end
+        end
+        set here to parent of here
+    end
+    return made
 end
 
 # the statements whose code keeps the facts right (see the facts, below): any other forgets them all
@@ -37428,7 +37545,7 @@ end
 # registers); a loop inside it may still use them, from where it starts.
 to cache_enter with fc, info, keep
     set was to record with cache cache of fc, next_reg next_reg of fc, open open of fc
-    set open of fc to not (calls of info or tries of info)
+    set open of fc to not (calls of info or tries of info or debugging of st of fc)
     if not open of fc
         return was
     end
@@ -38413,6 +38530,10 @@ to gen_expr with fc, e
         set made to gen_value(fc, e, xmm0)
     else if what is "name"
         set made to gen_name_into(fc, e, xmm0)
+    else if what is "debug_value" or what is "debug_set"
+        gen_debug_peek(fc, e)
+    else if what is "debug_depth" # how many calls are in progress
+        cvtsi2sd(a, xmm0, r15)
     else if what is "call"
         set made to gen_call(fc, e, no)
     else if what is "math"
@@ -38716,6 +38837,29 @@ end
 
 # xmm x gets a variable's value, from its register if it has one, and unless it's sure to have a value
 # already, a look that it does; once it has, that's known
+# For the debugger: a variable's value, or nothing if it has none yet (debug_value), or whether it has one
+# (debug_set), with no mistake either way
+to gen_debug_peek with fc, e
+    set a to a of fc
+    var_load(fc, front's resolve(scope of fc, name of e), xmm0)
+    set past to new_label(a)
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    if kind of e is "debug_value"
+        jcc(a, cc_ne, past)
+        load_bits(a, xmm0, bits_nothing)
+    else
+        set unset_at to new_label(a)
+        jcc(a, cc_e, unset_at)
+        load_bits(a, xmm0, bits_yes)
+        jmp_to(a, past)
+        mark(a, unset_at)
+        load_bits(a, xmm0, bits_no)
+    end
+    mark(a, past)
+end
+
 to gen_name_into with fc, e, x
     set a to a of fc
     set found to front's resolve(scope of fc, name of e)

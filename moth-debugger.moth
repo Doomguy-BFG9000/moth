@@ -1,0 +1,312 @@
+# The debugger `moth debug` builds into a program (DESIGN §59). Before each line of the program, and of the
+# files it uses, runs, the program asks `wants` whether to stop there; when it does, `here` says which line
+# it is and takes commands, typed or from the input, until one says to go on.
+
+set program_name to "" # the program's own file, for saying where a line is
+set sources to empty dictionary # each file's lines, by its name ("" for the program's own)
+set mode to "step" # stop at the next line (step), the next one no deeper in calls (next), the next one out of
+# this call (out), or only at a breakpoint (go)
+set deep to 0 # how many calls were in progress at the line it stopped at
+set breaks to empty dictionary # the breakpoints, each "file:line"
+set calls to empty list # the calls in progress, outermost first: the line each was made on
+set last to nothing # the line before this one: its file, line and function
+set level to 0 # how many calls were in progress then
+
+# Before the program's first line: its name, and each file's name and text
+to start with name, file_names, texts
+    set program_name to name
+    for each k from 1 to length of file_names
+        set lines to split item k of texts by "\n"
+        if length of lines is greater than 1 and item (length of lines) of lines is "" # what the last line ends with
+            set lines to all_but_last(lines)
+        end
+        set item (item k of file_names) of sources to lines
+    end
+end
+
+# a line, as a person finds it: the file's name and the line's number
+to place_name with file, line
+    if file is ""
+        return program_name + ":" + line
+    end
+    return file + ":" + line
+end
+
+# the function a line is in, said after its place
+to in_function with fn
+    if fn is ""
+        return ""
+    end
+    return ", in '" + fn + "'"
+end
+
+# what a line holds, as written, without a Windows line end
+to line_of with file, line
+    if not (file is in sources)
+        return ""
+    end
+    set lines to item file of sources
+    if line is less than 1 or line is greater than length of lines
+        return ""
+    end
+    set text to item line of lines
+    set made to ""
+    for each k from 1 to length of text
+        if k is less than length of text or byte 1 of (item k of text as bytes) is not 13 # 13: a carriage return
+            add item k of text to made
+        end
+    end
+    return made
+end
+
+to unindented with text
+    set made to ""
+    set started to no
+    for each c in text
+        if started or (c is not " " and c is not "\t")
+            set started to yes
+            add c to made
+        end
+    end
+    return made
+end
+
+to all_but_last with items
+    set made to empty list
+    for each k from 1 to length of items - 1
+        add item k of items to made
+    end
+    return made
+end
+
+# `calls`, kept up to date from how many calls are in progress at each line: one more than at the line
+# before, and that line made the call
+to follow with line, file, depth, fn
+    repeat while depth is greater than level
+        add last to calls
+        add 1 to level
+    end
+    repeat while depth is less than level and length of calls is greater than 0
+        set calls to all_but_last(calls)
+        set level to level - 1
+    end
+    set level to depth
+    set last to record with file file, line line, fn fn
+end
+
+# whether to stop at this line, before it runs
+to wants with line, file, depth, fn
+    follow(line, file, depth, fn)
+    if mode is "step" or (file + ":" + line) is in breaks
+        return yes
+    end
+    if mode is "next"
+        return depth is at most deep
+    end
+    if mode is "out"
+        return depth is less than deep
+    end
+    return no
+end
+
+# a value as it's written in Moth: text in quotes, as `say` shows it inside a list
+to shown with value
+    set whole to "" + (list of value)
+    set made to ""
+    for each k from 2 to length of whole - 1
+        add item k of whole to made
+    end
+    return made
+end
+
+# the words of a command, without the spaces between them
+to words_of with said
+    set made to empty list
+    for each w in split said by " "
+        if w is not ""
+            add w to made
+        end
+    end
+    return made
+end
+
+# `break 12`, at a line of this file, or `break math.moth 12`: "file:line", or nothing if it isn't one
+to break_place with words, file
+    set named to file
+    set written to nothing
+    if length of words is 2
+        set written to item 2 of words
+    else if length of words is 3
+        set named to item 2 of words
+        set written to item 3 of words
+        if named is program_name
+            set named to ""
+        end
+    end
+    if written is nothing
+        return nothing
+    end
+    try
+        set line to number of written
+    if it fails
+        return nothing
+    end
+    return named + ":" + line
+end
+
+# what a "file:line" says, as place_name does
+to break_name with key
+    set parts to split key by ":"
+    set line to item (length of parts) of parts
+    set file to ""
+    for each k from 1 to length of parts - 1
+        if k is greater than 1
+            add ":" to file
+        end
+        add item k of parts to file
+    end
+    if file is ""
+        return program_name + ":" + line
+    end
+    return file + ":" + line
+end
+
+to say_value with name, names, values, given
+    for each k from 1 to length of names
+        if item k of names is name
+            if item k of given
+                say name " is " shown(item k of values)
+            else
+                say name " has no value yet"
+            end
+            return nothing
+        end
+    end
+    say "there's no '" name "' here"
+end
+
+to say_lines with file, line
+    set first to line - 3
+    if first is less than 1
+        set first to 1
+    end
+    set past to line + 3
+    for each n from first to past
+        set text to line_of(file, n)
+        if file is in sources and n is at most length of item file of sources
+            if n is line
+                say "-> " n "  " text
+            else
+                say "   " n "  " text
+            end
+        end
+    end
+end
+
+to say_calls with line, file, fn
+    say "  " place_name(file, line) in_function(fn)
+    set k to length of calls
+    repeat while k is at least 1
+        set made_at to item k of calls
+        if made_at is nothing
+            say "  (called from outside the program)"
+        else
+            say "  " place_name(file of made_at, line of made_at) in_function(fn of made_at)
+        end
+        set k to k - 1
+    end
+end
+
+to say_help
+    say "step (s)        run this line, and stop at the next one, in a call it makes too"
+    say "next (n)        run this line, and stop at the next one here or after"
+    say "out (o)         run on, and stop once this call is over"
+    say "go (g)          run on, and stop only at a breakpoint"
+    say "break 12 (b)    stop at line 12 of this file; break math.moth 12 for another"
+    say "clear 12        take that breakpoint away; breaks lists them"
+    say "show x (p)      what x holds; vars (v) shows every variable"
+    say "where (w)       this line, and the calls in progress"
+    say "list (l)        the lines around this one"
+    say "quit (q)        end the program here"
+end
+
+# Stopped before this line runs: what it is, then commands until one goes on. `names` are the variables the
+# line can see, `values` what they hold, and `given` whether each has a value yet.
+to here with line, file, depth, fn, names, values, given
+    set deep to depth
+    say place_name(file, line) in_function(fn) ": " unindented(line_of(file, line))
+    repeat while yes
+        set said to nothing
+        try
+            set said to ask "(moth)"
+        if it fails # the input ended: the program runs on, stopping nowhere
+            set mode to "go"
+            set breaks to empty dictionary
+            return nothing
+        end
+        set words to words_of(said)
+        set command to ""
+        if length of words is at least 1
+            set command to lowercase of item 1 of words
+        end
+        if command is "step" or command is "s"
+            set mode to "step"
+            return nothing
+        else if command is "next" or command is "n"
+            set mode to "next"
+            return nothing
+        else if command is "out" or command is "o"
+            set mode to "out"
+            return nothing
+        else if command is "go" or command is "g" or command is "continue" or command is "c"
+            set mode to "go"
+            return nothing
+        else if command is "break" or command is "b"
+            set key to break_place(words, file)
+            if key is nothing
+                say "break needs a line's number: break 12, or break math.moth 12"
+            else
+                set item key of breaks to yes
+                say "breakpoint at " break_name(key)
+            end
+        else if command is "clear"
+            set key to break_place(words, file)
+            if key is nothing or not (key is in breaks)
+                say "there's no breakpoint there: breaks lists them"
+            else
+                remove key from breaks
+                say "breakpoint at " break_name(key) " taken away"
+            end
+        else if command is "breaks"
+            if length of breaks is 0
+                say "no breakpoints"
+            end
+            for each key in breaks
+                say "breakpoint at " break_name(key)
+            end
+        else if command is "show" or command is "p" or command is "print"
+            if length of words is 2
+                say_value(lowercase of item 2 of words, names, values, given)
+            else
+                say "show needs a variable's name: show x"
+            end
+        else if command is "vars" or command is "v"
+            if length of names is 0
+                say "no variables here"
+            end
+            for each name in names
+                say_value(name, names, values, given)
+            end
+        else if command is "where" or command is "w"
+            say_calls(line, file, fn)
+        else if command is "list" or command is "l"
+            say_lines(file, line)
+        else if command is "quit" or command is "q"
+            stop the program with 0
+        else if command is "help" or command is "h" or command is "?" or command is ""
+            say_help()
+        else
+            say "I don't know '" command "': help says what I do"
+        end
+    end
+end
