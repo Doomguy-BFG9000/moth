@@ -174,6 +174,10 @@ export const PROGRAMS = [
   // rounding, from a number as it's shown, and what's left over, with the divisor's sign
   ["for each x in list of 2.5, -2.5, 2.4, -2.4, 0.5, -0.5, 0.49, -0.49, 7, -7, 0.1 * 30, 2.9999999999999996, 1 / 3\n    say x \": \" x rounded down \" \" x rounded up \" \" x rounded\nend\nset big to 2 to the power of 60\nsay big rounded is big\nsay (0 - 0.3) rounded\nsay (0 - 0.3) rounded up\nset rounded to 4\nsay rounded rounded\nsay 10 / 4 rounded down\nsay (10 / 4) rounded down", "2.5: 2 3 3\n-2.5: -3 -2 -3\n2.4: 2 3 2\n-2.4: -3 -2 -2\n0.5: 0 1 1\n-0.5: -1 0 -1\n0.49: 0 1 0\n-0.49: -1 0 0\n7: 7 7 7\n-7: -7 -7 -7\n3: 3 3 3\n3: 3 3 3\n0.333333333333333: 0 1 0\nyes\n0\n0\n4\n2\n2"],
   ["for each a in list of 17, -17, 7.5, -7.5, 0.3, 1, 0\n    for each b in list of 5, -5, 2.5, 0.1\n        say a \" by \" b \": \" remainder of a divided by b\n    end\nend\nsay remainder of 2 to the power of 60 divided by 7\nsay remainder of 10 + 3 divided by 4\nset r to record with remainder 9\nsay remainder of r", "17 by 5: 2\n17 by -5: -3\n17 by 2.5: 2\n17 by 0.1: 0\n-17 by 5: 3\n-17 by -5: -2\n-17 by 2.5: 0.5\n-17 by 0.1: 0\n7.5 by 5: 2.5\n7.5 by -5: -2.5\n7.5 by 2.5: 0\n7.5 by 0.1: 0\n-7.5 by 5: 2.5\n-7.5 by -5: -2.5\n-7.5 by 2.5: 0\n-7.5 by 0.1: 0\n0.3 by 5: 0.3\n0.3 by -5: -4.7\n0.3 by 2.5: 0.3\n0.3 by 0.1: 0\n1 by 5: 1\n1 by -5: -4\n1 by 2.5: 1\n1 by 0.1: 0\n0 by 5: 0\n0 by -5: 0\n0 by 2.5: 0\n0 by 0.1: 0\n1\n1\n9"],
+  // a record's own functions: `pet's speak()` when nothing else is called speak
+  ["to dog_speaks with self\n    return name of self + \" says woof\"\nend\nto cat_speaks with self\n    return name of self + \" says meow\"\nend\nto make_pet with name, speaks\n    return record with name name, speak speaks\nend\nset pets to list of make_pet(\"Rex\", dog_speaks), make_pet(\"Tom\", cat_speaks)\nfor each pet in pets\n    say pet's speak()\nend\nto greets with self, other\n    return name of self + \" greets \" + other\nend\nset rex to item 1 of pets\nset greet of rex to greets\nsay rex's greet(\"Tom\")\nto make_puppy with name\n    set puppy to make_pet(name, dog_speaks)\n    set base to speak of puppy\n    set speak of puppy to function with self gives base(self) + \", softly\"\n    return puppy\nend\nset bit to make_puppy(\"Bit\")\nsay bit's speak()\nsay rex's speak()\nto shout with self\n    say uppercase of name of self\nend\nset loud of rex to shout\nrex's loud()\nset counter to record with count 0, step (function with self gives self)\nto bump with self, by\n    set count of self to count of self + by\n    return self\nend\nset step of counter to bump\nsay count of counter's step(2)'s step(3)", "Rex says woof\nTom says meow\nRex greets Tom\nBit says woof, softly\nRex says woof\nREX\n5"],
+  ["to speak with x\n    return \"the function\"\nend\nset r to record with speak (function with s gives \"its own\")\nsay r's speak()", "the function"],
+  ["set r to record with go (function with s gives 5)\ntry\n    r's nope()\nif it fails with why\n    say \"caught: \" why\nend\nsay r's go()", "caught: there is no function called 'nope'\n5"],
 ];
 
 // Saving and loading, the clock and waiting, and putting things in order, with files to save to: each program,
@@ -545,6 +549,12 @@ export const ERRORS = [
   ["say remainder of \"7\" divided by 2", "line 1: 'remainder of' needs a number, not text"],
   ["say remainder of 7 divided by yes", "line 1: 'remainder of' needs a number, not yes/no"],
   ["set x to 5 km\nsay x rounded", "line 2: 'rounded' needs a number, not a distance"],
+  ["set rex to record with name \"Rex\"\nrex's fly()", "line 2: there is no function called 'fly'"],
+  ["to bark with x\n    return 1\nend\nset rex to record with name \"Rex\"\nsay rex's brak()", "line 5: there is no function called 'brak'. Did you mean 'bark'?"],
+  ["set rex to record with name \"Rex\", sound \"woof\"\nrex's sound()", "line 2: 'sound' is text, not a function"],
+  ["set r to record with f (function with a gives a)\nsay r's f(1)", "line 2: 'f' needs 1 input but got 2"],
+  ["set xs to list of 1\nxs's speak()", "line 2: there is no function called 'speak'"],
+  ["to falls with self\n    return 1 / 0\nend\nset r to record with go falls\nsay r's go()", "line 2: can't divide by zero"],
 ];
 
 // The examples and the tables above, each broken by up to three random edits. The seed is fixed, so a

@@ -516,6 +516,7 @@ to parse with tokens, reading
     if depth_now is 0
         set calls of reading to empty list
         set defines of reading to empty list
+        set owns of reading to empty list
     end
     set depth of reading to depth_now + 1
     set orders_from to functions_made # functions are numbered on from here (see numbered)
@@ -1276,6 +1277,8 @@ to parse with tokens, reading
                     add own_one to own_given
                 end
                 set own_made to made_call(own_named, own_given, own_at)
+                set own_calls_made to owns of reading # a record's own function, if nothing else has its name (see own_calls)
+                add own_made to own_calls_made
             else
                 set own_made to record with kind "field", name own_named, subject own_made, at own_at
             end
@@ -2604,11 +2607,120 @@ to parse with tokens, reading
     set depth of reading to depth of reading - 1
     if depth of reading is 0
         fill_defaults(reading)
+        own_calls(reading, made)
         set counted to record with n orders_from
         numbered(made, counted)
         set functions_made to n of counted
     end
     return made
+end
+
+# `pet's speak(x)`, in a program that makes nothing called speak (no function, input or variable, in any
+# file it uses): a call to a function made for it at the program's top, which calls the function pet's
+# speak field holds, with pet first, so records can each have their own. If pet has no speak, it fails as
+# a call to a function nobody made did.
+to own_calls with reading, body
+    if length of owns of reading is 0
+        return nothing
+    end
+    set names to record with seen (empty dictionary), order (empty list)
+    made_names(body, names)
+    set helpers to empty list
+    set on_line to empty dictionary
+    for each call in owns of reading
+        set own to name of call
+        if not (own is in seen of names)
+            set t to at of call
+            set line_key to own + " " + line of t
+            set n to 1
+            if line_key is in on_line
+                set n to item line_key of on_line + 1
+            end
+            set item line_key of on_line to n
+            set helper to own + " of the record on line " + line of t
+            if n is greater than 1
+                set helper to helper + " (" + n + ")"
+            end
+            set params to list of "the record"
+            set kinds to list of -1
+            for each k from 2 to length of args of call
+                add "input " + (k - 1) to params
+                add -1 to kinds
+            end
+            set guess to closest(own, order of names)
+            set why to "there is no function called '" + own + "'"
+            if guess is not nothing
+                set why to why + ". Did you mean '" + guess + "'?"
+            end
+            set the_record to record with kind "name", name "the record", at t
+            set got to record with kind "set", name own, value (record with kind "field", name own, subject the_record, at t), at t
+            set failed to record with kind "fail", value (record with kind "value", type "string", value why, at t), at t
+            set tried to record with kind "try", body (list of got), name nothing, handler (list of failed), at t
+            set inputs to empty list
+            for each p in params
+                add (record with kind "name", name p, at t) to inputs
+            end
+            set gave to record with kind "return", value (record with kind "call", name own, args inputs, at t), at t
+            add (record with kind "define", name helper, params params, kinds kinds, body (list of tried, gave), at t, order 0, native nothing, defaults nothing) to helpers
+            set name of call to helper
+        end
+    end
+    for each s in body
+        add s to helpers
+    end
+    set k to 1
+    for each s in helpers # the program's own list, so it's the one that has them
+        if k is at most length of body
+            set item k of body to s
+        else
+            add s to body
+        end
+        add 1 to k
+    end
+end
+
+# every name the code makes: functions, their inputs, and variables, in the order they're written
+to made_names with body, names
+    for each s in body
+        set what to kind of s
+        set fn_made to nothing
+        if what is "define"
+            set fn_made to s
+            note_name(names, name of s)
+        else if what is "when" or what is "every"
+            set fn_made to fn of s
+        end
+        if fn_made is not nothing
+            for each p in params of fn_made
+                note_name(names, p)
+            end
+            made_names(body of fn_made, names)
+        end
+        if what is "set" or what is "add" or what is "count" or what is "each"
+            note_name(names, name of s)
+        end
+        if what is "try" and name of s is not nothing
+            note_name(names, name of s)
+        end
+        if what is "if"
+            made_names(then of s, names)
+            made_names(otherwise of s, names)
+        end
+        if what is "while" or what is "repeat" or what is "count" or what is "each" or what is "try"
+            made_names(body of s, names)
+        end
+        if what is "try"
+            made_names(handler of s, names)
+        end
+    end
+end
+
+to note_name with names, n
+    if not (n is in seen of names)
+        set item n of (seen of names) to yes
+        set in_order to order of names
+        add n to in_order
+    end
 end
 
 # Each function's number, in the order they're written, inside one another's too (see made_order): what

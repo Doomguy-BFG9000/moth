@@ -449,6 +449,11 @@ to birthday with person
     set person's age to person's age + 1
 end
 sam's birthday()                            # a function given the value first: birthday(sam)
+to woofs with dog
+    return name of dog + " says woof"
+end
+set rex to record with name "Rex", speak woofs   # a record can hold its own functions
+say rex's speak()                           # nothing else is called speak, so it's rex's: woofs(rex)
 
 to check_age with age
     if age is less than 0
@@ -678,6 +683,12 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   the sum before them, as it's shown, to 15 digits, so `(0.1 * 30) rounded
   down` is 3; `remainder of a divided by b` is exact for whole numbers. Adding
   text to anything joins them into text.
+- **A record's own functions:** `rex's speak()`, where the program makes
+  nothing else called `speak`, calls the function rex's `speak` field holds,
+  with rex first. So records made by different functions can each answer the
+  same call their own way, and one made from another can replace a function
+  of its own, keeping the old one to call: what Python's classes do, with
+  records.
 - **Inputs left out:** `with name, greeting or "Hello"`: after `or`, a value
   written out (or a list of them), which each call that leaves the input out
   gets afresh. Every input after one with `or` needs one too. A call through a

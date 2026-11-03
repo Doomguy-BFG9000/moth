@@ -3010,3 +3010,33 @@ hold them to agreeing.
   mistake, on the three engines, in compiler.moth, and in machine code on
   Windows and Linux, 600 random ones too; big.moth's own tests, and 800
   random sums against BigInt, on each.
+
+## 68. A record's own functions
+
+- **Why.** Python's classes give each kind of object its own methods, and a
+  subclass its own versions of some. Moth had records and `rex's bark()`,
+  which is `bark(rex)`: one function for every record.
+- **What it does.** `rex's speak()`, in a program that makes nothing called
+  `speak` (no function, input or variable, in any file it uses), calls the
+  function rex's `speak` field holds, with rex first, and the rest after it.
+  A record's functions are any functions: made with `to`, or `function with
+  self gives ...`. So two records, made by two functions, answer the same
+  call two ways; one made by calling another maker can set its own `speak`,
+  keeping the old one in a variable to call from the new; and a record can
+  be given one later with `set speak of rex to ...`.
+- **Where a name is made, the function wins.** If anything is called
+  `speak`, `rex's speak()` is `speak(rex)` as it always was, so no program
+  that ran before means anything new. A field that isn't a function says so
+  (`'sound' is text, not a function`); a record without the field, or a value
+  that isn't a record, fails as a call to a function nobody made did, with
+  the same "Did you mean", from every name the program makes.
+- **Only the parsers.** Once the whole program is read, each such call is
+  given a function of its own at the program's top, `speak of the record on
+  line 3`, which takes the field in a `try`, failing as above if it can't,
+  and calls it; so every engine and machine code run it as any function, and
+  a mistake in it shows that function in its trail.
+- **Tested.** Two kinds of record answering one call, a function with inputs
+  given later, one replaced that calls what it replaced, one said on its own
+  line, two in a row on what the first gave, a function of that name winning,
+  and each mistake, caught and not, on the three engines, in compiler.moth,
+  and in machine code on Windows and Linux.

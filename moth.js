@@ -1,7 +1,7 @@
 // Moth: a small programming language that reads like plain English.
 // Source text -> tokens -> syntax tree -> bytecode (this file) -> the virtual machine (vm.js).
 
-import { MothError, Ended, fail, startTasks, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
+import { MothError, Ended, fail, closest, startTasks, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
 import { wasm, compileToWasmModule } from "./wasm.js";
@@ -199,7 +199,7 @@ const CARRY_ON = ["at", "of", "bit", "is", "and", "or", "in", "as", "bytes"];
 // files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
 // once), and `open` the files being read right now, to catch two that use each other.
 function parse(tokens, reading = { loaded: new Set(), open: [] }) {
-  if (!reading.depth) [reading.calls, reading.defines] = [[], []]; // for inputs a call leaves out (see fillDefaults)
+  if (!reading.depth) [reading.calls, reading.defines, reading.owns] = [[], [], []]; // see fillDefaults and ownCalls
   reading.depth = (reading.depth ?? 0) + 1;
   let pos = 0;
   const aliases = new Set(); // the names this file used files and libraries `as`: `x's` is theirs, and any other `x's` a value's
@@ -482,7 +482,10 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos++;
       const t = peek();
       const named = name("a function's or a field's name");
-      node = tight(match("(")) ? madeCall(named, [node, ...argList()], t) : { kind: "field", name: named, of: node, at: t };
+      if (tight(match("("))) {
+        node = madeCall(named, [node, ...argList()], t);
+        reading.owns.push(node); // a record's own function, if nothing else has its name (see ownCalls)
+      } else node = { kind: "field", name: named, of: node, at: t };
     }
     return node;
   }
@@ -1309,8 +1312,55 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   const made = statements(null);
-  if (--reading.depth === 0) fillDefaults(reading);
+  if (--reading.depth === 0) {
+    fillDefaults(reading);
+    ownCalls(reading, made);
+  }
   return made;
+}
+
+// `pet's speak(x)`, in a program that makes nothing called speak (no function, input or variable, in any
+// file it uses): a call to a function made for it at the program's top, which calls the function pet's
+// speak field holds, with pet first, so records can each have their own. If pet has no speak, it fails as
+// a call to a function nobody made did.
+function ownCalls(reading, body) {
+  if (!reading.owns.length) return;
+  const names = madeNames(body, new Set());
+  const helpers = [];
+  const onLine = new Map();
+  for (const call of reading.owns) {
+    if (names.has(call.name)) continue;
+    const [t, own] = [call.at, call.name];
+    const key = `${own} ${t.line}`;
+    onLine.set(key, (onLine.get(key) ?? 0) + 1);
+    const helper = `${own} of the record on line ${t.line}${onLine.get(key) > 1 ? ` (${onLine.get(key)})` : ""}`;
+    const params = ["the record", ...call.args.slice(1).map((_, i) => `input ${i + 1}`)];
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const guess = closest(own, [...names]);
+    const why = `there is no function called '${own}'${guess ? `. Did you mean '${guess}'?` : ""}`;
+    helpers.push(at("define", { name: helper, params, kinds: params.map(() => -1), body: [
+      at("try", { body: [at("set", { name: own, value: at("field", { name: own, of: at("name", { name: "the record" }) }) })], name: null,
+        handler: [at("fail", { value: at("value", { value: why }) })] }),
+      at("return", { value: at("call", { name: own, args: params.map((p) => at("name", { name: p })) }) }),
+    ] }));
+    call.name = helper;
+  }
+  body.unshift(...helpers);
+}
+
+// every name the code makes: functions, their inputs, and variables, in the order they're written
+function madeNames(body, names) {
+  for (const s of body) {
+    const fn = s.kind === "define" ? s : s.fn; // `when` and `every` make a function too
+    if (fn) {
+      if (s.kind === "define") names.add(s.name);
+      for (const p of fn.params) names.add(p);
+      madeNames(fn.body, names);
+    }
+    if (["set", "add", "count", "each"].includes(s.kind) || (s.kind === "try" && s.name)) names.add(s.name);
+    for (const inner of [s.then, s.otherwise, s.kind !== "define" && s.body, s.handler]) if (inner) madeNames(inner, names);
+  }
+  return names;
 }
 
 // A call by a function's name that leaves inputs out, `greet("Sam")` for `to greet with name, greeting or

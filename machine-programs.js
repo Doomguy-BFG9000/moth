@@ -377,6 +377,16 @@ export const MACHINE_CASES = [
   "say remainder of 7 divided by yes",
   "set x to 5 km\nsay x rounded",
   "say remainder of 9007199254740991 divided by 2\nsay remainder of -9007199254740991 divided by 2\nsay remainder of 2 to the power of 70 divided by 3\nsay remainder of 0 - 2 to the power of 70 divided by 3\nsay remainder of 2 to the power of 70 divided by -3\nsay remainder of 7 divided by 2 to the power of 60\nsay remainder of -7 divided by 2 to the power of 60\nsay (2 to the power of 60 + 0.5) rounded\nsay 123456789.123456789 rounded\nsay 0 - 10 to the power of 300 rounded",
+  // a record's own functions: `pet's speak()` when nothing else is called speak
+  "to dog_speaks with self\n    return name of self + \" says woof\"\nend\nto cat_speaks with self\n    return name of self + \" says meow\"\nend\nto make_pet with name, speaks\n    return record with name name, speak speaks\nend\nset pets to list of make_pet(\"Rex\", dog_speaks), make_pet(\"Tom\", cat_speaks)\nfor each pet in pets\n    say pet's speak()\nend\nto greets with self, other\n    return name of self + \" greets \" + other\nend\nset rex to item 1 of pets\nset greet of rex to greets\nsay rex's greet(\"Tom\")\nto make_puppy with name\n    set puppy to make_pet(name, dog_speaks)\n    set base to speak of puppy\n    set speak of puppy to function with self gives base(self) + \", softly\"\n    return puppy\nend\nset bit to make_puppy(\"Bit\")\nsay bit's speak()\nsay rex's speak()\nto shout with self\n    say uppercase of name of self\nend\nset loud of rex to shout\nrex's loud()\nset counter to record with count 0, step (function with self gives self)\nto bump with self, by\n    set count of self to count of self + by\n    return self\nend\nset step of counter to bump\nsay count of counter's step(2)'s step(3)",
+  "to speak with x\n    return \"the function\"\nend\nset r to record with speak (function with s gives \"its own\")\nsay r's speak()",
+  "set rex to record with name \"Rex\"\nrex's fly()",
+  "to bark with x\n    return 1\nend\nset rex to record with name \"Rex\"\nsay rex's brak()",
+  "set rex to record with name \"Rex\", sound \"woof\"\nrex's sound()",
+  "set r to record with f (function with a gives a)\nsay r's f(1)",
+  "set xs to list of 1\nxs's speak()",
+  "to falls with self\n    return 1 / 0\nend\nset r to record with go falls\nsay r's go()",
+  "set r to record with go (function with s gives 5)\ntry\n    r's nope()\nif it fails with why\n    say \"caught: \" why\nend\nsay r's go()",
 ];
 
 export function machinePrograms(seed, count) {
