@@ -31,39 +31,51 @@
     return boxes;
   }
 
-  // The top of the page: the nav, then the heading word by word, then the rest; on the front page the lamp
-  // lights, the moth flies in, and the example's lines appear one at a time, then what it says. Only when the
-  // head is still waiting: if GSAP was slow and the head showed the page itself, it stays as it is.
+  // The top of the page: the nav, then the heading word by word, then the rest. On the front page the
+  // lantern drops in on its cord and its light spreads; on the Learn page the lamp lights. Only when the head
+  // is still waiting: if GSAP was slow and the head showed the page itself, it stays as it is.
   function bringIn() {
     const hero = $(".hero");
     if (!hero) return show();
     const heading = words(hero.querySelector("h1"));
-    const parts = [".nav", ...hero.querySelectorAll(".pill, .eyebrow, h1, h1 ~ p, .cta > *, .install, .facts li, .card")];
+    const parts = [".nav", ...hero.querySelectorAll(".eyebrow, h1, h1 ~ p, .cta > *, .install, .facts li, .card")];
     gsap.set(parts, { autoAlpha: 0 });
     show();
     const up = { autoAlpha: 1, y: 0 };
     const tl = gsap.timeline({ defaults: { ease: "power3.out", duration: 0.8 } });
-    // a step for the parts this page has (the Learn page has no facts or code card, say)
+    // a step for the parts this page has (the Learn page has no lantern or code window, say)
     const step = (targets, from, to, at) => {
       const parts = typeof targets === "string" ? $$(targets) : [...targets];
       if (parts.length) tl.fromTo(parts, from, to, at);
     };
     step(".nav", { y: -14 }, { ...up, duration: 0.7 }, 0);
+    step(".lantern", { y: -260 }, { y: 0, duration: 2.2, ease: "elastic.out(1, 0.42)" }, 0);
+    step(".halo", { scale: 0.2 }, { scale: 1, duration: 2.4, ease: "power2.out" }, 0.35);
     step(".lamp", { scale: 0 }, { scale: 1, duration: 1.6, ease: "expo.out" }, 0.1);
-    step(".flight", { x: 180, y: -70, autoAlpha: 0 }, { x: 0, y: 0, autoAlpha: 1, duration: 2, ease: "power2.out" }, 0.3);
-    step(hero.querySelectorAll(".pill, .eyebrow"), { y: 16 }, up, 0.15);
-    tl.set(hero.querySelector("h1"), { autoAlpha: 1 }, 0.25);
-    step(heading, { autoAlpha: 0, yPercent: 70, rotate: 3 }, { autoAlpha: 1, yPercent: 0, rotate: 0, duration: 0.9, stagger: 0.07 }, 0.25);
-    step(hero.querySelectorAll("h1 ~ p, .cta > *, .install"), { y: 18 }, { ...up, stagger: 0.08 }, 0.55);
-    step(hero.querySelectorAll(".facts li"), { y: 10, scale: 0.94 }, { ...up, scale: 1, duration: 0.5, stagger: 0.05 }, 0.85);
-    const card = hero.querySelector(".card");
-    if (card) {
-      tl.fromTo(card, { y: 50, rotationX: 12, transformPerspective: 1000, transformOrigin: "50% 100%" }, { ...up, rotationX: 0, duration: 1.2 }, 0.35);
-      for (const [pre, at] of [[$("#sample"), 0.9], [$("#sample-said"), 1.9]]) {
-        const lines = Math.max(1, pre.textContent.split("\n").length);
-        tl.fromTo(pre, { clipPath: "inset(0 0 100% 0)" }, { clipPath: "inset(0 0 0% 0)", duration: lines * 0.12, ease: `steps(${lines})` }, at);
-      }
+    step(hero.querySelectorAll(".eyebrow"), { y: 16 }, up, 0.15);
+    tl.set(hero.querySelector("h1"), { autoAlpha: 1 }, 0.45);
+    step(heading, { autoAlpha: 0, yPercent: 70, rotate: 3 }, { autoAlpha: 1, yPercent: 0, rotate: 0, duration: 0.9, stagger: 0.08 }, 0.45);
+    step(hero.querySelectorAll("h1 ~ p, .cta > *, .install"), { y: 18 }, { ...up, stagger: 0.08 }, 0.8);
+    step(hero.querySelectorAll(".facts li"), { y: 10, scale: 0.94 }, { ...up, scale: 1, duration: 0.5, stagger: 0.05 }, 1.1);
+    step(hero.querySelectorAll(".card"), { y: 70 }, { ...up, duration: 1.2 }, 1.0);
+  }
+
+  // The code window under the headline starts tipped back, and stands up as it's scrolled to; when it's in
+  // view its lines appear one at a time, then what it says
+  function stage() {
+    const card = $(".hero .card");
+    if (!card) return;
+    gsap.fromTo(card, { rotationX: 24, scale: 0.9, transformPerspective: 1400, transformOrigin: "50% 0%" }, {
+      rotationX: 0, scale: 1, ease: "none",
+      scrollTrigger: { trigger: card, start: "top bottom", end: "top 30%", scrub: 0.6 },
+    });
+    const typing = gsap.timeline({ paused: true });
+    for (const [pre, at] of [[$("#sample"), 0.2], [$("#sample-said"), 1.4]]) {
+      const lines = Math.max(1, pre.textContent.split("\n").length);
+      gsap.set(pre, { clipPath: "inset(0 0 100% 0)" });
+      typing.to(pre, { clipPath: "inset(0 0 0% 0)", duration: lines * 0.13, ease: `steps(${lines})` }, at);
     }
+    ScrollTrigger.create({ trigger: card, start: "top 75%", once: true, onEnter: () => typing.play() });
   }
 
   // Each part further down rises into view as it's scrolled to, a few at a time
@@ -125,26 +137,50 @@
     addEventListener("pointerup", () => gsap.to(ring, { scale: 1, duration: 0.4, ease: "back.out(3)" }));
   }
 
-  // The moth can't stay away from a light: while the mouse is over the top of the front page, the moth flies
-  // after the cursor, stopping just short of it, and the lamp in the corner dims; when it leaves, it goes home
-  function mothFollows() {
+  // The moth can't stay away from a light. It flies in and circles the lantern, passing behind it on the far
+  // side, its head turned the way it's flying. While a mouse is over the top of the front page, the cursor is
+  // the brighter light: the moth flies after it, stopping just short, and the lantern's glow dims; when the
+  // mouse leaves, the moth goes back to circling. Nothing moves while the top of the page is out of view.
+  function mothFlies() {
     const flight = $(".flight");
     const top = $(".intro");
     if (!flight || !top) return;
-    const [toX, toY] = ["x", "y"].map((axis) => gsap.quickTo(flight, axis, { duration: 1.8, ease: "power2.out" }));
+    root.classList.add("moving"); // the moth's own drift (in the stylesheet) gives way to this
+    const small = innerWidth < 640;
+    const [rx, ry] = small ? [86, 26] : [136, 38]; // the circle, seen from a little below
+    let follow = null; // the cursor, from the moth's home beside the lantern, while it's over the top of the page
+    let [x, y] = [innerWidth * 0.55, -280]; // it comes in from up and to the right
+    let turn = 0;
+    let clock = 0;
+    let inView = true;
+    ScrollTrigger.create({ trigger: top, start: "top top", end: "bottom top", onToggle: (self) => (inView = self.isActive) });
+    gsap.ticker.add((time, ms) => {
+      if (!inView) return;
+      const dt = Math.min(ms, 50) / 1000;
+      clock += dt;
+      const angle = clock * 0.55; // once round in about 11 seconds
+      const [toX, toY] = follow ?? [rx * Math.cos(angle), ry * Math.sin(angle) + Math.sin(clock * 6.5) * 3];
+      const k = 1 - Math.exp(-dt * (follow ? 2.6 : 1.5));
+      const [dx, dy] = [(toX - x) * k, (toY - y) * k];
+      x += dx;
+      y += dy;
+      const heading = Math.hypot(dx, dy) / dt > 30 ? (Math.atan2(dy, dx) * 180) / Math.PI + 90 : 0;
+      turn += ((((heading - turn + 540) % 360) - 180) * Math.min(1, dt * 4));
+      const far = !follow && Math.sin(angle) < 0; // the far side of the circle is behind the lantern
+      gsap.set(flight, { x, y, rotation: turn, scale: follow ? 1 : 0.9 + 0.1 * Math.sin(angle), zIndex: far ? -3 : -1 });
+    });
+    const halo = $(".halo");
     top.addEventListener("pointermove", (e) => {
       if (e.pointerType !== "mouse") return;
       const box = flight.getBoundingClientRect();
       const homeX = box.left + box.width / 2 - gsap.getProperty(flight, "x");
       const homeY = box.top + box.height / 2 - gsap.getProperty(flight, "y");
-      toX(e.clientX - homeX + 34);
-      toY(e.clientY - homeY - 26);
+      follow = [e.clientX - homeX + 30, e.clientY - homeY - 24];
     });
-    top.addEventListener("pointerenter", () => gsap.to(".lamp", { scale: 0.7, duration: 1.2, ease: "power2.out", overwrite: "auto" }));
+    top.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && halo && gsap.to(halo, { scale: 0.86, duration: 1.4, ease: "power2.out", overwrite: "auto" }));
     top.addEventListener("pointerleave", () => {
-      toX(0);
-      toY(0);
-      gsap.to(".lamp", { scale: 1, duration: 1.2, ease: "power2.out", overwrite: "auto" });
+      follow = null;
+      if (halo) gsap.to(halo, { scale: 1, duration: 1.4, ease: "power2.out", overwrite: "auto" });
     });
   }
 
@@ -200,11 +236,12 @@
 
   function start() {
     embers();
+    mothFlies();
+    stage();
     if (waiting && root.classList.contains("motion")) bringIn();
     rises(".section-head, .feature, .shot, .down, .path, .foot, .toc, .lesson, .next");
     if (mouse) {
       lampCursor();
-      mothFollows();
       leaning();
     }
   }
