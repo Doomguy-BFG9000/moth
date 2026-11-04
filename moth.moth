@@ -22,9 +22,9 @@ use "stdlib.moth" as standard # the libraries a program anywhere can use (see cl
 use "webpage.moth" as webpage # the page moth build --web writes a program into
 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
-set cli_asked to record with icon nothing, version nothing, include empty list
+set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -368,6 +368,126 @@ to cli_build_source with cli_path, cli_source, cli_target, cli_allowing, cli_int
         say "compiled " + cli_path + " to machine code for " + cli_system + " -> " + cli_into + " (" + cli_grouped(length of cli_bytes) + " bytes)"
     end
     return yes
+end
+
+# `moth build app.moth --installer`: then app-setup.exe (app-setup on Linux), a program holding the one just
+# built, which puts it where a person's own programs go, with a menu entry and a way to take it away
+# (tools/installer.moth, from the standard library); --name names it there, else the file does, and
+# --version and --icon are the installer's too
+to cli_build_installer with cli_path, cli_target, cli_built
+    set cli_app to app_name of cli_asked
+    if cli_app is nothing
+        set cli_app to cli_name_of(cli_stem(cli_path))
+    end
+    set cli_version_given to version of cli_asked
+    if cli_version_given is nothing
+        set cli_version_given to "1.0.0"
+    end
+    set cli_file_name to cli_name_of(cli_built)
+    for each cli_c in cli_app + cli_version_given + cli_file_name
+        if cli_c is "\"" or cli_c is "{" or cli_c is "\\"
+            say "moth: an installer's name and version can't have \", { or \\ in them" to the error output
+            return 1
+        end
+    end
+    set cli_icon_name to "nothing"
+    set cli_names to list of cli_file_name
+    set cli_datas to empty list
+    set cli_icon_bytes to nothing
+    try
+        add read bytes cli_built to cli_datas
+        if icon of cli_asked is not nothing
+            set cli_icon_bytes to read bytes icon of cli_asked
+            add "icon of the program.png" to cli_names
+            add cli_icon_bytes to cli_datas
+            set cli_icon_name to "\"icon of the program.png\""
+        end
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+        return 1
+    end
+    set cli_source to "use \"installer.moth\" as installer\ninstaller's setup(\"" + cli_app + "\", \"" + cli_version_given + "\", \"" + cli_file_name + "\", " + cli_icon_name + ")\n"
+    set cli_setup_path to cli_stem(cli_path) + "-setup"
+    if cli_target is "windows"
+        set cli_setup_path to cli_setup_path + ".exe"
+    end
+    set cli_used to cli_sources_of(cli_path, cli_source)
+    try
+        set cli_bytes to machine's compile_shipping(cli_source, names of cli_used, texts of cli_used, cli_target, cli_name_of(cli_setup_path), (list of "--allow-all"),
+            cli_icon_bytes, version of cli_asked, cli_names, cli_datas)
+    if it fails with cli_why
+        cli_report(cli_why, cli_path, cli_source, names of cli_used, texts of cli_used)
+        return 1
+    end
+    try
+        write cli_bytes as bytes to cli_setup_path
+    if it fails with cli_whynot
+        say "moth: " + cli_whynot to the error output
+        return 1
+    end
+    say "made its installer -> " + cli_setup_path + " (" + cli_grouped(length of cli_bytes) + " bytes): run, it installs " + cli_app + " " + cli_version_given
+    if not cli_signed(cli_setup_path)
+        return 1
+    end
+    return 0
+end
+
+# --sign's command, run with the program's name after it (signtool sign /fd SHA256 /a app.exe): whether it
+# went well, or there was nothing to run
+to cli_signed with cli_signing
+    if sign of cli_asked is nothing
+        return yes
+    end
+    set cli_words to cli_command_words(sign of cli_asked)
+    if length of cli_words is 0
+        say "moth: --sign needs a command, as in --sign \"signtool sign /fd SHA256 /a\"" to the error output
+        return no
+    end
+    set cli_sign_args to empty list
+    for each cli_k from 2 to length of cli_words
+        add item cli_k of cli_words to cli_sign_args
+    end
+    add cli_signing to cli_sign_args
+    set cli_got to nothing
+    try
+        set cli_got to run program item 1 of cli_words with cli_sign_args keeping its output
+    if it fails with cli_why
+        say "moth: --sign couldn't start " + item 1 of cli_words + ": " + cli_why to the error output
+        return no
+    end
+    if code of cli_got is not 0
+        say "moth: signing " + cli_signing + " failed (" + code of cli_got + "): " + output of cli_got + mistakes of cli_got to the error output
+        return no
+    end
+    say "signed " + cli_signing
+    return yes
+end
+
+# a command's words, split at spaces, a "quoted part" one word with its spaces
+to cli_command_words with cli_command_text
+    set cli_words to empty list
+    set cli_word to ""
+    set cli_in_quotes to no
+    set cli_has_word to no
+    for each cli_c in cli_command_text
+        if cli_c is "\""
+            set cli_in_quotes to not cli_in_quotes
+            set cli_has_word to yes
+        else if cli_c is " " and not cli_in_quotes
+            if cli_has_word
+                add cli_word to cli_words
+            end
+            set cli_word to ""
+            set cli_has_word to no
+        else
+            add cli_c to cli_word
+            set cli_has_word to yes
+        end
+    end
+    if cli_has_word
+        add cli_word to cli_words
+    end
+    return cli_words
 end
 
 # `moth run file.moth a b`: the program, built into a file beside it, started with those arguments and
@@ -2735,6 +2855,15 @@ to cli_main
             set cli_target to item (cli_k + 1) of cli_given
             set cli_fine to cli_target is "windows" or cli_target is "linux"
             add 2 to cli_k
+        else if cli_arg is "--installer" and cli_command is "build" and not installer of cli_asked
+            set installer of cli_asked to yes
+            add 1 to cli_k
+        else if cli_arg is "--sign" and cli_command is "build" and cli_k is less than length of cli_given
+            set sign of cli_asked to item (cli_k + 1) of cli_given
+            add 2 to cli_k
+        else if cli_arg is "--name" and cli_command is "build" and cli_k is less than length of cli_given
+            set app_name of cli_asked to item (cli_k + 1) of cli_given
+            add 2 to cli_k
         else if (cli_arg is "--icon" or cli_arg is "--version" or cli_arg is "--include") and (cli_command is "build" or cli_command is "run") and cli_k is less than length of cli_given
             set cli_value to item (cli_k + 1) of cli_given
             if cli_arg is "--icon"
@@ -2807,8 +2936,15 @@ to cli_main
     if cli_command is "coverage"
         stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-coverage.moth")
     end
-    if not cli_build(cli_file, cli_target, cli_flags, cli_out_for(cli_file, cli_target), yes) # a mistake in the program, or a file that can't be read: 1
+    set cli_out to cli_out_for(cli_file, cli_target)
+    if not cli_build(cli_file, cli_target, cli_flags, cli_out, yes) # a mistake in the program, or a file that can't be read: 1
         stop the program with 1
+    end
+    if not cli_signed(cli_out)
+        stop the program with 1
+    end
+    if installer of cli_asked
+        stop the program with cli_build_installer(cli_file, cli_target, cli_out)
     end
 end
 

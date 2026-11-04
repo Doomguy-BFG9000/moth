@@ -553,6 +553,35 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
 
 // moth build --web: a page holding the program and the files it uses (math.moth from the standard library),
 // as JSON nothing in which ends its script; and a program with a mistake says it, and makes no page
+// `moth build --installer` (DESIGN §99): app-setup, which puts the program in a folder (--into, so no menu entry
+// is made here) with what takes it away, which --uninstall runs; and --sign, a command run on each program made
+test("moth.exe build --installer makes a setup program that installs and takes away the program, and --sign signs each", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "installing");
+  mkdirSync(sub);
+  writeFileSync(join(sub, "app.moth"), 'say "installed and running"\n');
+  const signer = target === "windows" ? "cmd /c echo" : "echo";
+  const built = spawnSync(exe, ["build", "app.moth", "--installer", "--name", "Moth Test App", "--version", "2.1.0", "--sign", signer], { cwd: sub, encoding: "utf8" });
+  const [app, setup, remover] = target === "windows" ? ["app.exe", "app-setup.exe", "uninstall.cmd"] : ["app", "app-setup", "uninstall.sh"];
+  const lines = built.stdout.split("\n");
+  assert.deepEqual([lines[1], lines[3], lines[4], built.stderr, built.status], [`signed ${app}`, `signed ${setup}`, "", "", 0], built.stdout);
+  assert.match(lines[2], new RegExp(`^made its installer -> ${setup.replace(".", "\\.")} \\([\\d,]+ bytes\\): run, it installs Moth Test App 2\\.1\\.0$`));
+  if (target === "linux") chmodSync(join(sub, setup), 0o755);
+  const into = join(sub, "portable");
+  const installed = spawnSync(join(sub, setup), ["--quiet", "--into", into], { encoding: "utf8" });
+  assert.deepEqual([installed.stdout, installed.stderr, installed.status], ["", "", 0]);
+  assert.deepEqual(readdirSync(into).sort(), [app, remover].sort());
+  const ran = spawnSync(join(into, app), [], { encoding: "utf8" });
+  assert.equal(ran.stdout, "installed and running\n");
+  const removed = spawnSync(join(sub, setup), ["--quiet", "--uninstall", "--into", into], { encoding: "utf8" });
+  assert.deepEqual([removed.stderr, removed.status, existsSync(into)], ["", 0, false]);
+  const wrong = spawnSync(join(sub, setup), ["--frobnicate"], { encoding: "utf8" });
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /the installer takes --uninstall, --quiet and --into <folder>, not --frobnicate/);
+  const unsigned = spawnSync(exe, ["build", "app.moth", "--sign", "no-such-signer"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([unsigned.stderr, unsigned.status], ["moth: --sign couldn't start no-such-signer: there is no program called 'no-such-signer'\n", 1]);
+});
+
 test("moth.exe build --web makes a page that holds the program and the files it uses", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "web");

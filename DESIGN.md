@@ -3961,3 +3961,38 @@ hold them to agreeing.
 - **Tested.** A program built to be debugged, shown sums, items, fields of
   fields, comparisons, brackets, a minus, and three it can't work out.
 
+## 99. Installers and signing
+
+- **Why.** A program to give to people needed a setup that puts it in the
+  menus and can take it away, as Inno Setup or an MSI does, and a way to sign
+  it, so Windows can say who made it.
+- **The installer is a Moth program.** tools/installer.moth, in the standard
+  library: `moth build --installer` writes a two-line program that uses it,
+  with the app's name, version and file, and builds that with the app built in
+  (`--include` does the same), its icon, and `--allow-all`. Run, it asks with
+  Windows' own message box (or a question on Linux), writes the program where
+  a person's own programs go, and what takes it away beside it.
+- **Windows' entries.** A Start menu shortcut is a COM object's file, and the
+  installed apps' list is in the registry, so the installer writes a short
+  PowerShell script beside the program and runs it (`-File`, so no quotes go
+  through a command line), then removes it: WScript.Shell's shortcut, and
+  HKCU's Uninstall key with the name, version, folder, icon, and
+  `cmd /c "...\uninstall.cmd"`, which removes the key, the shortcut and the
+  folder, the last with `(goto) 2>nul & rmdir`, so cmd has let go of the file
+  first. Everything is the person's own (AppData, HKCU), so no administrator.
+- **Linux's.** `~/.local/opt/<name>`, a `.desktop` file in
+  `~/.local/share/applications`, the icon beside the program, and
+  `uninstall.sh`.
+- **--sign.** A command, split at spaces with quoted parts kept, run with each
+  program's name after it, after the program is built and before the
+  installer takes it in, then on the installer; one that fails, or can't be
+  started, stops the build. moth knows nothing of certificates: signtool, or
+  any tool, does the signing.
+- **Tested.** Through moth.exe, on Windows and Linux: an installer made and
+  signed (with `echo` for signtool), installed into a folder, the program run
+  from there, taken away, a wrong option, and a signer that isn't there. By
+  hand, on Windows: the Start menu shortcut's target, the Settings entry's
+  values, and its uninstall string run as Settings runs it, leaving nothing;
+  and on Linux, in WSL, the menu entry and uninstall.sh. A real certificate
+  wasn't at hand, so signtool itself is untried on Moth's programs.
+

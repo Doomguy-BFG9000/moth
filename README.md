@@ -939,6 +939,8 @@ moth build tool.moth --allow-read=data   only the files in data (also --allow-wr
 moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth    moth, built by itself
 moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (.ico or .png) and version
 moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
+moth build app.moth --installer --name "Notes"   and app-setup.exe, which installs it: a Start menu entry, removable in Settings
+moth build app.moth --sign "signtool sign /fd SHA256 /a"   run a command on each program made, its name after it
 ```
 
 `moth run` is `moth build` and then the program: it builds it into a file
@@ -951,6 +953,48 @@ comes after it is the program's own. `moth tidy` and `moth test` take any
 number of files, and `moth test` with none finds every file ending in
 `.test.moth` here and in the folders inside, but not hidden ones or
 `node_modules`; `moth check` takes one.
+
+### Installers and signing
+
+`moth build app.moth --installer` makes `app-setup.exe` (or `app-setup` on
+Linux) beside `app.exe`: one file to give people. Run, it asks, then installs
+the program for that person, with no administrator needed:
+
+- **Windows:** into `AppData\Local\Programs\<name>`, with a Start menu
+  shortcut and an entry in Settings' installed apps, whose Uninstall takes it
+  all away again.
+- **Linux:** into `~/.local/opt/<name>`, with an entry in the applications
+  menu (and the `--icon` PNG as its icon), and `uninstall.sh` beside it.
+
+`--name "Notes"` is what the menus call it (else the file's name), `--version`
+its version. The setup program takes `--uninstall`, `--quiet` (no questions)
+and `--into <folder>` (just the folder, no menu entry, for a program carried
+on a USB stick).
+
+Windows warns before it runs a program from an unknown publisher ("Windows
+protected your PC", or "Publisher: Unknown"). Signing the program says who
+made it:
+
+1. Get a code signing certificate: from a certificate authority (DigiCert,
+   Sectigo, SSL.com and others sell them, from about $200 a year, and check
+   who you are first), or Microsoft's Trusted Signing, a monthly service.
+2. Install `signtool`, which comes with the Windows SDK.
+3. Build with `--sign`, so moth signs the program, and then the installer
+   with the signed program in it:
+
+   ```text
+   moth build app.moth --installer --sign "signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a"
+   ```
+
+   `/a` picks the certificate installed on this computer; `/f cert.pfx /p
+   <password>` uses one in a file instead. The timestamp (`/tr`) keeps the
+   signature good after the certificate runs out.
+4. SmartScreen may still warn about a new certificate until enough people
+   have run programs signed with it; that's Windows' own reputation, which
+   nothing in the program changes.
+
+Linux doesn't ask for signed programs. To let people check a download, give
+its SHA-256 with it (`sha256sum app-setup`), or sign it with GPG.
 
 `moth` on its own is the Moth shell: type a line, or a block that runs once its
 `end` is typed, and see what it does. A line that's a value shows it.

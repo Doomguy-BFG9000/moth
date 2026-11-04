@@ -1,0 +1,245 @@
+# A program's installer, as `moth build app.moth --installer` makes one, on Windows and Linux. Run, it asks,
+# then puts the program where a person's own programs go, with no administrator needed: on Windows in
+# AppData\Local\Programs, in the Start menu, and in Settings' list of installed apps, which can remove it; on
+# Linux in ~/.local/opt, in the applications menu, and with an uninstall.sh beside it. Run with --uninstall,
+# it takes the program away again; --quiet asks nothing and says only what went wrong; --into <folder> puts
+# it there and makes no menu entry, for a program carried around in a folder.
+#
+#   use "installer.moth" as installer
+#   installer's setup("Notes", "1.2.0", "notes.exe", nothing)    # the program built in: --include notes.exe
+#
+# The fourth input is the name of a PNG icon built in too, for Linux's menu, or nothing. Built with
+# --allow-all, as moth build --installer builds it.
+
+use "system.moth" as system
+use the library "user32"
+    MessageBoxW(a pointer, wide text, wide text, a whole number) gives a whole number
+end
+
+set backslash to item 1 of "\\"
+set windows_line_end to (list of 13, 10) as bytes as text # what a .cmd file's lines end with
+
+# what the command line asks: --uninstall, --quiet, --into <folder>
+to asked_of with args
+    set made to record with uninstall no, quiet no, into nothing
+    set k to 1
+    repeat while k is at most length of args
+        set given to item k of args
+        if given is "--uninstall"
+            set uninstall of made to yes
+        else if given is "--quiet"
+            set quiet of made to yes
+        else if given is "--into" and k is less than length of args
+            set k to k + 1
+            set into of made to item k of args
+        else
+            fail with "the installer takes --uninstall, --quiet and --into <folder>, not " + given
+        end
+        set k to k + 1
+    end
+    return made
+end
+
+# install, or with --uninstall take away, the program built in as file_name
+to setup with name, version, file_name, icon_name
+    set asked to asked_of(arguments)
+    try
+        if uninstall of asked
+            if ask_first(asked, name, "Take " + name + " away from this computer?")
+                take_away(name, asked)
+                tell(asked, name, name + " is taken away.")
+            end
+        else if ask_first(asked, name, "Install " + name + " " + version + " for you?")
+            set place to put_in(name, version, file_name, icon_name, asked)
+            if into of asked is not nothing
+                tell(asked, name, name + " " + version + " is in " + place + ".")
+            else if system's system_windows
+                tell(asked, name, name + " " + version + " is installed: it's in the Start menu, and Settings' installed apps can remove it.")
+            else
+                tell(asked, name, name + " " + version + " is installed in " + place + ": it's in the applications menu, and " + place + "/uninstall.sh removes it.")
+            end
+        end
+    if it fails with why
+        say name + " setup: " + why to the error output
+        if not quiet of asked and system's system_windows
+            MessageBoxW(nothing, "" + why, name + " setup", 16)
+        end
+        stop the program with 1
+    end
+end
+
+# whether to go on: always, when quiet
+to ask_first with asked, name, question
+    if quiet of asked
+        return yes
+    end
+    if system's system_windows
+        return MessageBoxW(nothing, question, name + " setup", 4 + 32) is 6
+    end
+    set answer to lowercase of ask (question + " (y/n)")
+    return answer is "y" or answer is "yes"
+end
+
+to tell with asked, name, words
+    if quiet of asked
+        return nothing
+    end
+    if system's system_windows
+        MessageBoxW(nothing, words, name + " setup", 64)
+    else
+        say words
+    end
+end
+
+# where it goes: --into's folder, or this person's own programs' folder
+to folder_for with name, asked
+    if into of asked is not nothing
+        return into of asked
+    end
+    if system's system_windows
+        return system's environment("LOCALAPPDATA") + backslash + "Programs" + backslash + name
+    end
+    return system's home_folder() + "/.local/opt/" + name
+end
+
+to joined with folder, file_name
+    if system's system_windows
+        return folder + backslash + file_name
+    end
+    return folder + "/" + file_name
+end
+
+# the program and the way to take it away, written where they go, and its menu entry; gives the folder
+to put_in with name, version, file_name, icon_name, asked
+    set folder to folder_for(name, asked)
+    system's make_folder(folder)
+    set program_path to joined(folder, file_name)
+    write read bytes file_name to program_path
+    if system's system_windows
+        write windows_uninstaller(name, folder, asked) to joined(folder, "uninstall.cmd")
+        if into of asked is nothing
+            run_powershell(folder, windows_entries(name, version, folder, program_path))
+        end
+        return folder
+    end
+    run_checked("chmod", list of "755", program_path)
+    set icon_line to ""
+    if icon_name is not nothing
+        set icon_path to joined(folder, "icon.png")
+        write read bytes icon_name to icon_path
+        set icon_line to "Icon=" + icon_path + "\n"
+    end
+    write linux_uninstaller(name, folder, asked) to joined(folder, "uninstall.sh")
+    run_checked("chmod", list of "755", joined(folder, "uninstall.sh"))
+    if into of asked is nothing
+        set menus to system's home_folder() + "/.local/share/applications"
+        system's make_folder(menus)
+        write "[Desktop Entry]\nType=Application\nName=" + name + "\nComment=" + name + " " + version + "\nExec=\"" + program_path + "\"\n" + icon_line + "Terminal=false\n" to menus + "/" + menu_file(name)
+    end
+    return folder
+end
+
+# the menu entry's file name: no spaces, as .desktop files have them
+to menu_file with name
+    set made to ""
+    for each c in lowercase of name
+        if c is " "
+            set made to made + "-"
+        else
+            set made to made + c
+        end
+    end
+    return "moth-" + made + ".desktop"
+end
+
+# the Start menu's shortcut, and the entry in Settings' installed apps, made by PowerShell, as Windows
+# makes them only through COM and the registry
+to windows_entries with name, version, folder, program_path
+    set key to "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + name
+    set lines to list of "$ErrorActionPreference = 'Stop'"
+    add "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + quoted(shortcut_of(name)) + ")" to lines
+    add "$s.TargetPath = " + quoted(program_path) to lines
+    add "$s.WorkingDirectory = " + quoted(folder) to lines
+    add "$s.Save()" to lines
+    add "New-Item -Path " + quoted(key) + " -Force | Out-Null" to lines
+    for each pair in list of (list of "DisplayName", name), (list of "DisplayVersion", version), (list of "InstallLocation", folder), (list of "DisplayIcon", program_path), (list of "UninstallString", "cmd /c \"" + joined(folder, "uninstall.cmd") + "\"")
+        add "Set-ItemProperty -Path " + quoted(key) + " -Name " + item 1 of pair + " -Value " + quoted(item 2 of pair) to lines
+    end
+    add "Set-ItemProperty -Path " + quoted(key) + " -Name NoModify -Value 1 -Type DWord" to lines
+    add "Set-ItemProperty -Path " + quoted(key) + " -Name NoRepair -Value 1 -Type DWord" to lines
+    return join lines with windows_line_end
+end
+
+# text in PowerShell's single quotes, each ' in it doubled
+to quoted with words
+    set made to "'"
+    for each c in words
+        if c is "'"
+            set made to made + "''"
+        else
+            set made to made + c
+        end
+    end
+    return made + "'"
+end
+
+to shortcut_of with name
+    return system's environment("APPDATA") + "\\Microsoft\\Windows\\Start Menu\\Programs\\" + name + ".lnk"
+end
+
+# uninstall.cmd: the entry and the shortcut taken away, then the folder, this file in it too, once cmd has let go of it
+to windows_uninstaller with name, folder, asked
+    set lines to list of "@echo off"
+    if into of asked is nothing
+        add "reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + name + "\" /f >nul 2>&1" to lines
+        add "del /q \"" + shortcut_of(name) + "\" >nul 2>&1" to lines
+    end
+    add "cd /d \"%TEMP%\"" to lines
+    add "(goto) 2>nul & rmdir /s /q \"" + folder + "\"" to lines
+    return join lines with windows_line_end
+end
+
+to linux_uninstaller with name, folder, asked
+    set lines to list of "#!/bin/sh"
+    if into of asked is nothing
+        add "rm -f \"$HOME/.local/share/applications/" + menu_file(name) + "\"" to lines
+    end
+    add "rm -rf \"" + folder + "\"" to lines
+    return join lines with "\n"
+end
+
+# a PowerShell script, written beside the program, run, and removed
+to run_powershell with folder, script
+    set script_path to joined(folder, "setup.ps1")
+    write script to script_path
+    set got to run program "powershell" with (list of "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script_path) keeping its output
+    system's remove_file(script_path)
+    if code of got is not 0
+        fail with "PowerShell couldn't make the Start menu entry: " + output of got + mistakes of got
+    end
+end
+
+to run_checked with program_name, args
+    set got to run program program_name with args keeping its output
+    if code of got is not 0
+        fail with program_name + " failed: " + mistakes of got
+    end
+end
+
+# taken away: its uninstaller, run, as Settings or uninstall.sh would run it
+to take_away with name, asked
+    set folder to folder_for(name, asked)
+    if system's system_windows
+        set script_path to joined(folder, "uninstall.cmd")
+        if not system's is_file(script_path)
+            fail with name + " isn't installed in " + folder
+        end
+        set ended to run program "cmd" with (list of "/c", script_path)
+    else
+        set script_path to joined(folder, "uninstall.sh")
+        if not system's is_file(script_path)
+            fail with name + " isn't installed in " + folder
+        end
+        set ended to run program "sh" with (list of script_path)
+    end
+end
