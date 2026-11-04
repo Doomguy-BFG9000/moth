@@ -6,6 +6,17 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **Workers: every core.** `start work(x) on another core` runs the call on a worker, a thread with memory of
+  its own, given copies of what it's called with and of the program's variables; `wait for` gives a copy of
+  what it gave back, or fails with its mistake. In a program `moth build` makes, workers run at the same
+  moment on as many cores as there are, on Windows and Linux; in the playground, as tasks do, one after
+  another, giving the same.
+- **A web server for many people.** `server.moth` serves many connections at once, so a slow client holds up
+  no one, keeps them open for the next request (HTTP/1.1 keep-alive), answers requests sent together in
+  order, and limits how long a request takes and how big it is (`set_timeout`, `set_idle_timeout`,
+  `set_most_bytes`, `set_most_connections`, `set_most_requests`, `set_keep_alive`). A request now has its
+  `version`. `serve_on_workers(8080, answer, 4)`, or `set_workers(4)`, answers on 4 workers. From 10,500
+  requests a second to 85,000, on one thread.
 - **Trusted packages.** `moth.sums`, beside `moth.packages`, keeps the SHA-256 of each package's files.
   `moth add` and `moth update` write it and `moth get` checks it, so a package changed in `packages/`, or
   changed where it comes from, is found. A package's own `moth.sums` is checked for the packages it brings.

@@ -1,4 +1,4 @@
-// A load test for tools/server.moth (DESIGN §103): builds a small site with it, runs it, and asks it from
+// A load test for tools/server.moth (DESIGN §107): builds a small site with it, runs it, and asks it from
 // Node with many connections at once, on raw sockets, so nothing of Node's own pools or limits is measured.
 //
 //     node tools/load-test.mjs [server.moth] [--workers n] [--seconds s] [--connections c]
@@ -10,7 +10,7 @@
 //   burst:   c connections opened at once, each asking once
 //   slow:    50 connections that send half a request and stop, then 200 requests from others; how many of
 //            those are answered, and how long they wait
-//   heavy:   c connections asking for a page that takes the server about 20 ms of work each, for s seconds
+//   heavy:   c connections asking for a page that takes the server about a millisecond of work, for s seconds
 import { spawn } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -37,11 +37,11 @@ const serve = workers ? `web's serve_on_workers(${port}, answer, ${workers})` : 
 const site = `use "server.moth" as web
 to answer with request
     if path of request is "/heavy"
-        set total to 0
+        set sum to 0
         for each i from 1 to 2000000
-            add i to total
+            add i to sum
         end
-        return "worked " + total
+        return "worked " + sum
     end
     return "Hello from Moth"
 end

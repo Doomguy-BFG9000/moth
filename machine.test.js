@@ -6,8 +6,9 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { networkInterfaces, tmpdir } from "node:os";
+import { availableParallelism, networkInterfaces, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
@@ -3157,6 +3158,204 @@ say read site + "/stop"`, ["--allow-net"]);
   }
 });
 
+// tools/server.moth's connections (DESIGN §107), on raw sockets, so what's checked is what goes over the wire:
+// each says something, in pieces with pauses if it likes, and gets back everything until the server closes it,
+// or until it has waited `patience` ms for more
+function exchange(port, pieces, { pause = 0, patience = 3000, readLate = 0 } = {}) {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, "127.0.0.1");
+    const got = [];
+    let timer;
+    const done = (closed) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve({ said: Buffer.concat(got).toString("latin1"), closed });
+    };
+    const wait = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => done(false), patience);
+    };
+    socket.on("data", (d) => (got.push(d), wait()));
+    socket.on("end", () => done(true));
+    socket.on("error", () => done(true));
+    socket.on("close", () => done(true));
+    if (readLate) {
+      socket.pause();
+      setTimeout(() => socket.resume(), readLate);
+    }
+    socket.on("connect", async () => {
+      for (const piece of pieces) {
+        socket.write(piece);
+        if (pause) await new Promise((r) => setTimeout(r, pause));
+      }
+      wait();
+    });
+  });
+}
+
+// what each answer in what came back says: its status line, its Connection header, its length and its body
+function answers(text) {
+  const made = [];
+  let rest = Buffer.from(text, "latin1");
+  while (rest.length) {
+    const end = rest.indexOf("\r\n\r\n");
+    if (end < 0) break;
+    const [status, ...lines] = rest.subarray(0, end).toString("latin1").split("\r\n");
+    const headers = Object.fromEntries(lines.map((l) => [l.slice(0, l.indexOf(":")).toLowerCase(), l.slice(l.indexOf(":") + 1).trim()]));
+    const length = Number(headers["content-length"] ?? 0);
+    const body = rest.subarray(end + 4, end + 4 + (status.includes(" 204 ") ? 0 : length));
+    made.push({ status, connection: headers.connection, length, body: body.toString("utf8") });
+    rest = rest.subarray(end + 4 + body.length);
+  }
+  return made;
+}
+
+test("tools/server.moth keeps connections open, answers requests sent together in order, and keeps its time and size limits", { skip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-server-"));
+  const port = 22000 + (process.pid % 2000);
+  let running;
+  try {
+    const exe = executable(dir, "site");
+    writeFileSync(exe, machine(`use "server.moth" as web
+set lines to empty list
+for each i from 1 to 100000
+    add "0123456789abcdefghijklmnopqrstu" to lines
+end
+set big to (join lines with "\\n") + "\\n"
+to answer with request
+    set p to path of request
+    if p is "/echo"
+        return method of request + " " + version of request + " " + length of body_bytes of request + " [" + body of request + "] " + item "x-thing" of headers of request
+    else if p is "/big"
+        return big
+    else if p is "/nothing"
+        return nothing
+    else if p is "/query"
+        return query of request
+    else if p is "/stop"
+        web's stop_serving()
+        return "bye"
+    end
+    return "page " + p
+end
+web's set_timeout(400)
+web's set_idle_timeout(400)
+web's set_most_bytes(100000)
+web's set_most_requests(3)
+web's serve(${port}, answer)
+say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries"], files: { "server.moth": here("tools/server.moth") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    running = spawn(exe, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    running.stdout.on("data", (d) => (out += d));
+    running.stderr.on("data", (d) => (err += d));
+    const ended = new Promise((resolve) => running.on("exit", resolve));
+    for (let waited = 0; !err.includes("listening") && waited < 10000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+    const get = (path, more = "") => `GET ${path} HTTP/1.1\r\nHost: x\r\n${more}\r\n`;
+    const brief = (r) => answers(r.said).map((a) => `${a.status} ${a.connection} ${a.body.length > 200 ? `${a.body.length} bytes` : a.body}`);
+
+    // three on one connection, one after another, the last told it's the last; two sent together, then HEAD
+    // and an answer of nothing on the same connection; HTTP/1.0, which keeps it only if asked
+    assert.deepEqual(brief(await exchange(port, [get("/a"), get("/b"), get("/c")], { pause: 100 })),
+      ["HTTP/1.1 200 OK keep-alive page /a", "HTTP/1.1 200 OK keep-alive page /b", "HTTP/1.1 200 OK close page /c"]);
+    const together = await exchange(port, [get("/one") + get("/two") + `HEAD /three HTTP/1.1\r\n\r\n`]);
+    assert.deepEqual(brief(together).slice(0, 2), ["HTTP/1.1 200 OK keep-alive page /one", "HTTP/1.1 200 OK keep-alive page /two"]);
+    assert.match(together.said, /page \/twoHTTP\/1\.1 200 OK\r\nContent-Type: text\/plain; charset=utf-8\r\nContent-Length: 11\r\nConnection: close\r\n\r\n$/);
+    assert.deepEqual(brief(await exchange(port, [get("/nothing", "Connection: close\r\n")])), ["HTTP/1.1 204 No Content close "]);
+    assert.deepEqual(brief(await exchange(port, ["GET /old HTTP/1.0\r\n\r\n"])), ["HTTP/1.1 200 OK close page /old"]);
+    assert.deepEqual(brief(await exchange(port, ["GET /old HTTP/1.0\r\nConnection: Keep-Alive\r\n\r\n"], { patience: 1000 })),
+      ["HTTP/1.1 200 OK keep-alive page /old"]);
+
+    // a body with its length, in pieces; one in chunks, a byte at a time, with an extension and a trailer
+    const body = "name=Sam&note=hi ✓";
+    assert.deepEqual(brief(await exchange(port, [`POST /echo HTTP/1.1\r\nContent-Length: ${Buffer.byteLength(body)}\r\nX-Thing:  spaced \r\n\r\n`, body.slice(0, 5), body.slice(5)], { pause: 50 })),
+      ["HTTP/1.1 200 OK keep-alive POST HTTP/1.1 20 [name=Sam&note=hi ✓] spaced"]);
+    const chunked = "PUT /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\nX-Thing: c\r\n\r\n5;ext=1\r\nhello\r\n7\r\n, world\r\n0\r\nTrailer: x\r\n\r\n" + get("/after");
+    assert.deepEqual(brief(await exchange(port, chunked.match(/[^]{1,3}/g), { pause: 1 })),
+      ["HTTP/1.1 200 OK keep-alive PUT HTTP/1.1 12 [hello, world] c", "HTTP/1.1 200 OK keep-alive page /after"]);
+
+    // an answer far bigger than a socket holds, to a client that waits before it reads any of it
+    const huge = answers((await exchange(port, [get("/big", "Connection: close\r\n")], { readLate: 500 })).said);
+    assert.deepEqual([huge.length, huge[0].length, huge[0].body.length, huge[0].body.slice(0, 33)], [1, 3200000, 3200000, "0123456789abcdefghijklmnopqrstu\n0"]);
+
+    // a query, with a % that isn't one
+    assert.deepEqual(answers((await exchange(port, [get("/query?a=1&b=two%20words&c=100%zz&d", "Connection: close\r\n")])).said)[0].body,
+      '{"a":"1","b":"two words","c":"100%zz","d":""}');
+
+    // too big, headers too long, what isn't a request, chunks that can't be read; too slow to arrive, and a
+    // kept connection with nothing more on it, closed with no answer
+    assert.deepEqual(brief(await exchange(port, ["POST /echo HTTP/1.1\r\nContent-Length: 200000\r\n\r\n"])), ["HTTP/1.1 413 Content Too Large close The request is too big"]);
+    assert.deepEqual(brief(await exchange(port, [`GET / HTTP/1.1\r\nX-Long: ${"a".repeat(70000)}\r\n\r\n`])),
+      ["HTTP/1.1 431 Request Header Fields Too Large close The request's headers are too long"]);
+    assert.deepEqual(brief(await exchange(port, ["NONSENSE\r\n\r\n"])), ["HTTP/1.1 400 Bad Request close The request can't be read"]);
+    assert.deepEqual(brief(await exchange(port, ["POST /echo HTTP/1.1\r\nContent-Length: 12x\r\n\r\n"])), ["HTTP/1.1 400 Bad Request close The request's length can't be read"]);
+    assert.deepEqual(brief(await exchange(port, ["POST /echo HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab"])), ["HTTP/1.1 400 Bad Request close The request's length can't be read"]);
+    assert.deepEqual(brief(await exchange(port, ["POST /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n"])), ["HTTP/1.1 400 Bad Request close The request's chunks can't be read"]);
+    const slow = await exchange(port, ["GET /slow HTTP/1.1\r\nHo"]);
+    assert.deepEqual([brief(slow), slow.closed], [["HTTP/1.1 408 Request Timeout close The request took too long to arrive"], true]);
+    const idle = await exchange(port, [get("/idle")]);
+    assert.deepEqual([brief(idle), idle.closed], [["HTTP/1.1 200 OK keep-alive page /idle"], true]);
+
+    // one client that sends a byte at a time holds up nobody else: another's answer comes first
+    const finished = [];
+    const dribbling = exchange(port, get("/dribble", "Connection: close\r\n").split(""), { pause: 6 }).then((r) => (finished.push("dribble"), r));
+    await new Promise((r) => setTimeout(r, 30));
+    const quick = await exchange(port, [get("/quick", "Connection: close\r\n")]);
+    finished.push("quick");
+    assert.deepEqual([brief(quick), brief(await dribbling), finished], [["HTTP/1.1 200 OK close page /quick"], ["HTTP/1.1 200 OK close page /dribble"], ["quick", "dribble"]]);
+
+    assert.deepEqual(brief(await exchange(port, [get("/stop")])), ["HTTP/1.1 200 OK keep-alive bye"]);
+    assert.deepEqual([await ended, out, err], [0, "stopped\n", `listening on http://127.0.0.1:${port}/\n`]);
+  } finally {
+    running?.kill(); // once it has stopped, nothing; if a check failed, it's still serving
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// tools/server.moth on workers (DESIGN §108): a handler that works for a second and a half holds up only its own
+// worker, while the others answer
+test("tools/server.moth answers on workers, so a slow handler holds up only its own", { skip }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-server-"));
+  const port = 22000 + ((process.pid + 900) % 2000);
+  try {
+    const exe = executable(dir, "site");
+    writeFileSync(exe, machine(`use "server.moth" as web
+set seen to 0
+to answer with request
+    add 1 to seen
+    if path of request is "/slow"
+        set t0 to the clock
+        repeat while the clock - t0 is less than 1.5
+            set n to 0
+        end
+        return "slow"
+    end
+    return "seen " + seen
+end
+web's serve_on_workers(${port}, answer, 3)`, { target, name: "site.moth", allow: ["--allow-libraries"], files: { "server.moth": here("tools/server.moth") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const running = spawn(exe, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    running.stderr.on("data", (d) => (err += d));
+    try {
+      for (let waited = 0; !err.includes("listening") && waited < 10000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      assert.equal(err, `listening on http://127.0.0.1:${port}/, on 3 workers\n`);
+      const ask = async (path) => answers((await exchange(port, [`GET ${path} HTTP/1.1\r\nConnection: close\r\n\r\n`])).said)[0]?.body;
+      const slow = ask("/slow");
+      await new Promise((r) => setTimeout(r, 200));
+      const begun = Date.now();
+      const quick = await Promise.all(Array.from({ length: 20 }, () => ask("/")));
+      assert.ok(Date.now() - begun < 1000, `the quick requests took ${Date.now() - begun} ms`);
+      assert.ok(quick.every((said) => /^seen \d+$/.test(said)), quick.join(", "));
+      assert.equal(await slow, "slow");
+    } finally {
+      running.kill();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // apps/guestbook (docs/guestbook.md): a web app with a SQLite database, built by moth.exe from its own folder with
 // the standard library's server, SQLite, HTTP, dates and text: its own tests, then signed and read over HTTP, a
 // script given as a name shown as text, an entry with no name refused, the entries as JSON, a 404, and its file
@@ -5016,6 +5215,126 @@ end
 say 5 has ended`, { files: { "sync.moth": readFileSync(new URL("./tools/sync.moth", import.meta.url), "utf8") } });
   assert.deepEqual(ran, { stdout: "no\n300\nyes\n[20, 20, 20] 60\n1275\nno\nyes\nsaw it\nnothing came in 40 milliseconds\n",
     stderr: "p.moth:60:7: 'has ended' needs a task, as 'start' gives, not a number\nsay 5 has ended\n      ^\n", status: 1 });
+});
+
+// Workers (DESIGN §108): calls on threads of their own, each with a copy of the program's memory, so they run
+// Moth at the same moment. What a program with workers says must be what the JavaScript engine says, which runs
+// each worker when it's started, on copies all the same.
+const WORKER_PROGRAMS = [
+  // eight at once, each making far more than it keeps, so each collector runs while the others work; records,
+  // made in the worker, whose fields the program then reads; and texts the worker makes and the program's own
+  "to churn with tag, rounds\n    set kept to empty list\n    for each r from 1 to rounds\n        set garbage to empty list\n        for each i from 1 to 2000\n            add (record with at i, word tag + i) to garbage\n        end\n        add item r of garbage to kept\n    end\n    set sum to 0\n    for each k in kept\n        add at of k to sum\n    end\n    return record with tag tag, sum sum, last word of item rounds of kept, made \"by a worker\"\nend\nset jobs to empty list\nfor each k from 1 to 8\n    add (start churn(\"w\" + k, 150) on another core) to jobs\nend\nfor each j in jobs\n    set got to wait for j\n    say tag of got \" \" sum of got \" \" last of got \" \" made of got\nend",
+  // workers that start workers, and a worker's own tasks, which take turns with it alone
+  "to fib with n\n    if n is less than 2\n        return n\n    end\n    return fib(n - 1) + fib(n - 2)\nend\nto split_fib with n\n    if n is less than 18\n        return fib(n)\n    end\n    set a to start split_fib(n - 1) on another core\n    set b to start split_fib(n - 2) on another core\n    return (wait for a) + (wait for b)\nend\nto tasks_inside with n\n    set jobs to empty list\n    for each i from 1 to n\n        add (start fib(i)) to jobs\n    end\n    set sum to 0\n    for each j in jobs\n        set sum to sum + wait for j\n    end\n    return sum\nend\nsay wait for (start split_fib(24) on another core)\nsay wait for (start tasks_inside(20) on another core)",
+  // the program's tasks, working while worker after worker, each in the memory of the one before it, starts tasks of its own
+  "to fib with n\n    if n is less than 2\n        return n\n    end\n    return fib(n - 1) + fib(n - 2)\nend\nto tasks_inside with n\n    set jobs to empty list\n    for each i from 1 to n\n        add (start fib(i)) to jobs\n    end\n    set sum to 0\n    for each j in jobs\n        set sum to sum + wait for j\n    end\n    return sum\nend\nset main_jobs to empty list\nfor each k from 1 to 8\n    add (start fib(20 + k)) to main_jobs\nend\nset sums to empty list\nfor each k from 1 to 30\n    add (wait for (start tasks_inside(k) on another core)) to sums\nend\nsay sums\nset got to empty list\nfor each j in main_jobs\n    add (wait for j) to got\nend\nsay got",
+  // three thousand, one after another, each in the memory the one before it had; and sixty-four at once
+  "to sq with n\n    return n * n\nend\nset sum to 0\nfor each i from 1 to 3000\n    add wait for (start sq(i) on another core) to sum\nend\nsay sum\nset jobs to empty list\nfor each i from 1 to 64\n    add (start sq(i) on another core) to jobs\nend\nset sum to 0\nfor each j in jobs\n    add wait for j to sum\nend\nsay sum",
+  // a big list given and given back, with the program's variables, which a worker changes only for itself
+  "set table to dictionary where \"a\" is list of 1, 2\nset count to 0\nto grow with xs\n    set made to empty list\n    for each x in xs\n        add (list of x, \"n\" + x) to made\n    end\n    set inner to item \"a\" of table\n    add 3 to inner\n    set count to count + length of xs\n    return record with made made, table table, count count\nend\nset xs to empty list\nfor each i from 1 to 100000\n    add i to xs\nend\nset got to wait for (start grow(xs) on another core)\nsay length of made of got \" \" item 100000 of made of got \" \" table of got \" \" count of got\nsay table \" \" count",
+  // what a worker says comes before the program's next words, and one the program never waits for still ends
+  "to note with word\n    say \"a worker says \" + word\n    return word\nend\nsay \"before\"\nsay wait for (start note(\"hi\") on another core)\nstart note(\"bye\") on another core\nsay \"the program goes on\"",
+  // a mistake a worker ends with, which the program fails with when it waits for it, saying where it waited
+  "to risky with n\n    if n is 0\n        return 1 / 0\n    end\n    return risky(n - 1)\nend\nset j to start risky(2) on another core\nsay \"started\"\nsay wait for j\nsay \"never\"",
+];
+
+test("workers run on threads of their own, with copies, and say, fail and give back what the JavaScript engine has them do", { skip }, () => {
+  for (const source of WORKER_PROGRAMS) assert.deepEqual(taskRun(source), tasksOnEngine(source, "p.moth"), source);
+});
+
+// What only threads show: two workers that each wait for the other to write a file, which they can do only at
+// the same moment; one that's still working when it's asked; and a worker's tasks, with sync.moth's lock,
+// which keeps them in step inside it
+test("workers run at the same moment as the program and each other", { skip }, () => {
+  const ran = taskRun(`use "sync.moth" as sync
+to meet with mine, theirs
+    write "here" to mine
+    set waited to 0
+    repeat while waited is less than 500
+        try
+            set said to read theirs
+            return mine + " met " + theirs
+        if it fails
+            wait 10 milliseconds
+            add 1 to waited
+        end
+    end
+    return mine + " waited alone"
+end
+set a to start meet("a.txt", "b.txt") on another core
+set b to start meet("b.txt", "a.txt") on another core
+say wait for a
+say wait for b
+to nap with ms
+    wait ms milliseconds
+    return ms
+end
+set n to start nap(300) on another core
+say n has ended
+say wait for n
+say n has ended
+set lock_of_mine to sync's lock()
+set shared to 0
+to add_up with times
+    for each k from 1 to times
+        sync's take(lock_of_mine)
+        set seen to shared
+        wait 1 millisecond
+        set shared to seen + 1
+        sync's let_go(lock_of_mine)
+    end
+    return shared
+end
+to three_tasks with times
+    set jobs to list of (start add_up(times)), (start add_up(times)), (start add_up(times))
+    sync's wait_for_all(jobs)
+    return shared
+end
+say wait for (start three_tasks(15) on another core) " " shared
+say sync's wait_for_all(list of (start nap(20) on another core), (start nap(10) on another core))`,
+  { files: { "sync.moth": readFileSync(new URL("./tools/sync.moth", import.meta.url), "utf8") } });
+  assert.deepEqual(ran, { stdout: "a.txt met b.txt\nb.txt met a.txt\nno\n300\nyes\n45 0\n[20, 10]\n", stderr: "", status: 0 });
+});
+
+// Four workers, each doing what four calls one after another do a quarter of, take far less time, where there are cores
+test("workers use every core", { skip: skip || (availableParallelism() < 2 && "this computer has one core") }, () => {
+  const ran = taskRun(`to busy with n
+    set sum to 0
+    for each i from 1 to n
+        set sum to sum + (remainder of i divided by 7)
+    end
+    return sum
+end
+set n to 40000000
+set t0 to the clock
+for each k from 1 to 4
+    set r to busy(n)
+end
+set alone to the clock - t0
+set t0 to the clock
+set jobs to empty list
+for each k from 1 to 4
+    add (start busy(n) on another core) to jobs
+end
+for each j in jobs
+    set r to wait for j
+end
+set together to the clock - t0
+say together / alone`);
+  assert.equal(ran.status, 0, ran.stderr);
+  const ratio = Number(ran.stdout);
+  assert.ok(ratio < (availableParallelism() >= 4 ? 0.6 : 0.8), `four workers took ${ratio} of the time four calls one after another did`);
+});
+
+test("a program with workers takes its threads and its workers' memory from the system, on Windows as on Linux", () => {
+  const source = "to f\n    return 1\nend\nsay wait for (start f() on another core)";
+  const windows = Buffer.from(machine(source, { target: "windows", name: "p.moth" })).toString("latin1");
+  const plain = Buffer.from(machine("to f\n    return 1\nend\nsay wait for (start f())", { target: "windows", name: "p.moth" })).toString("latin1");
+  for (const name of ["CreateThread", "VirtualAlloc", "CreateEventW", "SetEvent", "ResetEvent", "WaitForSingleObject", "ExitThread", "SwitchToThread"]) {
+    assert.ok(windows.includes(name), name);
+  }
+  assert.ok(!plain.includes("SwitchToThread"));
+  assert.ok(machine(source, { target: "linux", name: "p.moth" }).length > 0);
 });
 
 test("a window's timer ticks while a task works", { skip: onUi }, () => {
