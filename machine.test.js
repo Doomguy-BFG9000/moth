@@ -1602,6 +1602,53 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
   assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
 });
 
+// tools/arrays.moth (DESIGN §103): its own tests, in machine code, where machine code's own loops do the work and
+// must give what Moth gives to the last bit
+test("arrays.moth passes its own tests in machine code, where machine code's own loops do the work", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "arrays");
+  mkdirSync(sub);
+  for (const name of ["arrays.moth", "arrays.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  writeFileSync(join(sub, "math.moth"), readFileSync(new URL("./math.moth", import.meta.url), "utf8"));
+  const ran = spawnSync(exe, ["test", "arrays.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
+  assert.equal(ran.stdout.split("\n").at(-2), "9 passed");
+});
+
+// Moth's own library, which needs no --allow-libraries and isn't a library the program loads, and a list of
+// numbers given to C as where its numbers are
+test("a program uses Moth's own library without --allow-libraries, and gives C a list of numbers where they are", { skip }, () => {
+  const own = libraryRun(`use the library "moth"
+    numbers_reduce(a long whole number, a list of numbers, a list of numbers, a long whole number, a long whole number, a long whole number, a long whole number) gives a long whole number
+end
+set out to list of 0, 0
+say numbers_reduce(1, out, (list of 1, 2, 3, 4, 5, 6), 2, 3, 1, 0) " " out
+say numbers_reduce(1, out, (list of 1, 2, 3), 2, 3, 1, 0) " " out
+say numbers_reduce(2, out, (list of 1, "x", 3), 1, 3, 1, 0)`, []);
+  assert.deepEqual([own.stdout, own.stderr, own.status], ["0 [6, 15]\n1 [6, 15]\n1\n", "", 0]);
+  if (target === "linux") assert.equal(own.bytes.includes(Buffer.from("libdl.so.2")), false, "Moth's own library isn't linked");
+  const unknown = () => machine(`use the library "moth"
+    numbers_nowhere(a list of numbers) gives a whole number
+end
+numbers_nowhere(list of 1)`, { target, name: "p.moth" });
+  assert.throws(unknown, /the library 'moth' has no function called 'numbers_nowhere'/);
+  const c = libraryRun(`use the library "msvcrt" or "c"
+    memcpy(a list of numbers, a list of numbers, a long whole number) gives a pointer
+    memset(a list of numbers, a whole number, a long whole number) gives a pointer
+end
+set to_here to list of 0, 0, 0
+memcpy(to_here, (list of 1.5, -2, 1000000), 24)
+say to_here
+memset(to_here, 255, 16)
+say (item 1 of to_here is not item 1 of to_here) " " (item 2 of to_here is not item 2 of to_here) " " item 3 of to_here
+say item 1 of to_here + 1
+memcpy(to_here, (list of 1, "two"), 16)`);
+  assert.deepEqual([c.stdout, c.stderr.split("\n")[0], c.status], ["[1.5, -2, 1000000]\nyes yes 1000000\nNaN\n",
+    "p.moth:2:5: 'memcpy' needs input 2 to be a list of numbers, not a list with text in it", 1]);
+  assert.throws(() => machine('use the library "msvcrt"\n    f(a whole number) gives a list of numbers\nend\n', { target, name: "p.moth" }),
+    (err) => err.reason === "a library's function can't give a list of numbers: only a function's input can be one");
+});
+
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
 test("tools/system.moth copies, moves and removes files and folders, and reads the environment", { skip }, () => {
   const ran = libraryRun(String.raw`use "system.moth" as system

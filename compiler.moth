@@ -482,8 +482,8 @@ set as_words to list of "bytes", "text", "hex", "binary", "json" # `block as tex
 # checks each input is, as kind_phrases numbers them (-1 for anything)
 set library_types to list of "a number", "a float", "a whole number", "a long whole number", "a pointer", "text", "wide text", "bytes",
     "yes or no", "a byte", "a signed byte", "a short whole number", "an unsigned short whole number", "an unsigned whole number",
-    "an unsigned long whole number"
-set library_kinds to list of 0, 0, 0, 0, -1, 1, 1, 6, 2, 0, 0, 0, 0, 0, 0
+    "an unsigned long whole number", "a list of numbers"
+set library_kinds to list of 0, 0, 0, 0, -1, 1, 1, 6, 2, 0, 0, 0, 0, 0, 0, 3
 # buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
 # "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
@@ -1279,13 +1279,22 @@ to parse with tokens, reading
                     set pos to pos + 2
                 end
             else
-                expected("what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes', 'yes or no', 'a byte', 'a signed byte', 'a short whole number', 'an unsigned short whole number', 'an unsigned whole number' or 'an unsigned long whole number', or a structure or callback)")
+                expected("what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes', 'yes or no', 'a byte', 'a signed byte', 'a short whole number', 'an unsigned short whole number', 'an unsigned whole number', 'an unsigned long whole number' or 'a list of numbers', or a structure or callback)")
             end
         end
         set is_structure to library_named(found, structures of declared)
         set is_callback to library_named(found, callbacks of declared)
         if found is "bytes" and where is "result"
             fail with problem(type_at, "a library's function can't give bytes: it can give a pointer to them")
+        end
+        if found is "a list of numbers" and where is not "input"
+            set listed_how to "a callback can't take or give"
+            if where is "result"
+                set listed_how to "a library's function can't give"
+            else if where is "field"
+                set listed_how to "a structure's field can't be"
+            end
+            fail with problem(type_at, listed_how + " a list of numbers: only a function's input can be one")
         end
         if found is "bytes" and where is "field"
             fail with problem(type_at, "a structure's field can't be bytes: say how many, as in '16 bytes', or take a pointer")

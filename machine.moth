@@ -234,7 +234,7 @@ to new_asm
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
         library_callbacks empty dictionary, callback_jobs empty list, shipping nothing, task_runtime no, threading no,
-        guarded empty list, released empty list, last_store nothing, field_spots 0, last_word no
+        guarded empty list, released empty list, last_store nothing, field_spots 0, last_word no, own_kernels empty dictionary
     set code of made to hot of made
     return made
 end
@@ -28631,7 +28631,7 @@ to emit_runtime with st
     if task_runtime of a
         emit_threads(a, target of st)
     end
-    if uses_case of st or windowed or uses_saving of st or files of a or libraries of a # (and a file's name, from UTF-16)
+    if uses_case of st or windowed or uses_saving of st or files of a or libraries of a or length of keys of own_kernels of a is greater than 0 # (and a file's name, from UTF-16)
         emit_cases(a)
     end
     if uses_drawing of st or uses_app of st
@@ -28664,8 +28664,13 @@ to emit_runtime with st
         movi(a, rax, 0)
         ret(a)
     end
-    if libraries of a
+    if length of keys of own_kernels of a is greater than 0
+        emit_kernels(a, target of st)
+    end
+    if libraries of a or length of keys of own_kernels of a is greater than 0
         emit_libraries(a, target of st)
+    end
+    if libraries of a
         if target of st is "windows"
             add (list of "KERNEL32.dll", (list of "LoadLibraryExW", "GetProcAddress")) to wanted
         end
@@ -35671,6 +35676,637 @@ to emit_run_why with a
     ret(a)
 end
 
+# ---------- Moth's own kernels (DESIGN §103) ----------
+# `use the library "moth"` names functions a program can have in it, written here for tools/arrays.moth:
+# loops over lists of numbers that take Moth's own code a few instructions an item. Each is called as a C
+# function is, on the system's own convention, and is given each list itself (see "a list of numbers" in
+# gen_library_call), so it checks what it's given: every place it reads or writes is inside its list, and
+# every number it works out is a number. Each gives 0, or 1 for anything it won't do (a place outside a list,
+# a NaN, a division by 0), which arrays.moth then does in Moth, so what happens is what Moth says happens.
+
+set own_kernel_names to dictionary where "numbers_binary" is "rt_k_binary", "numbers_matmul" is "rt_k_matmul",
+    "numbers_reduce" is "rt_k_reduce"
+
+# whether a library's function is one of Moth's own: from `use the library "moth"`
+to own_library with nat
+    set names to libraries of nat
+    return length of names is 1 and item 1 of names is "moth"
+end
+
+set packed_codes to dictionary where "+" is 0x58, "*" is 0x59, "-" is 0x5C, "/" is 0x5E, "max" is 0x5F, "min" is 0x5D
+
+to movupd_load with a, x, at
+    sse(a, 0x66, 0x10, x, at)
+end
+
+to movupd_store with a, at, x
+    sse(a, 0x66, 0x11, x, at)
+end
+
+# movsd without movsd_load's memory of the last store, for loops
+to movsd_plain with a, x, at
+    sse(a, 0xF2, 0x10, x, at)
+end
+
+to packed_math with a, op, x, at
+    sse(a, 0x66, item op of packed_codes, x, at)
+end
+
+to scalar_math with a, op, x, at
+    sse(a, 0xF2, item op of packed_codes, x, at)
+end
+
+to xorpd with a, x, at
+    sse(a, 0x66, 0x57, x, at)
+end
+
+# x's low half in both of its halves; and its high half in both
+to unpcklpd with a, x
+    sse(a, 0x66, 0x14, x, reg_at(x))
+end
+
+to unpckhpd with a, x
+    sse(a, 0x66, 0x15, x, reg_at(x))
+end
+
+# 16 bytes in the read-only data, on a 16-byte boundary: the sign bit of each half; once
+to sign_mask with a
+    set known to numbers of a
+    if "sign" is in known
+        return item "sign" of known
+    end
+    set ro to rodata of a
+    pad_to(ro, 16)
+    set name to "N" + length of ro
+    rodata_here(a, name)
+    repeat 2 times
+        put_all(ro, list of 0, 0, 0, 0, 0, 0, 0, 128)
+    end
+    set item "sign" of known to name
+    return name
+end
+
+# A kernel's start, as a C function's: rbp its frame, the registers C keeps pushed, and its inputs, from
+# their registers or the stack, at kernel_input(1) and on; kernel_leave goes back with rax
+to kernel_enter with a, target, inputs
+    push_r(a, rbp)
+    mov_rr(a, rbp, rsp)
+    for each r in list of rbx, rsi, rdi, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    alui(a, "sub", rsp, 128)
+    set in_regs to list of rdi, rsi, rdx, rcx, r8, r9
+    set stack_from to 16
+    if target is "windows"
+        set in_regs to list of rcx, rdx, r8, r9
+        set stack_from to 48 # past where it goes back to, and the 32 bytes the caller leaves
+    end
+    for each k from 1 to inputs
+        if k is at most length of in_regs
+            store(a, kernel_input(k), item k of in_regs)
+        else
+            load(a, rax, mem(rbp, stack_from + 8 * (k - length of in_regs - 1)))
+            store(a, kernel_input(k), rax)
+        end
+    end
+end
+
+to kernel_input with k
+    return mem(rbp, -56 - 8 * k)
+end
+
+to kernel_leave with a
+    lea(a, rsp, mem(rbp, -56))
+    for each r in list of r15, r14, r13, r12, rdi, rsi, rbx
+        pop_r(a, r)
+    end
+    pop_r(a, rbp)
+    ret(a)
+end
+
+# jumps to `wrong` unless input k is a whole number from 0 to 2^31 - 1, so sums of their products can't overflow
+to kernel_small with a, k, wrong
+    load(a, rax, kernel_input(k))
+    test_rr(a, rax, rax)
+    jcc(a, cc_s, wrong)
+    movi(a, rcx, 0x7FFFFFFF)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_a, wrong)
+end
+
+# jumps to `wrong` if rax, a place in the list that's input k, is past its end (rax at least its length)
+to kernel_inside with a, k, wrong
+    load(a, rcx, kernel_input(k))
+    alu_load(a, "cmp", rax, mem(rcx, 0))
+    jcc(a, cc_ae, wrong)
+end
+
+# register r: where the list that's input k has its numbers, from the place that's input `from` on
+to kernel_items with a, r, k, from
+    load(a, rax, kernel_input(k))
+    load(a, r, mem(rax, 16))
+    load(a, rcx, kernel_input(from))
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", r, rcx)
+end
+
+to emit_kernels with a, target
+    set used to own_kernels of a
+    if "numbers_binary" is in used
+        emit_kernel_binary(a, target)
+    end
+    if "numbers_matmul" is in used
+        emit_kernel_matmul(a, target)
+    end
+    if "numbers_reduce" is in used
+        emit_kernel_reduce(a, target)
+    end
+end
+
+# rt_k_binary(op, out, a, b, outer, inner, a_from, a_step_out, a_step, b_from, b_step_out, b_step, out_from):
+# for each of `outer` rows and `inner` places in it, out's next number, from out_from on, is a's and b's
+# numbers there with op between them: a's from a_from, a_step_out on for each row and a_step for each place,
+# and b's likewise. op 0 is a's number itself, 1 to 6 + - * / max min, and 7 to 9 a's number negated, made
+# positive, and made 0 below 0 (ReLU). max is a if a is greater than b, else b, as maxsd has it; min is a if
+# a is less than b, else b.
+to emit_kernel_binary with a, target
+    set refuse to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_k_binary")
+    kernel_enter(a, target, 13)
+    for each k in list of 1, 5, 6, 7, 8, 9, 10, 11, 12, 13
+        kernel_small(a, k, refuse)
+    end
+    load(a, rax, kernel_input(1))
+    alui(a, "cmp", rax, 9)
+    jcc(a, cc_a, refuse)
+    for each k in list of 5, 6
+        load(a, rax, kernel_input(k))
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, done)
+    end
+    load(a, rax, kernel_input(5)) # out_from + outer * inner - 1, inside out
+    load(a, rcx, kernel_input(6))
+    imul_rr(a, rax, rcx)
+    alu_load(a, "add", rax, kernel_input(13))
+    dec_r(a, rax)
+    kernel_inside(a, 2, refuse)
+    for each places in list of (list of 3, 7, 8, 9), (list of 4, 10, 11, 12) # a's and b's last place, inside them
+        load(a, rax, kernel_input(5))
+        dec_r(a, rax)
+        load(a, rcx, kernel_input(item 3 of places))
+        imul_rr(a, rax, rcx)
+        load(a, rdx, kernel_input(6))
+        dec_r(a, rdx)
+        load(a, rcx, kernel_input(item 4 of places))
+        imul_rr(a, rdx, rcx)
+        alu(a, "add", rax, rdx)
+        alu_load(a, "add", rax, kernel_input(item 2 of places))
+        kernel_inside(a, item 1 of places, refuse)
+    end
+    kernel_items(a, r13, 3, 7)
+    kernel_items(a, r14, 4, 10)
+    kernel_items(a, r15, 2, 13)
+    load(a, rbx, kernel_input(9))
+    shifti(a, "shl", rbx, 3)
+    load(a, rsi, kernel_input(12))
+    shifti(a, "shl", rsi, 3)
+    for each pair in list of (list of 8, 14), (list of 11, 15) # each row's steps, in bytes
+        load(a, rax, kernel_input(item 1 of pair))
+        shifti(a, "shl", rax, 3)
+        store(a, kernel_input(item 2 of pair), rax)
+    end
+    load(a, r12, kernel_input(5))
+    xorpd(a, xmm4, reg_at(xmm4))
+    set ops to list of "copy", "+", "-", "*", "/", "max", "min", "negate", "absolute", "relu"
+    set starts to empty list
+    for each op in ops
+        add new_label(a) to starts
+    end
+    load(a, rax, kernel_input(1))
+    set k to 0
+    for each start in starts
+        alui(a, "cmp", rax, k)
+        jcc(a, cc_e, start)
+        add 1 to k
+    end
+    jmp_to(a, refuse)
+    set k to 0
+    for each op in ops
+        add 1 to k
+        set rows to new_label(a)
+        set places to new_label(a)
+        mark(a, item k of starts)
+        mark(a, rows)
+        mov_rr(a, r8, r13)
+        mov_rr(a, r9, r14)
+        mov_rr(a, r10, r15)
+        load(a, rcx, kernel_input(6))
+        mark(a, places)
+        movsd_plain(a, xmm0, mem(r8, 0))
+        if op is "+" or op is "-" or op is "*"
+            movsd_plain(a, xmm1, mem(r9, 0))
+            scalar_math(a, op, xmm0, reg_at(xmm1))
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_p, refuse)
+        else if op is "/"
+            movsd_plain(a, xmm1, mem(r9, 0))
+            ucomisd(a, xmm1, reg_at(xmm4)) # 0, or a NaN
+            jcc(a, cc_e, refuse)
+            scalar_math(a, op, xmm0, reg_at(xmm1))
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_p, refuse)
+        else if op is "max" or op is "min"
+            movsd_plain(a, xmm1, mem(r9, 0))
+            ucomisd(a, xmm0, reg_at(xmm1)) # either a NaN
+            jcc(a, cc_p, refuse)
+            scalar_math(a, op, xmm0, reg_at(xmm1))
+        else if op is not "copy"
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_p, refuse)
+            if op is "negate"
+                xorpd(a, xmm0, rip(sign_mask(a)))
+            else if op is "absolute"
+                andpd(a, xmm0, rip(abs_mask(a)))
+            else
+                scalar_math(a, "max", xmm0, reg_at(xmm4))
+            end
+        end
+        movsd_store(a, mem(r10, 0), xmm0)
+        alu(a, "add", r8, rbx)
+        alu(a, "add", r9, rsi)
+        alui(a, "add", r10, 8)
+        dec_r(a, rcx)
+        jcc(a, cc_ne, places)
+        alu_load(a, "add", r13, kernel_input(14))
+        alu_load(a, "add", r14, kernel_input(15))
+        mov_rr(a, r15, r10)
+        dec_r(a, r12)
+        jcc(a, cc_ne, rows)
+        jmp_to(a, done)
+    end
+    mark(a, done)
+    movi(a, rax, 0)
+    kernel_leave(a)
+    mark(a, refuse)
+    movi(a, rax, 1)
+    kernel_leave(a)
+end
+
+# rt_k_matmul(out, a, b, m, k, n, a_from, b_from, out_from): out's m by n numbers, from out_from on, are a's m
+# by k (from a_from) times b's k by n (from b_from), each row after row. Each of out's numbers is 0 + a's first
+# times b's first + a's second times b's second..., added in that order, as arrays.moth adds them in Moth.
+to emit_kernel_matmul with a, target
+    set refuse to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_k_matmul")
+    kernel_enter(a, target, 9)
+    for each k in list of 4, 5, 6, 7, 8, 9
+        kernel_small(a, k, refuse)
+    end
+    load(a, rax, kernel_input(4))
+    load(a, rcx, kernel_input(6))
+    imul_rr(a, rax, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, done)
+    # each list's last place, inside it: out's m * n, a's m * k and b's k * n
+    for each places in list of (list of 1, 4, 6, 9), (list of 2, 4, 5, 7), (list of 3, 5, 6, 8)
+        load(a, rax, kernel_input(item 2 of places))
+        load(a, rcx, kernel_input(item 3 of places))
+        imul_rr(a, rax, rcx)
+        alu_load(a, "add", rax, kernel_input(item 4 of places))
+        dec_r(a, rax)
+        kernel_inside(a, item 1 of places, refuse)
+    end
+    for each places in list of (list of 2, 4, 5, 7), (list of 3, 5, 6, 8) # a's and b's numbers, each a number
+        set scan to new_label(a)
+        set scanned to new_label(a)
+        kernel_items(a, r8, item 1 of places, item 4 of places)
+        load(a, rcx, kernel_input(item 2 of places))
+        load(a, rax, kernel_input(item 3 of places))
+        imul_rr(a, rcx, rax)
+        mark(a, scan)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, scanned)
+        movsd_plain(a, xmm0, mem(r8, 0))
+        ucomisd(a, xmm0, reg_at(xmm0))
+        jcc(a, cc_p, refuse)
+        alui(a, "add", r8, 8)
+        dec_r(a, rcx)
+        jmp_to(a, scan)
+        mark(a, scanned)
+    end
+    kernel_items(a, rdi, 1, 9) # out, all 0
+    load(a, rcx, kernel_input(4))
+    load(a, rax, kernel_input(6))
+    imul_rr(a, rcx, rax)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    load(a, rax, kernel_input(5))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, done)
+    kernel_items(a, r13, 2, 7)
+    kernel_items(a, r14, 3, 8)
+    kernel_items(a, r15, 1, 9)
+    load(a, rbx, kernel_input(6))
+    shifti(a, "shl", rbx, 3)
+    load(a, r12, kernel_input(4))
+    set rows to new_label(a)
+    set terms to new_label(a)
+    set fours to new_label(a)
+    set ones to new_label(a)
+    set term_done to new_label(a)
+    mark(a, rows)
+    load(a, r11, kernel_input(5))
+    mov_rr(a, r9, r14)
+    mark(a, terms) # out's row + a's number there times b's row
+    movsd_plain(a, xmm1, mem(r13, 0))
+    unpcklpd(a, xmm1)
+    alui(a, "add", r13, 8)
+    mov_rr(a, r8, r9)
+    mov_rr(a, r10, r15)
+    load(a, rcx, kernel_input(6))
+    mark(a, fours)
+    alui(a, "cmp", rcx, 4)
+    jcc(a, cc_b, ones)
+    movupd_load(a, xmm0, mem(r8, 0))
+    packed_math(a, "*", xmm0, reg_at(xmm1))
+    movupd_load(a, xmm2, mem(r10, 0))
+    packed_math(a, "+", xmm2, reg_at(xmm0))
+    movupd_store(a, mem(r10, 0), xmm2)
+    movupd_load(a, xmm3, mem(r8, 16))
+    packed_math(a, "*", xmm3, reg_at(xmm1))
+    movupd_load(a, xmm5, mem(r10, 16))
+    packed_math(a, "+", xmm5, reg_at(xmm3))
+    movupd_store(a, mem(r10, 16), xmm5)
+    alui(a, "add", r8, 32)
+    alui(a, "add", r10, 32)
+    alui(a, "sub", rcx, 4)
+    jmp_to(a, fours)
+    mark(a, ones)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, term_done)
+    movsd_plain(a, xmm0, mem(r8, 0))
+    scalar_math(a, "*", xmm0, reg_at(xmm1))
+    movsd_plain(a, xmm2, mem(r10, 0))
+    scalar_math(a, "+", xmm2, reg_at(xmm0))
+    movsd_store(a, mem(r10, 0), xmm2)
+    alui(a, "add", r8, 8)
+    alui(a, "add", r10, 8)
+    dec_r(a, rcx)
+    jmp_to(a, ones)
+    mark(a, term_done)
+    alu(a, "add", r9, rbx)
+    dec_r(a, r11)
+    jcc(a, cc_ne, terms)
+    alu(a, "add", r15, rbx)
+    dec_r(a, r12)
+    jcc(a, cc_ne, rows)
+    mark(a, done)
+    movi(a, rax, 0)
+    kernel_leave(a)
+    mark(a, refuse)
+    movi(a, rax, 1)
+    kernel_leave(a)
+end
+
+# rt_k_reduce(op, out, a, outer, len, inner, a_from): a, from a_from, is `outer` blocks of `len` rows of
+# `inner` numbers; out's numbers, from its first, are for each block and place in a row its rows' numbers
+# there summed (op 1), or the largest (2) or smallest (3). A sum along rows of one number each (inner 1) adds
+# in four parts, the nth number to part n, n + 4 and on to the same, then (first + second) + (third +
+# fourth); any other sum adds each row in turn to 0. The largest starts with the first and takes each after
+# it that's greater (maxsd's way), the smallest each that's less.
+to emit_kernel_reduce with a, target
+    set refuse to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_k_reduce")
+    kernel_enter(a, target, 7)
+    for each k in list of 1, 4, 5, 6, 7
+        kernel_small(a, k, refuse)
+    end
+    load(a, rax, kernel_input(1))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_b, refuse)
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_a, refuse)
+    load(a, rax, kernel_input(4)) # outer * inner - 1, inside out
+    load(a, rcx, kernel_input(6))
+    imul_rr(a, rax, rcx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, done)
+    dec_r(a, rax)
+    kernel_inside(a, 2, refuse)
+    set some to new_label(a)
+    load(a, rax, kernel_input(5))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, some)
+    load(a, rax, kernel_input(1)) # no rows: sums of 0, and no largest
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_ne, refuse)
+    load(a, rdi, kernel_input(2))
+    load(a, rdi, mem(rdi, 16))
+    load(a, rcx, kernel_input(4))
+    load(a, rax, kernel_input(6))
+    imul_rr(a, rcx, rax)
+    movi(a, rax, 0)
+    rep_stosq(a)
+    jmp_to(a, done)
+    mark(a, some)
+    load(a, rax, kernel_input(4)) # a_from + outer * len * inner - 1, inside a
+    load(a, rcx, kernel_input(5))
+    imul_rr(a, rax, rcx)
+    load(a, rcx, kernel_input(6))
+    imul_rr(a, rax, rcx)
+    alu_load(a, "add", rax, kernel_input(7))
+    dec_r(a, rax)
+    kernel_inside(a, 3, refuse)
+    kernel_items(a, r13, 3, 7)
+    load(a, r15, kernel_input(2))
+    load(a, r15, mem(r15, 16))
+    load(a, r12, kernel_input(4))
+    load(a, rbx, kernel_input(6))
+    set wide to new_label(a)
+    alui(a, "cmp", rbx, 1)
+    jcc(a, cc_ne, wide)
+    # rows of one number each: a block's numbers are one after another
+    set firsts to list of new_label(a), new_label(a), new_label(a)
+    load(a, rax, kernel_input(1))
+    for each k from 1 to 3
+        alui(a, "cmp", rax, k)
+        jcc(a, cc_e, item k of firsts)
+    end
+    jmp_to(a, refuse)
+    set blocks to new_label(a) # sums, in four parts
+    set quads to new_label(a)
+    set quads_done to new_label(a)
+    set tail_moved to new_label(a)
+    set tail_done to new_label(a)
+    mark(a, item 1 of firsts)
+    mark(a, blocks)
+    xorpd(a, xmm0, reg_at(xmm0))
+    xorpd(a, xmm1, reg_at(xmm1))
+    load(a, rcx, kernel_input(5))
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shr", rcx, 2)
+    alui(a, "and", rdx, 3)
+    mark(a, quads)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, quads_done)
+    movupd_load(a, xmm2, mem(r13, 0))
+    packed_math(a, "+", xmm0, reg_at(xmm2))
+    movupd_load(a, xmm3, mem(r13, 16))
+    packed_math(a, "+", xmm1, reg_at(xmm3))
+    alui(a, "add", r13, 32)
+    dec_r(a, rcx)
+    jmp_to(a, quads)
+    mark(a, quads_done) # the parts: xmm0, xmm2, xmm1, xmm3
+    movapd(a, xmm2, xmm0)
+    unpckhpd(a, xmm2)
+    movapd(a, xmm3, xmm1)
+    unpckhpd(a, xmm3)
+    test_rr(a, rdx, rdx)
+    jcc(a, cc_e, tail_done)
+    scalar_math(a, "+", xmm0, mem(r13, 0))
+    alui(a, "cmp", rdx, 2)
+    jcc(a, cc_b, tail_moved)
+    scalar_math(a, "+", xmm2, mem(r13, 8))
+    alui(a, "cmp", rdx, 3)
+    jcc(a, cc_b, tail_moved)
+    scalar_math(a, "+", xmm1, mem(r13, 16))
+    mark(a, tail_moved)
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", r13, rdx)
+    mark(a, tail_done)
+    scalar_math(a, "+", xmm0, reg_at(xmm2))
+    scalar_math(a, "+", xmm1, reg_at(xmm3))
+    scalar_math(a, "+", xmm0, reg_at(xmm1))
+    ucomisd(a, xmm0, reg_at(xmm0))
+    jcc(a, cc_p, refuse)
+    movsd_store(a, mem(r15, 0), xmm0)
+    alui(a, "add", r15, 8)
+    dec_r(a, r12)
+    jcc(a, cc_ne, blocks)
+    jmp_to(a, done)
+    for each k from 2 to 3 # the largest, or the smallest, in turn
+        set op to "max"
+        if k is 3
+            set op to "min"
+        end
+        set blocks to new_label(a)
+        set rest to new_label(a)
+        set rest_done to new_label(a)
+        mark(a, item k of firsts)
+        mark(a, blocks)
+        movsd_plain(a, xmm0, mem(r13, 0))
+        ucomisd(a, xmm0, reg_at(xmm0))
+        jcc(a, cc_p, refuse)
+        alui(a, "add", r13, 8)
+        load(a, rcx, kernel_input(5))
+        dec_r(a, rcx)
+        mark(a, rest)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, rest_done)
+        movsd_plain(a, xmm1, mem(r13, 0))
+        ucomisd(a, xmm1, reg_at(xmm1))
+        jcc(a, cc_p, refuse)
+        scalar_math(a, op, xmm1, reg_at(xmm0))
+        movapd(a, xmm0, xmm1)
+        alui(a, "add", r13, 8)
+        dec_r(a, rcx)
+        jmp_to(a, rest)
+        mark(a, rest_done)
+        movsd_store(a, mem(r15, 0), xmm0)
+        alui(a, "add", r15, 8)
+        dec_r(a, r12)
+        jcc(a, cc_ne, blocks)
+        jmp_to(a, done)
+    end
+    mark(a, wide) # rows of more than one: each row onto out's, in turn
+    shifti(a, "shl", rbx, 3)
+    set wide_firsts to list of new_label(a), new_label(a), new_label(a)
+    load(a, rax, kernel_input(1))
+    for each k from 1 to 3
+        alui(a, "cmp", rax, k)
+        jcc(a, cc_e, item k of wide_firsts)
+    end
+    jmp_to(a, refuse)
+    for each k from 1 to 3
+        set op to "+"
+        if k is 2
+            set op to "max"
+        else if k is 3
+            set op to "min"
+        end
+        set blocks to new_label(a)
+        set rows to new_label(a)
+        set places to new_label(a)
+        set rows_done to new_label(a)
+        mark(a, item k of wide_firsts)
+        mark(a, blocks)
+        load(a, rdx, kernel_input(5))
+        if k is 1 # out's row, all 0
+            mov_rr(a, rdi, r15)
+            load(a, rcx, kernel_input(6))
+            movi(a, rax, 0)
+            rep_stosq(a)
+        else # out's row, a's first
+            set firsts_loop to new_label(a)
+            mov_rr(a, r8, r13)
+            mov_rr(a, r10, r15)
+            load(a, rcx, kernel_input(6))
+            mark(a, firsts_loop)
+            movsd_plain(a, xmm0, mem(r8, 0))
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_p, refuse)
+            movsd_store(a, mem(r10, 0), xmm0)
+            alui(a, "add", r8, 8)
+            alui(a, "add", r10, 8)
+            dec_r(a, rcx)
+            jcc(a, cc_ne, firsts_loop)
+            alu(a, "add", r13, rbx)
+            dec_r(a, rdx)
+        end
+        mark(a, rows)
+        test_rr(a, rdx, rdx)
+        jcc(a, cc_e, rows_done)
+        mov_rr(a, r8, r13)
+        mov_rr(a, r10, r15)
+        load(a, rcx, kernel_input(6))
+        mark(a, places)
+        movsd_plain(a, xmm1, mem(r8, 0))
+        if k is 1
+            movsd_plain(a, xmm0, mem(r10, 0))
+            scalar_math(a, "+", xmm0, reg_at(xmm1))
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_p, refuse)
+            movsd_store(a, mem(r10, 0), xmm0)
+        else
+            ucomisd(a, xmm1, reg_at(xmm1))
+            jcc(a, cc_p, refuse)
+            scalar_math(a, op, xmm1, mem(r10, 0))
+            movsd_store(a, mem(r10, 0), xmm1)
+        end
+        alui(a, "add", r8, 8)
+        alui(a, "add", r10, 8)
+        dec_r(a, rcx)
+        jcc(a, cc_ne, places)
+        alu(a, "add", r13, rbx)
+        dec_r(a, rdx)
+        jmp_to(a, rows)
+        mark(a, rows_done)
+        alu(a, "add", r15, rbx)
+        dec_r(a, r12)
+        jcc(a, cc_ne, blocks)
+        jmp_to(a, done)
+    end
+    mark(a, done)
+    movi(a, rax, 0)
+    kernel_leave(a)
+    mark(a, refuse)
+    movi(a, rax, 1)
+    kernel_leave(a)
+end
+
 # ---------- libraries ----------
 # `use the library "sqlite3"` (see library in moth.js): each of its functions the program declares is a
 # function of the program's whose body calls into the library. The library is loaded, and the function
@@ -36040,18 +36676,30 @@ to gen_library_call with fc, e
     set f to fn of fc
     set nat to native of f
     set target to target of st
-    set libraries of a to yes
-    if callbacks of nat is not nothing # C may call one of them on a thread of its own
-        if length of keys of callbacks of nat is greater than 0
-            set uses_threads of st to yes
+    set own to own_library(nat)
+    set desc to nothing
+    if own # Moth's own (DESIGN §103): in the program already, so nothing to load or ask for
+        if symbol of nat is not in own_kernel_names
+            fail with front's problem(at of e, "the library 'moth' has no function called '" + symbol of nat + "'")
         end
+        set kernels_used to own_kernels of a
+        set item (symbol of nat) of kernels_used to yes
+    else
+        set libraries of a to yes
+        if callbacks of nat is not nothing # C may call one of them on a thread of its own
+            if length of keys of callbacks of nat is greater than 0
+                set uses_threads of st to yes
+            end
+        end
+        set desc to library_desc(a, nat, target)
     end
-    set desc to library_desc(a, nat, target)
     set types to types of nat
     set n to length of types
-    lea(a, rcx, rip(desc))
-    call_to(a, "rt_lib_ready")
-    why_stub(fc, at of e, "rt_why_lib")
+    if not own
+        lea(a, rcx, rip(desc))
+        call_to(a, "rt_lib_ready")
+        why_stub(fc, at of e, "rt_why_lib")
+    end
     # where each input goes: a register, an xmm register (and on Windows, the register of its place too, as a
     # function that takes any number of inputs reads it there), or the stack
     set windows to target is "windows"
@@ -36181,6 +36829,23 @@ to gen_library_call with fc, e
         if type_name is "bytes"
             untag(a, rax)
             load(a, rax, mem(rax, 8))
+        else if type_name is "a list of numbers" # Moth's own kernels get the list, and check it themselves;
+            # anything else where its numbers are, each checked to be one
+            untag(a, rax)
+            if not own
+                set wrong to new_label(a)
+                call_to(a, "rt_lib_numbers")
+                test_rr(a, rdx, rdx)
+                jcc(a, cc_ne, wrong)
+                set was to enter_cold(a)
+                mark(a, wrong)
+                stub_start(fc, at of e)
+                stub_text(a, "'" + name of f + "' needs input " + i + " to be a list of numbers, not a list with ")
+                stub_kind(a, "err_a")
+                stub_text(a, " in it")
+                jmp_to(a, "rt_e_end")
+                leave_cold(a, was)
+            end
         else if type_name is "yes or no"
             movi64(a, rcx, bits_yes)
             alu(a, "cmp", rax, rcx)
@@ -36314,12 +36979,37 @@ to gen_library_call with fc, e
     if not windows # how many xmm registers hold inputs, for a function that takes any number of them
         movi(a, rax, floats)
     end
-    if threading of a # what it does, the other threads' turns go on meanwhile
-        call_to(a, "rt_gil_park")
+    if own # in a moment, and with the program's lists, which no other thread may change meanwhile
+        call_to(a, item (symbol of nat) of own_kernel_names)
+    else
+        if threading of a # what it does, the other threads' turns go on meanwhile
+            call_to(a, "rt_gil_park")
+        end
+        call_import(a, desc)
+        if threading of a
+            call_to(a, "rt_gil_unpark")
+        end
     end
-    call_import(a, desc)
-    if threading of a
-        call_to(a, "rt_gil_unpark")
+    set listed to no
+    for each type_name in types
+        if type_name is "a list of numbers"
+            set listed to not own
+        end
+    end
+    if listed # a NaN C wrote in a list of numbers, which could be any NaN, made the one Moth makes
+        store(a, mem(rsp, kept_at), rax)
+        movsd_store(a, mem(rsp, kept_at + 8), xmm0)
+        set i to 0
+        for each type_name in types
+            add 1 to i
+            if type_name is "a list of numbers"
+                load(a, rcx, mem(rbp, 16 + 8 * (n - i)))
+                untag(a, rcx)
+                call_to(a, "rt_lib_numbers_back")
+            end
+        end
+        load(a, rax, mem(rsp, kept_at))
+        movsd_load(a, xmm0, mem(rsp, kept_at + 8))
     end
     if result_by_value is not nothing and not hidden # the structure it gave, from its registers into its memory
         load(a, r11, mem(rsp, result_slot))
@@ -37042,162 +37732,221 @@ end
 
 # The runtime's part: finding a library and a function in it, and making values what C wants and back
 to emit_libraries with a, target
-    # rt_lib_ready: rcx a function's descriptor (see library_desc): rax 0 once it's found, its library loaded
-    # if it wasn't, if the program may use it; or 2, with err_why 90 if it may not, 91 if there's no such
-    # library, 92 if the library has no such function, and err_file the library's name
-    set ready to new_label(a)
-    set not_ready to new_label(a)
-    set have_handle to new_label(a)
-    set permitted to new_label(a)
-    set try_loop to new_label(a)
-    set next_try to new_label(a)
-    set none to new_label(a)
-    set loaded to new_label(a)
-    set no_fn to new_label(a)
-    set ready_out to new_label(a)
-    mark(a, "rt_lib_ready")
-    load(a, rax, mem(rcx, 0))
-    test_rr(a, rax, rax)
-    jcc(a, cc_e, not_ready)
-    movi(a, rax, 0)
-    ret(a)
-    mark(a, not_ready)
-    for each r in list of rbx, r12, r13, r14
-        push_r(a, r)
-    end
-    mov_rr(a, rbx, rcx)
-    load(a, r12, mem(rbx, 8))
-    load(a, rax, mem(r12, 16))
-    movi64(a, rcx, tag_text)
-    alu(a, "or", rax, rcx)
-    store(a, rip("err_file"), rax)
-    load(a, rax, mem(r12, 0))
-    test_rr(a, rax, rax)
-    jcc(a, cc_ne, have_handle)
-    movi(a, rcx, 4) # may it?
-    call_to(a, "rt_permit")
-    test_rr(a, rax, rax)
-    jcc(a, cc_e, permitted)
-    storei(a, rip("err_why"), 90)
-    movi(a, rax, 2)
-    jmp_to(a, ready_out)
-    mark(a, permitted)
-    movi(a, r13, 0)
-    mark(a, try_loop) # each file it could be, in turn
-    alu_load(a, "cmp", r13, mem(r12, 8))
-    jcc(a, cc_ae, none)
-    imul_ri(a, r14, r13, 24)
-    alu(a, "add", r14, r12)
-    if target is "windows" # a name alone from System32, then the program's folder (what that needs from either);
-        # one with a folder in it as it is
-        set with_folder to new_label(a)
-        load(a, rax, mem(r14, 32))
+    if libraries of a # finding a library and a function in it: Moth's own kernels need neither
+        # rt_lib_ready: rcx a function's descriptor (see library_desc): rax 0 once it's found, its library loaded
+        # if it wasn't, if the program may use it; or 2, with err_why 90 if it may not, 91 if there's no such
+        # library, 92 if the library has no such function, and err_file the library's name
+        set ready to new_label(a)
+        set not_ready to new_label(a)
+        set have_handle to new_label(a)
+        set permitted to new_label(a)
+        set try_loop to new_label(a)
+        set next_try to new_label(a)
+        set none to new_label(a)
+        set loaded to new_label(a)
+        set no_fn to new_label(a)
+        set ready_out to new_label(a)
+        mark(a, "rt_lib_ready")
+        load(a, rax, mem(rcx, 0))
         test_rr(a, rax, rax)
-        jcc(a, cc_ne, with_folder)
-        for each flags in list of 0x800, 0x1000 # LOAD_LIBRARY_SEARCH_SYSTEM32, then _DEFAULT_DIRS
+        jcc(a, cc_e, not_ready)
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, not_ready)
+        for each r in list of rbx, r12, r13, r14
+            push_r(a, r)
+        end
+        mov_rr(a, rbx, rcx)
+        load(a, r12, mem(rbx, 8))
+        load(a, rax, mem(r12, 16))
+        movi64(a, rcx, tag_text)
+        alu(a, "or", rax, rcx)
+        store(a, rip("err_file"), rax)
+        load(a, rax, mem(r12, 0))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, have_handle)
+        movi(a, rcx, 4) # may it?
+        call_to(a, "rt_permit")
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, permitted)
+        storei(a, rip("err_why"), 90)
+        movi(a, rax, 2)
+        jmp_to(a, ready_out)
+        mark(a, permitted)
+        movi(a, r13, 0)
+        mark(a, try_loop) # each file it could be, in turn
+        alu_load(a, "cmp", r13, mem(r12, 8))
+        jcc(a, cc_ae, none)
+        imul_ri(a, r14, r13, 24)
+        alu(a, "add", r14, r12)
+        if target is "windows" # a name alone from System32, then the program's folder (what that needs from either);
+            # one with a folder in it as it is
+            set with_folder to new_label(a)
+            load(a, rax, mem(r14, 32))
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, with_folder)
+            for each flags in list of 0x800, 0x1000 # LOAD_LIBRARY_SEARCH_SYSTEM32, then _DEFAULT_DIRS
+                win_enter(a)
+                load(a, rcx, mem(r14, 24))
+                movi(a, rdx, 0)
+                movi(a, r8, flags)
+                call_import(a, "imp_LoadLibraryExW")
+                win_leave(a)
+                test_rr(a, rax, rax)
+                jcc(a, cc_ne, loaded)
+            end
+            jmp_to(a, next_try)
+            mark(a, with_folder)
             win_enter(a)
             load(a, rcx, mem(r14, 24))
             movi(a, rdx, 0)
-            movi(a, r8, flags)
+            movi(a, r8, 0)
             call_import(a, "imp_LoadLibraryExW")
             win_leave(a)
-            test_rr(a, rax, rax)
-            jcc(a, cc_ne, loaded)
+        else
+            push_r(a, rbp)
+            mov_rr(a, rbp, rsp)
+            alui(a, "and", rsp, -16)
+            load(a, rdi, mem(r14, 24))
+            movi(a, rsi, 2) # RTLD_NOW
+            call_import(a, "got_dlopen")
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
         end
-        jmp_to(a, next_try)
-        mark(a, with_folder)
-        win_enter(a)
-        load(a, rcx, mem(r14, 24))
-        movi(a, rdx, 0)
-        movi(a, r8, 0)
-        call_import(a, "imp_LoadLibraryExW")
-        win_leave(a)
-    else
-        push_r(a, rbp)
-        mov_rr(a, rbp, rsp)
-        alui(a, "and", rsp, -16)
-        load(a, rdi, mem(r14, 24))
-        movi(a, rsi, 2) # RTLD_NOW
-        call_import(a, "got_dlopen")
-        mov_rr(a, rsp, rbp)
-        pop_r(a, rbp)
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, loaded)
+        mark(a, next_try)
+        inc_r(a, r13)
+        jmp_to(a, try_loop)
+        mark(a, none)
+        storei(a, rip("err_why"), 91)
+        movi(a, rax, 2)
+        jmp_to(a, ready_out)
+        mark(a, loaded)
+        store(a, mem(r12, 0), rax)
+        load(a, rax, mem(r14, 40))
+        store(a, mem(r12, 16), rax)
+        mark(a, have_handle) # and the function in it
+        if target is "windows"
+            win_enter(a)
+            load(a, rcx, mem(r12, 0))
+            load(a, rdx, mem(rbx, 16))
+            call_import(a, "imp_GetProcAddress")
+            win_leave(a)
+        else
+            push_r(a, rbp)
+            mov_rr(a, rbp, rsp)
+            alui(a, "and", rsp, -16)
+            load(a, rdi, mem(r12, 0))
+            load(a, rsi, mem(rbx, 16))
+            call_import(a, "got_dlsym")
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
+        end
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, no_fn)
+        store(a, mem(rbx, 0), rax)
+        movi(a, rax, 0)
+        jmp_to(a, ready_out)
+        mark(a, no_fn)
+        load(a, rax, mem(r12, 16)) # the library it loaded
+        movi64(a, rcx, tag_text)
+        alu(a, "or", rax, rcx)
+        store(a, rip("err_file"), rax)
+        load(a, rax, mem(rbx, 24))
+        alu(a, "or", rax, rcx)
+        store(a, rip("err_reason"), rax)
+        storei(a, rip("err_why"), 92)
+        movi(a, rax, 2)
+        mark(a, ready_out)
+        for each r in list of r14, r13, r12, rbx
+            pop_r(a, r)
+        end
+        ret(a)
+
+        # rt_why_lib: what went wrong finding a library's function, into the builder
+        set why_none to new_label(a)
+        set why_no_fn to new_label(a)
+        mark(a, "rt_why_lib")
+        load(a, rax, rip("err_why"))
+        alui(a, "cmp", rax, 91)
+        jcc(a, cc_e, why_none)
+        alui(a, "cmp", rax, 92)
+        jcc(a, cc_e, why_no_fn)
+        b_text(a, "can't use the library '")
+        file_name_text(a)
+        b_text(a, "': ")
+        reason_text(a)
+        ret(a)
+        mark(a, why_none)
+        b_text(a, "there is no library called '")
+        file_name_text(a)
+        b_text(a, "'")
+        ret(a)
+        mark(a, why_no_fn)
+        b_text(a, "the library '")
+        file_name_text(a)
+        b_text(a, "' has no function called '")
+        reason_text(a)
+        b_text(a, "'")
+        ret(a)
     end
-    test_rr(a, rax, rax)
-    jcc(a, cc_ne, loaded)
-    mark(a, next_try)
-    inc_r(a, r13)
-    jmp_to(a, try_loop)
-    mark(a, none)
-    storei(a, rip("err_why"), 91)
-    movi(a, rax, 2)
-    jmp_to(a, ready_out)
-    mark(a, loaded)
-    store(a, mem(r12, 0), rax)
-    load(a, rax, mem(r14, 40))
-    store(a, mem(r12, 16), rax)
-    mark(a, have_handle) # and the function in it
-    if target is "windows"
-        win_enter(a)
-        load(a, rcx, mem(r12, 0))
-        load(a, rdx, mem(rbx, 16))
-        call_import(a, "imp_GetProcAddress")
-        win_leave(a)
-    else
-        push_r(a, rbp)
-        mov_rr(a, rbp, rsp)
-        alui(a, "and", rsp, -16)
-        load(a, rdi, mem(r12, 0))
-        load(a, rsi, mem(rbx, 16))
-        call_import(a, "got_dlsym")
-        mov_rr(a, rsp, rbp)
-        pop_r(a, rbp)
-    end
-    test_rr(a, rax, rax)
-    jcc(a, cc_e, no_fn)
-    store(a, mem(rbx, 0), rax)
-    movi(a, rax, 0)
-    jmp_to(a, ready_out)
-    mark(a, no_fn)
-    load(a, rax, mem(r12, 16)) # the library it loaded
-    movi64(a, rcx, tag_text)
-    alu(a, "or", rax, rcx)
-    store(a, rip("err_file"), rax)
-    load(a, rax, mem(rbx, 24))
-    alu(a, "or", rax, rcx)
-    store(a, rip("err_reason"), rax)
-    storei(a, rip("err_why"), 92)
-    movi(a, rax, 2)
-    mark(a, ready_out)
-    for each r in list of r14, r13, r12, rbx
-        pop_r(a, r)
-    end
+
+    # rt_lib_numbers: rax a list, untagged: rax where its numbers are, with rdx 0; or rdx 1, and the first thing
+    # in it that isn't a number in err_a
+    set numbers_loop to new_label(a)
+    set numbers_fine to new_label(a)
+    set numbers_wrong to new_label(a)
+    mark(a, "rt_lib_numbers")
+    load(a, r8, mem(rax, 0))
+    load(a, r9, mem(rax, 16))
+    mov_rr(a, r10, r9)
+    mark(a, numbers_loop)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, numbers_fine)
+    load(a, rdx, mem(r10, 0))
+    mov_rr(a, rcx, rdx)
+    movi64(a, r11, bits_nothing)
+    alu(a, "sub", rcx, r11)
+    alui(a, "cmp", rcx, 3)
+    jcc(a, cc_b, numbers_wrong)
+    mov_rr(a, rcx, rdx)
+    shifti(a, "shr", rcx, 48)
+    alui(a, "cmp", rcx, kind_text)
+    jcc(a, cc_ae, numbers_wrong)
+    alui(a, "add", r10, 8)
+    dec_r(a, r8)
+    jmp_to(a, numbers_loop)
+    mark(a, numbers_fine)
+    mov_rr(a, rax, r9)
+    movi(a, rdx, 0)
+    ret(a)
+    mark(a, numbers_wrong)
+    store(a, rip("err_a"), rdx)
+    movi(a, rdx, 1)
     ret(a)
 
-    # rt_why_lib: what went wrong finding a library's function, into the builder
-    set why_none to new_label(a)
-    set why_no_fn to new_label(a)
-    mark(a, "rt_why_lib")
-    load(a, rax, rip("err_why"))
-    alui(a, "cmp", rax, 91)
-    jcc(a, cc_e, why_none)
-    alui(a, "cmp", rax, 92)
-    jcc(a, cc_e, why_no_fn)
-    b_text(a, "can't use the library '")
-    file_name_text(a)
-    b_text(a, "': ")
-    reason_text(a)
-    ret(a)
-    mark(a, why_none)
-    b_text(a, "there is no library called '")
-    file_name_text(a)
-    b_text(a, "'")
-    ret(a)
-    mark(a, why_no_fn)
-    b_text(a, "the library '")
-    file_name_text(a)
-    b_text(a, "' has no function called '")
-    reason_text(a)
-    b_text(a, "'")
+    # rt_lib_numbers_back: rcx a list, untagged, C was given: any NaN C left in it, which could have any bits,
+    # made the NaN arithmetic makes, so none can be taken for nothing or a value in memory
+    set back_loop to new_label(a)
+    set back_fine to new_label(a)
+    set back_done to new_label(a)
+    mark(a, "rt_lib_numbers_back")
+    load(a, r8, mem(rcx, 0))
+    load(a, r9, mem(rcx, 16))
+    mark(a, back_loop)
+    test_rr(a, r8, r8)
+    jcc(a, cc_e, back_done)
+    movsd_plain(a, xmm1, mem(r9, 0))
+    ucomisd(a, xmm1, reg_at(xmm1))
+    jcc(a, cc_np, back_fine)
+    movi64(a, rax, list of 0, 0, 0, 0, 0, 0, 0xF8, 0xFF)
+    store(a, mem(r9, 0), rax)
+    mark(a, back_fine)
+    alui(a, "add", r9, 8)
+    dec_r(a, r8)
+    jmp_to(a, back_loop)
+    mark(a, back_done)
     ret(a)
 
     # rt_lib_whole, rt_lib_long: rax a number: rax it as a whole number, with rdx 0; or rdx 1, and the number in
@@ -37509,7 +38258,7 @@ to emit_libraries with a, target
         emit_callback(a, job, target)
     end
     emit_library_tellers(a)
-    if target is "linux" # what the dynamic linker needs to give the program dlopen and dlsym (see linux_file)
+    if target is "linux" and libraries of a # what the dynamic linker needs to give the program dlopen and dlsym (see linux_file)
         emit_dynamic(a)
     end
 end

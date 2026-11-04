@@ -1,0 +1,263 @@
+# arrays.moth's tests, which moth.test.js runs on every engine and machine.test.js in machine code, where the
+# work is done by machine code's own loops: what they give must be what Moth gives, to the last bit
+
+use "arrays.moth" as arrays
+
+to test_making
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    expect a's shape is list of 2, 3
+    expect arrays's numbers_of(a) is list of 1, 2, 3, 4, 5, 6
+    expect arrays's size(a) is 6
+    expect arrays's rank(a) is 2
+    expect kind of a is "array"
+    expect arrays's array(list of 7)'s shape is list of 1
+    expect arrays's array(list of (list of (list of 1, 2)))'s shape is list of 1, 1, 2
+    expect arrays's shaped((list of 1, 2, 3, 4, 5, 6), (list of 3, 2))'s shape is list of 3, 2
+    expect arrays's numbers_of(arrays's zeros(list of 2, 2)) is list of 0, 0, 0, 0
+    expect arrays's numbers_of(arrays's ones(3)) is list of 1, 1, 1
+    expect arrays's numbers_of(arrays's filled((list of 2, 1), 7.5)) is list of 7.5, 7.5
+    expect arrays's zeros(list of 0, 3)'s shape is list of 0, 3
+    expect arrays's numbers_of(arrays's counting(1, 10, 3)) is list of 1, 4, 7, 10
+    expect arrays's numbers_of(arrays's counting(5, 1, -2)) is list of 5, 3, 1
+    expect arrays's numbers_of(arrays's evenly(0, 1, 5)) is list of 0, 0.25, 0.5, 0.75, 1
+    expect arrays's to_list(arrays's identity(3)) is list of (list of 1, 0, 0), (list of 0, 1, 0), (list of 0, 0, 1)
+    set r to arrays's random(list of 50, 40)
+    expect r's shape is list of 50, 40
+    expect arrays's min(r) is at least 0
+    expect arrays's max(r) is less than 1
+    set g to arrays's random_normal(10000)
+    expect arrays's mean(g) is greater than -0.05
+    expect arrays's mean(g) is less than 0.05
+    set c to arrays's copy_of(a)
+    arrays's set_value_at(c, (list of 1, 1), 100)
+    expect arrays's value_at(a, list of 1, 1) is 1
+    expect arrays's value_at(c, list of 1, 1) is 100
+end
+
+to test_element_by_element
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    expect arrays's to_list(arrays's plus(a, 10)) is list of (list of 11, 12, 13), (list of 14, 15, 16)
+    expect arrays's to_list(arrays's minus(10, a)) is list of (list of 9, 8, 7), (list of 6, 5, 4)
+    expect arrays's to_list(arrays's times(a, a)) is list of (list of 1, 4, 9), (list of 16, 25, 36)
+    expect arrays's numbers_of(arrays's divided_by(a, 2)) is list of 0.5, 1, 1.5, 2, 2.5, 3
+    expect arrays's numbers_of(arrays's square(a)) is list of 1, 4, 9, 16, 25, 36
+    set b to arrays's array(list of (list of 3, 3, 3), (list of 3, 7, -1))
+    expect arrays's numbers_of(arrays's maximum(a, b)) is list of 3, 3, 3, 4, 7, 6
+    expect arrays's numbers_of(arrays's minimum(a, b)) is list of 1, 2, 3, 3, 5, -1
+    set m to arrays's array(list of -2, -0.5, 0, 3)
+    expect arrays's numbers_of(arrays's negate(m)) is list of 2, 0.5, 0, -3
+    expect arrays's numbers_of(arrays's absolute(m)) is list of 2, 0.5, 0, 3
+    expect arrays's numbers_of(arrays's relu(m)) is list of 0, 0, 0, 3
+    expect arrays's numbers_of(arrays's sqrt(arrays's array(list of 4, 9, 2))) is list of 2, 3, 1.41421356237309
+    expect arrays's numbers_of(arrays's exp(arrays's array(list of 0, 1))) is list of 1, 2.71828182845904
+    expect arrays's numbers_of(arrays's ln(arrays's array(list of 1, 2.718281828459045))) is list of 0, 1
+    expect arrays's numbers_of(arrays's tanh(arrays's array(list of 0, 1, -100))) is list of 0, 0.761594155955765, -1
+    expect arrays's numbers_of(arrays's sigmoid(arrays's array(list of 0, 2, -2))) is list of 0.5, 0.880797077977883, 0.119202922022118
+    expect arrays's numbers_of(arrays's power(arrays's array(list of 2, 9), 0.5)) is list of 1.41421356237309, 3
+    expect arrays's numbers_of(arrays's apply(a, function with x gives x * 2 + 1)) is list of 3, 5, 7, 9, 11, 13
+    expect arrays's plus(2, 3) is 5
+end
+
+to test_broadcasting
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    set row to arrays's array(list of 10, 20, 30)
+    expect arrays's to_list(arrays's plus(a, row)) is list of (list of 11, 22, 33), (list of 14, 25, 36)
+    set column to arrays's array(list of (list of 100), (list of 200))
+    expect arrays's to_list(arrays's plus(a, column)) is list of (list of 101, 102, 103), (list of 204, 205, 206)
+    set across to arrays's plus(arrays's array(list of 1, 2, 3, 4), arrays's array(list of (list of 10), (list of 20), (list of 30)))
+    expect across's shape is list of 3, 4
+    expect arrays's to_list(across) is list of (list of 11, 12, 13, 14), (list of 21, 22, 23, 24), (list of 31, 32, 33, 34)
+    # three axes that can't be made two: every place of the first two is a call of its own
+    set cube to arrays's shaped(arrays's numbers_of(arrays's counting(1, 24)), list of 2, 3, 4)
+    set middle to arrays's array(list of (list of 0), (list of 100), (list of 200))
+    set sum to arrays's plus(cube, middle)
+    expect sum's shape is list of 2, 3, 4
+    expect arrays's value_at(sum, list of 1, 1, 1) is 1
+    expect arrays's value_at(sum, list of 1, 2, 3) is 107
+    expect arrays's value_at(sum, list of 2, 3, 4) is 224
+    set wide to arrays's times(arrays's shaped((list of 1, 2), (list of 2, 1, 1)), arrays's ones(list of 3, 4))
+    expect wide's shape is list of 2, 3, 4
+    expect arrays's sum(wide) is 36
+    expect arrays's minus(arrays's array(list of 5), 2)'s shape is list of 1
+end
+
+to test_matrices
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    set b to arrays's transpose(a)
+    expect arrays's to_list(b) is list of (list of 1, 4), (list of 2, 5), (list of 3, 6)
+    expect arrays's to_list(arrays's matmul(a, b)) is list of (list of 14, 32), (list of 32, 77)
+    expect arrays's to_list(arrays's matmul(b, a)) is list of (list of 17, 22, 27), (list of 22, 29, 36), (list of 27, 36, 45)
+    expect arrays's numbers_of(arrays's matmul(arrays's array(list of 1, 1), a)) is list of 5, 7, 9
+    expect arrays's numbers_of(arrays's matmul(a, arrays's array(list of 1, 0, -1))) is list of -2, -2
+    expect arrays's dot(arrays's array(list of 1, 2, 3), arrays's array(list of 4, 5, 6)) is 32
+    expect arrays's same(arrays's matmul(a, arrays's identity(3)), a)
+    # matrices one after another: times one matrix, and times as many
+    set two to arrays's stack(list of a, arrays's times(a, 2))
+    set by_one to arrays's matmul(two, b)
+    expect by_one's shape is list of 2, 2, 2
+    expect arrays's to_list(by_one) is list of (list of (list of 14, 32), (list of 32, 77)), (list of (list of 28, 64), (list of 64, 154))
+    set by_each to arrays's matmul(two, arrays's stack(list of b, b))
+    expect arrays's same(by_each, by_one)
+    set cube to arrays's shaped(arrays's numbers_of(arrays's counting(1, 24)), list of 2, 3, 4)
+    set turned to arrays's transpose(cube)
+    expect turned's shape is list of 4, 3, 2
+    expect arrays's value_at(turned, list of 4, 2, 1) is arrays's value_at(cube, list of 1, 2, 4)
+    expect arrays's value_at(turned, list of 1, 3, 2) is arrays's value_at(cube, list of 2, 3, 1)
+    # bigger than four at a time, and not a multiple of it
+    set p to arrays's shaped(arrays's numbers_of(arrays's counting(1, 77)), list of 7, 11)
+    set q to arrays's shaped(arrays's numbers_of(arrays's counting(1, 99)), list of 11, 9)
+    set pq to arrays's matmul(p, q)
+    expect pq's shape is list of 7, 9
+    expect arrays's value_at(pq, list of 1, 1) is 4026
+    expect arrays's value_at(pq, list of 7, 9) is 43758
+end
+
+to test_along_axes
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    expect arrays's sum(a) is 21
+    expect arrays's numbers_of(arrays's sum(a, 1)) is list of 5, 7, 9
+    expect arrays's numbers_of(arrays's sum(a, 2)) is list of 6, 15
+    expect arrays's mean(a) is 3.5
+    expect arrays's numbers_of(arrays's mean(a, 1)) is list of 2.5, 3.5, 4.5
+    expect arrays's numbers_of(arrays's max(a, 1)) is list of 4, 5, 6
+    expect arrays's numbers_of(arrays's min(a, 2)) is list of 1, 4
+    expect arrays's max(a) is 6
+    expect arrays's min(a) is 1
+    expect arrays's argmax(a) is 6
+    expect arrays's numbers_of(arrays's argmax(arrays's array(list of (list of 1, 9, 3), (list of 7, 2, 7)), 2)) is list of 2, 1
+    expect arrays's sum(arrays's array(list of 5, 6, 7)) is 18
+    expect arrays's sum(arrays's array(list of 5, 6, 7), 1) is 18
+    set cube to arrays's shaped(arrays's numbers_of(arrays's counting(1, 24)), list of 2, 3, 4)
+    expect arrays's to_list(arrays's sum(cube, 2)) is list of (list of 15, 18, 21, 24), (list of 51, 54, 57, 60)
+    expect arrays's to_list(arrays's max(cube, 3)) is list of (list of 4, 8, 12), (list of 16, 20, 24)
+    expect arrays's sum(arrays's zeros(0)) is 0
+    set probabilities to arrays's softmax(arrays's array(list of (list of 1, 2, 3), (list of 1000, 1000, 1000)))
+    expect arrays's numbers_of(arrays's sum(probabilities, 2)) is list of 1, 1
+    expect arrays's value_at(probabilities, list of 1, 3) is 0.665240955774822
+    expect arrays's value_at(probabilities, list of 2, 1) is 0.333333333333333
+end
+
+to test_shapes
+    set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+    expect arrays's to_list(arrays's reshape(a, list of 3, 2)) is list of (list of 1, 2), (list of 3, 4), (list of 5, 6)
+    expect arrays's reshape(a, list of -1, 1)'s shape is list of 6, 1
+    expect arrays's flatten(a)'s shape is list of 6
+    expect arrays's to_list(arrays's slice(a, 2, 2, 3)) is list of (list of 2, 3), (list of 5, 6)
+    expect arrays's to_list(arrays's slice(a, 1, 2, 2)) is list of (list of 4, 5, 6)
+    expect arrays's numbers_of(arrays's row(a, 2)) is list of 4, 5, 6
+    expect arrays's row(arrays's array(list of 7, 8, 9), 3) is 9
+    expect arrays's value_at(a, list of 2, 3) is 6
+    expect arrays's value_at(arrays's array(list of 7, 8, 9), 2) is 8
+    expect arrays's to_list(arrays's join_along((list of a, a), 1)) is list of (list of 1, 2, 3), (list of 4, 5, 6), (list of 1, 2, 3), (list of 4, 5, 6)
+    expect arrays's to_list(arrays's join_along((list of a, arrays's slice(a, 2, 1, 1)), 2)) is list of (list of 1, 2, 3, 1), (list of 4, 5, 6, 4)
+    expect arrays's stack(list of a, a, a)'s shape is list of 3, 2, 3
+    expect "{a}" is "[[1, 2, 3], [4, 5, 6]]"
+    set big to arrays's reshape(arrays's counting(1, 1200), list of 30, 40)
+    expect position of "[[1, 2, 3, ..., 38, 39, 40], [41, 42, 43, ..., 78, 79, 80], [81, 82, 83, ..., 118, 119, 120], ..., [1081," in "{big}" is 1
+end
+
+# What machine code's own loops give, against the same work done in Moth: every operation, on numbers with
+# every bit of their own, for shapes of every size around the loops' fours
+to test_machine_code_agrees
+    set seed to 7
+    for each n in list of 1, 2, 3, 4, 5, 7, 8, 9, 31
+        set xs to empty list
+        set ys to empty list
+        for each k from 1 to n * 3
+            set seed to remainder of (seed * 16807) divided by 2147483647
+            add (seed - 1073741823) / 3721 to xs
+            set seed to remainder of (seed * 16807) divided by 2147483647
+            add (seed - 1073741823) / 977 to ys
+        end
+        set a to arrays's shaped(xs, list of 3, n)
+        set b to arrays's shaped(ys, list of 3, n)
+        for each op from 0 to 9
+            set got to arrays's arrays_zeros_list(3 * n)
+            arrays's arrays_run_binary(op, got, xs, ys, 3, n, 0, n, 1, 0, n, 1, 0)
+            set want to arrays's arrays_zeros_list(3 * n)
+            arrays's arrays_binary_moth(op, want, xs, ys, 3, n, 0, n, 1, 0, n, 1, 0)
+            expect_bits(got, want)
+        end
+        for each op from 1 to 3
+            for each shape in list of (list of 1, 3 * n, 1), (list of 3, n, 1), (list of 1, 3, n), (list of 3, 1, n)
+                set got to arrays's arrays_zeros_list(item 1 of shape * item 3 of shape)
+                arrays's arrays_run_reduce(op, got, xs, item 1 of shape, item 2 of shape, item 3 of shape, 0, "test")
+                set want to arrays's arrays_zeros_list(item 1 of shape * item 3 of shape)
+                arrays's arrays_reduce_moth(op, want, xs, item 1 of shape, item 2 of shape, item 3 of shape, 0, "test")
+                expect_bits(got, want)
+            end
+        end
+        set got to arrays's arrays_zeros_list(9)
+        arrays's arrays_run_matmul(got, xs, ys, 3, n, 3, 0, 0, 0)
+        set want to arrays's arrays_zeros_list(9)
+        arrays's arrays_matmul_moth(want, xs, ys, 3, n, 3, 0, 0, 0)
+        expect_bits(got, want)
+        set got to arrays's arrays_zeros_list(n * n)
+        arrays's arrays_run_matmul(got, xs, ys, n, 3, n, 0, 0, 0)
+        set want to arrays's arrays_zeros_list(n * n)
+        arrays's arrays_matmul_moth(want, xs, ys, n, 3, n, 0, 0, 0)
+        expect_bits(got, want)
+    end
+end
+
+# each number exactly the other: their difference 0, not just the same to 15 digits
+to expect_bits with got, want
+    expect length of got is length of want
+    for each k from 1 to length of got
+        expect item k of got - item k of want is 0
+    end
+end
+
+to test_nan_and_infinity
+    set huge to 10 to the power of 300
+    set infinity to huge * huge
+    set nan to infinity - infinity
+    set a to arrays's array(list of 1, nan, infinity)
+    set sum to arrays's plus(a, 1)
+    expect arrays's value_at(sum, 1) is 2
+    expect arrays's value_at(sum, 2) is not arrays's value_at(sum, 2)
+    expect arrays's value_at(sum, 3) is infinity
+    set most to arrays's maximum(a, arrays's array(list of 5, 5, 5))
+    expect arrays's value_at(most, 2) is not arrays's value_at(most, 2)
+    expect arrays's value_at(most, 3) is infinity
+    set top to arrays's max(a)
+    expect top is not top
+    set total to arrays's sum(a)
+    expect total is not total
+    set inf_sum to arrays's sum(arrays's array(list of infinity, -1))
+    expect inf_sum is infinity
+    set zero_times to arrays's matmul(arrays's array(list of infinity, 1), arrays's array(list of 0, 1))
+    expect zero_times is not zero_times
+    expect length of arrays's numbers_of(arrays's relu(arrays's array(list of nan, -1))) is 2
+end
+
+to test_mistakes
+    expect_mistake(function gives arrays's divided_by(arrays's array(list of 1, 2), arrays's array(list of 1, 0)), "can't divide by zero")
+    expect_mistake(function gives arrays's plus(arrays's zeros(list of 2, 3), arrays's zeros(2)), "'plus' can't put shapes [2, 3] and [2] together: on each axis, from the last, they must be as long as each other, or one of them 1")
+    expect_mistake(function gives arrays's matmul(arrays's zeros(list of 2, 3), arrays's zeros(list of 2, 2)), "'matmul' needs the first's last axis as long as the second's second last: [2, 3] and [2, 2]")
+    expect_mistake(function gives arrays's value_at(arrays's zeros(list of 2, 3), list of 3, 1), "'value_at': an array of shape [2, 3] has no place [3, 1]")
+    expect_mistake(function gives arrays's sum(arrays's zeros(2), 2), "'sum' needs an axis from 1 to 1, not 2")
+    expect_mistake(function gives arrays's reshape(arrays's zeros(6), list of 4, -1), "'reshape' can't make 6 numbers shape [4, -1]")
+    expect_mistake(function gives arrays's array(list of (list of 1, 2), (list of 3)), "'array' needs lists that are each as long as the others: one at depth 2 isn't 2 long")
+    expect_mistake(function gives arrays's array(list of 1, "two"), "'array' needs numbers, or lists of them, not text")
+    expect_mistake(function gives arrays's zeros(list of 2, -1), "'filled' needs a shape of whole numbers of at least 0, not [2, -1]")
+    expect_mistake(function gives arrays's plus("a", 1), "'plus' needs arrays or numbers, not text")
+    expect_mistake(function gives arrays's max(arrays's zeros(0)), "'max' needs numbers to choose from")
+    expect_mistake(function gives arrays's slice(arrays's zeros(3), 1, 2, 4), "'slice' needs places from 1 to 3 on axis 1, not 2 to 4")
+    expect_mistake(function gives arrays's shaped((list of 1, 2, 3), (list of 2, 2)), "'shaped' needs 4 numbers for shape [2, 2], not 3")
+    # data changed by hand to hold text: Moth's own mistake, in machine code as anywhere
+    set spoiled to arrays's zeros(2)
+    set data to spoiled's data
+    set item 2 of data to "x"
+    expect_mistake(function gives arrays's times(spoiled, 2), "can't use '*' on text and a number")
+end
+
+to expect_mistake with f, said
+    try
+        f()
+    if it fails with why
+        expect why is said
+        return nothing
+    end
+    expect "no mistake" is said
+end

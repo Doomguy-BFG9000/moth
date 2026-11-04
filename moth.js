@@ -584,6 +584,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     const callback = type.startsWith("a ") && Object.hasOwn(made.callbacks, type.slice(2));
     const wrong = (why) => fail(t, why);
     if (type === "bytes" && where === "result") wrong("a library's function can't give bytes: it can give a pointer to them");
+    if (type === "a list of numbers" && where !== "input") wrong(`${where === "result" ? "a library's function can't give" : where === "field" ? "a structure's field can't be" : "a callback can't take or give"} a list of numbers: only a function's input can be one`);
     if (type === "bytes" && where !== "input") wrong(`${where === "field" ? "a structure's field" : "a callback"} can't be bytes: ${where === "field" ? "say how many, as in '16 bytes', or" : "it can"} take a pointer`);
     if (callback && where !== "input" && where !== "field") wrong("only a function's input or a structure's field can be a callback");
     if ((type === "text" || type === "wide text" || structure) && where === "callback result") wrong(`a callback can't give ${type === "text" || type === "wide text" ? type : "a structure"}`);
@@ -1830,9 +1831,11 @@ const fallbackFits = (e) => e.kind === "value" || (e.kind === "negate" && e.oper
 // What a library's function can take and give, and what Moth checks each input is (see KINDS in vm.js, and -1
 // for anything): a number is a double, a float a float, a whole number an int, a long whole number 64 bits,
 // and a pointer a whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows). A
-// structure is a record, or nothing, and a callback a function.
+// structure is a record, or nothing, and a callback a function. A list of numbers is a double*, to the list's own
+// numbers, which C can read and change (DESIGN §103).
 const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2,
-  "a byte": 0, "a signed byte": 0, "a short whole number": 0, "an unsigned short whole number": 0, "an unsigned whole number": 0, "an unsigned long whole number": 0 };
+  "a byte": 0, "a signed byte": 0, "a short whole number": 0, "an unsigned short whole number": 0, "an unsigned whole number": 0, "an unsigned long whole number": 0,
+  "a list of numbers": 3 };
 
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {

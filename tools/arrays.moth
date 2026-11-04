@@ -1,0 +1,1243 @@
+# Arrays of numbers, as NumPy has them: a shape, and the numbers row after row, with maths on all of them at
+# once, matrix multiplication, sums, means and the largest along an axis, reshaping, slicing and broadcasting.
+# A program `moth build` makes does the work in machine code, loops of Moth's own (DESIGN §103) over the
+# numbers where they are, one after another in memory; anywhere else, the same in Moth, with the same answers.
+#
+#   use "arrays.moth" as arrays
+#   set a to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6))
+#   say a's shape                               # [2, 3]
+#   say arrays's plus(a, 10)                    # [[11, 12, 13], [14, 15, 16]]: a number goes with every one
+#   say arrays's times(a, arrays's array(list of 1, 0, -1))   # each row times [1, 0, -1] (broadcasting)
+#   set b to arrays's transpose(a)              # 3 by 2
+#   say arrays's matmul(a, b)                   # [[14, 32], [32, 77]]
+#   say arrays's sum(a)                         # 21; sum(a, 1) adds down axis 1: [5, 7, 9]
+#   say arrays's mean(a, 2)                     # [2, 5]; also max, min, argmax
+#   say arrays's reshape(a, list of 3, 2)       # the same numbers, 3 by 2; -1 for one axis works it out
+#   say arrays's slice(a, 2, 2, 3)              # axis 2, from its 2nd to its 3rd: [[2, 3], [5, 6]]
+#   say arrays's value_at(a, list of 2, 3)      # 6: places count from 1, as items do
+#
+# Made with array(nested lists), shaped(numbers, shape), zeros(shape), ones(shape), filled(shape, x),
+# random(shape) (from 0 up to 1), random_normal(shape), counting(first, last, step), evenly(first, last, n)
+# and identity(n). Element by element: plus, minus, times, divided_by, maximum, minimum (each of two arrays,
+# or an array and a number), negate, absolute, square, relu, sqrt, exp, ln, tanh, sigmoid, power(t, p) and
+# apply(t, f). Then matmul, dot, transpose, flatten, row, stack, join_along, softmax, to_list, numbers_of,
+# copy_of, size, rank, close(a, b) and same(a, b). Axes and places count from 1. A shape that can't be,
+# shapes that don't go together, or a place outside an array is a `fail with` that says so.
+
+use "math.moth" as arrays_math
+
+# Moth's own loops, which a program moth build makes has in it (see machine.moth's own kernels): each gives 0,
+# or 1 for anything it won't do, which is then done in Moth below, so what happens is what Moth says happens
+use the library "moth"
+    "numbers_binary" as arrays_k_binary(a long whole number, a list of numbers, a list of numbers, a list of numbers, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number) gives a long whole number
+    "numbers_matmul" as arrays_k_matmul(a list of numbers, a list of numbers, a list of numbers, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number, a long whole number) gives a long whole number
+    "numbers_reduce" as arrays_k_reduce(a long whole number, a list of numbers, a list of numbers, a long whole number, a long whole number, a long whole number, a long whole number) gives a long whole number
+end
+
+# whether they're there: in machine code, yes; on the JavaScript engines, which can't call a library, no
+set arrays_native to yes
+try
+    arrays_k_binary(0, (list of 0), (list of 0), (list of 0), 1, 1, 0, 0, 0, 0, 0, 0, 0)
+if it fails
+    set arrays_native to no
+end
+
+# an array is a record of this kind: `shape`, a list of how long each axis is, and `data`, its numbers, the
+# last axis's one after another, then the next, as C and NumPy lay them out
+kind arrays_record with shape, data
+    to shown with self
+        return arrays_text(self)
+    end
+end
+
+# ---------- making them ----------
+
+to arrays_make with shape, data
+    set made to arrays_record(shape, data)
+    set kind of made to "array"
+    return made
+end
+
+# an array of a list's numbers, or of lists of them, each as long as the others: its shape from how they nest
+to array with values
+    if arrays_is_array(values)
+        return copy_of(values)
+    end
+    if arrays_is_number(values)
+        fail with "'array' needs a list of numbers, or of lists of them, not a number: filled(1, x) makes an array of one"
+    end
+    set shape to empty list
+    set probe to values
+    repeat while arrays_is_list(probe)
+        add length of probe to shape
+        if length of probe is 0
+            stop
+        end
+        set probe to item 1 of probe
+    end
+    set data to empty list
+    arrays_flatten_into(values, shape, 1, data)
+    return arrays_make(shape, data)
+end
+
+to arrays_flatten_into with values, shape, axis, data
+    if axis is greater than length of shape
+        if not arrays_is_number(values)
+            fail with "'array' needs numbers, or lists of them, not " + arrays_kind_name(values)
+        end
+        add values to data
+        return nothing
+    end
+    if not arrays_is_list(values) or length of values is not item axis of shape
+        fail with "'array' needs lists that are each as long as the others: one at depth " + axis + " isn't " + item axis of shape + " long"
+    end
+    for each v in values
+        arrays_flatten_into(v, shape, axis + 1, data)
+    end
+end
+
+# an array of this shape, from a list of its numbers in order
+to shaped with values, shape
+    set shape to arrays_shape(shape, "shaped")
+    if not arrays_is_list(values)
+        fail with "'shaped' needs a list of numbers"
+    end
+    if length of values is not arrays_product(shape)
+        fail with "'shaped' needs " + arrays_product(shape) + " numbers for shape " + shape + ", not " + length of values
+    end
+    for each v in values
+        if not arrays_is_number(v)
+            fail with "'shaped' needs numbers, not " + arrays_kind_name(v)
+        end
+    end
+    return arrays_make(shape, items 1 to length of values of values)
+end
+
+to filled with shape, value
+    set shape to arrays_shape(shape, "filled")
+    if not arrays_is_number(value)
+        fail with "'filled' needs a number to fill it with, not " + arrays_kind_name(value)
+    end
+    set data to arrays_zeros_list(arrays_product(shape))
+    if value is not 0
+        set data to arrays_strided(0, data, (list of value), 0, (list of 0), (list of value), 0, (list of 0), (list of length of data))
+    end
+    return arrays_make(shape, data)
+end
+
+to zeros with shape
+    return filled(shape, 0)
+end
+
+to ones with shape
+    return filled(shape, 1)
+end
+
+# numbers from 0 up to 1, from math.moth's random numbers
+to random with shape
+    set shape to arrays_shape(shape, "random")
+    set data to empty list
+    repeat arrays_product(shape) times
+        add arrays_math's random() to data
+    end
+    return arrays_make(shape, data)
+end
+
+# numbers of a normal distribution, with a mean of 0 and a standard deviation of 1 (Box and Muller's way)
+to random_normal with shape
+    set shape to arrays_shape(shape, "random_normal")
+    set n to arrays_product(shape)
+    set data to empty list
+    repeat while length of data is less than n
+        set u to 1 - arrays_math's random()
+        set v to arrays_math's random()
+        set radius to arrays_math's sqrt(-2 * arrays_math's ln(u))
+        add radius * arrays_math's cosine(2 * arrays_math's pi * v) to data
+        if length of data is less than n
+            add radius * arrays_math's sine(2 * arrays_math's pi * v) to data
+        end
+    end
+    return arrays_make(shape, data)
+end
+
+# first, first + step and on, as far as last, as `for each i from 1 to 10 by 2` counts
+to counting with first, last, step or 1
+    if step is 0
+        fail with "'counting' needs a step that isn't 0"
+    end
+    set data to empty list
+    set k to 0
+    set x to first
+    repeat while (step is greater than 0 and x is at most last) or (step is less than 0 and x is at least last)
+        add x to data
+        add 1 to k
+        set x to first + k * step
+    end
+    return arrays_make((list of length of data), data)
+end
+
+# n numbers from first to last, evenly apart
+to evenly with first, last, n
+    if not arrays_whole(n) or n is less than 1
+        fail with "'evenly' needs how many numbers, a whole number of at least 1"
+    end
+    set data to list of first
+    for each k from 1 to n - 1
+        add first + (last - first) * k / (n - 1) to data
+    end
+    return arrays_make((list of n), items 1 to n of data)
+end
+
+# n by n, 1 on its diagonal and 0 elsewhere
+to identity with n
+    set made to zeros(list of n, n)
+    set data to made's data
+    for each k from 1 to n
+        set item ((k - 1) * n + k) of data to 1
+    end
+    return made
+end
+
+to copy_of with t
+    set t to arrays_need(t, "copy_of")
+    return arrays_make(items 1 to length of t's shape of t's shape, items 1 to length of t's data of t's data)
+end
+
+# ---------- what they are ----------
+
+to size with t
+    return length of arrays_need(t, "size")'s data
+end
+
+to rank with t
+    return length of arrays_need(t, "rank")'s shape
+end
+
+# a number in it, at a place: a list of where on each axis, from 1, or a number for an array of one axis
+to value_at with t, place
+    set t to arrays_need(t, "value_at")
+    return item arrays_place(t, place, "value_at") of t's data
+end
+
+to set_value_at with t, place, value
+    set t to arrays_need(t, "set_value_at")
+    if not arrays_is_number(value)
+        fail with "'set_value_at' needs a number to put there, not " + arrays_kind_name(value)
+    end
+    set data to t's data
+    set item arrays_place(t, place, "set_value_at") of data to value
+end
+
+# its numbers as lists, nested as its axes are
+to to_list with t
+    set t to arrays_need(t, "to_list")
+    if length of t's shape is 0
+        return item 1 of t's data
+    end
+    return arrays_nest(t, 1, 0)
+end
+
+to arrays_nest with t, axis, offset
+    set n to item axis of t's shape
+    set made to empty list
+    if axis is length of t's shape
+        if n is 0
+            return made
+        end
+        return items offset + 1 to offset + n of t's data
+    end
+    set step to arrays_product(items axis + 1 to length of t's shape of t's shape)
+    for each k from 0 to n - 1
+        add arrays_nest(t, axis + 1, offset + k * step) to made
+    end
+    return made
+end
+
+# its numbers, in order, as a list of its own
+to numbers_of with t
+    set t to arrays_need(t, "numbers_of")
+    if length of t's data is 0
+        return empty list
+    end
+    return items 1 to length of t's data of t's data
+end
+
+# ---------- element by element ----------
+
+to plus with a, b
+    return arrays_binary(1, a, b, "plus")
+end
+
+to minus with a, b
+    return arrays_binary(2, a, b, "minus")
+end
+
+to times with a, b
+    return arrays_binary(3, a, b, "times")
+end
+
+to divided_by with a, b
+    return arrays_binary(4, a, b, "divided_by")
+end
+
+# the larger of each two, or NaN if either is; minimum the smaller
+to maximum with a, b
+    return arrays_binary(5, a, b, "maximum")
+end
+
+to minimum with a, b
+    return arrays_binary(6, a, b, "minimum")
+end
+
+to negate with t
+    return arrays_unary(7, t, "negate")
+end
+
+to absolute with t
+    return arrays_unary(8, t, "absolute")
+end
+
+# each number below 0 made 0
+to relu with t
+    return arrays_unary(9, t, "relu")
+end
+
+to square with t
+    return arrays_binary(3, t, t, "square")
+end
+
+# f of each number, a function of one input that gives a number
+to apply with t, f
+    set t to arrays_need(t, "apply")
+    set data to empty list
+    for each x in t's data
+        set y to f(x)
+        if not arrays_is_number(y)
+            fail with "'apply' needs a function that gives a number, not " + arrays_kind_name(y)
+        end
+        add y to data
+    end
+    return arrays_make(items 1 to length of t's shape of t's shape, data)
+end
+
+to sqrt with t
+    return apply(arrays_need(t, "sqrt"), arrays_math's sqrt)
+end
+
+to exp with t
+    return apply(arrays_need(t, "exp"), arrays_math's exp)
+end
+
+to ln with t
+    return apply(arrays_need(t, "ln"), arrays_math's ln)
+end
+
+to tanh with t
+    return apply(arrays_need(t, "tanh"), arrays_tanh)
+end
+
+to sigmoid with t
+    return apply(arrays_need(t, "sigmoid"), arrays_sigmoid)
+end
+
+# each number to the power p, any number (math.moth's power)
+to power with t, p
+    set t to arrays_need(t, "power")
+    set data to empty list
+    for each x in t's data
+        add arrays_math's power(x, p) to data
+    end
+    return arrays_make(items 1 to length of t's shape of t's shape, data)
+end
+
+to arrays_tanh with x
+    if x is greater than 20
+        return 1
+    end
+    if x is less than -20
+        return -1
+    end
+    set e2 to arrays_math's exp(2 * x)
+    return (e2 - 1) / (e2 + 1)
+end
+
+to arrays_sigmoid with x
+    if x is at least 0
+        return 1 / (1 + arrays_math's exp(-x))
+    end
+    set e to arrays_math's exp(x)
+    return e / (1 + e)
+end
+
+# ---------- shapes ----------
+
+# the same numbers in another shape, with as many; one axis of -1 is as long as it needs to be
+to reshape with t, shape
+    set t to arrays_need(t, "reshape")
+    if arrays_is_number(shape)
+        set shape to list of shape
+    end
+    if not arrays_is_list(shape)
+        fail with "'reshape' needs a shape, a list of how long each axis is"
+    end
+    set known to 1
+    set unknown to 0
+    for each n in shape
+        if n is -1
+            add 1 to unknown
+        else if not arrays_whole(n) or n is less than 0
+            fail with "'reshape' needs a shape of whole numbers, not " + shape
+        else
+            set known to known * n
+        end
+    end
+    set made to empty list
+    for each n in shape
+        if n is -1
+            if unknown is greater than 1 or known is 0 or not arrays_whole(size(t) / known)
+                fail with "'reshape' can't make " + size(t) + " numbers shape " + shape
+            end
+            add size(t) / known to made
+        else
+            add n to made
+        end
+    end
+    if arrays_product(made) is not size(t)
+        fail with "'reshape' can't make " + size(t) + " numbers shape " + made
+    end
+    return arrays_make(made, numbers_of(t))
+end
+
+to flatten with t
+    return reshape(t, -1)
+end
+
+# its axes the other way round: rows become columns
+to transpose with t
+    set t to arrays_need(t, "transpose")
+    set r to length of t's shape
+    set steps to arrays_steps(t's shape)
+    set shape to empty list
+    set from_steps to empty list
+    set d to r
+    repeat while d is at least 1
+        add item d of t's shape to shape
+        add item d of steps to from_steps
+        set d to d - 1
+    end
+    set data to arrays_zeros_list(size(t))
+    arrays_strided(0, data, t's data, 0, from_steps, t's data, 0, from_steps, shape)
+    return arrays_make(shape, data)
+end
+
+# along an axis, from one place to another, both counted from 1 and both kept
+to slice with t, axis, first, last
+    set t to arrays_need(t, "slice")
+    set axis to arrays_axis(t, axis, "slice")
+    set n to item axis of t's shape
+    if not arrays_whole(first) or not arrays_whole(last) or first is less than 1 or last is greater than n or first is greater than last + 1
+        fail with "'slice' needs places from 1 to " + n + " on axis " + axis + ", not " + first + " to " + last
+    end
+    set shape to items 1 to length of t's shape of t's shape
+    set item axis of shape to last - first + 1
+    set steps to arrays_steps(t's shape)
+    set data to arrays_zeros_list(arrays_product(shape))
+    arrays_strided(0, data, t's data, (first - 1) * item axis of steps, steps, t's data, 0, steps, shape)
+    return arrays_make(shape, data)
+end
+
+# the place-th along axis 1: an array of one axis fewer, or a number
+to row with t, place
+    set t to arrays_need(t, "row")
+    if length of t's shape is 0
+        fail with "'row' needs an array with an axis"
+    end
+    set one to slice(t, 1, place, place)
+    if length of t's shape is 1
+        return item 1 of one's data
+    end
+    return arrays_make(items 2 to length of one's shape of one's shape, one's data)
+end
+
+# arrays of one shape, each a place along a new first axis
+to stack with arrays
+    if not arrays_is_list(arrays) or length of arrays is 0
+        fail with "'stack' needs a list of arrays"
+    end
+    set first to arrays_need(item 1 of arrays, "stack")
+    set data to empty list
+    for each t in arrays
+        set t to arrays_need(t, "stack")
+        if t's shape is not first's shape
+            fail with "'stack' needs arrays of one shape: " + first's shape + " and " + t's shape
+        end
+        for each x in t's data
+            add x to data
+        end
+    end
+    set shape to list of length of arrays
+    for each n in first's shape
+        add n to shape
+    end
+    return arrays_make(shape, data)
+end
+
+# arrays one after another along an axis, the same shape but for that axis
+to join_along with arrays, axis
+    if not arrays_is_list(arrays) or length of arrays is 0
+        fail with "'join_along' needs a list of arrays"
+    end
+    set first to arrays_need(item 1 of arrays, "join_along")
+    set axis to arrays_axis(first, axis, "join_along")
+    set outer to arrays_product(items 1 to axis - 1 of first's shape)
+    set total_along to 0
+    for each t in arrays
+        set t to arrays_need(t, "join_along")
+        if length of t's shape is not length of first's shape
+            fail with "'join_along' needs arrays of as many axes: " + first's shape + " and " + t's shape
+        end
+        for each d from 1 to length of first's shape
+            if d is not axis and item d of t's shape is not item d of first's shape
+                fail with "'join_along' needs arrays the same shape but along axis " + axis + ": " + first's shape + " and " + t's shape
+            end
+        end
+        add item axis of t's shape to total_along
+    end
+    set data to empty list
+    for each block from 0 to outer - 1
+        for each t in arrays
+            set run to arrays_product(items axis to length of t's shape of t's shape)
+            if run is greater than 0
+                for each x in items block * run + 1 to (block + 1) * run of t's data
+                    add x to data
+                end
+            end
+        end
+    end
+    set shape to items 1 to length of first's shape of first's shape
+    set item axis of shape to total_along
+    return arrays_make(shape, data)
+end
+
+# ---------- matrices ----------
+
+# a by b as matrices: m by k times k by n is m by n. An array of one axis is a row on the left and a column on
+# the right, and two of them give a number; an array of more axes is matrices one after another, times one
+# matrix or as many
+to matmul with a, b
+    set a to arrays_need(a, "matmul")
+    set b to arrays_need(b, "matmul")
+    set ra to length of a's shape
+    set rb to length of b's shape
+    if ra is 0 or rb is 0
+        fail with "'matmul' needs arrays with axes; multiply works with a number"
+    end
+    set k to item ra of a's shape
+    set kb to item 1 of b's shape
+    if rb is at least 2
+        set kb to item (rb - 1) of b's shape
+    end
+    if k is not kb
+        fail with "'matmul' needs the first's last axis as long as the second's " + arrays_kth(rb) + ": " + a's shape + " and " + b's shape
+    end
+    set n to 1
+    if rb is at least 2
+        set n to item rb of b's shape
+    end
+    if rb is at most 2 # one matrix on the right: everything on the left is rows of it
+        set m to size(a) / k
+        if k is 0
+            set m to arrays_product(items 1 to ra - 1 of a's shape)
+        end
+        set data to arrays_zeros_list(m * n)
+        arrays_run_matmul(data, a's data, b's data, m, k, n, 0, 0, 0)
+        set shape to items 1 to ra - 1 of a's shape
+        if rb is 2
+            add n to shape
+        end
+        if length of shape is 0
+            return item 1 of data
+        end
+        return arrays_make(shape, data)
+    end
+    if ra is not rb or items 1 to ra - 2 of a's shape is not items 1 to rb - 2 of b's shape
+        fail with "'matmul' needs as many matrices on each side, or one on the right: " + a's shape + " and " + b's shape
+    end
+    set m to item (ra - 1) of a's shape
+    set batches to arrays_product(items 1 to ra - 2 of a's shape)
+    set data to arrays_zeros_list(batches * m * n)
+    for each batch from 0 to batches - 1
+        arrays_run_matmul(data, a's data, b's data, m, k, n, batch * m * k, batch * k * n, batch * m * n)
+    end
+    set shape to items 1 to ra - 1 of a's shape
+    add n to shape
+    return arrays_make(shape, data)
+end
+
+to arrays_kth with r
+    if r is 1
+        return "only axis"
+    end
+    return "second last"
+end
+
+# the sum of the products of two arrays' numbers, one with the other: of one axis each, as long as each other
+to dot with a, b
+    set a to arrays_need(a, "dot")
+    set b to arrays_need(b, "dot")
+    if length of a's shape is not 1 or length of b's shape is not 1 or a's shape is not b's shape
+        fail with "'dot' needs two arrays of one axis, as long as each other: " + a's shape + " and " + b's shape
+    end
+    return matmul(a, b)
+end
+
+# ---------- along an axis ----------
+
+# all its numbers added, or along an axis: an array of one axis fewer (a number for an array of one axis)
+to sum with t, axis or nothing
+    return arrays_reduce(1, t, axis, "sum")
+end
+
+to mean with t, axis or nothing
+    set t to arrays_need(t, "mean")
+    set summed to arrays_reduce(1, t, axis, "mean")
+    if axis is nothing
+        if size(t) is 0
+            fail with "'mean' needs an array with numbers in it"
+        end
+        return summed / size(t)
+    end
+    set n to item arrays_axis(t, axis, "mean") of t's shape
+    if n is 0
+        fail with "'mean' needs numbers along axis " + axis
+    end
+    return arrays_binary(4, summed, n, "mean")
+end
+
+# the largest, or NaN if any is NaN; min the smallest
+to max with t, axis or nothing
+    return arrays_reduce(2, t, axis, "max")
+end
+
+to min with t, axis or nothing
+    return arrays_reduce(3, t, axis, "min")
+end
+
+# where the largest is, from 1: in all of it (as if it were flat), or along an axis; the first if there are
+# several
+to argmax with t, axis or nothing
+    set t to arrays_need(t, "argmax")
+    if size(t) is 0
+        fail with "'argmax' needs an array with numbers in it"
+    end
+    if axis is nothing
+        return arrays_best_place(t's data, 0, size(t), 1)
+    end
+    set axis to arrays_axis(t, axis, "argmax")
+    set outer to arrays_product(items 1 to axis - 1 of t's shape)
+    set n to item axis of t's shape
+    set inner to arrays_product(items axis + 1 to length of t's shape of t's shape)
+    set data to empty list
+    for each o from 0 to outer - 1
+        for each i from 0 to inner - 1
+            add arrays_best_place(t's data, o * n * inner + i, n, inner) to data
+        end
+    end
+    return arrays_shrunk(t, axis, data)
+end
+
+to arrays_best_place with data, start, n, step
+    set best to item start + 1 of data
+    set place to 1
+    for each k from 2 to n
+        set x to item (start + (k - 1) * step + 1) of data
+        if x - best is greater than 0
+            set best to x
+            set place to k
+        end
+    end
+    return place
+end
+
+# e to the power of each number over their sum along an axis (the last if none is given), each from the
+# largest there, so none is too big
+to softmax with t, axis or nothing
+    set t to arrays_need(t, "softmax")
+    if length of t's shape is 0
+        fail with "'softmax' needs an array with an axis"
+    end
+    if axis is nothing
+        set axis to length of t's shape
+    end
+    set axis to arrays_axis(t, axis, "softmax")
+    set largest_here to arrays_kept(t, axis, max(t, axis))
+    set raised to exp(minus(t, largest_here))
+    return divided_by(raised, arrays_kept(t, axis, sum(raised, axis)))
+end
+
+# what a reduction along an axis gave, with that axis put back as 1 long, so it broadcasts against t
+to arrays_kept with t, axis, reduced
+    set shape to items 1 to length of t's shape of t's shape
+    set item axis of shape to 1
+    if arrays_is_number(reduced)
+        return arrays_make(shape, list of reduced)
+    end
+    return arrays_make(shape, reduced's data)
+end
+
+# ---------- comparing ----------
+
+# whether two arrays have one shape and their numbers are each within tolerance of each other
+to close with a, b, tolerance or 0.000000001
+    set a to arrays_need(a, "close")
+    set b to arrays_need(b, "close")
+    if a's shape is not b's shape
+        return no
+    end
+    for each k from 1 to size(a)
+        set gap to item k of a's data - item k of b's data
+        if gap is less than 0
+            set gap to -gap
+        end
+        if not (gap is at most tolerance)
+            return no
+        end
+    end
+    return yes
+end
+
+to same with a, b
+    set a to arrays_need(a, "same")
+    set b to arrays_need(b, "same")
+    return a's shape is b's shape and a's data is b's data
+end
+
+# ---------- the work, in machine code or in Moth ----------
+
+# `a op b` for every place of the shape they broadcast to, as NumPy broadcasts: their shapes lined up from the
+# right, each axis as long as the other's or 1 (or missing), which goes with every place along the other's
+to arrays_binary with op, a, b, what
+    set left to arrays_operand(a, what)
+    set right to arrays_operand(b, what)
+    set ra to length of left's shape
+    set rb to length of right's shape
+    set r to ra
+    if rb is greater than r
+        set r to rb
+    end
+    set shape to empty list
+    set sa to empty list
+    set sb to empty list
+    set steps_a to arrays_steps(left's shape)
+    set steps_b to arrays_steps(right's shape)
+    for each d from 1 to r
+        set na to 1
+        set step_a to 0
+        if d + ra - r is at least 1
+            set na to item (d + ra - r) of left's shape
+            set step_a to item (d + ra - r) of steps_a
+        end
+        set nb to 1
+        set step_b to 0
+        if d + rb - r is at least 1
+            set nb to item (d + rb - r) of right's shape
+            set step_b to item (d + rb - r) of steps_b
+        end
+        if na is not nb and na is not 1 and nb is not 1
+            fail with "'" + what + "' can't put shapes " + left's shape + " and " + right's shape + " together: on each axis, from the last, they must be as long as each other, or one of them 1"
+        end
+        set n to na
+        if na is 1
+            set n to nb
+            set step_a to 0
+        end
+        if nb is 1
+            set step_b to 0
+        end
+        add n to shape
+        add step_a to sa
+        add step_b to sb
+    end
+    set data to arrays_zeros_list(arrays_product(shape))
+    arrays_strided(op, data, left's data, 0, sa, right's data, 0, sb, shape)
+    if ra is 0 and rb is 0 # two numbers make a number
+        return item 1 of data
+    end
+    return arrays_make(shape, data)
+end
+
+to arrays_unary with op, t, what
+    set t to arrays_need(t, what)
+    set steps to arrays_steps(t's shape)
+    set data to arrays_zeros_list(size(t))
+    arrays_strided(op, data, t's data, 0, steps, t's data, 0, steps, t's shape)
+    return arrays_make(items 1 to length of t's shape of t's shape, data)
+end
+
+# out's numbers, in order, for every place of `shape`: from a, starting at a_from and stepping a_steps along
+# each axis, and b likewise, with op between them (see rt_k_binary in machine.moth). Axes that step through
+# both as one longer axis would are made one, then the last two are each a call, for each place of the rest.
+to arrays_strided with op, out, a, a_from, a_steps, b, b_from, b_steps, shape
+    set ns to empty list
+    set sa to empty list
+    set sb to empty list
+    for each d from 1 to length of shape
+        if item d of shape is 0
+            return out
+        end
+        if item d of shape is not 1
+            set k to length of ns
+            if k is greater than 0 and item k of sa is item d of a_steps * item d of shape and item k of sb is item d of b_steps * item d of shape
+                set item k of ns to item k of ns * item d of shape
+                set item k of sa to item d of a_steps
+                set item k of sb to item d of b_steps
+            else
+                add item d of shape to ns
+                add item d of a_steps to sa
+                add item d of b_steps to sb
+            end
+        end
+    end
+    repeat while length of ns is less than 2
+        set ns to arrays_before(1, ns)
+        set sa to arrays_before(0, sa)
+        set sb to arrays_before(0, sb)
+    end
+    set r to length of ns
+    set outer to item (r - 1) of ns
+    set inner to item r of ns
+    set blocks to arrays_product(items 1 to r - 2 of ns)
+    set place to empty list
+    repeat r - 2 times
+        add 0 to place
+    end
+    for each block from 0 to blocks - 1
+        set oa to a_from
+        set ob to b_from
+        for each d from 1 to r - 2
+            set oa to oa + item d of place * item d of sa
+            set ob to ob + item d of place * item d of sb
+        end
+        arrays_run_binary(op, out, a, b, outer, inner, oa, item (r - 1) of sa, item r of sa, ob, item (r - 1) of sb, item r of sb, block * outer * inner)
+        set d to r - 2
+        repeat while d is at least 1
+            set item d of place to item d of place + 1
+            if item d of place is less than item d of ns
+                stop
+            end
+            set item d of place to 0
+            set d to d - 1
+        end
+    end
+    return out
+end
+
+to arrays_run_binary with op, out, a, b, outer, inner, oa, sa0, sa1, ob, sb0, sb1, oo
+    if arrays_native
+        if arrays_k_binary(op, out, a, b, outer, inner, oa, sa0, sa1, ob, sb0, sb1, oo) is 0
+            return nothing
+        end
+    end
+    arrays_binary_moth(op, out, a, b, outer, inner, oa, sa0, sa1, ob, sb0, sb1, oo)
+end
+
+# rt_k_binary, in Moth: op 0 a's number, 1 to 6 + - * / max min, 7 to 9 negate, absolute and relu
+to arrays_binary_moth with op, out, a, b, outer, inner, oa, sa0, sa1, ob, sb0, sb1, oo
+    set k to oo + 1
+    set i to 0
+    repeat while i is less than outer
+        set ia to oa + i * sa0 + 1
+        set ib to ob + i * sb0 + 1
+        set j to 0
+        repeat while j is less than inner
+            set x to item ia of a
+            if op is 0
+                set r to x
+            else if op is 1
+                set r to x + item ib of b
+            else if op is 2
+                set r to x - item ib of b
+            else if op is 3
+                set r to x * item ib of b
+            else if op is 4
+                set r to x / item ib of b
+            else if op is 5 or op is 6
+                set y to item ib of b
+                if x is not x or y is not y
+                    set r to x + y
+                else if (op is 5 and x - y is greater than 0) or (op is 6 and y - x is greater than 0)
+                    set r to x
+                else
+                    set r to y
+                end
+            else if op is 7
+                set r to -x
+            else if op is 8
+                set r to x
+                if x is 0
+                    set r to 0
+                else if x is less than 0
+                    set r to -x
+                end
+            else
+                set r to x
+                if x is x and not (x is greater than 0)
+                    set r to 0
+                end
+            end
+            set item k of out to r
+            add 1 to k
+            add sa1 to ia
+            add sb1 to ib
+            add 1 to j
+        end
+        add 1 to i
+    end
+end
+
+to arrays_run_matmul with out, a, b, m, k, n, oa, ob, oo
+    if arrays_native
+        if arrays_k_matmul(out, a, b, m, k, n, oa, ob, oo) is 0
+            return nothing
+        end
+    end
+    arrays_matmul_moth(out, a, b, m, k, n, oa, ob, oo)
+end
+
+# rt_k_matmul, in Moth: each of out's numbers 0 + a's first times b's first + ..., in that order
+to arrays_matmul_moth with out, a, b, m, k, n, oa, ob, oo
+    for each place from oo + 1 to oo + m * n
+        set item place of out to 0
+    end
+    set i to 0
+    repeat while i is less than m
+        set row_at to oo + i * n
+        set p to 0
+        repeat while p is less than k
+            set here to item (oa + i * k + p + 1) of a
+            set b_row to ob + p * n
+            set j to 1
+            repeat while j is at most n
+                set item (row_at + j) of out to item (row_at + j) of out + here * item (b_row + j) of b
+                add 1 to j
+            end
+            add 1 to p
+        end
+        add 1 to i
+    end
+end
+
+# t summed (op 1), or its largest (2) or smallest (3): all of it as a number, or along an axis
+to arrays_reduce with op, t, axis, what
+    set t to arrays_need(t, what)
+    if axis is nothing
+        set data to list of 0
+        arrays_run_reduce(op, data, t's data, 1, size(t), 1, 0, what)
+        return item 1 of data
+    end
+    set axis to arrays_axis(t, axis, what)
+    set outer to arrays_product(items 1 to axis - 1 of t's shape)
+    set n to item axis of t's shape
+    set inner to arrays_product(items axis + 1 to length of t's shape of t's shape)
+    set data to arrays_zeros_list(outer * inner)
+    arrays_run_reduce(op, data, t's data, outer, n, inner, 0, what)
+    return arrays_shrunk(t, axis, data)
+end
+
+# what a reduction along an axis gave, as an array without that axis, or a number if it was the only one
+to arrays_shrunk with t, axis, data
+    set shape to empty list
+    for each d from 1 to length of t's shape
+        if d is not axis
+            add item d of t's shape to shape
+        end
+    end
+    if length of shape is 0
+        return item 1 of data
+    end
+    return arrays_make(shape, data)
+end
+
+to arrays_run_reduce with op, out, a, outer, n, inner, oa, what
+    if arrays_native
+        if arrays_k_reduce(op, out, a, outer, n, inner, oa) is 0
+            return nothing
+        end
+    end
+    arrays_reduce_moth(op, out, a, outer, n, inner, oa, what)
+end
+
+# rt_k_reduce, in Moth: rows of one number summed in four parts, any other rows each in turn onto 0; the
+# largest each that's greater, the smallest each that's less, or NaN if any is
+to arrays_reduce_moth with op, out, a, outer, n, inner, oa, what
+    if n is 0 and op is not 1 and outer * inner is greater than 0
+        fail with "'" + what + "' needs numbers to choose from"
+    end
+    set k to 1
+    set o to 0
+    repeat while o is less than outer
+        set base to oa + o * n * inner + 1
+        if inner is 1 and op is 1
+            set s0 to 0
+            set s1 to 0
+            set s2 to 0
+            set s3 to 0
+            set j to 0
+            set lane to 0
+            repeat while j is less than n
+                set x to item (base + j) of a
+                if lane is 0
+                    set s0 to s0 + x
+                else if lane is 1
+                    set s1 to s1 + x
+                else if lane is 2
+                    set s2 to s2 + x
+                else
+                    set s3 to s3 + x
+                end
+                set lane to lane + 1
+                if lane is 4
+                    set lane to 0
+                end
+                add 1 to j
+            end
+            set item k of out to (s0 + s1) + (s2 + s3)
+            add 1 to k
+        else
+            set i to 0
+            repeat while i is less than inner
+                set spot to k + i
+                if op is 1
+                    set item spot of out to 0
+                    set j to 0
+                else
+                    set first to item (base + i) of a
+                    set probe to first - 0
+                    set item spot of out to first
+                    set j to 1
+                end
+                repeat while j is less than n
+                    set x to item (base + j * inner + i) of a
+                    set best to item spot of out
+                    if op is 1
+                        set item spot of out to best + x
+                    else
+                        set probe to x - 0
+                        if best is not best
+                            set j to j
+                        else if x is not x
+                            set item spot of out to x
+                        else if (op is 2 and x - best is greater than 0) or (op is 3 and best - x is greater than 0)
+                            set item spot of out to x
+                        end
+                    end
+                    add 1 to j
+                end
+                add 1 to i
+            end
+            add inner to k
+        end
+        add 1 to o
+    end
+end
+
+# ---------- helpers ----------
+
+to arrays_before with x, xs
+    set made to list of x
+    for each y in xs
+        add y to made
+    end
+    return made
+end
+
+to arrays_is_number with v
+    try
+        set probe to v - 0
+        return yes
+    if it fails
+        return no
+    end
+end
+
+to arrays_is_array with v
+    try
+        return kind of v is "array"
+    if it fails
+        return no
+    end
+end
+
+to arrays_is_text with v
+    try
+        set probe to uppercase of v
+        return yes
+    if it fails
+        return no
+    end
+end
+
+to arrays_is_list with v
+    if arrays_is_text(v)
+        return no
+    end
+    try
+        set probe to items 1 to 0 of v
+        return yes
+    if it fails
+        return no
+    end
+end
+
+# what a value is, for a mistake
+to arrays_kind_name with v
+    if arrays_is_text(v)
+        return "text"
+    end
+    if arrays_is_array(v)
+        return "an array"
+    end
+    if arrays_is_list(v)
+        return "a list"
+    end
+    if v is nothing
+        return "nothing"
+    end
+    if v is yes or v is no
+        return "yes or no"
+    end
+    return "something that isn't a number"
+end
+
+to arrays_whole with x
+    return arrays_is_number(x) and x is (x rounded down)
+end
+
+# an array, or a mistake that says what wanted one
+to arrays_need with t, what
+    if arrays_is_array(t)
+        return t
+    end
+    fail with "'" + what + "' needs an array, not " + arrays_kind_name(t)
+end
+
+# an array, or a number as an array of no axes, which broadcasts against anything
+to arrays_operand with v, what
+    if arrays_is_array(v)
+        return v
+    end
+    if arrays_is_number(v)
+        return arrays_make(empty list, list of v)
+    end
+    fail with "'" + what + "' needs arrays or numbers, not " + arrays_kind_name(v)
+end
+
+# a shape: a list of whole numbers, or one whole number for an array of one axis
+to arrays_shape with shape, what
+    if arrays_is_number(shape)
+        set shape to list of shape
+    end
+    if not arrays_is_list(shape)
+        fail with "'" + what + "' needs a shape, a list of how long each axis is"
+    end
+    for each n in shape
+        if not arrays_whole(n) or n is less than 0
+            fail with "'" + what + "' needs a shape of whole numbers of at least 0, not " + shape
+        end
+    end
+    if length of shape is 0
+        return empty list
+    end
+    return items 1 to length of shape of shape
+end
+
+to arrays_product with ns
+    set made to 1
+    for each n in ns
+        set made to made * n
+    end
+    return made
+end
+
+# how far apart in data the next place along each axis is
+to arrays_steps with shape
+    set steps to empty list
+    set step to 1
+    set d to length of shape
+    repeat while d is at least 1
+        set steps to arrays_before(step, steps)
+        set step to step * item d of shape
+        set d to d - 1
+    end
+    return steps
+end
+
+to arrays_axis with t, axis, what
+    if not arrays_whole(axis) or axis is less than 1 or axis is greater than length of t's shape
+        fail with "'" + what + "' needs an axis from 1 to " + length of t's shape + ", not " + axis
+    end
+    return axis
+end
+
+# where a place is in data, from 1
+to arrays_place with t, place, what
+    if arrays_is_number(place)
+        set place to list of place
+    end
+    if not arrays_is_list(place) or length of place is not length of t's shape
+        fail with "'" + what + "' needs a place with " + length of t's shape + " numbers for shape " + t's shape
+    end
+    set spot to 0
+    set d to 1
+    for each p in place
+        if not arrays_whole(p) or p is less than 1 or p is greater than item d of t's shape
+            fail with "'" + what + "': an array of shape " + t's shape + " has no place " + place
+        end
+        set spot to spot * item d of t's shape + p - 1
+        add 1 to d
+    end
+    return spot + 1
+end
+
+# n zeros, a list of their own, copied from a list of them kept for it
+set arrays_zero_list to list of 0
+to arrays_zeros_list with n
+    if n is 0
+        return empty list
+    end
+    repeat while length of arrays_zero_list is less than n
+        for each x in items 1 to length of arrays_zero_list of arrays_zero_list
+            add 0 to arrays_zero_list
+        end
+    end
+    return items 1 to n of arrays_zero_list
+end
+
+# how say shows an array: lists in lists, as to_list makes, with an axis of more than 6 shown by its first
+# and last 3 when there are more than 1000 numbers, as NumPy shows them
+to arrays_text with t
+    if length of t's shape is 0
+        return "" + item 1 of t's data
+    end
+    return arrays_text_at(t, 1, 0, size(t) is greater than 1000)
+end
+
+to arrays_text_at with t, axis, offset, short
+    if axis is greater than length of t's shape
+        return "" + item (offset + 1) of t's data
+    end
+    set n to item axis of t's shape
+    set step to arrays_product(items axis + 1 to length of t's shape of t's shape)
+    set parts to empty list
+    set k to 0
+    repeat while k is less than n
+        if short and n is greater than 6 and k is 3
+            add "..." to parts
+        end
+        if not short or n is at most 6 or k is less than 3 or k is at least n - 3
+            add arrays_text_at(t, axis + 1, offset + k * step, short) to parts
+        end
+        add 1 to k
+    end
+    return "[" + (join parts with ", ") + "]"
+end
