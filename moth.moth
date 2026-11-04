@@ -20,11 +20,12 @@
 use "machine.moth" as machine
 use "stdlib.moth" as standard # the libraries a program anywhere can use (see cli_sources_of)
 use "webpage.moth" as webpage # the page moth build --web writes a program into
+use "tools/hash.moth" as cli_hashing # SHA-256, for the sums of packages' files in moth.sums
 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -1600,12 +1601,16 @@ end
 # The packages a program uses are in packages/, in the folder moth runs in, each a Git repository's clone,
 # whose main file is named after it, and listed in moth.packages there: a line for each, its name, where it
 # comes from (a site's address, or a folder) and the commit it's at, so `moth get` fetches the same ones
-# anywhere.
+# anywhere. moth.sums beside it has the SHA-256 of each one's files at that commit, which `moth get` checks
+# (DESIGN §103).
 
 # git, run with these arguments, keeping what it says; or nothing, said why, if it can't be started. On
-# Windows a package's files can be deeper than 260 characters, which git takes only when told to.
+# Windows a package's files can be deeper than 260 characters, which git takes only when told to. A package's
+# files are checked out as they are in the repository, whatever the system or the person's own settings, so
+# their sum is the same everywhere: line ends as they were committed, and a symbolic link as a file holding
+# where it points.
 to cli_git with cli_git_args
-    set cli_all_args to list of "-c", "core.longpaths=true"
+    set cli_all_args to list of "-c", "core.longpaths=true", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.symlinks=false"
     for each cli_arg in cli_git_args
         add cli_arg to cli_all_args
     end
@@ -1627,7 +1632,7 @@ to cli_git_said with cli_answer
     for each cli_c in cli_said
         if cli_c is "\n"
             add " " to cli_one
-        else
+        else if cli_c is not "\r"
             add cli_c to cli_one
         end
     end
@@ -1649,6 +1654,15 @@ to cli_is_file with cli_path
         return yes
     if it fails
         return no
+    end
+end
+
+# a file's text, or nothing if it can't be read
+to cli_read_or_nothing with cli_path
+    try
+        return read cli_path
+    if it fails
+        return nothing
     end
 end
 
@@ -1685,22 +1699,32 @@ to cli_package_name_of with cli_source
     return cli_last
 end
 
-# moth.packages, read: a record of each line's name, source and commit, or nothing if there isn't one
-to cli_package_list
-    set cli_text to nothing
-    try
-        set cli_text to read "moth.packages"
-    if it fails
-        return nothing
+# a line's words, the spaces between them gone
+to cli_words_of with cli_line
+    set cli_found to empty list
+    for each cli_word in split cli_trimmed(cli_line) by " "
+        if cli_word is not ""
+            add cli_word to cli_found
+        end
+    end
+    return cli_found
+end
+
+# the packages a moth.packages text lists, each a record of its name, source and commit, and its sum: what a
+# moth.sums text (or nothing) has for that name at that commit, or nothing
+to cli_packages_in with cli_text, cli_sums_text
+    set cli_sums to empty list
+    if cli_sums_text is not nothing
+        for each cli_line in cli_text_lines(cli_sums_text)
+            set cli_words to cli_words_of(cli_line)
+            if length of cli_words is 3 and item 1 of item 1 of cli_words is not "#"
+                add cli_words to cli_sums
+            end
+        end
     end
     set cli_list to empty list
     for each cli_line in cli_text_lines(cli_text)
-        set cli_words to empty list
-        for each cli_word in split cli_trimmed(cli_line) by " "
-            if cli_word is not ""
-                add cli_word to cli_words
-            end
-        end
+        set cli_words to cli_words_of(cli_line)
         if length of cli_words is at least 3 and item 1 of item 1 of cli_words is not "#"
             set cli_from to ""
             for each cli_k from 2 to length of cli_words - 1
@@ -1709,10 +1733,28 @@ to cli_package_list
                 end
                 add item cli_k of cli_words to cli_from
             end
-            add record with name item 1 of cli_words, source cli_from, commit item (length of cli_words) of cli_words to cli_list
+            set cli_name to item 1 of cli_words
+            set cli_commit to item (length of cli_words) of cli_words
+            set cli_sum to nothing
+            for each cli_known in cli_sums
+                if item 1 of cli_known is cli_name and item 2 of cli_known is cli_commit
+                    set cli_sum to item 3 of cli_known
+                end
+            end
+            add record with name cli_name, source cli_from, commit cli_commit, sum cli_sum to cli_list
         end
     end
     return cli_list
+end
+
+# moth.packages, read, with moth.sums's sums: a record of each line's name, source, commit and sum, or nothing
+# if there isn't one
+to cli_package_list
+    set cli_text to cli_read_or_nothing("moth.packages")
+    if cli_text is nothing
+        return nothing
+    end
+    return cli_packages_in(cli_text, cli_read_or_nothing("moth.sums"))
 end
 
 to cli_write_packages with cli_list
@@ -1721,6 +1763,18 @@ to cli_write_packages with cli_list
         add name of cli_one + " " + source of cli_one + " " + commit of cli_one + "\n" to cli_out
     end
     write cli_out to "moth.packages"
+    cli_write_sums(cli_list)
+end
+
+# moth.sums: each package's name, its commit and the SHA-256 of its files there
+to cli_write_sums with cli_list
+    set cli_out to "# The SHA-256 of each package's files at the commit moth.packages has it at: its name, the commit and the sum.\n# moth add and update write them, and moth get checks them.\n"
+    for each cli_one in cli_list
+        if sum of cli_one is not nothing
+            add name of cli_one + " " + commit of cli_one + " " + sum of cli_one + "\n" to cli_out
+        end
+    end
+    write cli_out to "moth.sums"
 end
 
 to cli_short with cli_commit
@@ -1818,28 +1872,191 @@ to cli_remove_folder with cli_path
     end
 end
 
+# ---------- what packages are made of: their sums and signatures ----------
+
+# every file in a package's folder but Git's own (a .git folder or file, at any depth), by its path there with
+# / between its parts, added to cli_found; cli_inside is the folder inside it being looked in, "" or ending in /
+to cli_package_files with cli_dir, cli_inside, cli_found
+    set cli_at to cli_dir
+    if cli_inside is not ""
+        set cli_at to cli_dir + "/" + cli_first(cli_inside, length of cli_inside - 1)
+    end
+    for each cli_entry in read the folder cli_at
+        if cli_entry is not ".git/" and cli_entry is not ".git"
+            if item (length of cli_entry) of cli_entry is "/"
+                cli_package_files(cli_dir, cli_inside + cli_entry, cli_found)
+            else
+                add cli_inside + cli_entry to cli_found
+            end
+        end
+    end
+end
+
+# the sum of a package's files: for each, in order of its path, the SHA-256 of what's in it in hex, two spaces,
+# its path and a line end, as sha256sum writes them; and the SHA-256 of all that, after "sha256:". Nothing,
+# said, if a file can't be read
+to cli_files_sum with cli_dir
+    set cli_paths to empty list
+    set cli_lines to ""
+    try
+        cli_package_files(cli_dir, "", cli_paths)
+        for each cli_path in cli_paths in order
+            add cli_hashing's sha256(read bytes (cli_dir + "/" + cli_path)) + "  " + cli_path + "\n" to cli_lines
+        end
+    if it fails with cli_why
+        say "moth: can't read the files in " + cli_dir + ": " + cli_why to the error output
+        return nothing
+    end
+    return "sha256:" + cli_hashing's sha256(cli_lines)
+end
+
+# what git sees changed in a package's folder, for a message: the files changed, added or taken away
+to cli_changed_files with cli_dir
+    set cli_answer to cli_git(list of "-C", cli_dir, "status", "--porcelain", "--untracked-files=all", "--ignored")
+    if cli_answer is nothing or code of cli_answer is not 0
+        return ""
+    end
+    set cli_paths to empty list
+    for each cli_line in cli_text_lines(output of cli_answer)
+        set cli_line_now to cli_trimmed(cli_line)
+        if length of cli_line_now is greater than 3
+            add cli_tail(cli_line_now, 4) to cli_paths
+        end
+    end
+    return join cli_paths with ", "
+end
+
+# whether a package's files are the ones its sum says, its sum written into the record if it has none yet; said
+# if not. cli_fresh: whether moth has just fetched it, so a difference comes from where it was fetched from, and
+# the folder is taken away so that nothing uses it; cli_using: the package whose moth.sums the sum came from,
+# or nothing for this folder's
+to cli_check_sum with cli_one, cli_fresh, cli_using
+    set cli_dir to "packages/" + name of cli_one
+    set cli_now to cli_files_sum(cli_dir)
+    if cli_now is nothing
+        return no
+    end
+    if sum of cli_one is nothing
+        set sum of cli_one to cli_now
+        return yes
+    end
+    if cli_now is sum of cli_one
+        return yes
+    end
+    if not cli_fresh
+        set cli_which to cli_changed_files(cli_dir)
+        if cli_which is not ""
+            set cli_which to " (" + cli_which + ")"
+        end
+        say "moth: " + cli_dir + " has changed since it was fetched" + cli_which + ": remove that folder, and moth get fetches it again" to the error output
+        return no
+    end
+    set cli_whose to "moth.sums"
+    if cli_using is not nothing
+        set cli_whose to cli_using + "'s moth.sums"
+    end
+    say "moth: " + name of cli_one + " at " + cli_short(commit of cli_one) + ", from " + place of cli_source_and_ref(source of cli_one) + ", isn't what " + cli_whose + " says: its files' sum is " + cli_now + ", not " + sum of cli_one + ", so it wasn't kept" to the error output
+    cli_remove_folder(cli_dir)
+    return no
+end
+
+# a package listed, made ready to use: fetched, or moved, to its commit, and its files checked against its sum.
+# One fetched by a moth from before sums, with no sum yet, is fetched again, as moth fetches now, for its sum to
+# be the same everywhere. Whether it's ready; said why if not
+to cli_get_one with cli_one
+    set cli_dir to "packages/" + name of cli_one
+    set cli_here to cli_folder_here(cli_dir)
+    if cli_here and sum of cli_one is nothing
+        if not cli_remove_folder(cli_dir)
+            say "moth: " + cli_dir + " couldn't be removed, to be fetched again" to the error output
+            return no
+        end
+        set cli_here to no
+    end
+    if cli_here
+        if not cli_move_to(name of cli_one, commit of cli_one)
+            return no
+        end
+    else if cli_fetch(name of cli_one, source of cli_one, commit of cli_one) is nothing
+        return no
+    end
+    return cli_check_sum(cli_one, not cli_here, nothing)
+end
+
+# whether a package is signed, as --signed asks (DESIGN §104): the tag it was asked for at, if that's a tag at its
+# commit with a signature git trusts, or else its commit; said why if not
+to cli_is_signed with cli_one
+    set cli_dir to "packages/" + name of cli_one
+    set cli_wanted to ref of cli_source_and_ref(source of cli_one)
+    set cli_why to ""
+    set cli_kind to nothing
+    if cli_wanted is not nothing # a tag of its own, which can be signed, and not a name for a commit
+        set cli_kind to cli_git(list of "-C", cli_dir, "cat-file", "-t", "refs/tags/" + cli_wanted)
+        if cli_kind is nothing
+            return no
+        end
+    end
+    if cli_kind is not nothing and code of cli_kind is 0 and cli_trimmed(output of cli_kind) is "tag"
+        set cli_tag to cli_git(list of "-C", cli_dir, "rev-parse", "--verify", "--quiet", "refs/tags/" + cli_wanted + "^\{commit}")
+        if cli_tag is nothing
+            return no
+        end
+        if code of cli_tag is 0 and cli_trimmed(output of cli_tag) is commit of cli_one
+            set cli_answer to cli_git(list of "-C", cli_dir, "verify-tag", cli_wanted)
+            if cli_answer is nothing
+                return no
+            end
+            if code of cli_answer is 0
+                return yes
+            end
+            set cli_why to cli_git_said(cli_answer)
+        end
+    end
+    set cli_answer to cli_git(list of "-C", cli_dir, "verify-commit", commit of cli_one)
+    if cli_answer is nothing
+        return no
+    end
+    if code of cli_answer is 0
+        return yes
+    end
+    if cli_git_said(cli_answer) is not ""
+        set cli_why to cli_git_said(cli_answer)
+    end
+    set cli_what to "isn't signed"
+    if cli_why is not ""
+        set cli_what to "has no signature git trusts: " + cli_why
+    end
+    say "moth: " + name of cli_one + " at " + cli_short(commit of cli_one) + " " + cli_what to the error output
+    return no
+end
+
 # ---------- the package index ----------
 # A JSON file of the packages people have made, each by its name: where it comes from, as moth add takes it,
-# and what it's for: {"packages": {"thing": {"repository": "github.com/someone/thing", "about": "..."}}}. This
-# one, unless --index gives another, an address or a file.
+# and what it's for: {"packages": {"thing": {"repository": "github.com/someone/thing", "about": "..."}}}, and
+# the advisories about them that moth audit reads (DESIGN §105). This one, unless --index gives another, an
+# address or a file.
 
 set cli_index_default to "https://raw.githubusercontent.com/samyyy2423/moth-packages/main/index.json"
 
-# the index a command was given with --index, and what else it was given
+# the index a command was given with --index, whether it was given --signed, and what else it was given
 to cli_index_flag with cli_all
     set cli_index to cli_index_default
+    set cli_only_signed to no
     set cli_others to empty list
     set cli_k to 1
     repeat while cli_k is at most length of cli_all
         if item cli_k of cli_all is "--index" and cli_k is less than length of cli_all
             set cli_index to item (cli_k + 1) of cli_all
             add 2 to cli_k
+        else if item cli_k of cli_all is "--signed"
+            set cli_only_signed to yes
+            add 1 to cli_k
         else
             add item cli_k of cli_all to cli_others
             add 1 to cli_k
         end
     end
-    return record with index cli_index, rest cli_others
+    return record with index cli_index, signed cli_only_signed, rest cli_others
 end
 
 # whether what moth add was given is a name alone, for the index: no folder, address or site in it, and no
@@ -1853,8 +2070,8 @@ to cli_index_name with cli_given
     return cli_package_name(cli_given) and not cli_folder_here(cli_given)
 end
 
-# the index's packages, each a record of its name, source and about, by name; nothing, said, if it can't be read
-to cli_read_index with cli_index
+# the index, read: what its JSON is, with its packages, or nothing, said, if it can't be read
+to cli_index_json with cli_index
     set cli_text to nothing
     try
         if cli_first(cli_index + "        ", 8) is "https://" or cli_first(cli_index + "       ", 7) is "http://"
@@ -1871,9 +2088,28 @@ to cli_read_index with cli_index
         say "moth: can't read the package index at " + cli_index + ": " + cli_why to the error output
         return nothing
     end
+    try
+        set cli_all to json from cli_text
+        if "packages" is in cli_all
+            return cli_all
+        end
+        say "moth: the package index at " + cli_index + " isn't one: it has no \"packages\"" to the error output
+        return nothing
+    if it fails with cli_why
+        say "moth: the package index at " + cli_index + " isn't one: " + cli_why to the error output
+        return nothing
+    end
+end
+
+# the index's packages, each a record of its name, source and about, by name; nothing, said, if it can't be read
+to cli_read_index with cli_index
+    set cli_all to cli_index_json(cli_index)
+    if cli_all is nothing
+        return nothing
+    end
     set cli_made to empty list
     try
-        set cli_packages to item "packages" of json from cli_text
+        set cli_packages to item "packages" of cli_all
         for each cli_name in cli_packages
             set cli_entry to item cli_name of cli_packages
             set cli_about to ""
@@ -1940,6 +2176,190 @@ to cli_search with cli_words, cli_index
     return 0
 end
 
+# ---------- moth audit ----------
+
+# where a package comes from, written one way, to compare two: in lowercase, \ as /, with no https://, http://,
+# ssh:// or git:// before it (git@site:path as site/path), and no / or .git at its end
+to cli_place_key with cli_place
+    set cli_out to ""
+    for each cli_c in lowercase of cli_place
+        if cli_c is "\\"
+            add "/" to cli_out
+        else
+            add cli_c to cli_out
+        end
+    end
+    for each cli_start in list of "https://", "http://", "ssh://", "git://"
+        if length of cli_out is greater than length of cli_start and cli_first(cli_out, length of cli_start) is cli_start
+            set cli_out to cli_tail(cli_out, length of cli_start + 1)
+        end
+    end
+    if length of cli_out is greater than 4 and cli_first(cli_out, 4) is "git@"
+        set cli_rest to cli_tail(cli_out, 5)
+        set cli_out to ""
+        set cli_colon to no
+        for each cli_c in cli_rest
+            if cli_c is ":" and not cli_colon
+                add "/" to cli_out
+                set cli_colon to yes
+            else
+                add cli_c to cli_out
+            end
+        end
+    end
+    repeat while length of cli_out is greater than 0 and item (length of cli_out) of cli_out is "/"
+        set cli_out to cli_first(cli_out, length of cli_out - 1)
+    end
+    if length of cli_out is greater than 4 and cli_tail(cli_out, length of cli_out - 3) is ".git"
+        set cli_out to cli_first(cli_out, length of cli_out - 4)
+    end
+    return cli_out
+end
+
+# the repository an advisory is about, as cli_place_key writes it: its own "repository", or that of the index's
+# package it names; nothing if neither
+to cli_advisory_place with cli_advisory, cli_all
+    if "repository" is in cli_advisory
+        return cli_place_key("" + item "repository" of cli_advisory)
+    end
+    if "package" is in cli_advisory
+        set cli_packages to item "packages" of cli_all
+        set cli_name to "" + item "package" of cli_advisory
+        if cli_name is in cli_packages
+            return cli_place_key("" + item "repository" of item cli_name of cli_packages)
+        end
+    end
+    return nothing
+end
+
+# whether `cli_older` is `cli_commit` or a commit before it, in a package's clone
+to cli_is_ancestor with cli_dir, cli_older, cli_commit
+    set cli_answer to cli_git(list of "-C", cli_dir, "merge-base", "--is-ancestor", cli_older, cli_commit)
+    return cli_answer is not nothing and code of cli_answer is 0
+end
+
+# whether an advisory is about a package's commit: one of its "commits" (all of a commit or its first 7 or more
+# digits), or one from its "introduced" commit on (if it has one) that isn't from its "fixed" commit on; or any,
+# if it has none of those. Nothing if that needs the package's history and it isn't fetched
+to cli_affected with cli_one, cli_advisory
+    set cli_commit to lowercase of commit of cli_one
+    set cli_listed to "commits" is in cli_advisory
+    set cli_ranged to "introduced" is in cli_advisory or "fixed" is in cli_advisory
+    if cli_listed
+        for each cli_given in item "commits" of cli_advisory
+            set cli_c to lowercase of ("" + cli_given)
+            if length of cli_c is at least 7 and length of cli_c is at most length of cli_commit and cli_first(cli_commit, length of cli_c) is cli_c
+                return yes
+            end
+        end
+    end
+    if not cli_ranged
+        return not cli_listed
+    end
+    set cli_dir to "packages/" + name of cli_one
+    if not cli_folder_here(cli_dir)
+        return nothing
+    end
+    set cli_there to cli_git(list of "-C", cli_dir, "cat-file", "-e", cli_commit + "^\{commit}")
+    if cli_there is nothing or code of cli_there is not 0
+        return nothing
+    end
+    if "introduced" is in cli_advisory
+        set cli_from to "" + item "introduced" of cli_advisory
+        if cli_from is not "0" and not cli_is_ancestor(cli_dir, cli_from, cli_commit)
+            return no
+        end
+    end
+    if "fixed" is in cli_advisory and cli_is_ancestor(cli_dir, "" + item "fixed" of cli_advisory, cli_commit)
+        return no
+    end
+    return yes
+end
+
+# an advisory's field as text, or "" if it hasn't that field
+to cli_field with cli_advisory, cli_key
+    if cli_key is in cli_advisory
+        return "" + item cli_key of cli_advisory
+    end
+    return ""
+end
+
+# `moth audit`: each package moth.packages lists, checked against the index's advisories, each saying which
+# commits of a package have a problem. 0 if none is about these packages' commits; 1 if one is, or a package
+# couldn't be checked
+to cli_audit with cli_index
+    set cli_list to cli_package_list()
+    if cli_list is nothing
+        say "moth: there's no moth.packages here: moth add <git repository> adds a package" to the error output
+        return 1
+    end
+    set cli_all to cli_index_json(cli_index)
+    if cli_all is nothing
+        return 1
+    end
+    set cli_found to 0
+    set cli_unchecked to 0
+    try
+        set cli_advisories to empty list
+        if "advisories" is in cli_all
+            set cli_advisories to item "advisories" of cli_all
+        end
+        for each cli_one in cli_list
+            set cli_key to cli_place_key(place of cli_source_and_ref(source of cli_one))
+            set cli_said_why to no
+            for each cli_advisory in cli_advisories
+                if cli_advisory_place(cli_advisory, cli_all) is cli_key
+                    set cli_hit to cli_affected(cli_one, cli_advisory)
+                    if cli_hit is nothing
+                        if not cli_said_why
+                            say "moth: " + name of cli_one + " isn't fetched, so it couldn't be checked: moth get fetches it" to the error output
+                            add 1 to cli_unchecked
+                            set cli_said_why to yes
+                        end
+                    else if cli_hit
+                        set cli_what to cli_field(cli_advisory, "id")
+                        if cli_what is ""
+                            set cli_what to "an advisory"
+                        end
+                        if cli_field(cli_advisory, "severity") is not ""
+                            set cli_what to cli_what + " (" + cli_field(cli_advisory, "severity") + ")"
+                        end
+                        if cli_field(cli_advisory, "about") is not ""
+                            set cli_what to cli_what + ": " + cli_field(cli_advisory, "about")
+                        end
+                        say name of cli_one + " at " + cli_short(commit of cli_one) + ": " + cli_what
+                        if cli_field(cli_advisory, "fixed") is not ""
+                            say "  fixed at " + cli_short(cli_field(cli_advisory, "fixed")) + ": moth update " + name of cli_one + " takes its newest"
+                        else
+                            say "  not fixed yet"
+                        end
+                        if cli_field(cli_advisory, "link") is not ""
+                            say "  " + cli_field(cli_advisory, "link")
+                        end
+                        add 1 to cli_found
+                    end
+                end
+            end
+        end
+    if it fails with cli_why
+        say "moth: an advisory in the package index at " + cli_index + " isn't one: " + cli_why to the error output
+        return 1
+    end
+    if cli_found is 1
+        say "1 advisory is about these packages"
+    else if cli_found is greater than 1
+        say "" + cli_found + " advisories are about these packages"
+    else if cli_unchecked is 0 and length of cli_list is 1
+        say "no advisories about " + name of item 1 of cli_list + " at " + cli_short(commit of item 1 of cli_list)
+    else if cli_unchecked is 0
+        say "no advisories about these " + (length of cli_list) + " packages at their commits"
+    end
+    if cli_found is greater than 0 or cli_unchecked is greater than 0
+        return 1
+    end
+    return 0
+end
+
 # a package's source as moth.packages has it, split: where it is, and after an @ in its last part, the tag,
 # branch or commit wanted (DESIGN §93), or nothing
 to cli_source_and_ref with cli_source
@@ -1968,9 +2388,11 @@ to cli_package_source with cli_given
     return cli_given
 end
 
-# `moth add <source> [name]`: the package fetched at its newest commit and listed, and the packages it lists
-# in a moth.packages of its own, at their commits, unless there's one of that name here already
-to cli_add with cli_given, cli_named
+# `moth add <source> [name]`: the package fetched at its newest commit and listed, with the sum of its files,
+# and the packages it lists in a moth.packages of its own, at their commits, unless there's one of that name
+# here already, each checked against the sum the package's own moth.sums has for it, if it has one. With
+# --signed, each must be signed (see cli_is_signed)
+to cli_add with cli_given, cli_named, cli_only_signed
     set cli_source to cli_package_source(cli_given)
     set cli_name to cli_named
     if cli_name is nothing
@@ -1998,7 +2420,15 @@ to cli_add with cli_given, cli_named
     if cli_commit is nothing
         return 1
     end
-    add record with name cli_name, source cli_source, commit cli_commit to cli_list
+    set cli_added to record with name cli_name, source cli_source, commit cli_commit, sum nothing
+    if not cli_check_sum(cli_added, yes, nothing)
+        return 1
+    end
+    if cli_only_signed and not cli_is_signed(cli_added)
+        cli_remove_folder("packages/" + cli_name)
+        return 1
+    end
+    add cli_added to cli_list
     set cli_wanted to ref of cli_source_and_ref(cli_source)
     if cli_wanted is nothing
         say "added " + cli_name + " at " + cli_short(cli_commit) + ", from " + cli_source
@@ -2012,14 +2442,9 @@ to cli_add with cli_given, cli_named
     set cli_k to length of cli_list # what each package added needs, the packages it adds too
     repeat while cli_k is at most length of cli_list
         set cli_needing to name of item cli_k of cli_list
-        set cli_needs to nothing
-        try
-            set cli_needs to read "packages/" + cli_needing + "/moth.packages"
-        if it fails
-            set cli_needs to nothing
-        end
+        set cli_needs to cli_read_or_nothing("packages/" + cli_needing + "/moth.packages")
         if cli_needs is not nothing
-            for each cli_need in cli_needs_of(cli_needs)
+            for each cli_need in cli_packages_in(cli_needs, cli_read_or_nothing("packages/" + cli_needing + "/moth.sums"))
                 set cli_have to no
                 for each cli_one in cli_list
                     if name of cli_one is name of cli_need
@@ -2029,6 +2454,11 @@ to cli_add with cli_given, cli_named
                 if not cli_have and not cli_folder_here("packages/" + name of cli_need)
                     set cli_got to cli_fetch(name of cli_need, source of cli_need, commit of cli_need)
                     if cli_got is nothing
+                        set cli_failed to yes
+                    else if not cli_check_sum(cli_need, yes, cli_needing)
+                        set cli_failed to yes
+                    else if cli_only_signed and not cli_is_signed(cli_need)
+                        cli_remove_folder("packages/" + name of cli_need)
                         set cli_failed to yes
                     else
                         add cli_need to cli_list
@@ -2046,56 +2476,43 @@ to cli_add with cli_given, cli_named
     return 0
 end
 
-# the packages a package's own moth.packages lists, as cli_package_list reads them
-to cli_needs_of with cli_text
-    set cli_list to empty list
-    for each cli_line in cli_text_lines(cli_text)
-        set cli_words to empty list
-        for each cli_word in split cli_trimmed(cli_line) by " "
-            if cli_word is not ""
-                add cli_word to cli_words
-            end
-        end
-        if length of cli_words is at least 3 and item 1 of item 1 of cli_words is not "#"
-            set cli_from to ""
-            for each cli_k from 2 to length of cli_words - 1
-                if cli_k is greater than 2
-                    add " " to cli_from
-                end
-                add item cli_k of cli_words to cli_from
-            end
-            add record with name item 1 of cli_words, source cli_from, commit item (length of cli_words) of cli_words to cli_list
-        end
-    end
-    return cli_list
-end
-
-# `moth get`: every package listed, fetched or moved to its commit
-to cli_get
+# `moth get`: every package listed, fetched or moved to its commit, and its files checked against moth.sums;
+# one with no sum there yet fetched again and its sum written down. With --signed, each must be signed
+to cli_get with cli_only_signed
     set cli_list to cli_package_list()
     if cli_list is nothing
         say "moth: there's no moth.packages here: moth add <git repository> adds a package" to the error output
         return 1
     end
     set cli_ended to 0
+    set cli_summed to no
     for each cli_one in cli_list
-        set cli_fine to no
-        if cli_folder_here("packages/" + name of cli_one)
-            set cli_fine to cli_move_to(name of cli_one, commit of cli_one)
-        else
-            set cli_fine to cli_fetch(name of cli_one, source of cli_one, commit of cli_one) is not nothing
+        set cli_had to sum of cli_one
+        set cli_fine to cli_get_one(cli_one)
+        if cli_fine and cli_had is nothing
+            set cli_summed to yes
         end
-        if cli_fine
+        if cli_fine and cli_only_signed
+            set cli_fine to cli_is_signed(cli_one)
+        end
+        if cli_fine and cli_had is nothing
+            say name of cli_one + " at " + cli_short(commit of cli_one) + ", its sum now in moth.sums"
+        else if cli_fine
             say name of cli_one + " at " + cli_short(commit of cli_one)
         else
             set cli_ended to 1
         end
     end
+    if cli_summed
+        cli_write_sums(cli_list)
+    end
     return cli_ended
 end
 
-# `moth update [name]`: every package, or the one named, moved to the newest commit where it comes from
-to cli_update with cli_named
+# `moth update [name]`: every package, or the one named, moved to the newest commit where it comes from, once its
+# files are checked against moth.sums, and the sum of its new files written down. With --signed, a newest
+# commit that isn't signed isn't taken
+to cli_update with cli_named, cli_only_signed
     set cli_list to cli_package_list()
     if cli_list is nothing
         say "moth: there's no moth.packages here: moth add <git repository> adds a package" to the error output
@@ -2107,10 +2524,7 @@ to cli_update with cli_named
         if cli_named is nothing or name of cli_one is cli_named
             set cli_found to yes
             set cli_dir to "packages/" + name of cli_one
-            set cli_ready to cli_folder_here(cli_dir)
-            if not cli_ready
-                set cli_ready to cli_fetch(name of cli_one, source of cli_one, commit of cli_one) is not nothing
-            end
+            set cli_ready to cli_get_one(cli_one)
             set cli_answer to nothing
             if cli_ready
                 set cli_answer to cli_git(list of "-C", cli_dir, "fetch", "--quiet", "origin")
@@ -2136,13 +2550,21 @@ to cli_update with cli_named
                 set cli_ended to 1
             else
                 set cli_newest to cli_head(cli_dir)
+                set cli_moved to record with name name of cli_one, source source of cli_one, commit cli_newest, sum nothing
                 if cli_newest is commit of cli_one and cli_wanted is not nothing and cli_newest_of is commit of cli_one
                     say name of cli_one + " stays at " + cli_wanted + ", " + cli_short(cli_newest)
                 else if cli_newest is commit of cli_one
                     say name of cli_one + " is at its newest, " + cli_short(cli_newest)
-                else
+                else if cli_only_signed and not cli_is_signed(cli_moved)
+                    cli_move_to(name of cli_one, commit of cli_one)
+                    say "moth: so " + name of cli_one + " stays at " + cli_short(commit of cli_one) to the error output
+                    set cli_ended to 1
+                else if cli_check_sum(cli_moved, yes, nothing)
                     say name of cli_one + ": " + cli_short(commit of cli_one) + " -> " + cli_short(cli_newest)
                     set commit of cli_one to cli_newest
+                    set sum of cli_one to sum of cli_moved
+                else
+                    set cli_ended to 1
                 end
             end
         end
@@ -2199,13 +2621,21 @@ to cli_list_packages
     return 0
 end
 
-# `moth add`, `get`, `update`, `remove`, `packages` and `search`, with what follows them
+# `moth add`, `get`, `update`, `remove`, `packages`, `search` and `audit`, with what follows them
 to cli_package_command with cli_command, cli_all
     set cli_flagged to cli_index_flag(cli_all)
     set cli_rest to rest of cli_flagged
     set cli_n to length of cli_rest
+    set cli_only_signed to signed of cli_flagged
+    if cli_only_signed and not (cli_command is "add" or cli_command is "get" or cli_command is "update")
+        say cli_usage to the error output
+        return 2
+    end
     if cli_command is "search"
         return cli_search(cli_rest, index of cli_flagged)
+    end
+    if cli_command is "audit" and cli_n is 0
+        return cli_audit(index of cli_flagged)
     end
     if cli_command is "add" and (cli_n is 1 or cli_n is 2)
         set cli_named to nothing
@@ -2223,16 +2653,16 @@ to cli_package_command with cli_command, cli_all
             end
             set cli_given to source of cli_found
         end
-        return cli_add(cli_given, cli_named)
+        return cli_add(cli_given, cli_named, cli_only_signed)
     end
     if cli_command is "get" and cli_n is 0
-        return cli_get()
+        return cli_get(cli_only_signed)
     end
     if cli_command is "update" and cli_n is 0
-        return cli_update(nothing)
+        return cli_update(nothing, cli_only_signed)
     end
     if cli_command is "update" and cli_n is 1
-        return cli_update(item 1 of cli_rest)
+        return cli_update(item 1 of cli_rest, cli_only_signed)
     end
     if cli_command is "remove" and cli_n is 1
         return cli_remove_package(item 1 of cli_rest)
@@ -2828,7 +3258,7 @@ to cli_main
         end
         stop the program with cli_shell(cli_shell_flags)
     end
-    if cli_command is "add" or cli_command is "get" or cli_command is "update" or cli_command is "remove" or cli_command is "packages" or cli_command is "search"
+    if cli_command is "add" or cli_command is "get" or cli_command is "update" or cli_command is "remove" or cli_command is "packages" or cli_command is "search" or cli_command is "audit"
         set cli_rest to empty list
         for each cli_k from 2 to length of cli_given
             add item cli_k of cli_given to cli_rest

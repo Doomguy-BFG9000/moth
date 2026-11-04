@@ -5,94 +5,204 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Learn Moth · a programming language that reads like English</title>
   <meta name="description" content="Learn Moth in an afternoon: eleven short lessons, each with a program you can run and change right in your browser.">
+  <meta name="theme-color" content="#0c0a08">
   <link rel="icon" href="docs/moth.svg" type="image/svg+xml">
+  <!-- site only: the site's motion (site-motion.js, with GSAP from jsDelivr), which make-web.mjs leaves out of a program's page -->
+  <script>
+    if (matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+      const root = document.documentElement;
+      const show = () => root.classList.remove("motion");
+      root.classList.add("motion"); // the top of the page waits to be brought in, but not for long
+      setTimeout(show, 1800);
+      for (const [src, integrity] of [
+        ["https://cdn.jsdelivr.net/npm/gsap@3.15.1/dist/gsap.min.js", "sha384-3vCAhD+a3BOliP3QqjQINn6ZWiZxoqu0WFxX5ZQZgqekDZuSb1mJBrrLMmu94H8f"],
+        ["https://cdn.jsdelivr.net/npm/gsap@3.15.1/dist/ScrollTrigger.min.js", "sha384-H2WL1iy/jKQQ7MTHU2hskZKNHTYWWD/KgKE1vCNnaWY8An2ESTh23KN/fTp8XS3j"],
+        ["site-motion.js"],
+      ]) {
+        const script = Object.assign(document.createElement("script"), { src, async: false, onerror: show });
+        if (integrity) Object.assign(script, { integrity, crossOrigin: "anonymous" });
+        document.head.append(script);
+      }
+    }
+  </script>
+  <!-- /site only -->
   <style>
+    /* the same colours, type scale and spacing as the front page (index.html) */
     :root {
       color-scheme: dark;
-      --night: #070a13; --bg: #0b1020; --panel: #0e1427; --raised: #151d35; --border: #212a46; --line: #1a2240;
-      --text: #ece5d6; --soft: #c8c1b3; --dim: #8e96b0; --faint: #5b6482;
-      --amber: #f4b54a; --amber-hi: #ffc96b; --ember: #e8952e; --bad: #ff8a7a; --good: #7ee787;
+      --night: #0c0a08; --bg: #120e0a; --panel: #17120d; --raised: #221a12; --border: #30251a; --line: #261d14; --edge: #3d2f20;
+      --text: #f6ecdc; --soft: #d9cbb5; --dim: #b3a58f; --faint: #8a7a63;
+      --amber: #f4b54a; --amber-hi: #ffd27a; --ember: #ff7a2f; --gold-hi: #ffe2a8; --bad: #ff8a7a; --good: #7ee787;
+      --gold: linear-gradient(120deg, #ffd98a, #f4b54a 45%, #ff8a3d); --gold-lit: linear-gradient(120deg, #ffe5a8, #f7c260 45%, #ff9a55);
+      --metal: linear-gradient(180deg, #fff3dc 15%, #f0c46a 90%); --flame: linear-gradient(100deg, #ffd98a, #ffad4a 45%, #ff7a2f);
+      --glass: linear-gradient(180deg, #2a1f1499, #130e0a99); --glass-edge: #ffd27a24; --ink: #1f0e02;
       --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
       --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      --text-xs: 12px; --text-s: 13.5px; --text-m: 16px; --text-l: 18.5px;
+      --h3: 20px; --h2: clamp(26px, 3vw, 32px); --h1: clamp(40px, 5.6vw, 64px);
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 72px; --space-9: 104px;
+      --radius-s: 8px; --radius-m: 14px; --radius-l: 18px;
     }
-    html { scroll-behavior: smooth; }
-    body { margin: 0; background: var(--night); color: var(--text); font: 16px/1.65 var(--sans); }
-    a { color: var(--amber-hi); }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--night); color: var(--text); font: var(--text-m)/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+    a { color: var(--amber-hi); text-underline-offset: 3px; }
     ::selection { background: #f4b54a40; }
     code, pre, textarea { font-feature-settings: "liga" 0, "calt" 0 !important; }
     :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    * { scrollbar-width: thin; scrollbar-color: #3d2f20 transparent; }
+    .icon { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .moth .fore { fill: url(#wing-fore); } .moth .hind { fill: url(#wing-hind); }
     .moth .spot { fill: #7a4512; } .moth .body { fill: #ffe7b5; }
     .moth .feelers { fill: none; stroke: #ffe7b5; stroke-width: 1.6; stroke-linecap: round; }
 
-    header { position: relative; overflow: hidden; background:
-      radial-gradient(50rem 30rem at 86% -10%, #f4b54a2e, transparent 62%),
-      radial-gradient(40rem 30rem at -6% 110%, #6f5cff14, transparent 60%),
-      linear-gradient(#070a13, #0a0f1e 70%, #0b1020); border-bottom: 1px solid var(--line); }
-    .wrap { max-width: 1140px; margin: 0 auto; padding: 0 28px; }
-    .nav { display: flex; align-items: center; gap: 26px; padding-top: 22px; padding-bottom: 22px; }
-    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--text); text-decoration: none; font: 600 23px/1 var(--serif); }
-    .brand svg { width: 32px; height: 32px; filter: drop-shadow(0 0 10px #ffb84d70); }
-    .nav a:not(.brand) { color: var(--dim); text-decoration: none; font-size: 14.5px; }
-    .nav a:not(.brand):hover, .nav a[aria-current] { color: var(--text); }
-    .hero { padding: 34px 0 54px; }
-    .hero h1 { margin: 0 0 14px; font: 500 clamp(38px, 5.4vw, 60px)/1.05 var(--serif); letter-spacing: -0.015em; }
-    .hero h1 em { color: var(--amber); font-style: normal; text-shadow: 0 0 34px #ffb84d59; }
-    .hero p { max-width: 38em; margin: 0; color: var(--soft); font-size: 18.5px; }
+    header { position: relative; overflow: hidden; isolation: isolate; border-bottom: 1px solid var(--line); background:
+      radial-gradient(56rem 32rem at 86% -12%, #f4b54a30, transparent 62%),
+      radial-gradient(34rem 24rem at 70% 20%, #ff7a2f1a, transparent 64%),
+      radial-gradient(40rem 30rem at -6% 110%, #ff7a2f14, transparent 60%),
+      linear-gradient(#0c0a08, #0f0b08 70%, #120e0a); }
+    header::before { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; opacity: 0.07; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+    .lamp { position: absolute; z-index: -1; top: 92px; right: 9%; width: 12px; height: 12px; border-radius: 50%; background: #fff4d6;
+      box-shadow: 0 0 24px 10px #ffc46b, 0 0 110px 54px #ff9a3d40, 0 0 320px 170px #ff7a2f17; }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 32px; }
+    .nav { display: flex; align-items: center; gap: var(--space-1); padding-top: 20px; padding-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--text); text-decoration: none; font: 600 24px/1 var(--serif); letter-spacing: 0.01em; }
+    .brand svg { width: 34px; height: 34px; filter: drop-shadow(0 0 10px #ffb84d70); }
+    .nav a:not(.brand) { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px; color: var(--dim); font-size: 14.5px; text-decoration: none; transition: color 0.15s, background-color 0.15s, border-color 0.15s; }
+    .nav a:not(.brand):hover { color: var(--text); background: #ffffff0b; }
+    .nav a[aria-current] { color: var(--text); background: #ffffff0d; }
+    .nav a.outlined { margin-left: var(--space-2); border: 1px solid var(--edge); color: var(--text); }
+    .nav a.outlined:hover { border-color: #f4b54a88; background: #f4b54a12; }
+    .nav .icon { width: 16px; height: 16px; fill: currentColor; stroke: none; }
+    .hero { padding-top: 40px; padding-bottom: 64px; }
+    .eyebrow { margin: 0 0 var(--space-3); color: #ff9a4d; font: 600 var(--text-xs)/1 var(--sans); letter-spacing: 0.16em; text-transform: uppercase; }
+    .hero h1 { margin: 0 0 var(--space-4); font: 500 var(--h1)/1.05 var(--serif); letter-spacing: -0.02em; text-wrap: balance; }
+    .hero h1 em { color: var(--amber); filter: drop-shadow(0 0 26px #ff8a3d55); }
+    .hero h1 em:not(:has(.word)), .hero h1 em .word { background: var(--flame); -webkit-background-clip: text; background-clip: text; color: transparent; padding-right: 0.08em; margin-right: -0.07em; }
+    .hero p:not(.eyebrow) { max-width: 36em; margin: 0; color: var(--soft); font-size: var(--text-l); text-wrap: pretty; }
+    .cta { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+    .btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 22px; border: 1px solid transparent; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s, background-color 0.15s, border-color 0.15s; }
+    .btn.primary { color: var(--ink); background: var(--gold); box-shadow: 0 10px 34px -10px #ff7a2fcc, inset 0 1px #fff1cc; }
+    .btn.primary:hover { transform: translateY(-1px); background: var(--gold-lit); }
+    .btn.ghost { color: var(--text); border-color: #4a3826; background: #ffffff05; }
+    .btn.ghost:hover { border-color: #f4b54a88; background: #f4b54a0f; }
 
-    .layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 44px; padding-top: 40px; padding-bottom: 80px; }
-    .toc { position: sticky; top: 24px; align-self: start; }
-    .toc h2 { margin: 0 0 10px; color: var(--faint); font: 600 12px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; }
+    .layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 56px; padding-top: var(--space-7); padding-bottom: var(--space-8); }
+    .toc { position: sticky; top: 24px; align-self: start; padding: var(--space-4) var(--space-2) var(--space-4); border: 1px solid var(--glass-edge); border-radius: var(--radius-m); background: var(--glass); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+    .toc h2 { margin: 0 var(--space-3) var(--space-3); color: var(--faint); font: 600 11px/1 var(--sans); letter-spacing: 0.16em; text-transform: uppercase; }
     .toc ol { margin: 0; padding: 0; list-style: none; counter-reset: n; }
     .toc li { counter-increment: n; }
-    .toc a { display: flex; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 8px; color: var(--dim); text-decoration: none; font-size: 14.5px; }
-    .toc a::before { content: counter(n); min-width: 1.2em; color: var(--faint); font: 12.5px var(--mono); }
+    .toc a { display: flex; gap: 10px; align-items: baseline; padding: 6px 12px; border-radius: var(--radius-s); color: var(--dim); text-decoration: none; font-size: 14.5px; line-height: 1.4; transition: color 0.15s, background-color 0.15s; }
+    .toc a::before { content: counter(n, decimal-leading-zero); min-width: 1.6em; color: var(--faint); font: 12px var(--mono); }
     .toc a:hover { color: var(--text); background: #ffffff08; }
     .toc a.done { color: var(--soft); }
+    .toc a.done::before { color: var(--good); }
     .toc a.done::after { content: "✓"; margin-left: auto; color: var(--good); font-size: 13px; }
-    .toc .progress { margin: 16px 10px 0; color: var(--faint); font-size: 13px; }
+    .meter { height: 4px; margin: var(--space-4) var(--space-3) 0; overflow: hidden; border-radius: 999px; background: var(--line); }
+    .meter span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--gold); box-shadow: 0 0 10px #f4b54a88; transition: width 0.4s; }
+    .toc .progress { margin: var(--space-2) var(--space-3) 0; color: var(--faint); font-size: 13px; }
 
-    .lesson { scroll-margin-top: 24px; margin: 0 0 56px; }
-    .lesson h2 { display: flex; align-items: baseline; gap: 14px; margin: 0 0 12px; font: 500 30px/1.2 var(--serif); }
-    .lesson h2 span { color: var(--amber); font: 500 15px var(--mono); }
-    .lesson p { margin: 0 0 12px; max-width: 42em; color: var(--soft); }
+    .lesson { scroll-margin-top: 24px; margin: 0 0 var(--space-8); }
+    .lesson h2 { display: flex; align-items: center; gap: 14px; margin: 0 0 var(--space-3); font: 500 var(--h2)/1.2 var(--serif); letter-spacing: -0.01em; color: var(--gold-hi); }
+    .lesson h2 span { flex: none; display: inline-grid; place-items: center; width: 40px; height: 32px; border: 1px solid #ff9a4d55; border-radius: var(--radius-s); background: linear-gradient(135deg, #ffad4a1f, #ff7a2f14); color: #ffb35c; font: 600 14px/1 var(--mono); }
+    .lesson p { margin: 0 0 var(--space-3); max-width: 42em; color: var(--soft); }
     .lesson p code, .try code { color: var(--amber-hi); font: 0.9em var(--mono); }
-    .box { margin-top: 18px; overflow: hidden; border: 1px solid #28315280; border-radius: 14px; background: linear-gradient(#111830, #0c1225);
-      box-shadow: 0 30px 70px -40px #000, inset 0 1px #ffffff0a; }
-    .head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 16px; border-bottom: 1px solid var(--line); color: var(--faint); font: 12.5px var(--mono); }
-    .head .name { margin-right: auto; }
-    button, .open { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid #333d60; border-radius: 999px;
-      background: transparent; color: var(--text); font: 600 13.5px/1 var(--sans); text-decoration: none; cursor: pointer; }
-    button:hover, .open:hover { border-color: #f4b54a88; background: #f4b54a0d; }
-    button.run { border-color: transparent; color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); box-shadow: inset 0 1px #fff1cc; }
-    button.run:hover { filter: brightness(1.06); }
-    textarea { display: block; box-sizing: border-box; width: 100%; min-height: 80px; margin: 0; padding: 16px 18px; border: 0; resize: vertical;
-      background: transparent; color: var(--text); font: 15px/1.6 var(--mono); tab-size: 4; outline: none; white-space: pre; overflow: auto; }
-    .out { margin: 0; padding: 14px 18px; border-top: 1px solid var(--line); background: #070b17; color: var(--soft);
+    .box { margin-top: var(--space-5); overflow: hidden; border: 1px solid #ffd27a26; border-radius: var(--radius-m); background: linear-gradient(180deg, #221810, #120e0a);
+      box-shadow: 0 30px 70px -40px #000, inset 0 1px #ffe2b012; transition: border-color 0.2s, box-shadow 0.2s; }
+    .box:focus-within { border-color: #ffd27a55; box-shadow: 0 30px 70px -40px #000, 0 0 40px -16px #ff7a2f55; }
+    .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 16px; border-bottom: 1px solid var(--line); background: #17120dcc; color: var(--faint); font: 12.5px var(--mono); }
+    .head .name { display: flex; align-items: center; gap: 7px; margin-right: auto; }
+    .head .name::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #f4b54a99; box-shadow: 15px 0 #3a2c1e, 30px 0 #3a2c1e; margin-right: 36px; }
+    button, .open { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid #3d2f21; border-radius: var(--radius-s);
+      background: var(--raised); color: var(--text); font: 500 13px/1 var(--sans); text-decoration: none; cursor: pointer; transition: background-color 0.15s, border-color 0.15s; }
+    button:hover, .open:hover { border-color: #5a4430; background: #2a2017; }
+    button.run, .open.run { border-color: #f59a42; color: var(--ink); background: var(--gold); font-weight: 700; box-shadow: 0 4px 16px -6px #f4b54aaa, inset 0 1px #fff1cc; }
+    button.run:hover, .open.run:hover { background: var(--gold-lit); }
+    .run .icon { fill: currentColor; stroke: none; }
+    textarea { display: block; width: 100%; min-height: 80px; margin: 0; padding: 16px 18px; border: 0; resize: vertical;
+      background: transparent; color: var(--text); font: 15px/1.6 var(--mono); tab-size: 4; outline: none; white-space: pre; overflow: auto; caret-color: var(--amber); }
+    .out { margin: 0; padding: 14px 18px; border-top: 1px solid var(--line); background: #0a0806; color: #f1e6cf;
       font: 14px/1.55 var(--mono); white-space: pre-wrap; min-height: 22px; }
-    .out:empty::before { content: "Press Run to see what it says (or Ctrl+Enter)."; color: var(--faint); }
+    .out::before { content: "it says"; display: block; margin-bottom: 4px; color: var(--faint); font: 600 10.5px var(--sans); letter-spacing: 0.14em; text-transform: uppercase; }
+    .out:empty::before { content: "Press Run to see what it says (or Ctrl+Enter)."; margin: 0; font: 14px/1.55 var(--mono); letter-spacing: normal; text-transform: none; }
     .out .bad { color: var(--bad); }
-    .status { padding: 6px 18px 10px; background: #070b17; color: var(--faint); font: 12px var(--mono); }
+    .status { padding: 0 18px 12px; background: #0a0806; color: var(--faint); font: 12px var(--mono); }
     .status:empty { display: none; }
-    .ask { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 18px 14px; background: #070b17; }
+    .ask { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 18px 14px; border-top: 1px dashed #3d2f20; background: #100c08; }
     .ask label { color: var(--amber-hi); font: 14px var(--mono); }
-    .ask input { flex: 1; min-width: 160px; padding: 7px 12px; border: 1px solid #333d60; border-radius: 8px; background: #0e1427; color: var(--text); font: 14px var(--mono); }
-    .try { margin-top: 14px; padding: 12px 16px; border-left: 3px solid var(--amber); border-radius: 0 10px 10px 0; background: #f4b54a0d; color: var(--soft); }
-    .try b { color: var(--amber-hi); }
+    .ask input { flex: 1; min-width: 160px; height: 36px; padding: 0 12px; border: 1px solid #4a3826; border-radius: var(--radius-s); background: #17120d; color: var(--text); font: 14px var(--mono); }
+    .ask input:focus { border-color: var(--amber); outline: none; box-shadow: 0 0 0 3px #f4b54a33; }
+    .try { display: flex; gap: var(--space-3); margin-top: var(--space-4); padding: 14px 18px; border: 1px solid #f4b54a2a; border-left: 3px solid #ff9a4d; border-radius: 0 var(--radius-s) var(--radius-s) 0; background: linear-gradient(90deg, #ff8a3d14, #f4b54a08); color: var(--soft); }
+    .try b { flex: none; color: var(--amber-hi); }
 
-    .next { padding: 30px 32px; border: 1px solid #28315280; border-radius: 16px; background: linear-gradient(#111830, #0c1225); }
-    .next h2 { margin: 0 0 8px; font: 500 30px/1.2 var(--serif); }
-    .next ul { margin: 10px 0 0; padding-left: 20px; color: var(--soft); }
-    .next li { margin: 6px 0; }
-    footer { padding: 26px 0 40px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13.5px; text-align: center; }
+    .next { padding: var(--space-6); border: 1px solid #ffd27a26; border-radius: var(--radius-l); background: radial-gradient(40rem 16rem at 100% 0%, #ff7a2f14, transparent 70%), linear-gradient(180deg, #221810, #120e0a); }
+    .next h2 { width: fit-content; margin: 0 0 var(--space-2); font: 500 var(--h2)/1.2 var(--serif); background: var(--metal); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .next > p { margin: 0; color: var(--soft); }
+    .next ul { display: grid; gap: var(--space-3); margin: var(--space-5) 0 0; padding: 0; list-style: none; color: var(--dim); }
+    .next li { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-s); background: #110d09; }
+    .next li a { font-weight: 600; }
+    .next code { font: 0.9em var(--mono); color: var(--amber-hi); }
+    .foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); padding-top: var(--space-6); padding-bottom: var(--space-7); border-top: 1px solid var(--line); color: var(--faint); font-size: var(--text-s); }
+    .foot .brand { margin-right: 0; font-size: 19px; }
+    .foot .brand svg { width: 26px; height: 26px; }
+    .foot p { margin: 0 auto 0 0; }
+    .foot nav { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+    .foot nav a { color: var(--dim); text-decoration: none; }
+    .foot nav a:hover { color: var(--amber); }
 
-    @media (max-width: 860px) {
-      .layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    /* the site's motion (site-motion.js): what it brings in waits hidden until it does, or gives up */
+    .nobr { white-space: nowrap; }
+    .word { display: inline-block; }
+    .cursor-dot, .cursor-ring { position: fixed; z-index: 100; top: 0; left: 0; border-radius: 50%; pointer-events: none; visibility: hidden; }
+    .cursor-dot { width: 7px; height: 7px; background: #fff0d6; box-shadow: 0 0 10px 3px #ffb35caa, 0 0 34px 12px #ff7a2f40; }
+    .cursor-ring { width: 36px; height: 36px; border: 1.5px solid #ffb35c88; transition: width 0.25s, height 0.25s, background-color 0.25s, border-color 0.25s; }
+    .cursor-ring.hot { width: 58px; height: 58px; border-color: #ffd27a; background: #ff7a2f17; }
+    /* embers rising from the bottom of the top of the page, made by site-motion.js */
+    .embers { position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: min(100vh, 960px); overflow: hidden; pointer-events: none; }
+    .ember { position: absolute; top: 0; left: 0; width: 4px; height: 4px; border-radius: 50%; background: radial-gradient(circle, #ffe2a8, #ff8a3d 55%, transparent 72%); box-shadow: 0 0 8px 2px #ff7a2f66; }
+    .lit { position: relative; }
+    .lit::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+      background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), #ff9a4d1f, transparent 65%); }
+    .lit:hover::after { opacity: 1; }
+    html.motion header { visibility: hidden; }
+    html.has-cursor body, html.has-cursor body *:not(textarea):not(input):not(select) { cursor: none !important; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); padding-top: var(--space-6); }
       .toc { position: static; }
-      .toc ol { display: flex; flex-wrap: wrap; gap: 4px; }
-      .toc .progress { margin-left: 0; }
-      .nav { gap: 16px; flex-wrap: wrap; }
+      .toc ol { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+      .nav a:not(.brand):not(.go) { display: none; }
+    }
+    @media (max-width: 640px) {
+      .wrap { padding: 0 20px; }
+      .nav { gap: 0; }
+      .nav a:not(.brand) { padding: 8px 10px; font-size: 14px; }
+      .nav a.outlined { margin-left: var(--space-1); }
+      .brand { font-size: 22px; } .brand svg { width: 30px; height: 30px; }
+      .lamp { top: 74px; right: 12%; }
+      .hero { padding-top: 24px; padding-bottom: var(--space-7); }
+      .hero p:not(.eyebrow) { font-size: 17px; }
+      .btn { flex: 1 1 auto; justify-content: center; }
+      .toc ol { grid-template-columns: minmax(0, 1fr); }
+      .lesson { margin-bottom: var(--space-7); }
+      .head { padding-left: 12px; }
+      .head .name { flex-basis: 100%; }
+      .head button, .head .open { flex: 1 1 auto; justify-content: center; }
+      textarea { padding: 14px; font-size: 14px; }
+      .try { flex-direction: column; gap: 2px; }
+      .next { padding: var(--space-5); }
+      .foot { flex-direction: column; align-items: flex-start; }
+    }
+    @media (pointer: coarse) {
+      button, .open { height: 40px; }
+      .ask input { height: 40px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
+      .btn.primary:hover { transform: none; }
     }
   </style>
 </head>
@@ -108,21 +218,29 @@
         <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
         <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
       </symbol>
+      <symbol id="i-run" viewBox="0 0 16 16"><path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.2-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5z"/></symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
     </defs>
   </svg>
 
   <header>
+    <div class="lamp" aria-hidden="true"></div>
     <nav class="nav wrap" aria-label="Moth">
       <a class="brand" href="./"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
-      <a href="./#playground">Playground</a>
-      <a href="learn.html" aria-current="page">Learn</a>
+      <a class="go" href="./#playground">Playground</a>
+      <a class="go" href="learn.html" aria-current="page">Learn</a>
       <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
-      <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
     </nav>
     <div class="hero wrap">
-      <h1>Learn Moth in <em>an afternoon</em>.</h1>
+      <p class="eyebrow">Learn Moth</p>
+      <h1>Learn Moth in <span class="nobr"><em>an afternoon</em>.</span></h1>
       <p>Eleven short lessons. Each has a program you can run and change, right here in your browser, with
         nothing to install. Change anything, press Run, and see what happens.</p>
+      <div class="cta">
+        <a class="btn primary" href="#lesson-1">Start with lesson 1 <span aria-hidden="true">↓</span></a>
+        <a class="btn ghost" href="./#playground">Open the playground</a>
+      </div>
     </div>
   </header>
 
@@ -130,24 +248,35 @@
     <nav class="toc" aria-label="Lessons">
       <h2>Lessons</h2>
       <ol id="toc"></ol>
+      <div class="meter" aria-hidden="true"><span id="meter"></span></div>
       <p class="progress" id="progress"></p>
     </nav>
     <main>
       <div id="lessons"></div>
       <section class="next" id="next">
+        <p class="eyebrow">Keep going</p>
         <h2>Where next</h2>
-        <p style="color: var(--soft); margin: 0">That's the heart of Moth. When you're ready for more:</p>
+        <p>That's the heart of Moth. When you're ready for more:</p>
         <ul>
           <li><a href="./#playground">The playground</a> has examples to open and change: games, drawings, a neural network that reads your handwriting.</li>
           <li><a href="https://github.com/samyyy2423/moth#the-language">The language</a> has all of Moth on one page.</li>
-          <li><a href="https://github.com/samyyy2423/moth/releases/latest">Download Moth</a> for Windows or Linux, and <code style="font: 0.9em var(--mono); color: var(--amber-hi)">moth build</code> turns your program into one of its own, as fast as C.</li>
+          <li><a href="https://github.com/samyyy2423/moth/releases/latest">Download Moth</a> for Windows or Linux, and <code>moth build</code> turns your program into one of its own, as fast as C.</li>
           <li><a href="https://github.com/samyyy2423/moth/blob/main/docs/guestbook.md">Build a web app</a>: a guestbook with a database, in Moth, from start to finish.</li>
         </ul>
       </section>
     </main>
   </div>
 
-  <footer>Moth is open source under the Apache License 2.0 · <a href="https://github.com/samyyy2423/moth" style="color: var(--dim)">github.com/samyyy2423/moth</a></footer>
+  <footer class="foot wrap">
+    <a class="brand" href="./"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="./#playground">Playground</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth/blob/main/DESIGN.md">How it's built</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
 
   <script type="module">
     import { LESSONS } from "./learn-lessons.js";
@@ -166,13 +295,22 @@
       e.append(...kids);
       return e;
     };
-    const done = new Set(JSON.parse(localStorage.getItem("moth-learn-done") || "[]"));
+    // the play icon from the sprite above, then the words
+    const withRunIcon = (e, words) => {
+      e.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-run"/></svg>';
+      e.append(words);
+      return e;
+    };
+    // the lessons run so far, kept in this browser; where it keeps nothing (storage turned off), only for now
+    const done = new Set((() => { try { return JSON.parse(localStorage.getItem("moth-learn-done") || "[]"); } catch { return []; } })());
+    const remember = () => { try { localStorage.setItem("moth-learn-done", JSON.stringify([...done])); } catch {} };
     const toc = document.getElementById("toc");
     const list = document.getElementById("lessons");
     const tocLinks = [];
 
     function showProgress() {
-      document.getElementById("progress").textContent = done.size ? `${done.size} of ${LESSONS.length} run` : "";
+      document.getElementById("progress").textContent = done.size ? `${done.size} of ${LESSONS.length} run` : `${LESSONS.length} lessons`;
+      document.getElementById("meter").style.width = `${(100 * done.size) / LESSONS.length}%`;
       tocLinks.forEach((a, i) => a.classList.toggle("done", done.has(i)));
     }
 
@@ -193,8 +331,8 @@
       const reset = el("button", { type: "button", textContent: "Reset", title: "Put the lesson's program back" });
       const open = el("a", { className: "open", textContent: "Open in the playground ↗", target: "_blank", rel: "noopener" });
       const run = lesson.draws
-        ? el("a", { className: "open", textContent: "▶ Run it in the playground", target: "_blank", rel: "noopener", style: "color: #1c1405; border-color: transparent; background: linear-gradient(#ffc96b, #f2ac3a)" })
-        : el("button", { type: "button", className: "run", textContent: "▶ Run" });
+        ? withRunIcon(el("a", { className: "open run", target: "_blank", rel: "noopener" }), "Run it in the playground")
+        : withRunIcon(el("button", { type: "button", className: "run" }), "Run");
       const playgroundLink = () => `./#code=${encodeURIComponent(code.value)}`;
       const refreshLinks = () => { open.href = playgroundLink(); if (lesson.draws) run.href = playgroundLink(); };
       refreshLinks();
@@ -202,7 +340,7 @@
       const head = el("div", { className: "head" }, el("span", { className: "name", textContent: `lesson-${i + 1}.moth` }), reset, open, ...(lesson.draws ? [] : [run]));
       const box = el("div", { className: "box" }, head, code, out, status);
       if (lesson.draws) head.append(run);
-      const tryIt = el("div", { className: "try", innerHTML: `<b>Try this:</b> ${lesson.try}` });
+      const tryIt = el("div", { className: "try", innerHTML: `<b>Try this:</b> <span>${lesson.try}</span>` });
       section.append(h2, intro, box, tryIt);
       list.append(section);
 
@@ -230,6 +368,7 @@
             clearTimeout(limit);
             status.textContent = "Waiting for your answer";
             const input = el("input", { type: "text", autocomplete: "off" });
+            input.setAttribute("aria-label", data.question);
             const form = el("form", { className: "ask" }, el("label", { textContent: data.question }), input, el("button", { type: "submit", className: "run", textContent: "Answer" }));
             form.onsubmit = (e) => { e.preventDefault(); answers.push({ text: input.value }); start(); };
             out.after(form);
@@ -250,7 +389,7 @@
           }
           if (data.done || data.error) {
             done.add(i);
-            localStorage.setItem("moth-learn-done", JSON.stringify([...done]));
+            remember();
             showProgress();
           }
         };
@@ -258,7 +397,7 @@
         current.postMessage({ source: code.value, engine, answers, files: {}, seed: Math.floor(Math.random() * 2 ** 32), disk: {} });
       }
       if (!lesson.draws) run.onclick = () => { answers = []; start(); };
-      else run.onclick = () => { done.add(i); localStorage.setItem("moth-learn-done", JSON.stringify([...done])); showProgress(); };
+      else run.onclick = () => { done.add(i); remember(); showProgress(); };
       reset.onclick = () => { stop(); answers = []; code.value = lesson.code; refreshLinks(); out.textContent = ""; status.textContent = ""; box.querySelector(".ask")?.remove(); };
       code.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!lesson.draws) { answers = []; start(); } else window.open(playgroundLink(), "_blank"); }
