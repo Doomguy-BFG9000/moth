@@ -33,3 +33,66 @@ to test_text_and_bytes
     end
     expect hash's sha256(big) is "89f4ff56a25dd1db06a4ce6033603775d705fb96f30f8693733fef602a1ca532"
 end
+
+to test_other_hashes
+    set texts to list of "", "abc", "The quick brown fox jumps over the lazy dog"
+    set md5s to list of "d41d8cd98f00b204e9800998ecf8427e", "900150983cd24fb0d6963f7d28e17f72", "9e107d9d372bb6826bd81d3542a419d6"
+    set sha1s to list of "da39a3ee5e6b4b0d3255bfef95601890afd80709", "a9993e364706816aba3e25717850c26c9cd0d89d",
+        "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"
+    set sha224s to list of "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f",
+        "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7", "730e109bd7a8a32b1cb9d9a09aa2325d2430587ddbc0c38bad911525"
+    set sha384s to list of "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b",
+        "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+        "ca737f1014a48f4c0b6dd43cb177b0afd9e5169367544c494011e3317dbf9a509cb1e5dc1e85a941bbee3d7f2afbc9b1"
+    set sha512s to list of "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+        "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb642e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6"
+    for each k from 1 to 3
+        set t to item k of texts
+        expect hash's md5(t) is item k of md5s
+        expect hash's sha1(t) is item k of sha1s
+        expect hash's sha224(t) is item k of sha224s
+        expect hash's sha384(t) is item k of sha384s
+        expect hash's sha512(t) is item k of sha512s
+        expect hash's digest("SHA512", t) is item k of sha512s
+    end
+end
+
+to test_hmac
+    set fox to "The quick brown fox jumps over the lazy dog"
+    expect hash's hmac("sha256", "key", fox) is "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+    expect hash's hmac("sha512", "key", fox) is "b42af09057bac1e2d41708e48a902e09b5ff7f12ab428a4fe86653c73dd248fb82f948a549f7b791a5b41915ee4d1ec3935357e4e2317250d0372afa2ebeeb3a"
+    expect hash's hmac("md5", "key", fox) is "80070713463e7749b90c2dc24911e275"
+    set long_key to "" # longer than a block: hashed first
+    repeat 100 times
+        add "k" to long_key
+    end
+    expect hash's hmac("sha1", long_key, "x") is "f0f06edc45a0697855c766dd91a235f449aaa384"
+end
+
+to test_pbkdf2
+    expect hash's pbkdf2("sha1", "password", "salt", 1, 20) is "0c60c80f961f0e71f3a9b524af6012062fe037a6"
+    expect hash's pbkdf2("sha1", "password", "salt", 2, 20) is "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957"
+    expect hash's pbkdf2("sha256", "password", "salt", 4, 40) is "cd7b203e3aef28a773613de46901d9a5d621228b3b3de8de24cea5b788459c8a456a5d6b8766556e"
+end
+
+to test_hex_and_mistakes
+    expect hash's hex_of(hash's bytes_of_hex("00ff10Ab")) is "00ff10ab"
+    expect hash's hex_of("hi") is "6869"
+    expect hash's bytes_of_hex("") is 0 bytes
+    for each pair in list of (list of "abc", "hex has two digits for each byte, and 'abc' has an odd number"),
+        (list of "zz", "'zz' isn't hex: its digits are 0 to 9 and a to f")
+        try
+            hash's bytes_of_hex(item 1 of pair)
+            expect "no mistake" is item 2 of pair
+        if it fails with why
+            expect why is item 2 of pair
+        end
+    end
+    try
+        hash's digest("sha3", "x")
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "there's no hash called 'sha3' here: md5, sha1, sha224, sha256, sha384 and sha512 are"
+    end
+end

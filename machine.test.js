@@ -1263,7 +1263,8 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   const dir = mkdtempSync(join(tmpdir(), "moth-library-"));
   try {
     const files = {};
-    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
+      "secrets.moth", "base64.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1684,6 +1685,75 @@ say host of peer of s
 say (wait for job) is less than 1.5
 `);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["::1\n::1\nover six\nsix back\n::ffff:127.0.0.1\nfour\nsent\n0\n1\nyes\n1\nknock\n1\n0\n127.0.0.1\nyes\n", "", 0]);
+});
+
+// tools/secrets.moth: the system's random bytes, two draws of which differ, and as many as asked for; tokens in
+// hex and for addresses; numbers below n, each seen often in 600; a choice, a shuffle, secrets compared; and
+// each mistake
+test("tools/secrets.moth gives random bytes, tokens and numbers no one can guess, on Windows and Linux", { skip }, () => {
+  const ran = libraryRun(String.raw`use "secrets.moth" as secrets
+set a to secrets's random_bytes(16)
+set b to secrets's random_bytes(16)
+say length of a
+say a is b
+say length of secrets's random_bytes(0)
+say length of secrets's random_bytes(100000)
+set h to secrets's token_hex(8)
+say length of h
+set fine to yes
+for each c in h
+    if not (c is in "0123456789abcdef")
+        set fine to no
+    end
+end
+say fine
+set u to secrets's token_url(16)
+say length of u
+set fine to yes
+for each c in u
+    if not (c is in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        set fine to no
+    end
+end
+say fine
+set seen to list of 0, 0, 0, 0, 0, 0
+repeat 600 times
+    set r to secrets's below(6)
+    set item (r + 1) of seen to item (r + 1) of seen + 1
+end
+set every_one to yes
+for each count in seen
+    if count is less than 50
+        set every_one to no
+    end
+end
+say every_one
+say secrets's below(1)
+say secrets's below(281474976710656) is less than 281474976710656
+say secrets's choice(list of "only")
+say secrets's shuffled(list of 1, 2, 3, 4, 5) in order
+say secrets's same_secret("token", "token")
+say secrets's same_secret("token", "tokeN")
+say secrets's same_secret("token", "tok")
+for each bad in list of 0, 2.5, 281474976710657
+    try
+        secrets's below(bad)
+    if it fails with why
+        say why
+    end
+end
+try
+    secrets's choice(empty list)
+if it fails with why
+    say why
+end
+try
+    secrets's random_bytes(-1)
+if it fails with why
+    say why
+end
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["16\nno\n0\n100000\n16\nyes\n22\nyes\nyes\n0\nyes\nonly\n[1, 2, 3, 4, 5]\nyes\nno\nno\nbelow needs a whole number from 1 to 2^48, not 0\nbelow needs a whole number from 1 to 2^48, not 2.5\nbelow needs a whole number from 1 to 2^48, not 281474976710657\nchoice needs something to choose from: the list is empty\nrandom_bytes needs a whole number of bytes from 0 up, not -1\n", "", 0]);
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;
@@ -2107,7 +2177,7 @@ test("tools/email.moth sends mail over SMTP, secure and logged in, with HTML and
     assert.equal(made.status, 0, made.stderr);
     if (set) for (const n of set.names) writeFileSync(join(dir, n), readFileSync(join(set.dir, n)));
     const files = {};
-    for (const name of ["email.moth", "sockets.moth", "dates.moth", "hash.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    for (const name of ["email.moth", "sockets.moth", "dates.moth", "hash.moth", "base64.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     const exe = executable(dir, "p");
     writeFileSync(exe, machine(String.raw`use "email.moth" as mail
 use "sockets.moth" as net

@@ -1,0 +1,160 @@
+# Bytes as text and back, as Python's base64 module has them: base64 (RFC 4648), its URL-safe kind, with - and
+# _ for + and /, and base32, which authenticator apps' secrets are written in. In Moth alone, so it works
+# everywhere. Each takes text (its UTF-8) or bytes, and gives text; each way back gives bytes, passing over
+# what isn't its alphabet (line ends, spaces, = at the end), as Python's does by default.
+#
+#   use "base64.moth" as b64
+#   say b64's base64_of("Moth ✓")                 # TW90aCDinJM=
+#   say b64's bytes_of_base64("TW90aCDinJM=") as text
+#   say b64's url_base64_of(some bytes)           # no + or /, so it can go in an address
+#   say b64's base32_of("hello")                  # NBSWY3DP
+
+set b64_alphabet to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+set b64_url_alphabet to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+set b64_32_alphabet to "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+# a text's UTF-8, or bytes as they are
+to b64_bytes with data
+    return data as bytes
+end
+
+to base64_of with data
+    return b64_encode(b64_bytes(data), b64_alphabet as bytes, yes)
+end
+
+to bytes_of_base64 with words
+    return b64_decode(words, b64_alphabet as bytes)
+end
+
+# URL-safe base64, with its = at the end, as Python's urlsafe_b64encode
+to url_base64_of with data
+    return b64_encode(b64_bytes(data), b64_url_alphabet as bytes, yes)
+end
+
+to bytes_of_url_base64 with words
+    return b64_decode(words, b64_url_alphabet as bytes)
+end
+
+# base64 6 bits a letter: each 3 bytes as 4 letters, = to fill the last 4 when it's short, if `filled`
+to b64_encode with b, codes, filled
+    set n to length of b
+    set rest to remainder of n divided by 3
+    set size to (n - rest) / 3 * 4
+    if rest is not 0
+        set size to size + 4
+    end
+    set out to size bytes
+    set k to 1
+    set at to 1
+    repeat while k + 2 is at most n
+        set v to byte k of b * 65536 + byte (k + 1) of b * 256 + byte (k + 2) of b
+        set byte at of out to byte ((shift v right by 18) + 1) of codes
+        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of codes
+        set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of codes
+        set byte (at + 3) of out to byte ((v bit and 63) + 1) of codes
+        set k to k + 3
+        set at to at + 4
+    end
+    if rest is not 0
+        set v to byte k of b * 65536
+        if rest is 2
+            set v to v + byte (k + 1) of b * 256
+        end
+        set byte at of out to byte ((shift v right by 18) + 1) of codes
+        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of codes
+        set byte (at + 2) of out to 61 # =
+        if rest is 2
+            set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of codes
+        end
+        set byte (at + 3) of out to 61
+    end
+    if not filled
+        repeat while length of out is greater than 0 and byte (length of out) of out is 61
+            set out to items 1 to (length of out - 1) of out
+        end
+    end
+    return out as text
+end
+
+to b64_decode with words, codes
+    set values to 256 bytes # each letter's value, plus 1; 0 for one that isn't the alphabet's
+    for each k from 1 to 64
+        set byte (byte k of codes + 1) of values to k
+    end
+    set made to empty list
+    set v to 0
+    set held to 0
+    for each b in words as bytes
+        set value to byte (b + 1) of values
+        if value is not 0
+            set v to v * 64 + value - 1
+            set held to held + 1
+            if held is 4
+                add shift v right by 16 to made
+                add (shift v right by 8) bit and 255 to made
+                add v bit and 255 to made
+                set v to 0
+                set held to 0
+            end
+        end
+    end
+    if held is 3
+        add shift v right by 10 to made
+        add (shift v right by 2) bit and 255 to made
+    else if held is 2
+        add shift v right by 4 to made
+    end
+    return made as bytes
+end
+
+# base32: each 5 bytes as 8 letters, = to fill the last 8
+to base32_of with data
+    set b to b64_bytes(data)
+    set codes to b64_32_alphabet as bytes
+    set made to empty list
+    set bits to 0
+    set held to 0
+    for each x in b
+        set bits to bits * 256 + x
+        set held to held + 8
+        repeat while held is at least 5
+            set held to held - 5
+            set index to shift bits right by held
+            add byte (index + 1) of codes to made
+            set bits to bits - index * (shift 1 left by held)
+        end
+    end
+    if held is greater than 0
+        add byte ((shift bits left by (5 - held)) + 1) of codes to made
+    end
+    repeat while remainder of length of made divided by 8 is not 0
+        add 61 to made
+    end
+    return made as bytes as text
+end
+
+# base32 back to bytes; small letters as capitals, and what isn't its alphabet passed over
+to bytes_of_base32 with words
+    set codes to b64_32_alphabet as bytes
+    set values to 256 bytes
+    for each k from 1 to 32
+        set byte (byte k of codes + 1) of values to k
+    end
+    set made to empty list
+    set bits to 0
+    set held to 0
+    for each b in (uppercase of words) as bytes
+        set value to byte (b + 1) of values
+        if value is not 0
+            set bits to bits * 32 + value - 1
+            set held to held + 5
+            if held is at least 8
+                set held to held - 8
+                set top to shift bits right by held
+                add top to made
+                set bits to bits - top * (shift 1 left by held)
+            end
+        end
+    end
+    return made as bytes
+end

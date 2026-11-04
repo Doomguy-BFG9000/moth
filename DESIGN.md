@@ -3523,3 +3523,30 @@ hold them to agreeing.
   to have gone, so neither did.
 - **Tested.** The secure connections' test runs on one core too, with
   taskset, where Linux has it.
+
+## 86. Hashes, base64 and secrets
+
+- **Why.** Python's `hashlib`, `hmac`, `base64` and `secrets`: checking a
+  download, signing a request to an API, a token in an address, a password
+  kept safely. hash.moth had SHA-256 alone, base64 was inside email.moth, and
+  `random number` is made to repeat when a program asks it to.
+- **hash.moth** has SHA-224 (SHA-256 from other starting words), SHA-512 and
+  SHA-384, SHA-1 and MD5, each by its own name or through `digest(name,
+  data)`; `hmac(name, key, data)` (RFC 2104); `pbkdf2(name, password, salt,
+  rounds, size)` (RFC 8018); and `hex_of` and `bytes_of_hex`. All in Moth, so
+  on every engine. SHA-512's words are 64 bits, past what a number holds
+  exactly, so each is two halves of 32 bits, every sum carried from the low
+  half to the high; its constants were made from their definition (the cube
+  and square roots of the first primes) and checked against FIPS 180-4's.
+- **base64.moth** writes base64, its URL-safe kind, and base32 (RFC 4648),
+  and reads them back passing over what isn't their alphabet, as Python
+  does. email.moth uses it.
+- **secrets.moth** asks the system: BCryptGenRandom on Windows, getrandom on
+  Linux, through `use the library`. `random_bytes(n)`, `token_hex`,
+  `token_url`, `below(n)` (each number as likely: bytes drawn again when
+  they'd favour the smallest), `choice`, `shuffled` and `same_secret`, which
+  compares two secrets taking as long however much of them is the same.
+- **Tested.** Every hash, HMAC and PBKDF2 against Node's crypto, on texts and
+  bytes of every length around a block's edges, on the three engines and in
+  machine code on Windows and Linux; base64 and base32 against RFC 4648's
+  and Node's; secrets on Windows and Linux.

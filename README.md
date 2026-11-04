@@ -371,8 +371,14 @@ bytes and dictionaries:
   text, so `say` shows them and `is` compares them: `big's times(f, 30)`,
   `plus`, `minus`, `divided`, `remainder`, `power` and `compare`, in Moth
   alone, tested against JavaScript's BigInt.
-- [`hash.moth`](tools/hash.moth) gives a text's or bytes' SHA-256, in Moth alone,
-  and [`system.moth`](tools/system.moth) copies, moves and removes files, makes
+- [`hash.moth`](tools/hash.moth) gives a text's or bytes' SHA-256, SHA-224,
+  SHA-512, SHA-384, SHA-1 or MD5, HMAC with any of them, and PBKDF2, as
+  Python's `hashlib` and `hmac` do, in Moth alone;
+  [`base64.moth`](tools/base64.moth) writes bytes in base64 (and its URL-safe
+  kind) and base32, and back; and [`secrets.moth`](tools/secrets.moth) gives
+  bytes, tokens and numbers no one can guess, from the system, as Python's
+  `secrets` does.
+- [`system.moth`](tools/system.moth) copies, moves and removes files, makes
   and removes folders, says whether a name is a file or a folder, how big a
   file is and when it changed, reads and sets environment variables, and
   knows the current, home and temporary folders, on Windows and Linux.

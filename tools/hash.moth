@@ -1,9 +1,16 @@
-# SHA-256, as FIPS 180-4 has it: a text's or bytes' hash, the 64 hex digits that `sha256sum` and every other
-# program give for the same bytes (a text's are its UTF-8). In Moth alone, so it works everywhere.
+# Hashes, as Python's hashlib and hmac have them: a text's or bytes' SHA-256, SHA-224, SHA-512, SHA-384, SHA-1
+# or MD5, as the hex digits `sha256sum` and every other program give for the same bytes (a text's are its
+# UTF-8); HMAC, a hash with a key, which says a message came from one who knows it; and PBKDF2, a key made
+# from a password slowly, to keep passwords. In Moth alone, so it works everywhere. (SHA-1 and MD5 are broken
+# for keeping secrets: they're here for checking files and talking to what still uses them.)
 #
 #   use "hash.moth" as hash
 #   say hash's sha256("abc")             # ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 #   say hash's sha256(read bytes "moth.exe")
+#   say hash's digest("sha512", "abc")   # any of them by its name: md5, sha1, sha224, sha256, sha384, sha512
+#   say hash's hmac("sha256", "key", "The quick brown fox jumps over the lazy dog")
+#   say hash's pbkdf2("sha256", "password", "salt", 1000, 32)   # 32 bytes, as hex
+#   say hash's bytes_of_hex("ff00")      # (2 bytes: 255, 0); hex_of(bytes) back
 
 set hash_constants to list of 1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748,
     2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580,
@@ -14,14 +21,55 @@ set hash_constants to list of 1116352408, 1899447441, 3049323471, 3921009573, 96
     958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474,
     2756734187, 3204031479, 3329325298
 set hash_starts to list of 1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225
+set hash_224_starts to list of 3238371032, 914150663, 812702999, 4144912697, 4290775857, 1750603025, 1694076839,
+    3204075428
+set hash_md5_constants to list of 3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080426, 2821735955,
+    4249261313, 1770035416, 2336552879, 4294925233, 2304563134, 1804603682, 4254626195, 2792965006, 1236535329,
+    4129170786, 3225465664, 643717713, 3921069994, 3593408605, 38016083, 3634488961, 3889429448, 568446438,
+    3275163606, 4107603335, 1163531501, 2850285829, 4243563512, 1735328473, 2368359562, 4294588738, 2272392833,
+    1839030562, 4259657740, 2763975236, 1272893353, 4139469664, 3200236656, 681279174, 3936430074, 3572445317,
+    76029189, 3654602809, 3873151461, 530742520, 3299628645, 4096336452, 1126891415, 2878612391, 4237533241,
+    1700485571, 2399980690, 4293915773, 2240044497, 1873313359, 4264355552, 2734768916, 1309151649, 4149444226,
+    3174756917, 718787259, 3951481745
+set hash_512_constants to list of 1116352408, 3609767458, 1899447441, 602891725, 3049323471, 3964484399, 3921009573,
+    2173295548, 961987163, 4081628472, 1508970993, 3053834265, 2453635748, 2937671579, 2870763221, 3664609560,
+    3624381080, 2734883394, 310598401, 1164996542, 607225278, 1323610764, 1426881987, 3590304994, 1925078388,
+    4068182383, 2162078206, 991336113, 2614888103, 633803317, 3248222580, 3479774868, 3835390401, 2666613458,
+    4022224774, 944711139, 264347078, 2341262773, 604807628, 2007800933, 770255983, 1495990901, 1249150122,
+    1856431235, 1555081692, 3175218132, 1996064986, 2198950837, 2554220882, 3999719339, 2821834349, 766784016,
+    2952996808, 2566594879, 3210313671, 3203337956, 3336571891, 1034457026, 3584528711, 2466948901, 113926993,
+    3758326383, 338241895, 168717936, 666307205, 1188179964, 773529912, 1546045734, 1294757372, 1522805485,
+    1396182291, 2643833823, 1695183700, 2343527390, 1986661051, 1014477480, 2177026350, 1206759142, 2456956037,
+    344077627, 2730485921, 1290863460, 2820302411, 3158454273, 3259730800, 3505952657, 3345764771, 106217008,
+    3516065817, 3606008344, 3600352804, 1432725776, 4094571909, 1467031594, 275423344, 851169720, 430227734,
+    3100823752, 506948616, 1363258195, 659060556, 3750685593, 883997877, 3785050280, 958139571, 3318307427,
+    1322822218, 3812723403, 1537002063, 2003034995, 1747873779, 3602036899, 1955562222, 1575990012, 2024104815,
+    1125592928, 2227730452, 2716904306, 2361852424, 442776044, 2428436474, 593698344, 2756734187, 3733110249,
+    3204031479, 2999351573, 3329325298, 3815920427, 3391569614, 3928383900, 3515267271, 566280711, 3940187606,
+    3454069534, 4118630271, 4000239992, 116418474, 1914138554, 174292421, 2731055270, 289380356, 3203993006,
+    460393269, 320620315, 685471733, 587496836, 852142971, 1086792851, 1017036298, 365543100, 1126000580,
+    2618297676, 1288033470, 3409855158, 1501505948, 4234509866, 1607167915, 987167468, 1816402316, 1246189591
+set hash_512_starts to list of 1779033703, 4089235720, 3144134277, 2227873595, 1013904242, 4271175723, 2773480762,
+    1595750129, 1359893119, 2917565137, 2600822924, 725511199, 528734635, 4215389547, 1541459225, 327033209
+set hash_384_starts to list of 3418070365, 3238371032, 1654270250, 914150663, 2438529370, 812702999, 355462360,
+    4144912697, 1731405415, 4290775857, 2394180231, 1750603025, 3675008525, 1694076839, 1203062813, 3204075428
+set hash_md5_shifts to list of 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20,
+    5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15,
+    21, 6, 10, 15, 21, 6, 10, 15, 21
 set hash_powers to list of 1 # 2 to the 0th, 1st, ... 32nd, from item 1
 repeat 32 times
     add item (length of hash_powers) of hash_powers * 2 to hash_powers
 end
+set hash_hex_digits to "0123456789abcdef"
 
 # a 32-bit number turned right by n: what falls off the right comes back on the left, kept below 2^53 all along
 to hash_turn with x, n
     return (shift x right by n) + (x bit and (item (n + 1) of hash_powers - 1)) * item (33 - n) of hash_powers
+end
+
+# turned left by n
+to hash_left with x, n
+    return hash_turn(x, 32 - n)
 end
 
 to hash_add with x, y
@@ -32,28 +80,80 @@ to hash_bytes_of with data as text
     return data as bytes
 end
 
-# the hash of a text or of bytes, as 64 hex digits
-to sha256 with data
-    set message to data
+# a text's UTF-8, or bytes as they are
+to hash_message with data
     try
-        set message to hash_bytes_of(data)
+        return hash_bytes_of(data)
     if it fails
-        set message to data
+        return data
     end
+end
+
+# the message, then 128, then 0s, then its length in bits in `size` bytes, to a whole number of blocks of `block`
+# bytes; the length the highest byte first, or (for MD5) the lowest
+to hash_padded with message, block, size, lowest_first
     set count to length of message
-    set blocks to hash_whole((count + 8) / 64) + 1 # a whole number of 64-byte blocks, with room for 128 and the length
-    set padded to (64 * blocks) bytes
+    set blocks to hash_whole((count + size) / block) + 1
+    set padded to (block * blocks) bytes
     for each k from 1 to count
         set byte k of padded to byte k of message
     end
     set byte (count + 1) of padded to 128
     set bits to count * 8
-    for each k from 0 to 6 # its length in bits, highest byte first, in the last 8 (2^56 bits is plenty)
-        set byte (64 * blocks - k) of padded to bits bit and 255
+    for each k from 0 to 6 # 2^56 bits is plenty
+        if lowest_first
+            set byte (block * blocks - size + 1 + k) of padded to bits bit and 255
+        else
+            set byte (block * blocks - k) of padded to bits bit and 255
+        end
         set bits to shift bits right by 8
     end
+    return padded
+end
+
+# 32-bit numbers as hex, 8 digits each, the highest byte first, or (for MD5) the lowest
+to hash_hex_words with words, lowest_first
+    set made to empty list
+    for each part in words
+        if lowest_first
+            set left to part
+            repeat 4 times
+                add hash_hex_byte(left bit and 255) to made
+                set left to shift left right by 8
+            end
+        else
+            set shown to part as hex
+            repeat 8 - length of shown times
+                set shown to "0" + shown
+            end
+            add shown to made
+        end
+    end
+    return join made with ""
+end
+
+to hash_hex_byte with b
+    return item ((shift b right by 4) + 1) of hash_hex_digits + item ((b bit and 15) + 1) of hash_hex_digits
+end
+
+# ---------- SHA-256 and SHA-224 ----------
+
+# the hash of a text or of bytes, as 64 hex digits
+to sha256 with data
+    return hash_hex_words(hash_256_words(hash_message(data), hash_starts), no)
+end
+
+# as 56 hex digits: SHA-256 from other starting words, its first 7
+to sha224 with data
+    set words to hash_256_words(hash_message(data), hash_224_starts)
+    return hash_hex_words(items 1 to 7 of words, no)
+end
+
+to hash_256_words with message, starts
+    set padded to hash_padded(message, 64, 8, no)
+    set blocks to length of padded / 64
     set h to empty list
-    for each start in hash_starts
+    for each start in starts
         add start to h
     end
     set w to empty list
@@ -107,13 +207,373 @@ to sha256 with data
         set item 7 of h to hash_add(item 7 of h, g)
         set item 8 of h to hash_add(item 8 of h, hh)
     end
-    set made to ""
-    for each part in h
-        set shown to part as hex
-        repeat 8 - length of shown times
-            set shown to "0" + shown
+    return h
+end
+
+# ---------- SHA-1 ----------
+
+# the hash of a text or of bytes, as 40 hex digits
+to sha1 with data
+    set padded to hash_padded(hash_message(data), 64, 8, no)
+    set h to list of 1732584193, 4023233417, 2562383102, 271733878, 3285377520
+    set w to empty list
+    repeat 80 times
+        add 0 to w
+    end
+    for each block from 0 to length of padded / 64 - 1
+        set at to 64 * block
+        for each t from 1 to 16
+            set b to at + 4 * t - 3
+            set item t of w to byte b of padded * 16777216 + byte (b + 1) of padded * 65536 + byte (b + 2) of padded * 256
+                + byte (b + 3) of padded
         end
-        set made to made + shown
+        for each t from 17 to 80
+            set item t of w to hash_left(item (t - 3) of w bit xor item (t - 8) of w bit xor item (t - 14) of w bit xor item (t - 16) of w, 1)
+        end
+        set a to item 1 of h
+        set b2 to item 2 of h
+        set c to item 3 of h
+        set d to item 4 of h
+        set e to item 5 of h
+        for each t from 1 to 80
+            set f to 0
+            set k to 0
+            if t is at most 20
+                set f to (b2 bit and c) bit xor ((4294967295 - b2) bit and d)
+                set k to 1518500249
+            else if t is at most 40
+                set f to b2 bit xor c bit xor d
+                set k to 1859775393
+            else if t is at most 60
+                set f to (b2 bit and c) bit xor (b2 bit and d) bit xor (c bit and d)
+                set k to 2400959708
+            else
+                set f to b2 bit xor c bit xor d
+                set k to 3395469782
+            end
+            set temp to (hash_left(a, 5) + f + e + k + item t of w) bit and 4294967295
+            set e to d
+            set d to c
+            set c to hash_left(b2, 30)
+            set b2 to a
+            set a to temp
+        end
+        set item 1 of h to hash_add(item 1 of h, a)
+        set item 2 of h to hash_add(item 2 of h, b2)
+        set item 3 of h to hash_add(item 3 of h, c)
+        set item 4 of h to hash_add(item 4 of h, d)
+        set item 5 of h to hash_add(item 5 of h, e)
+    end
+    return hash_hex_words(h, no)
+end
+
+# ---------- MD5 ----------
+
+# the hash of a text or of bytes, as 32 hex digits
+to md5 with data
+    set padded to hash_padded(hash_message(data), 64, 8, yes)
+    set h to list of 1732584193, 4023233417, 2562383102, 271733878
+    set m to empty list
+    repeat 16 times
+        add 0 to m
+    end
+    for each block from 0 to length of padded / 64 - 1
+        set at to 64 * block
+        for each t from 1 to 16 # each word's lowest byte first
+            set b to at + 4 * t - 3
+            set item t of m to byte (b + 3) of padded * 16777216 + byte (b + 2) of padded * 65536 + byte (b + 1) of padded * 256
+                + byte b of padded
+        end
+        set a to item 1 of h
+        set b2 to item 2 of h
+        set c to item 3 of h
+        set d to item 4 of h
+        for each i from 0 to 63
+            set f to 0
+            set g to 0
+            if i is less than 16
+                set f to (b2 bit and c) bit xor ((4294967295 - b2) bit and d)
+                set g to i
+            else if i is less than 32
+                set f to (d bit and b2) bit xor ((4294967295 - d) bit and c)
+                set g to remainder of (5 * i + 1) divided by 16
+            else if i is less than 48
+                set f to b2 bit xor c bit xor d
+                set g to remainder of (3 * i + 5) divided by 16
+            else
+                set f to c bit xor (b2 bit or (4294967295 - d))
+                set g to remainder of (7 * i) divided by 16
+            end
+            set f to (f + a + item (i + 1) of hash_md5_constants + item (g + 1) of m) bit and 4294967295
+            set a to d
+            set d to c
+            set c to b2
+            set b2 to hash_add(b2, hash_left(f, item (i + 1) of hash_md5_shifts))
+        end
+        set item 1 of h to hash_add(item 1 of h, a)
+        set item 2 of h to hash_add(item 2 of h, b2)
+        set item 3 of h to hash_add(item 3 of h, c)
+        set item 4 of h to hash_add(item 4 of h, d)
+    end
+    return hash_hex_words(h, yes)
+end
+
+# ---------- SHA-512 and SHA-384 ----------
+
+# A 64-bit word is two 32-bit numbers, its high half and its low, each kept below 2^32, so every sum stays exact.
+
+# the high half of (hi, lo) turned right by n, from 1 to 63; hash_turn_low its low half
+to hash_turn_high with hi, lo, n
+    if n is at least 32
+        return hash_turn_high(lo, hi, n - 32)
+    end
+    if n is 0
+        return hi
+    end
+    return (shift hi right by n) + (lo bit and (item (n + 1) of hash_powers - 1)) * item (33 - n) of hash_powers
+end
+
+to hash_turn_low with hi, lo, n
+    if n is at least 32
+        return hash_turn_low(lo, hi, n - 32)
+    end
+    if n is 0
+        return lo
+    end
+    return (shift lo right by n) + (hi bit and (item (n + 1) of hash_powers - 1)) * item (33 - n) of hash_powers
+end
+
+# the low half of (hi, lo) shifted right by n, below 32 (the high half is hi shifted)
+to hash_shift_low with hi, lo, n
+    return (shift lo right by n) + (hi bit and (item (n + 1) of hash_powers - 1)) * item (33 - n) of hash_powers
+end
+
+# the hash of a text or of bytes, as 128 hex digits
+to sha512 with data
+    return hash_hex_words(hash_512_words(hash_message(data), hash_512_starts), no)
+end
+
+# as 96 hex digits: SHA-512 from other starting words, its first 6
+to sha384 with data
+    set words to hash_512_words(hash_message(data), hash_384_starts)
+    return hash_hex_words(items 1 to 12 of words, no)
+end
+
+# the 8 64-bit words, as 16 halves, the high half first
+to hash_512_words with message, starts
+    set padded to hash_padded(message, 128, 16, no)
+    set h to empty list
+    for each start in starts
+        add start to h
+    end
+    set wh to empty list
+    set wl to empty list
+    repeat 80 times
+        add 0 to wh
+        add 0 to wl
+    end
+    for each block from 0 to length of padded / 128 - 1
+        set at to 128 * block
+        for each t from 1 to 16
+            set b to at + 8 * t - 7
+            set item t of wh to byte b of padded * 16777216 + byte (b + 1) of padded * 65536 + byte (b + 2) of padded * 256
+                + byte (b + 3) of padded
+            set item t of wl to byte (b + 4) of padded * 16777216 + byte (b + 5) of padded * 65536 + byte (b + 6) of padded * 256
+                + byte (b + 7) of padded
+        end
+        for each t from 17 to 80
+            set xh to item (t - 15) of wh
+            set xl to item (t - 15) of wl
+            set s0h to hash_turn_high(xh, xl, 1) bit xor hash_turn_high(xh, xl, 8) bit xor (shift xh right by 7)
+            set s0l to hash_turn_low(xh, xl, 1) bit xor hash_turn_low(xh, xl, 8) bit xor hash_shift_low(xh, xl, 7)
+            set yh to item (t - 2) of wh
+            set yl to item (t - 2) of wl
+            set s1h to hash_turn_high(yh, yl, 19) bit xor hash_turn_high(yh, yl, 61) bit xor (shift yh right by 6)
+            set s1l to hash_turn_low(yh, yl, 19) bit xor hash_turn_low(yh, yl, 61) bit xor hash_shift_low(yh, yl, 6)
+            set low to item (t - 16) of wl + s0l + item (t - 7) of wl + s1l
+            set low_part to remainder of low divided by 4294967296
+            set item t of wl to low_part
+            set item t of wh to remainder of (item (t - 16) of wh + s0h + item (t - 7) of wh + s1h + (low - low_part) / 4294967296) divided by 4294967296
+        end
+        set ah to item 1 of h
+        set al to item 2 of h
+        set bh to item 3 of h
+        set bl to item 4 of h
+        set ch to item 5 of h
+        set cl to item 6 of h
+        set dh to item 7 of h
+        set dl to item 8 of h
+        set eh to item 9 of h
+        set el to item 10 of h
+        set fh to item 11 of h
+        set fl to item 12 of h
+        set gh to item 13 of h
+        set gl to item 14 of h
+        set hh to item 15 of h
+        set hl to item 16 of h
+        for each t from 1 to 80
+            set big1h to hash_turn_high(eh, el, 14) bit xor hash_turn_high(eh, el, 18) bit xor hash_turn_high(eh, el, 41)
+            set big1l to hash_turn_low(eh, el, 14) bit xor hash_turn_low(eh, el, 18) bit xor hash_turn_low(eh, el, 41)
+            set chh to (eh bit and fh) bit xor ((4294967295 - eh) bit and gh)
+            set chl to (el bit and fl) bit xor ((4294967295 - el) bit and gl)
+            set low to hl + big1l + chl + item (2 * t) of hash_512_constants + item t of wl
+            set t1l to remainder of low divided by 4294967296
+            set t1h to remainder of (hh + big1h + chh + item (2 * t - 1) of hash_512_constants + item t of wh + (low - t1l) / 4294967296) divided by 4294967296
+            set big0h to hash_turn_high(ah, al, 28) bit xor hash_turn_high(ah, al, 34) bit xor hash_turn_high(ah, al, 39)
+            set big0l to hash_turn_low(ah, al, 28) bit xor hash_turn_low(ah, al, 34) bit xor hash_turn_low(ah, al, 39)
+            set majh to (ah bit and bh) bit xor (ah bit and ch) bit xor (bh bit and ch)
+            set majl to (al bit and bl) bit xor (al bit and cl) bit xor (bl bit and cl)
+            set low to big0l + majl
+            set t2l to remainder of low divided by 4294967296
+            set t2h to remainder of (big0h + majh + (low - t2l) / 4294967296) divided by 4294967296
+            set hh to gh
+            set hl to gl
+            set gh to fh
+            set gl to fl
+            set fh to eh
+            set fl to el
+            set low to dl + t1l
+            set el to remainder of low divided by 4294967296
+            set eh to remainder of (dh + t1h + (low - el) / 4294967296) divided by 4294967296
+            set dh to ch
+            set dl to cl
+            set ch to bh
+            set cl to bl
+            set bh to ah
+            set bl to al
+            set low to t1l + t2l
+            set al to remainder of low divided by 4294967296
+            set ah to remainder of (t1h + t2h + (low - al) / 4294967296) divided by 4294967296
+        end
+        set made to list of ah, al, bh, bl, ch, cl, dh, dl, eh, el, fh, fl, gh, gl, hh, hl
+        for each k from 1 to 8
+            set low to item (2 * k) of h + item (2 * k) of made
+            set low_part to remainder of low divided by 4294967296
+            set item (2 * k) of h to low_part
+            set item (2 * k - 1) of h to remainder of (item (2 * k - 1) of h + item (2 * k - 1) of made + (low - low_part) / 4294967296) divided by 4294967296
+        end
+    end
+    return h
+end
+
+# ---------- by name, with a key, and from a password ----------
+
+# a hash by its name, "md5", "sha1", "sha224", "sha256", "sha384" or "sha512", as hex
+to digest with name, data
+    set wanted to lowercase of name
+    if wanted is "sha256"
+        return sha256(data)
+    else if wanted is "sha224"
+        return sha224(data)
+    else if wanted is "sha512"
+        return sha512(data)
+    else if wanted is "sha384"
+        return sha384(data)
+    else if wanted is "sha1"
+        return sha1(data)
+    else if wanted is "md5"
+        return md5(data)
+    end
+    fail with "there's no hash called '" + name + "' here: md5, sha1, sha224, sha256, sha384 and sha512 are"
+end
+
+# HMAC (RFC 2104): the hash, by its name, of the key and the data together, as hex
+to hmac with name, key, data
+    set block to 64
+    if lowercase of name is "sha384" or lowercase of name is "sha512"
+        set block to 128
+    end
+    set k to hash_message(key)
+    if length of k is greater than block
+        set k to bytes_of_hex(digest(name, k))
+    end
+    set message to hash_message(data)
+    set inner to (block + length of message) bytes
+    set outer_key to block bytes
+    for each i from 1 to block
+        set b to 0
+        if i is at most length of k
+            set b to byte i of k
+        end
+        set byte i of inner to b bit xor 54
+        set byte i of outer_key to b bit xor 92
+    end
+    for each i from 1 to length of message
+        set byte (block + i) of inner to byte i of message
+    end
+    set inner_hash to bytes_of_hex(digest(name, inner))
+    set outer to (block + length of inner_hash) bytes
+    for each i from 1 to block
+        set byte i of outer to byte i of outer_key
+    end
+    for each i from 1 to length of inner_hash
+        set byte (block + i) of outer to byte i of inner_hash
+    end
+    return digest(name, outer)
+end
+
+# PBKDF2 (RFC 8018) with HMAC of the hash by its name: `size` bytes made from a password and salt over so many
+# rounds, as hex; each round is two hashes, so more rounds make guessing a password slower too
+to pbkdf2 with name, password, salt, rounds, size
+    set salted to hash_message(salt)
+    set made to empty list
+    set count to 1
+    repeat while length of made is less than size
+        set first to (length of salted + 4) bytes
+        for each i from 1 to length of salted
+            set byte i of first to byte i of salted
+        end
+        set n to length of salted
+        set byte (n + 1) of first to (shift count right by 24) bit and 255
+        set byte (n + 2) of first to (shift count right by 16) bit and 255
+        set byte (n + 3) of first to (shift count right by 8) bit and 255
+        set byte (n + 4) of first to count bit and 255
+        set u to bytes_of_hex(hmac(name, password, first))
+        set t to empty list
+        for each b in u
+            add b to t
+        end
+        repeat rounds - 1 times
+            set u to bytes_of_hex(hmac(name, password, u))
+            for each i from 1 to length of t
+                set item i of t to item i of t bit xor byte i of u
+            end
+        end
+        for each b in t
+            if length of made is less than size
+                add b to made
+            end
+        end
+        set count to count + 1
+    end
+    return hex_of(made as bytes)
+end
+
+# ---------- hex ----------
+
+# bytes as hex, two digits each
+to hex_of with data
+    set made to empty list
+    for each b in hash_message(data)
+        add hash_hex_byte(b) to made
+    end
+    return join made with ""
+end
+
+# hex, as "ff00" or "FF00", back to its bytes
+to bytes_of_hex with digits
+    set low to lowercase of digits
+    if remainder of length of low divided by 2 is not 0
+        fail with "hex has two digits for each byte, and '" + digits + "' has an odd number"
+    end
+    set made to (length of low / 2) bytes
+    for each k from 1 to length of made
+        set high to position of item (2 * k - 1) of low in hash_hex_digits
+        set lower to position of item (2 * k) of low in hash_hex_digits
+        if high is 0 or lower is 0
+            fail with "'" + digits + "' isn't hex: its digits are 0 to 9 and a to f"
+        end
+        set byte k of made to (high - 1) * 16 + lower - 1
     end
     return made
 end

@@ -1,0 +1,30 @@
+# base64.moth's tests: what RFC 4648 and Python's base64 give, which moth.test.js runs on every engine
+
+use "base64.moth" as b64
+
+to test_rfc_4648
+    set texts to list of "", "f", "fo", "foo", "foob", "fooba", "foobar"
+    set base64s to list of "", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy"
+    set base32s to list of "", "MY======", "MZXQ====", "MZXW6===", "MZXW6YQ=", "MZXW6YTB", "MZXW6YTBOI======"
+    for each k from 1 to length of texts
+        expect b64's base64_of(item k of texts) is item k of base64s
+        expect b64's bytes_of_base64(item k of base64s) as text is item k of texts
+        expect b64's base32_of(item k of texts) is item k of base32s
+        expect b64's bytes_of_base32(item k of base32s) as text is item k of texts
+    end
+end
+
+to test_text_and_bytes
+    expect b64's base64_of("Moth ✓") is "TW90aCDinJM="
+    set block to (list of 251, 255, 191, 0) as bytes
+    expect b64's base64_of(block) is "+/+/AA=="
+    expect b64's url_base64_of(block) is "-_-_AA=="
+    expect b64's bytes_of_url_base64("-_-_AA==") is block
+    expect b64's bytes_of_base64("+/+/AA==") is block
+end
+
+to test_passing_over
+    expect b64's bytes_of_base64("TW90 aCDi\nnJM=") as text is "Moth ✓"
+    expect b64's bytes_of_base64("TW90aCDinJM") as text is "Moth ✓"
+    expect b64's bytes_of_base32("mzxw6ytboi") as text is "foobar"
+end

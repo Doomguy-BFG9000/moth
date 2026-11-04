@@ -22,6 +22,7 @@
 use "sockets.moth" as mail_net
 use "dates.moth" as mail_dates
 use "hash.moth" as mail_hash
+use "base64.moth" as mail_b64
 use the library "msvcrt"
     "_time64" as mail_windows_time(a pointer) gives a long whole number
 end
@@ -29,8 +30,6 @@ use the library "c"
     "time" as mail_unix_time(a pointer) gives a long whole number
 end
 
-set mail_alphabet to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-set mail_codes to mail_alphabet as bytes
 set mail_cr to (list of 13) as bytes as text
 set mail_line_end to (list of 13, 10) as bytes as text
 set mail_types to dictionary where "txt" is "text/plain", "html" is "text/html", "htm" is "text/html",
@@ -397,73 +396,14 @@ end
 
 # ---------- base64 ----------
 
-# text's UTF-8, or bytes, in base64
+# text's UTF-8, or bytes, in base64 (base64.moth's)
 to base64_of with data
-    set b to data as bytes
-    set n to length of b
-    set rest to remainder of n divided by 3
-    set size to (n - rest) / 3 * 4
-    if rest is not 0
-        set size to size + 4
-    end
-    set out to size bytes
-    set k to 1
-    set at to 1
-    repeat while k + 2 is at most n
-        set v to byte k of b * 65536 + byte (k + 1) of b * 256 + byte (k + 2) of b
-        set byte at of out to byte ((shift v right by 18) + 1) of mail_codes
-        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of mail_codes
-        set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of mail_codes
-        set byte (at + 3) of out to byte ((v bit and 63) + 1) of mail_codes
-        set k to k + 3
-        set at to at + 4
-    end
-    if rest is not 0
-        set v to byte k of b * 65536
-        if rest is 2
-            set v to v + byte (k + 1) of b * 256
-        end
-        set byte at of out to byte ((shift v right by 18) + 1) of mail_codes
-        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of mail_codes
-        set byte (at + 2) of out to 61 # =
-        if rest is 2
-            set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of mail_codes
-        end
-        set byte (at + 3) of out to 61
-    end
-    return out as text
+    return mail_b64's base64_of(data)
 end
 
 # base64 back to its bytes; what isn't base64 (line ends, spaces, =) is passed over
 to bytes_of_base64 with words
-    set values to 256 bytes # each letter's value, plus 1; 0 for one that isn't base64's
-    for each k from 1 to 64
-        set byte (byte k of mail_codes + 1) of values to k
-    end
-    set made to empty list
-    set v to 0
-    set held to 0
-    for each b in words as bytes
-        set value to byte (b + 1) of values
-        if value is not 0
-            set v to v * 64 + value - 1
-            set held to held + 1
-            if held is 4
-                add shift v right by 16 to made
-                add (shift v right by 8) bit and 255 to made
-                add v bit and 255 to made
-                set v to 0
-                set held to 0
-            end
-        end
-    end
-    if held is 3
-        add shift v right by 10 to made
-        add (shift v right by 2) bit and 255 to made
-    else if held is 2
-        add shift v right by 4 to made
-    end
-    return made as bytes
+    return mail_b64's bytes_of_base64(words)
 end
 
 # ---------- sending ----------
