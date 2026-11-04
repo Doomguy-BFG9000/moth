@@ -18,7 +18,9 @@ const scripted = (text) => text.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--
 
 // the page, with the modules in it
 export function webpage(read = (file) => readFileSync(new URL(`./${file}`, import.meta.url), "utf8")) {
-  let html = read("index.html");
+  // without the site's own parts, marked "site only": its motion, which loads GSAP from the web, and which a
+  // program's page, needing nothing else, goes without
+  let html = read("index.html").replace(/\n[ \t]*<!-- site only[^]*?<!-- \/site only -->/g, "");
   const swap = (from, to) => {
     if (!html.includes(from)) throw new Error(`index.html has no ${from}`);
     html = html.replace(from, () => to); // a function, so a $ in `to` is itself
