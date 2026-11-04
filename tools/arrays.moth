@@ -42,6 +42,16 @@ if it fails
     set arrays_native to no
 end
 
+# BLAS, for matmul, once use_blas finds it: OpenBLAS as its releases and Linux's packages have it, or as
+# NumPy's wheels do (64-bit whole numbers, and its names with scipy_ before and 64_ after)
+use the library "libopenblas" or "openblas"
+    "cblas_dgemm" as arrays_dgemm(a whole number, a whole number, a whole number, a whole number, a whole number, a whole number, a number, a list of numbers, a whole number, a list of numbers, a whole number, a number, a list of numbers, a whole number)
+end
+use the library "libscipy_openblas64_" or "scipy_openblas64_"
+    "scipy_cblas_dgemm64_" as arrays_dgemm64(a whole number, a whole number, a whole number, a long whole number, a long whole number, a long whole number, a number, a list of numbers, a long whole number, a list of numbers, a long whole number, a number, a list of numbers, a long whole number)
+end
+set arrays_blas to nothing
+
 # an array is a record of this kind: `shape`, a list of how long each axis is, and `data`, its numbers, the
 # last axis's one after another, then the next, as C and NumPy lay them out
 kind arrays_record with shape, data
@@ -521,6 +531,33 @@ end
 
 # ---------- matrices ----------
 
+# Has matmul use BLAS from now on, for all but the smallest: OpenBLAS (libopenblas.dll on Windows, from
+# github.com/OpenMathLib/OpenBLAS/releases, beside the program; libopenblas.so.0 on Linux, from its packages),
+# or NumPy's own (numpy.libs/libscipy_openblas64_-*.dll, copied beside the program as libscipy_openblas64_.dll).
+# Gives which it found, "openblas" or "openblas64", or nothing, when matmul stays as it was. A program that
+# uses it is built with --allow-libraries. BLAS adds in its own order, so its answers can differ from Moth's in
+# the last digits, as NumPy's do.
+to use_blas
+    for each way in list of "openblas", "openblas64"
+        try
+            set out to list of 0
+            arrays_blas_matmul(way, out, (list of 2), (list of 3), 1, 1, 1)
+            if item 1 of out is 6
+                set arrays_blas to way
+                return way
+            end
+        if it fails
+            set arrays_blas to nothing
+        end
+    end
+    return nothing
+end
+
+# matmul back to Moth's own, without BLAS
+to stop_using_blas
+    set arrays_blas to nothing
+end
+
 # a by b as matrices: m by k times k by n is m by n. An array of one axis is a row on the left and a column on
 # the right, and two of them give a number; an array of more axes is matrices one after another, times one
 # matrix or as many
@@ -896,12 +933,25 @@ to arrays_binary_moth with op, out, a, b, outer, inner, oa, sa0, sa1, ob, sb0, s
 end
 
 to arrays_run_matmul with out, a, b, m, k, n, oa, ob, oo
+    if arrays_blas is not nothing and oa is 0 and ob is 0 and oo is 0 and m * k * n is at least 4096 and k is greater than 0
+        arrays_blas_matmul(arrays_blas, out, a, b, m, k, n)
+        return nothing
+    end
     if arrays_native
         if arrays_k_matmul(out, a, b, m, k, n, oa, ob, oo) is 0
             return nothing
         end
     end
     arrays_matmul_moth(out, a, b, m, k, n, oa, ob, oo)
+end
+
+# out = a times b through BLAS's dgemm: rows after rows (101), neither turned (111)
+to arrays_blas_matmul with way, out, a, b, m, k, n
+    if way is "openblas"
+        arrays_dgemm(101, 111, 111, m, n, k, 1, a, k, b, n, 0, out, n)
+    else
+        arrays_dgemm64(101, 111, 111, m, n, k, 1, a, k, b, n, 0, out, n)
+    end
 end
 
 # rt_k_matmul, in Moth: each of out's numbers 0 + a's first times b's first + ..., in that order

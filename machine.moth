@@ -35685,7 +35685,7 @@ end
 # a NaN, a division by 0), which arrays.moth then does in Moth, so what happens is what Moth says happens.
 
 set own_kernel_names to dictionary where "numbers_binary" is "rt_k_binary", "numbers_matmul" is "rt_k_matmul",
-    "numbers_reduce" is "rt_k_reduce"
+    "numbers_reduce" is "rt_k_reduce", "numbers_convert" is "rt_k_convert"
 
 # whether a library's function is one of Moth's own: from `use the library "moth"`
 to own_library with nat
@@ -35821,6 +35821,96 @@ to emit_kernels with a, target
     if "numbers_reduce" is in used
         emit_kernel_reduce(a, target)
     end
+    if "numbers_convert" is in used
+        emit_kernel_convert(a, target)
+    end
+end
+
+# rt_k_convert(op, list, bytes): a list of numbers and bytes, as C keeps numbers of other sizes, for as many
+# numbers as the list has: op 1 the list's numbers into the bytes as floats (4 bytes each), op 2 the bytes'
+# floats into the list; op 3 the list's numbers, each a whole number, into the bytes as 64-bit whole numbers,
+# and op 4 those back into the list. The bytes must have room. A NaN read is the NaN arithmetic makes.
+to emit_kernel_convert with a, target
+    set refuse to new_label(a)
+    set done to new_label(a)
+    mark(a, "rt_k_convert")
+    kernel_enter(a, target, 3)
+    kernel_small(a, 1, refuse)
+    load(a, r8, kernel_input(2)) # the list: how many, and where they are
+    load(a, rcx, mem(r8, 0))
+    load(a, r8, mem(r8, 16))
+    load(a, r9, kernel_input(3)) # the bytes: how many, and where they are
+    load(a, rdx, mem(r9, 0))
+    load(a, r9, mem(r9, 8))
+    load(a, rax, kernel_input(1))
+    set steps to list of 4, 4, 8, 8
+    set starts to list of new_label(a), new_label(a), new_label(a), new_label(a)
+    for each k from 1 to 4
+        alui(a, "cmp", rax, k)
+        jcc(a, cc_e, item k of starts)
+    end
+    jmp_to(a, refuse)
+    for each k from 1 to 4
+        set loop to new_label(a)
+        mark(a, item k of starts)
+        mov_rr(a, rax, rcx) # the bytes it takes, at most the bytes there are
+        imul_ri(a, rax, rax, item k of steps)
+        alu(a, "cmp", rax, rdx)
+        jcc(a, cc_a, refuse)
+        mark(a, loop)
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_e, done)
+        if k is 1 or k is 3 # a number from the list, which must be one
+            load(a, rax, mem(r8, 0))
+            mov_rr(a, r10, rax)
+            movi64(a, r11, bits_nothing)
+            alu(a, "sub", r10, r11)
+            alui(a, "cmp", r10, 3)
+            jcc(a, cc_b, refuse)
+            mov_rr(a, r10, rax)
+            shifti(a, "shr", r10, 48)
+            alui(a, "cmp", r10, kind_text)
+            jcc(a, cc_ae, refuse)
+            movq_xr(a, xmm0, rax)
+            if k is 1
+                cvtsd2ss(a, xmm0, xmm0)
+                movq_rx(a, rax, xmm0)
+                store32(a, mem(r9, 0), rax)
+            else # whole, and from -2^63 up to (not including) 2^63: what it is made back is what it was
+                cvttsd2si(a, rax, xmm0)
+                cvtsi2sd(a, xmm1, rax)
+                ucomisd(a, xmm0, reg_at(xmm1))
+                jcc(a, cc_ne, refuse)
+                jcc(a, cc_p, refuse)
+                store(a, mem(r9, 0), rax)
+            end
+        else # a number for the list, a NaN made the one Moth makes
+            set number_made to new_label(a)
+            if k is 2
+                movss_load(a, xmm0, mem(r9, 0))
+                cvtss2sd(a, xmm0, reg_at(xmm0))
+            else
+                load(a, rax, mem(r9, 0))
+                cvtsi2sd(a, xmm0, rax)
+            end
+            ucomisd(a, xmm0, reg_at(xmm0))
+            jcc(a, cc_np, number_made)
+            movi64(a, rax, list of 0, 0, 0, 0, 0, 0, 0xF8, 0xFF)
+            movq_xr(a, xmm0, rax)
+            mark(a, number_made)
+            movsd_store(a, mem(r8, 0), xmm0)
+        end
+        alui(a, "add", r8, 8)
+        alui(a, "add", r9, item k of steps)
+        dec_r(a, rcx)
+        jmp_to(a, loop)
+    end
+    mark(a, done)
+    movi(a, rax, 0)
+    kernel_leave(a)
+    mark(a, refuse)
+    movi(a, rax, 1)
+    kernel_leave(a)
 end
 
 # rt_k_binary(op, out, a, b, outer, inner, a_from, a_step_out, a_step, b_from, b_step_out, b_step, out_from):
@@ -36404,8 +36494,12 @@ to library_desc with a, nat, target
     data_here(a, label)
     put64(dat, 0)
     for each pointed in list of block, c_name, shown
-        absolute(a, "data", length of dat, pointed, 0)
-        put64(dat, 0)
+        if pointed is c_name and symbol of nat is "at an address" # 0: none to find
+            put64(dat, 0)
+        else
+            absolute(a, "data", length of dat, pointed, 0)
+            put64(dat, 0)
+        end
     end
     return label
 end
@@ -36695,6 +36789,20 @@ to gen_library_call with fc, e
     end
     set types to types of nat
     set n to length of types
+    # a function "at an address" (DESIGN §104): its first input is where it is, which C doesn't get
+    set by_address to not own and symbol of nat is "at an address"
+    set first_skipped to 0
+    set c_types to types
+    if by_address
+        if n is 0 or item 1 of types is not "a pointer"
+            fail with front's problem(at of e, "a function at an address takes where it is first, as a pointer")
+        end
+        set first_skipped to 1
+        set c_types to items 2 to n of types
+        if n is 1
+            set c_types to empty list
+        end
+    end
     if not own
         lea(a, rcx, rip(desc))
         call_to(a, "rt_lib_ready")
@@ -36732,7 +36840,7 @@ to gen_library_call with fc, e
         set place_number to 1
     end
     set i to 0
-    for each type_name in types
+    for each type_name in c_types
         add 1 to i
         set is_float to type_name is "a number" or type_name is "a float"
         set valued to by_value_of(nat, type_name)
@@ -36745,9 +36853,9 @@ to gen_library_call with fc, e
                     set deref to 0
                 end
                 if place_number is at most 4
-                    add record with input i, reg item place_number of int_regs, x -1, float no, slot -1, deref deref to places
+                    add record with input i + first_skipped, reg item place_number of int_regs, x -1, float no, slot -1, deref deref to places
                 else
-                    add record with input i, reg -1, x -1, float no, slot stacked, deref deref to places
+                    add record with input i + first_skipped, reg -1, x -1, float no, slot stacked, deref deref to places
                     add 1 to stacked
                 end
             else
@@ -36768,16 +36876,16 @@ to gen_library_call with fc, e
                     for each c in classes
                         if c is "int"
                             add 1 to ints
-                            add record with input i, reg item ints of int_regs, x -1, float no, slot -1, deref 8 * j to places
+                            add record with input i + first_skipped, reg item ints of int_regs, x -1, float no, slot -1, deref 8 * j to places
                         else
-                            add record with input i, reg -1, x floats, float yes, slot -1, deref 8 * j to places
+                            add record with input i + first_skipped, reg -1, x floats, float yes, slot -1, deref 8 * j to places
                             add 1 to floats
                         end
                         add 1 to j
                     end
                 else
                     for each j from 0 to (size + 7 - remainder of (size + 7) divided by 8) / 8 - 1
-                        add record with input i, reg -1, x -1, float no, slot stacked, deref 8 * j to places
+                        add record with input i + first_skipped, reg -1, x -1, float no, slot stacked, deref 8 * j to places
                         add 1 to stacked
                     end
                 end
@@ -36785,19 +36893,19 @@ to gen_library_call with fc, e
         else if windows
             add 1 to place_number
             if place_number is at most 4
-                add record with input i, reg item place_number of int_regs, x place_number - 1, float is_float, slot -1, deref -1 to places
+                add record with input i + first_skipped, reg item place_number of int_regs, x place_number - 1, float is_float, slot -1, deref -1 to places
             else
-                add record with input i, reg -1, x -1, float is_float, slot stacked, deref -1 to places
+                add record with input i + first_skipped, reg -1, x -1, float is_float, slot stacked, deref -1 to places
                 add 1 to stacked
             end
         else if is_float and floats is less than 8
-            add record with input i, reg -1, x floats, float yes, slot -1, deref -1 to places
+            add record with input i + first_skipped, reg -1, x floats, float yes, slot -1, deref -1 to places
             add 1 to floats
         else if not is_float and ints is less than 6
             add 1 to ints
-            add record with input i, reg item ints of int_regs, x -1, float no, slot -1, deref -1 to places
+            add record with input i + first_skipped, reg item ints of int_regs, x -1, float no, slot -1, deref -1 to places
         else
-            add record with input i, reg -1, x -1, float is_float, slot stacked, deref -1 to places
+            add record with input i + first_skipped, reg -1, x -1, float is_float, slot stacked, deref -1 to places
             add 1 to stacked
         end
     end
@@ -36826,9 +36934,12 @@ to gen_library_call with fc, e
         add 1 to i
         set slot_at to mem(rsp, staging + 8 * (i - 1))
         load(a, rax, mem(rbp, 16 + 8 * (n - i)))
-        if type_name is "bytes"
+        if type_name is "bytes" # Moth's own kernels get the bytes themselves, and check them; anything else
+            # where they are
             untag(a, rax)
-            load(a, rax, mem(rax, 8))
+            if not own
+                load(a, rax, mem(rax, 8))
+            end
         else if type_name is "a list of numbers" # Moth's own kernels get the list, and check it themselves;
             # anything else where its numbers are, each checked to be one
             untag(a, rax)
@@ -36982,10 +37093,27 @@ to gen_library_call with fc, e
     if own # in a moment, and with the program's lists, which no other thread may change meanwhile
         call_to(a, item (symbol of nat) of own_kernel_names)
     else
+        if by_address # where it is, which can't be nothing
+            set nowhere to new_label(a)
+            load(a, r11, mem(rsp, staging))
+            test_rr(a, r11, r11)
+            jcc(a, cc_e, nowhere)
+            set was to enter_cold(a)
+            mark(a, nowhere)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input 1 to be where a function is, not nothing")
+            jmp_to(a, "rt_e_end")
+            leave_cold(a, was)
+        end
         if threading of a # what it does, the other threads' turns go on meanwhile
             call_to(a, "rt_gil_park")
         end
-        call_import(a, desc)
+        if by_address
+            load(a, r11, mem(rsp, staging))
+            call_r(a, r11)
+        else
+            call_import(a, desc)
+        end
         if threading of a
             call_to(a, "rt_gil_unpark")
         end
@@ -37826,7 +37954,16 @@ to emit_libraries with a, target
         store(a, mem(r12, 0), rax)
         load(a, rax, mem(r14, 40))
         store(a, mem(r12, 16), rax)
-        mark(a, have_handle) # and the function in it
+        mark(a, have_handle) # and the function in it, unless it's at an address the program gives (no name)
+        set by_name to new_label(a)
+        load(a, rax, mem(rbx, 16))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, by_name)
+        movi(a, rax, 1)
+        store(a, mem(rbx, 0), rax)
+        movi(a, rax, 0)
+        jmp_to(a, ready_out)
+        mark(a, by_name)
         if target is "windows"
             win_enter(a)
             load(a, rcx, mem(r12, 0))

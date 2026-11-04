@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import https from "node:https";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
@@ -1647,6 +1647,166 @@ memcpy(to_here, (list of 1, "two"), 16)`);
     "p.moth:2:5: 'memcpy' needs input 2 to be a list of numbers, not a list with text in it", 1]);
   assert.throws(() => machine('use the library "msvcrt"\n    f(a whole number) gives a list of numbers\nend\n', { target, name: "p.moth" }),
     (err) => err.reason === "a library's function can't give a list of numbers: only a function's input can be one");
+});
+
+// A library's function "at an address" (DESIGN §104): the first input is where the function is, a pointer C
+// gave, as ONNX Runtime's C API gives a table of them
+test("a library's function at an address is called where a pointer says it is", { skip }, () => {
+  const finding = target === "windows" ? `use the library "kernel32"
+    LoadLibraryW(wide text) gives a pointer
+    GetProcAddress(a pointer, text) gives a pointer
+end
+to found with name
+    return GetProcAddress(LoadLibraryW("msvcrt.dll"), name)
+end` : `use the library "c"
+    dlsym(a pointer, text) gives a pointer
+end
+to found with name
+    return dlsym(nothing, name)
+end`;
+  const ran = libraryRun(`${finding}
+use the library "msvcrt" or "c"
+    "at an address" as call_abs(a pointer, a whole number) gives a whole number
+    "at an address" as call_strlen(a pointer, text) gives a long whole number
+end
+say call_abs(found("abs"), -5) " " call_strlen(found("strlen"), "héllo")
+call_abs(nothing, 1)`);
+  assert.deepEqual([ran.stdout, ran.stderr.split("\n")[0], ran.status], ["5 6\n", `p.moth:${target === "windows" ? 9 : 8}:5: 'call_abs' needs input 1 to be where a function is, not nothing`, 1]);
+  assert.throws(() => machine('use the library "c"\n    "at an address" as f(a whole number) gives a whole number\nend\nf(1)\n', { target, name: "p.moth" }),
+    (err) => err.reason === "a function at an address takes where it is first, as a pointer");
+  const refused = libraryRun(`${finding}
+say found("abs")`, []);
+  assert.match(refused.stderr, /this program isn't allowed to use libraries \(start it with --allow-libraries\)/);
+});
+
+// A small ONNX model, written byte by byte as protobuf: Y = Relu(X · W + B), X [batch, 3], W [3, 2], B [2], in
+// floats (1) or doubles (11)
+function onnxModel(type) {
+  const varint = (n) => {
+    const out = [];
+    let v = BigInt(n);
+    do {
+      let b = Number(v & 0x7fn);
+      v >>= 7n;
+      if (v) b |= 0x80;
+      out.push(b);
+    } while (v);
+    return out;
+  };
+  const int = (field, n) => [...varint(field << 3), ...varint(n)];
+  const bytes = (field, b) => [...varint((field << 3) | 2), ...varint(b.length), ...b];
+  const str = (field, s) => bytes(field, [...Buffer.from(s, "utf8")]);
+  const raw = (values) => {
+    const buf = Buffer.alloc(values.length * (type === 1 ? 4 : 8));
+    values.forEach((v, i) => (type === 1 ? buf.writeFloatLE(v, i * 4) : buf.writeDoubleLE(v, i * 8)));
+    return [...buf];
+  };
+  const tensor = (name, dims, values) => [...dims.flatMap((d) => int(1, d)), ...int(2, type), ...str(8, name), ...bytes(9, raw(values))];
+  const dim = (d) => bytes(1, typeof d === "number" ? int(1, d) : str(2, d));
+  const valueInfo = (name, dims) => [...str(1, name), ...bytes(2, bytes(1, [...int(1, type), ...bytes(2, dims.flatMap(dim))]))];
+  const node = (inputs, outputs, op) => [...inputs.flatMap((i) => str(1, i)), ...outputs.flatMap((o) => str(2, o)), ...str(4, op)];
+  const graph = [...bytes(1, node(["X", "W"], ["XW"], "MatMul")), ...bytes(1, node(["XW", "B"], ["Z"], "Add")), ...bytes(1, node(["Z"], ["Y"], "Relu")),
+    ...str(2, "dense"), ...bytes(5, tensor("W", [3, 2], [1, -1, 0.5, 2, 2, 0.25])), ...bytes(5, tensor("B", [2], [0.5, 1])),
+    ...bytes(11, valueInfo("X", ["batch", 3])), ...bytes(12, valueInfo("Y", ["batch", 2]))];
+  return Buffer.from([...int(1, 7), ...str(2, "moth"), ...bytes(7, graph), ...bytes(8, [...str(1, ""), ...int(2, 13)])]);
+}
+
+// ONNX Runtime comes with Windows 11; on Linux, from its release, where the test looks for it
+const onnxHere = target === "windows" ? existsSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "onnxruntime.dll"))
+  : ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib", "/usr/local/lib"].some((d) => existsSync(join(d, "libonnxruntime.so")) || existsSync(join(d, "libonnxruntime.so.1")));
+test("tools/onnx.moth runs an ONNX model through ONNX Runtime's C API, in floats and in doubles", { skip: skip || (!onnxHere && "ONNX Runtime isn't installed") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-onnx-"));
+  try {
+    writeFileSync(join(dir, "dense.onnx"), onnxModel(1));
+    writeFileSync(join(dir, "dense64.onnx"), onnxModel(11));
+    const files = {};
+    for (const name of ["onnx.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "onnx.moth" as onnx
+use "arrays.moth" as arrays
+say length of split onnx's version() by "."
+for each file in list of "dense.onnx", "dense64.onnx"
+    set model to onnx's load(file)
+    say model
+    for each put in onnx's inputs(model)
+        say put's name " " put's type " " put's shape
+    end
+    for each put in onnx's outputs(model)
+        say put's name " " put's type " " put's shape
+    end
+    set x to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6), (list of -1, -1, -1))
+    say item "Y" of onnx's run(model, dictionary where "X" is x)
+    onnx's close(model)
+end
+set model to onnx's load("dense.onnx")
+for each wrong in list of (dictionary where "Z" is 1), (dictionary where "X" is arrays's zeros(list of 2, 4))
+    try
+        onnx's run(model, wrong)
+    if it fails with why
+        say item 1 of split why by "\\n"
+    end
+end
+try
+    onnx's load("nowhere.onnx")
+if it fails with why
+    say "fails: " position of "nowhere.onnx" in why is greater than 0
+end
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`3
+an ONNX model (dense.onnx)
+X float [-1, 3]
+Y float [-1, 2]
+[[8.5, 4.75], [19, 8.5], [0, 0]]
+an ONNX model (dense64.onnx)
+X double [-1, 3]
+Y double [-1, 2]
+[[8.5, 4.75], [19, 8.5], [0, 0]]
+the model needs an input called 'X'
+ONNX Runtime: Got invalid dimensions for input: X for the following indices
+fails: yes
+`, "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// BLAS for matmul: OpenBLAS as Linux has it, or NumPy's copy of it, which the test puts beside the program
+function numpyBlas() {
+  const asked = spawnSync("python", ["-E", "-c", "import numpy, os; print(os.path.dirname(numpy.__file__) + '.libs')"], { encoding: "utf8", cwd: tmpdir() });
+  if (asked.error || asked.status !== 0) return null;
+  const folder = asked.stdout.trim();
+  const found = existsSync(folder) && readdirSync(folder).find((f) => /^libscipy_openblas64_.*\.dll$/.test(f));
+  return found ? join(folder, found) : null;
+}
+const blasHere = target === "windows" ? numpyBlas()
+  : ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib"].some((d) => existsSync(join(d, "libopenblas.so.0")) || existsSync(join(d, "libopenblas.so"))) && "system";
+test("arrays.moth's matmul goes through BLAS once use_blas finds it, and gives what its own loops give", { skip: skip || (!blasHere && "OpenBLAS isn't installed (nor NumPy, which has a copy)") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-blas-"));
+  try {
+    if (target === "windows") copyFileSync(blasHere, join(dir, "libscipy_openblas64_.dll"));
+    const files = { "arrays.moth": readFileSync(new URL("./tools/arrays.moth", import.meta.url), "utf8"), "math.moth": readFileSync(new URL("./math.moth", import.meta.url), "utf8") };
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "arrays.moth" as arrays
+set p to arrays's random(list of 70, 50)
+set q to arrays's random(list of 50, 30)
+set own to arrays's matmul(p, q)
+set found to arrays's use_blas()
+say found is "openblas" or found is "openblas64"
+set blas to arrays's matmul(p, q)
+say arrays's close(own, blas, 0.000000001) " " blas's shape
+say arrays's to_list(arrays's matmul(arrays's array(list of (list of 1, 2)), arrays's array(list of (list of 3), (list of 4))))
+arrays's stop_using_blas()
+say arrays's same(arrays's matmul(p, q), own)
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\nyes [70, 30]\n[[11]]\nyes\n", "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
