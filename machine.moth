@@ -27549,6 +27549,7 @@ end
 # task gave is item n of task_gave, a list among the roots too, so it's there once the slot is another's.
 
 set thr_max to 256
+set thr_foreign to 16 # the last slots, for threads C made while they're in one of the program's callbacks
 set thr_size to 480
 set thr_state to 8 # 0 a free slot, 1 running, 2 done
 set thr_holding to 16 # 1 while it holds the turn
@@ -27932,25 +27933,114 @@ to emit_threads with a, target
     ret(a)
 
     # rt_gil_cb_in: a function C calls back, before it works out what it was given: the turn, for the thread
-    # it's called on, which let it go to call C. A thread the program didn't make has no turn to take, and
-    # ends the program. rt_gil_cb_out, before it goes back to C: the turn let go again, rax and xmm0 kept.
+    # it's called on, which let it go to call C. A thread C made (DESIGN §92) takes one of the last slots, with
+    # lock cmpxchg, so two such threads can't both have one, and waits for one if all of them are in use; its
+    # thread's own storage is set to it, and its depth (in thr_nargs) is 1, one more for a callback inside a
+    # callback on it. rt_gil_cb_out, before it goes back to C: the turn let go again, rax and xmm0 kept, and a
+    # slot C's thread took given back when it goes back out of its first callback.
     set foreign to new_label(a)
+    set not_foreign to new_label(a)
+    set seek_slot to new_label(a)
+    set next_try to new_label(a)
+    set claimed to new_label(a)
     mark(a, "rt_gil_cb_in")
+    if not windows # a thread C made has no GS base of the program's, so asked for first: gs:0 would be address 0
+        alui(a, "sub", rsp, 8)
+        movi(a, rdi, 4100) # ARCH_GET_GS
+        mov_rr(a, rsi, rsp)
+        sys_call(a, 158)
+        load(a, rax, mem(rsp, 0))
+        alui(a, "add", rsp, 8)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, foreign)
+    end
     call_to(a, "rt_gil_mine")
     test_rr(a, rax, rax)
     jcc(a, cc_e, foreign)
     mov_rr(a, rcx, rax)
+    lea(a, rdx, rip_plus("thr_slots", thr_size * (thr_max - thr_foreign)))
+    alu(a, "cmp", rcx, rdx)
+    jcc(a, cc_b, not_foreign)
+    load(a, rax, mem(rcx, thr_nargs)) # C's thread, in a callback already: one deeper
+    inc_r(a, rax)
+    store(a, mem(rcx, thr_nargs), rax)
+    mark(a, not_foreign)
     jmp_to(a, "rt_gil_take")
     mark(a, foreign)
-    movi(a, rcx, 70)
-    jmp_to(a, "rt_exit")
+    push_r(a, rbx)
+    mark(a, seek_slot)
+    lea(a, rbx, rip_plus("thr_slots", thr_size * (thr_max - thr_foreign)))
+    movi(a, rdx, thr_foreign)
+    mark(a, next_try)
+    movi(a, rax, 0)
+    movi(a, rcx, 1)
+    enc(a, (list of 0xF0), yes, (list of 0x0F, 0xB1), rcx, mem(rbx, thr_state), empty list) # lock cmpxchg: 0 to 1
+    jcc(a, cc_e, claimed)
+    alui(a, "add", rbx, thr_size)
+    dec_r(a, rdx)
+    jcc(a, cc_ne, next_try)
+    raw(a, list of 0xF3, 0x90) # pause: every one in use, so round again
+    jmp_to(a, seek_slot)
+    mark(a, claimed)
+    store(a, mem(rbx, 0), rbx)
+    storei(a, mem(rbx, thr_holding), 0)
+    storei(a, mem(rbx, thr_saved), 0)
+    storei(a, mem(rbx, thr_try), 0)
+    storei(a, mem(rbx, thr_number), 0)
+    storei(a, mem(rbx, thr_nargs), 1)
+    for each k from 0 to 2
+        storei(a, mem(rbx, thr_builder + 8 * k), 0)
+    end
+    lea(a, rax, mem(rsp, 16)) # its stack's top: what the program does on it is below where C called it
+    store(a, mem(rbx, thr_top), rax)
+    if windows
+        win_enter(a)
+        load(a, rcx, rip("tls_index"))
+        mov_rr(a, rdx, rbx)
+        call_import(a, "imp_TlsSetValue")
+        win_leave(a)
+    else
+        movi(a, rdi, 4097) # ARCH_SET_GS
+        mov_rr(a, rsi, rbx)
+        sys_call(a, 158)
+    end
+    mov_rr(a, rcx, rbx)
+    pop_r(a, rbx)
+    jmp_to(a, "rt_gil_take")
+
+    set kept to new_label(a)
     mark(a, "rt_gil_cb_out")
     push_r(a, rax)
-    alui(a, "sub", rsp, 8)
+    alui(a, "sub", rsp, 16)
     movsd_store(a, mem(rsp, 0), xmm0)
+    load(a, rcx, rip("thr_current"))
+    store(a, mem(rsp, 8), rcx)
     call_to(a, "rt_gil_give")
+    load(a, rcx, mem(rsp, 8))
+    lea(a, rdx, rip_plus("thr_slots", thr_size * (thr_max - thr_foreign)))
+    alu(a, "cmp", rcx, rdx)
+    jcc(a, cc_b, kept)
+    load(a, rax, mem(rcx, thr_nargs))
+    dec_r(a, rax)
+    store(a, mem(rcx, thr_nargs), rax)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, kept)
+    if windows # out of its first callback: its thread's storage cleared, then its slot free again
+        win_enter(a)
+        load(a, rcx, rip("tls_index"))
+        movi(a, rdx, 0)
+        call_import(a, "imp_TlsSetValue")
+        win_leave(a)
+    else
+        movi(a, rdi, 4097)
+        movi(a, rsi, 0)
+        sys_call(a, 158)
+    end
+    load(a, rcx, mem(rsp, 8))
+    storei(a, mem(rcx, thr_state), 0)
+    mark(a, kept)
     movsd_load(a, xmm0, mem(rsp, 0))
-    alui(a, "add", rsp, 8)
+    alui(a, "add", rsp, 16)
     pop_r(a, rax)
     ret(a)
 
@@ -27995,7 +28085,7 @@ to emit_threads with a, target
     lea(a, rbx, rip_plus("thr_slots", thr_size))
     movi(a, rcx, 1)
     mark(a, seek)
-    alui(a, "cmp", rcx, thr_max)
+    alui(a, "cmp", rcx, thr_max - thr_foreign)
     jcc(a, cc_ae, full)
     load(a, rax, mem(rbx, thr_state))
     test_rr(a, rax, rax)
@@ -35649,6 +35739,75 @@ set library_takers to dictionary where "a whole number" is "rt_lib_whole", "a lo
     "a pointer" is "rt_lib_pointer", "text" is "rt_lib_text", "wide text" is "rt_lib_wide"
 set library_wants to dictionary where "a whole number" is "a whole number from -2147483648 to 4294967295",
     "a long whole number" is "a whole number", "a pointer" is "a pointer (a whole number, nothing or bytes)"
+# C's other whole numbers (DESIGN §92), by the words a block names them with: how many bytes each is, whether
+# it can be below 0, the least and most it takes, and what a mistake says it must be
+set c_wholes to dictionary where "a byte" is (list of 1, no, 0, 255, "a whole number from 0 to 255"),
+    "a signed byte" is (list of 1, yes, -128, 127, "a whole number from -128 to 127"),
+    "a short whole number" is (list of 2, yes, -32768, 32767, "a whole number from -32768 to 32767"),
+    "an unsigned short whole number" is (list of 2, no, 0, 65535, "a whole number from 0 to 65535"),
+    "an unsigned whole number" is (list of 4, no, 0, 4294967295, "a whole number from 0 to 4294967295"),
+    "an unsigned long whole number" is (list of 8, no, 0, 0, "a whole number from 0 to 2^64 - 1")
+to c_wholes_known
+    set k to 0
+    for each type_name in c_wholes
+        add 1 to k
+        set item type_name of library_takers to "rt_lib_c" + k
+        set item type_name of library_wants to item 5 of item type_name of c_wholes
+    end
+end
+c_wholes_known()
+
+# rax, a C whole number of this type in its low bytes, as a number in xmm0
+to c_whole_value with a, type_name
+    set spec to item type_name of c_wholes
+    set size to item 1 of spec
+    set signed to item 2 of spec
+    if size is 1 and signed
+        enc(a, empty list, yes, (list of 0x0F, 0xBE), rax, reg_at(rax), empty list) # movsx rax, al
+    else if size is 1
+        movzx8(a, rax, rax)
+    else if size is 2 and signed
+        movsx16(a, rax, rax)
+    else if size is 2
+        enc(a, empty list, no, (list of 0x0F, 0xB7), rax, reg_at(rax), empty list) # movzx eax, ax
+    else if size is 4 and signed
+        movsxd(a, rax, rax)
+    else if size is 4
+        mov32_rr(a, rax, rax) # the top half cleared
+    end
+    if size is 8 and not signed # from 2^63 up: half of it, its lowest bit kept, made a number and doubled
+        set high to new_label(a)
+        set done to new_label(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_s, high)
+        cvtsi2sd(a, xmm0, rax)
+        jmp_to(a, done)
+        mark(a, high)
+        mov_rr(a, rcx, rax)
+        alui(a, "and", rcx, 1)
+        shifti(a, "shr", rax, 1)
+        alu(a, "or", rax, rcx)
+        cvtsi2sd(a, xmm0, rax)
+        sse_math(a, "+", xmm0, reg_at(xmm0))
+        mark(a, done)
+    else
+        cvtsi2sd(a, xmm0, rax)
+    end
+end
+
+# the low bytes of rax, as many as this type has, into memory
+to c_whole_store with a, at, type_name
+    set size to item 1 of item type_name of c_wholes
+    if size is 1
+        store8(a, at, rax)
+    else if size is 2
+        store16(a, at, rax)
+    else if size is 4
+        store32(a, at, rax)
+    else
+        store(a, at, rax)
+    end
+end
 
 # xmm x: the 4 bytes at `at`, a float
 to movss_load with a, x, at
@@ -35673,6 +35832,68 @@ to is_structure with nat, type_name
     return named is not nothing and named is in structures of nat
 end
 
+# `a point by value`: the structure's name, or nothing for any other type
+to by_value_of with nat, type_name
+    set type_text to "" + type_name
+    set ending to " by value"
+    if length of type_text is at most length of ending
+        return nothing
+    end
+    if items (length of type_text - length of ending + 1) to (length of type_text) of type_text is not ending
+        return nothing
+    end
+    set named to named_type(items 1 to (length of type_text - length of ending) of type_text)
+    if named is not nothing and named is in structures of nat
+        return named
+    end
+    return nothing
+end
+
+# A structure's eightbytes as Linux's calling convention sorts them: "sse" for one of numbers and floats alone,
+# "int" for any other; or nothing for one past 16 bytes, which goes in memory
+to struct_classes with nat, structure_name
+    set laid to structure_layout(nat, structure_name)
+    if size of laid is greater than 16
+        return nothing
+    end
+    set pieces to empty list
+    struct_pieces(nat, structure_name, 0, pieces)
+    set made to empty list
+    for each j from 0 to (size of laid + 7 - remainder of (size of laid + 7) divided by 8) / 8 - 1
+        set kind to "sse"
+        set any to no
+        for each p in pieces
+            if item 1 of p is less than 8 * j + 8 and item 1 of p + item 2 of p is greater than 8 * j
+                set any to yes
+                if item 3 of p is "int"
+                    set kind to "int"
+                end
+            end
+        end
+        if not any
+            set kind to "int"
+        end
+        add kind to made
+    end
+    return made
+end
+
+# each field's place, size and kind, those of a structure in it too, from `at`
+to struct_pieces with nat, structure_name, at, pieces
+    for each field in fields of structure_layout(nat, structure_name)
+        set type_name to type of field
+        if is_structure(nat, type_name)
+            struct_pieces(nat, named_type(type_name), at + at of field, pieces)
+        else
+            set kind to "int"
+            if type_name is "a number" or type_name is "a float"
+                set kind to "sse"
+            end
+            add (list of at + at of field, size of field, kind) to pieces
+        end
+    end
+end
+
 to is_callback with nat, type_name
     set named to named_type(type_name)
     return named is not nothing and named is in callbacks of nat
@@ -35691,6 +35912,10 @@ end
 to type_room with nat, type_name
     if type_name is "a float" or type_name is "a whole number" or type_name is "yes or no"
         return list of 4, 4
+    end
+    if type_name is in c_wholes
+        set size to item 1 of item type_name of c_wholes
+        return list of size, size
     end
     if inline_bytes(type_name) is greater than 0
         return list of inline_bytes(type_name), 1
@@ -35776,6 +36001,11 @@ to gen_library_call with fc, e
     set nat to native of f
     set target to target of st
     set libraries of a to yes
+    if callbacks of nat is not nothing # C may call one of them on a thread of its own
+        if length of keys of callbacks of nat is greater than 0
+            set uses_threads of st to yes
+        end
+    end
     set desc to library_desc(a, nat, target)
     set types to types of nat
     set n to length of types
@@ -35789,24 +36019,97 @@ to gen_library_call with fc, e
     if windows
         set int_regs to list of rcx, rdx, r8, r9
     end
+    # A structure by value (DESIGN §92): on Windows, one of 1, 2, 4 or 8 bytes in its place's register, and
+    # any other as where a copy is; on Linux, one of up to 16 bytes in a register for each 8 bytes, as its
+    # classes say, if there are enough, and any other on the stack. A structure given by value of any other
+    # size comes back through memory the caller gives as a first input, before the others.
+    set result_by_value to by_value_of(nat, gives of nat)
+    set result_size to 0
+    set hidden to no
+    if result_by_value is not nothing
+        set result_size to size of structure_layout(nat, result_by_value)
+        if windows
+            set hidden to not (result_size is 1 or result_size is 2 or result_size is 4 or result_size is 8)
+        else
+            set hidden to result_size is greater than 16
+        end
+    end
     set places to empty list
     set ints to 0
     set floats to 0
     set stacked to 0
+    set place_number to 0 # Windows': each input's place, from 1
+    if hidden
+        set ints to 1
+        set place_number to 1
+    end
     set i to 0
     for each type_name in types
         add 1 to i
         set is_float to type_name is "a number" or type_name is "a float"
-        if windows and i is at most 4
-            add record with reg item i of int_regs, x i - 1, float is_float, slot -1 to places
-        else if not windows and is_float and floats is less than 8
-            add record with reg -1, x floats, float yes, slot -1 to places
+        set valued to by_value_of(nat, type_name)
+        if valued is not nothing
+            set size to size of structure_layout(nat, valued)
+            if windows
+                add 1 to place_number
+                set deref to -1
+                if size is 1 or size is 2 or size is 4 or size is 8
+                    set deref to 0
+                end
+                if place_number is at most 4
+                    add record with input i, reg item place_number of int_regs, x -1, float no, slot -1, deref deref to places
+                else
+                    add record with input i, reg -1, x -1, float no, slot stacked, deref deref to places
+                    add 1 to stacked
+                end
+            else
+                set classes to struct_classes(nat, valued)
+                set need_int to 0
+                set need_sse to 0
+                if classes is not nothing
+                    for each c in classes
+                        if c is "int"
+                            add 1 to need_int
+                        else
+                            add 1 to need_sse
+                        end
+                    end
+                end
+                if classes is not nothing and ints + need_int is at most 6 and floats + need_sse is at most 8
+                    set j to 0
+                    for each c in classes
+                        if c is "int"
+                            add 1 to ints
+                            add record with input i, reg item ints of int_regs, x -1, float no, slot -1, deref 8 * j to places
+                        else
+                            add record with input i, reg -1, x floats, float yes, slot -1, deref 8 * j to places
+                            add 1 to floats
+                        end
+                        add 1 to j
+                    end
+                else
+                    for each j from 0 to (size + 7 - remainder of (size + 7) divided by 8) / 8 - 1
+                        add record with input i, reg -1, x -1, float no, slot stacked, deref 8 * j to places
+                        add 1 to stacked
+                    end
+                end
+            end
+        else if windows
+            add 1 to place_number
+            if place_number is at most 4
+                add record with input i, reg item place_number of int_regs, x place_number - 1, float is_float, slot -1, deref -1 to places
+            else
+                add record with input i, reg -1, x -1, float is_float, slot stacked, deref -1 to places
+                add 1 to stacked
+            end
+        else if is_float and floats is less than 8
+            add record with input i, reg -1, x floats, float yes, slot -1, deref -1 to places
             add 1 to floats
-        else if not windows and not is_float and ints is less than 6
+        else if not is_float and ints is less than 6
             add 1 to ints
-            add record with reg item ints of int_regs, x -1, float no, slot -1 to places
+            add record with input i, reg item ints of int_regs, x -1, float no, slot -1, deref -1 to places
         else
-            add record with reg -1, x -1, float is_float, slot stacked to places
+            add record with input i, reg -1, x -1, float is_float, slot stacked, deref -1 to places
             add 1 to stacked
         end
     end
@@ -35815,7 +36118,8 @@ to gen_library_call with fc, e
         set shadow to 32
     end
     set staging to shadow + 8 * stacked
-    set kept_at to staging + 8 * n # what it gave, while the structures are made what C left
+    set result_slot to staging + 8 * n # where the structure it gives by value goes
+    set kept_at to result_slot + 8 # what it gave, while the structures are made what C left
     set frame to kept_at + 16
     if (frame bit and 15) is not 0
         set frame to frame + 8
@@ -35824,6 +36128,11 @@ to gen_library_call with fc, e
     store(a, saved, rsp)
     alui(a, "and", rsp, -16)
     alui(a, "sub", rsp, frame)
+    if result_by_value is not nothing
+        movi(a, rcx, result_size + 16)
+        call_to(a, "rt_alloc")
+        store(a, mem(rsp, result_slot), rax)
+    end
     set i to 0
     for each type_name in types # each input, made what C wants
         add 1 to i
@@ -35841,6 +36150,36 @@ to gen_library_call with fc, e
             movq_xr(a, xmm0, rax)
             cvtsd2ss(a, xmm0, xmm0)
             movq_rx(a, rax, xmm0)
+        else if by_value_of(nat, type_name) is not nothing # a record made a structure in memory of its own, which goes as it is
+            set routines to structure_routines(a, nat, by_value_of(nat, type_name))
+            set wrong to new_label(a)
+            set wrong_field to new_label(a)
+            mov_rr(a, rcx, rax)
+            shifti(a, "shr", rcx, 48)
+            alui(a, "cmp", rcx, kind_record)
+            jcc(a, cc_ne, wrong)
+            movi(a, rcx, size of layout of routines + 16)
+            call_to(a, "rt_alloc")
+            store(a, slot_at, rax)
+            mov_rr(a, rdi, rax)
+            load(a, rcx, mem(rbp, 16 + 8 * (n - i)))
+            call_to(a, into of routines)
+            test_rr(a, rdx, rdx)
+            jcc(a, cc_ne, wrong_field)
+            load(a, rax, slot_at)
+            set was to enter_cold(a)
+            mark(a, wrong)
+            store(a, rip("err_a"), rax)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input " + i + " to be a record (a " + by_value_of(nat, type_name) + "), not ")
+            stub_kind(a, "err_a")
+            jmp_to(a, "rt_e_end")
+            mark(a, wrong_field)
+            stub_start(fc, at of e)
+            stub_text(a, "'" + name of f + "' needs input " + i + "'s ")
+            call_to(a, "rt_lib_tell_field")
+            jmp_to(a, "rt_e_end")
+            leave_cold(a, was)
         else if is_structure(nat, type_name) # a record made a structure in memory of its own, or nothing for none
             set routines to structure_routines(a, nat, named_type(type_name))
             set null to new_label(a)
@@ -35911,13 +36250,15 @@ to gen_library_call with fc, e
         end
         store(a, slot_at, rax)
     end
-    set i to 0
-    for each place in places # then where the convention wants them
-        add 1 to i
-        set from to mem(rsp, staging + 8 * (i - 1))
-        if slot of place is at least 0
+    for each place in places # then where the convention wants them: a structure by value from its memory
+        set from to mem(rsp, staging + 8 * (input of place - 1))
+        if deref of place is at least 0
             load(a, rax, from)
-            store(a, mem(rsp, shadow + 8 * slot of place), rax)
+            set from to mem(rax, deref of place)
+        end
+        if slot of place is at least 0
+            load(a, r11, from)
+            store(a, mem(rsp, shadow + 8 * slot of place), r11)
         else
             if float of place
                 movsd_load(a, x of place, from)
@@ -35926,6 +36267,9 @@ to gen_library_call with fc, e
                 load(a, reg of place, from)
             end
         end
+    end
+    if hidden # where the structure it gives goes, first
+        load(a, item 1 of int_regs, mem(rsp, result_slot))
     end
     if not windows # how many xmm registers hold inputs, for a function that takes any number of them
         movi(a, rax, floats)
@@ -35936,6 +36280,34 @@ to gen_library_call with fc, e
     call_import(a, desc)
     if threading of a
         call_to(a, "rt_gil_unpark")
+    end
+    if result_by_value is not nothing and not hidden # the structure it gave, from its registers into its memory
+        load(a, r11, mem(rsp, result_slot))
+        if windows
+            store(a, mem(r11, 0), rax)
+        else
+            set ni to 0
+            set ns to 0
+            set j to 0
+            for each c in struct_classes(nat, result_by_value)
+                if c is "int"
+                    if ni is 0
+                        store(a, mem(r11, 8 * j), rax)
+                    else
+                        store(a, mem(r11, 8 * j), rdx)
+                    end
+                    add 1 to ni
+                else
+                    if ns is 0
+                        movsd_store(a, mem(r11, 8 * j), xmm0)
+                    else
+                        movsd_store(a, mem(r11, 8 * j), xmm1)
+                    end
+                    add 1 to ns
+                end
+                add 1 to j
+            end
+        end
     end
     set structured to no
     for each type_name in types
@@ -35962,10 +36334,25 @@ to gen_library_call with fc, e
         load(a, rax, mem(rsp, kept_at))
         movsd_load(a, xmm0, mem(rsp, kept_at + 8))
     end
+    if result_by_value is not nothing
+        load(a, rax, mem(rsp, result_slot))
+    end
     load(a, rsp, saved)
     set gives to gives of nat # and what it gave, as a value
     if gives is nothing
         load_bits(a, xmm0, bits_nothing)
+    else if result_by_value is not nothing # a new record of it, from rax, its memory
+        push_r(a, rax)
+        push_r(a, rax)
+        movi(a, rcx, 0)
+        call_to(a, "rt_record_make")
+        store(a, mem(rsp, 0), rax)
+        mov_rr(a, rcx, rax)
+        load(a, rsi, mem(rsp, 8))
+        call_to(a, back of structure_routines(a, nat, result_by_value))
+        pop_r(a, rax)
+        pop_r(a, rcx)
+        movq_xr(a, xmm0, rax)
     else if gives is "a number" or gives is "a float"
         if gives is "a float"
             cvtss2sd(a, xmm0, reg_at(xmm0))
@@ -35984,6 +36371,8 @@ to gen_library_call with fc, e
         cvtsi2sd(a, xmm0, rax)
     else if gives is "a long whole number"
         cvtsi2sd(a, xmm0, rax)
+    else if gives is in c_wholes
+        c_whole_value(a, gives)
     else if gives is "a pointer"
         set given to new_label(a)
         set null to new_label(a)
@@ -36106,6 +36495,8 @@ to emit_structure with a, job
             jcc(a, cc_ne, want)
             if type_name is "a whole number"
                 store32(a, target_at, rax)
+            else if type_name is in c_wholes
+                c_whole_store(a, target_at, type_name)
             else
                 store(a, target_at, rax)
             end
@@ -36197,6 +36588,10 @@ to emit_structure with a, job
                 load(a, rax, from)
             end
             cvtsi2sd(a, xmm0, rax)
+            movq_rx(a, rax, xmm0)
+        else if type_name is in c_wholes
+            load(a, rax, from) # its bytes, and those after it, which c_whole_value leaves out
+            c_whole_value(a, type_name)
             movq_rx(a, rax, xmm0)
         else if type_name is "a pointer"
             set pointed to new_label(a)
@@ -36430,6 +36825,10 @@ to emit_callback with a, job, target
             end
             cvtsi2sd(a, xmm0, rax)
             movq_rx(a, rax, xmm0)
+        else if type_name is in c_wholes
+            load(a, rax, from)
+            c_whole_value(a, type_name)
+            movq_rx(a, rax, xmm0)
         else if type_name is "a pointer"
             set pointed to new_label(a)
             set as_value to new_label(a)
@@ -36490,7 +36889,7 @@ to emit_callback with a, job, target
     store(a, rip("try_top"), rcx)
     set gives to gives of shape # what it gave, as C wants it
     movq_rx(a, rax, xmm0)
-    if gives is "a number" or gives is "a float" or gives is "a whole number" or gives is "a long whole number" or gives is "a pointer"
+    if gives is "a number" or gives is "a float" or gives is "a whole number" or gives is "a long whole number" or gives is "a pointer" or gives is in c_wholes
         set not_number to new_label(a)
         set given to new_label(a)
         mov_rr(a, rcx, rax)
@@ -36784,6 +37183,65 @@ to emit_libraries with a, target
             alu(a, "cmp", rcx, rdx)
             jcc(a, cc_g, bad)
         end
+        mov_rr(a, rax, rcx)
+        movi(a, rdx, 0)
+        ret(a)
+        mark(a, bad)
+        store(a, rip("err_a"), rax)
+        movi(a, rdx, 1)
+        ret(a)
+    end
+
+    # rt_lib_c1 to rt_lib_c6: rax a number: rax it as one of C's other whole numbers, with rdx 0; or rdx 1, and
+    # the number in err_a, if it isn't whole or isn't from the type's least to its most. An unsigned long's from
+    # 2^63 up is made from 2^63 less, with its top bit set.
+    set k to 0
+    for each type_name in c_wholes
+        add 1 to k
+        set spec to item type_name of c_wholes
+        set bad to new_label(a)
+        set fine to new_label(a)
+        mark(a, "rt_lib_c" + k)
+        movq_xr(a, xmm0, rax)
+        if item 1 of spec is 8 and not item 2 of spec
+            set low_half to new_label(a)
+            load_bits(a, xmm1, double_bytes(0))
+            ucomisd(a, xmm0, reg_at(xmm1))
+            jcc(a, cc_p, bad)
+            jcc(a, cc_b, bad) # below 0
+            load_bits(a, xmm1, double_bytes(9223372036854775808))
+            ucomisd(a, xmm0, reg_at(xmm1))
+            jcc(a, cc_b, low_half)
+            load_bits(a, xmm1, double_bytes(18446744073709551616))
+            ucomisd(a, xmm0, reg_at(xmm1))
+            jcc(a, cc_ae, bad)
+            load_bits(a, xmm1, double_bytes(9223372036854775808))
+            sse_math(a, "-", xmm0, reg_at(xmm1))
+            cvttsd2si(a, rcx, xmm0)
+            cvtsi2sd(a, xmm1, rcx)
+            ucomisd(a, xmm0, reg_at(xmm1))
+            jcc(a, cc_ne, bad)
+            bit_op(a, "bts", rcx, 63)
+            jmp_to(a, fine)
+            mark(a, low_half)
+        end
+        cvttsd2si(a, rcx, xmm0)
+        cvtsi2sd(a, xmm1, rcx)
+        ucomisd(a, xmm0, reg_at(xmm1))
+        jcc(a, cc_ne, bad)
+        jcc(a, cc_p, bad)
+        if item 1 of spec is less than 8 # an unsigned long's least is checked above; a long's are all fine
+            alui(a, "cmp", rcx, item 3 of spec)
+            jcc(a, cc_l, bad)
+            if item 4 of spec is greater than 2147483647
+                movi(a, rdx, item 4 of spec)
+                alu(a, "cmp", rcx, rdx)
+            else
+                alui(a, "cmp", rcx, item 4 of spec)
+            end
+            jcc(a, cc_g, bad)
+        end
+        mark(a, fine)
         mov_rr(a, rax, rcx)
         movi(a, rdx, 0)
         ret(a)

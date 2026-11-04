@@ -478,8 +478,9 @@ set as_words to list of "bytes", "text", "hex", "binary", "json" # `block as tex
 # what a library's function can take and give, in the order of LIBRARY_TYPES in moth.js, and what Moth
 # checks each input is, as kind_phrases numbers them (-1 for anything)
 set library_types to list of "a number", "a float", "a whole number", "a long whole number", "a pointer", "text", "wide text", "bytes",
-    "yes or no"
-set library_kinds to list of 0, 0, 0, 0, -1, 1, 1, 6, 2
+    "yes or no", "a byte", "a signed byte", "a short whole number", "an unsigned short whole number", "an unsigned whole number",
+    "an unsigned long whole number"
+set library_kinds to list of 0, 0, 0, 0, -1, 1, 1, 6, 2, 0, 0, 0, 0, 0, 0
 # buttons and text boxes (DESIGN §36): `when enter is pressed in the text box "Name"`, `the text in the text box
 # "Name"`, and the words that can follow a value, so `draw button at 0, 0` still draws a variable called button
 set enter_phrase to list of "enter", "is", "pressed", "in", "the", "text", "box"
@@ -1243,8 +1244,12 @@ to parse with tokens, reading
             else if is_word("a") and library_named("a " + value of item (pos + 1) of tokens, structures of declared) or is_word("a") and library_named("a " + value of item (pos + 1) of tokens, callbacks of declared)
                 set found to "a " + value of item (pos + 1) of tokens
                 set pos to pos + 2
+                if library_named(found, structures of declared) and (where is "input" or where is "result") and word_at(pos, "by") and word_at(pos + 1, "value")
+                    set found to found + " by value" # the structure itself, not where it is (DESIGN §92)
+                    set pos to pos + 2
+                end
             else
-                expected("what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes' or 'yes or no', or a structure or callback)")
+                expected("what it takes or gives ('a number', 'a float', 'a whole number', 'a long whole number', 'a pointer', 'text', 'wide text', 'bytes', 'yes or no', 'a byte', 'a signed byte', 'a short whole number', 'an unsigned short whole number', 'an unsigned whole number' or 'an unsigned long whole number', or a structure or callback)")
             end
         end
         set is_structure to library_named(found, structures of declared)

@@ -1323,14 +1323,16 @@ unboxed numbers were all caught, some only by the fuzzer.
   program's time. It has no limit on its steps, so a loop that never ends runs
   until it's stopped.
 - `moth build` makes programs for x86-64 Windows and Linux, not for Macs.
-- A library's function takes a structure by where it is, not by its value,
-  and gives one the same way; a structure's fields are whole numbers of 32 or
-  64 bits, not 8 or 16 (but `2 bytes` and the like), numbers, floats,
+- A library's function takes a structure by where it is, or with `by value`
+  as itself (`a point by value`), and gives one either way; a structure's
+  fields are whole numbers of 8 to 64 bits (`a byte`, `a short whole
+  number`, `an unsigned whole number` and the rest), numbers, floats,
   pointers, text, other structures and callbacks. Its whole numbers are
-  signed, and exact up to 2^53. C can call a callback only on one of the
-  program's own threads (its own or a task's), while it's in one of a library's functions, and there
-  can be 64 functions of each kind of callback at once; a mistake in one ends the
-  program, as a mistake in an app's handler does. A mistake in a library can
+  exact up to 2^53. C can call a callback on any thread, its own too, while
+  the program waits in one of a library's functions, or between its own
+  lines (a program with callbacks takes turns as one with tasks does), and
+  there can be 64 functions of each kind of callback at once; a mistake in
+  one ends the program, as a mistake in an app's handler does. A mistake in a library can
   crash the program. On Linux a program that uses one needs glibc's dynamic linker, as
   nearly every Linux has, and finds a library by its name as the system's
   linker does: `"sqlite3"` is libsqlite3.so, or .so.0 to .so.9. On Windows

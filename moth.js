@@ -461,6 +461,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     } else if (isWord("a") && tokens[pos + 1].type === "word" && (Object.hasOwn(made.structures, tokens[pos + 1].value) || Object.hasOwn(made.callbacks, tokens[pos + 1].value))) {
       type = `a ${tokens[pos + 1].value}`;
       pos += 2;
+      // the structure itself, not where it is (DESIGN §92)
+      if (Object.hasOwn(made.structures, type.slice(2)) && (where === "input" || where === "result") && wordAt(pos, "by") && wordAt(pos + 1, "value")) {
+        type += " by value";
+        pos += 2;
+      }
     } else expected(`what it takes or gives (${Object.keys(LIBRARY_TYPES).map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")}, or a structure or callback)`);
     const structure = type.startsWith("a ") && Object.hasOwn(made.structures, type.slice(2));
     const callback = type.startsWith("a ") && Object.hasOwn(made.callbacks, type.slice(2));
@@ -1409,7 +1414,8 @@ const fallbackFits = (e) => e.kind === "value" || (e.kind === "negate" && e.oper
 // for anything): a number is a double, a float a float, a whole number an int, a long whole number 64 bits,
 // and a pointer a whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows). A
 // structure is a record, or nothing, and a callback a function.
-const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2 };
+const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2,
+  "a byte": 0, "a signed byte": 0, "a short whole number": 0, "an unsigned short whole number": 0, "an unsigned whole number": 0, "an unsigned long whole number": 0 };
 
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {

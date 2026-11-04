@@ -3701,3 +3701,44 @@ hold them to agreeing.
   engines and in machine code; zones against Node's own (ICU's), in nine
   zones at nine moments, on Windows and Linux.
 
+## 92. More of C: small whole numbers, structures by value, any thread
+
+- **Why.** Python's ctypes has every C type, passes structures by value, and
+  lets C call back on any thread; Moth's library blocks had whole numbers of
+  32 and 64 bits, structures only by where they are, and callbacks only on
+  the program's own threads.
+- **Whole numbers.** `a byte`, `a signed byte`, `a short whole number`, `an
+  unsigned short whole number`, `an unsigned whole number` and `an unsigned
+  long whole number`, from one table (machine.moth's c_wholes): as inputs,
+  checked from their least to their most; as what a function gives, made
+  from their low bytes with or without their sign (an unsigned long from
+  2^63 up as half of it, doubled); as fields, as many bytes as they have, on
+  their own boundary, as C lays them out; and as a callback's inputs and
+  what it gives. Both parsers know the same names.
+- **By value.** `a point by value`, for an input or what a function gives.
+  On Windows a structure of 1, 2, 4 or 8 bytes goes in its place's register
+  (or stack slot), and any other as where a copy of it is; one given back of
+  any other size comes through memory the program gives as a first input.
+  On Linux each 8 bytes of one up to 16 is sorted as the System V convention
+  says, into a whole number register if anything in it isn't a number or a
+  float and an xmm register if it is, while there are enough of each; any
+  other goes on the stack, 8 bytes a slot; one given back comes in rax and
+  rdx, or xmm0 and xmm1, as it was sorted, and past 16 bytes through memory
+  given first, in rdi. Each input's place says which 8 bytes of the
+  structure's memory it takes, so one structure can be two registers or
+  three stack slots. A structure by value can't be nothing.
+- **Any thread.** A program whose library block has callbacks takes turns as
+  one with tasks does (§62), so a thread C made has a turn to take. On
+  entry, a thread with none of the program's slots takes one of the last 16,
+  with lock cmpxchg so two can't both have it (waiting, with pause, while all
+  are in use; tasks keep to the slots before them); its thread's own storage
+  (TlsSetValue, or on Linux its GS base) is set to it; a count in it goes up
+  for a callback inside a callback. On Linux the GS base is asked for first
+  (arch_prctl), as gs:0 with none is address 0. Going back out of its first
+  callback, the turn is let go, its storage cleared, and the slot free.
+- **Tested.** In machine code on Windows and Linux: each new whole number in
+  and out of C, and through a structure laid out as C does; C's div giving a
+  structure by value, and on Linux, with gcc, a library of the test's own
+  with every shape the conventions sort; and three of C's threads calling a
+  callback at once (and 24, and on one core, by hand).
+

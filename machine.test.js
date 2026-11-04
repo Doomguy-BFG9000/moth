@@ -2245,6 +2245,236 @@ say zones's now() is greater than 1700000000
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], [want.join("\n") + "\n", "", 0]);
 });
 
+// Libraries' other whole numbers (DESIGN §92): bytes, shorts and the unsigned ones, given and given back, in a
+// structure whose layout is C's, and each mistake of one that won't fit
+test("a library's function takes and gives bytes, shorts and unsigned whole numbers, as C has them", { skip }, () => {
+  const ran = libraryRun(String.raw`use the library "msvcrt" or "c"
+    "strtoul" as unsigned_of(text, a pointer, a whole number) gives an unsigned whole number
+    "strtoul" as signed_of(text, a pointer, a whole number) gives a whole number
+    "toupper" as upper_byte(a byte) gives a byte
+    "abs" as abs_short(a short whole number) gives a short whole number
+    "memset" as fill(bytes, a byte, a long whole number) gives a pointer
+    structure mixed with a as a byte, b as a signed byte, c as a short whole number, d as an unsigned short whole number,
+        e as an unsigned whole number, f as an unsigned long whole number
+    "memcpy" as from_mixed(bytes, a mixed, a long whole number) gives a pointer
+    "memcpy" as to_mixed(a mixed, bytes, a long whole number) gives a pointer
+end
+use the library "c"
+    "strtoull" as big_unsigned(text, a pointer, a whole number) gives an unsigned long whole number
+end
+use the library "msvcrt"
+    "_strtoui64" as big_unsigned_windows(text, a pointer, a whole number) gives an unsigned long whole number
+end
+
+say unsigned_of("4294967295", nothing, 10)
+say signed_of("4294967295", nothing, 10)
+say upper_byte(97)
+say abs_short(-1234)
+set b to 4 bytes
+fill(b, 255, 4)
+say b
+set m to record with a 200, b -100, c -30000, d 60000, e 4000000000, f 12345678901234
+set raw to 24 bytes
+from_mixed(raw, m, 24)
+say raw
+set back to record with a 0, b 0, c 0, d 0, e 0, f 0
+set raw2 to 24 bytes
+for each k from 1 to 24
+    set byte k of raw2 to 255
+end
+to_mixed(back, raw2, 24)
+say back
+set big to 0
+try
+    set big to big_unsigned("18446744073709551615", nothing, 10)
+if it fails
+    set big to big_unsigned_windows("18446744073709551615", nothing, 10)
+end
+say big is 18446744073709551616
+for each bad in list of 256, -1, 2.5
+    try
+        upper_byte(bad)
+    if it fails with why
+        say why
+    end
+end
+try
+    abs_short(40000)
+if it fails with why
+    say why
+end
+try
+    from_mixed(raw, (record with a 1, b 1, c 1, d 1, e -1, f 1), 24)
+if it fails with why
+    say why
+end
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["4294967295\n-1\n65\n1234\n(4 bytes: 255, 255, 255, 255)\n(24 bytes: 200, 156, 208, 138, 96, 234, 0, 0, 0, 40, 107, 238, 0, 0, 0, 0, 242, 47, 206, 115, 58, 11, 0, 0)\n(record with a 255, b -1, c -1, d 65535, e 4294967295, f 18446744073709552000)\nyes\n'upper_byte' needs input 1 to be a whole number from 0 to 255, not 256\n'upper_byte' needs input 1 to be a whole number from 0 to 255, not -1\n'upper_byte' needs input 1 to be a whole number from 0 to 255, not 2.5\n'abs_short' needs input 1 to be a whole number from -32768 to 32767, not 40000\n'from_mixed' needs input 2's e to be a whole number from 0 to 4294967295, not -1\n", "", 0]);
+});
+
+// Structures by value: C's div gives one; and where there's a C compiler, a library of the test's own, built
+// with it, with each shape the calling conventions sort differently: two numbers, a whole number and a number,
+// 24 bytes, 4 bytes, two floats, and more inputs than there are registers for them
+const C_SOURCE = String.raw`/* structures by value, each shape the calling conventions sort differently */
+#ifdef _WIN32
+#define OUT __declspec(dllexport)
+#else
+#define OUT
+#endif
+typedef struct { double x, y; } vec2;           /* 16 bytes: two numbers */
+typedef struct { int a; double b; } mixed;      /* 16 bytes: a whole number, then a number */
+typedef struct { long long a, b, c; } big3;     /* 24 bytes: memory */
+typedef struct { char c; short s; } small;      /* 4 bytes */
+typedef struct { float f, g; } pairf;           /* 8 bytes of floats */
+
+OUT vec2 vadd(vec2 p, vec2 q) { vec2 r = { p.x + q.x, p.y + q.y }; return r; }
+OUT double vlen2(vec2 p) { return p.x * p.x + p.y * p.y; }
+OUT mixed mk(int a, double b) { mixed m = { a * 2, b / 2 }; return m; }
+OUT double mixed_sum(mixed m) { return m.a + m.b; }
+OUT long long sum3(big3 v) { return v.a + v.b + v.c; }
+OUT big3 make3(long long a, long long b, long long c) { big3 v = { a, b * 10, c * 100 }; return v; }
+OUT small sm(small s) { small r = { (char)(s.c + 1), (short)(s.s * 2) }; return r; }
+OUT pairf swapf(pairf p) { pairf r = { p.g, p.f }; return r; }
+/* enough before the structures that they don't fit in registers on Linux, and go past Windows' four */
+OUT long long many(int a, int b, int c, int d, int e, vec2 v, big3 w, int f) {
+  return a + b + c + d + e + (long long)(v.x + v.y) + w.a + w.b + w.c + f;
+}
+`;
+const C_COMPILER = target === "linux" ? ["gcc", "cc"].find((c) => spawnSync(c, ["--version"], { encoding: "utf8" }).status === 0) : null;
+test("a library's function takes and gives structures by value, as each system's convention has them", { skip }, () => {
+  const division = libraryRun(String.raw`use the library "msvcrt" or "c"
+    structure division with quotient as a whole number, rest as a whole number
+    "div" as divided(a whole number, a whole number) gives a division by value
+end
+
+say divided(17, 5)
+say divided(-7, 2)
+`);
+  assert.deepEqual([division.stdout, division.stderr, division.status], ["(record with quotient 3, rest 2)\n(record with quotient -3, rest -1)\n", "", 0]);
+  if (!C_COMPILER) return;
+  const dir = mkdtempSync(join(tmpdir(), "moth-byvalue-"));
+  try {
+    writeFileSync(join(dir, "bv.c"), C_SOURCE);
+    const built = spawnSync(C_COMPILER, ["-shared", "-fPIC", "-O2", "-o", join(dir, "libbv.so"), join(dir, "bv.c")], { encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(String.raw`use the library "./bv.dll" or "./libbv.so"
+    structure vec2 with x as a number, y as a number
+    structure mixed with a as a whole number, b as a number
+    structure big3 with a as a long whole number, b as a long whole number, c as a long whole number
+    structure small with c as a signed byte, s as a short whole number
+    structure pairf with f as a float, g as a float
+    vadd(a vec2 by value, a vec2 by value) gives a vec2 by value
+    vlen2(a vec2 by value) gives a number
+    mk(a whole number, a number) gives a mixed by value
+    mixed_sum(a mixed by value) gives a number
+    sum3(a big3 by value) gives a long whole number
+    make3(a long whole number, a long whole number, a long whole number) gives a big3 by value
+    sm(a small by value) gives a small by value
+    swapf(a pairf by value) gives a pairf by value
+    many(a whole number, a whole number, a whole number, a whole number, a whole number, a vec2 by value, a big3 by value, a whole number) gives a long whole number
+end
+use the library "msvcrt" or "c"
+    structure division with quotient as a whole number, rest as a whole number
+    "div" as divided(a whole number, a whole number) gives a division by value
+end
+
+say vadd((record with x 1.5, y 2), record with x 10, y 20)
+say vlen2(record with x 3, y 4)
+say mk(21, 5)
+say mixed_sum(record with a 7, b 0.5)
+say sum3(record with a 1, b 2, c 3)
+say make3(1, 2, 3)
+say sm(record with c 9, s -300)
+say swapf(record with f 1.5, g -2.25)
+say many(1, 2, 3, 4, 5, (record with x 0.5, y 0.5), (record with a 100, b 200, c 300), 7)
+say divided(17, 5)
+set p to record with x 1, y 2
+say vadd(p, p)
+say p
+try
+    vlen2(nothing)
+if it fails with why
+    say why
+end
+try
+    vlen2(record with x 1)
+if it fails with why
+    say why
+end
+`, { target, name: "p.moth", allow: ["--allow-libraries"] }));
+    chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["(record with x 11.5, y 22)\n25\n(record with a 42, b 2.5)\n7.5\n6\n(record with a 1, b 20, c 300)\n(record with c 10, s -600)\n(record with f -2.25, g 1.5)\n623\n(record with quotient 3, rest 2)\n(record with x 2, y 4)\n(record with x 1, y 2)\n'vlen2' needs input 1 to be a record (a vec2), not nothing\n", "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Callbacks on threads C made, three at once, while the program waits for them in C
+test("a callback runs on a thread C made, as many at once as C makes", { skip }, () => {
+  const ran = libraryRun(String.raw`use the library "kernel32"
+    callback win_worker(a pointer) gives a whole number
+    CreateThread(a pointer, a long whole number, a win_worker, a pointer, a whole number, bytes) gives a pointer
+    WaitForSingleObject(a pointer, a whole number) gives a whole number
+    CloseHandle(a pointer) gives yes or no
+    GetTickCount() gives a whole number
+end
+use the library "c"
+    callback unix_worker(a pointer) gives a pointer
+    pthread_create(bytes, a pointer, a unix_worker, a pointer) gives a whole number
+    pthread_join(a long whole number, a pointer) gives a whole number
+end
+
+set seen to empty list
+
+to work with n
+    set total to 0
+    for each k from 1 to 200000
+        set total to total + k
+    end
+    add "thread " + n + ": " + total to seen
+    return n * 10
+end
+
+set on_windows to yes
+try
+    GetTickCount()
+if it fails
+    set on_windows to no
+end
+
+set handles to empty list
+for each n from 1 to 3
+    if on_windows
+        add CreateThread(nothing, 0, work, n, 0, 4 bytes) to handles
+    else
+        set made to 8 bytes
+        pthread_create(made, nothing, work, n)
+        set id to 0
+        set k to 8
+        repeat while k is at least 1
+            set id to id * 256 + byte k of made
+            set k to k - 1
+        end
+        add id to handles
+    end
+end
+for each h in handles
+    if on_windows
+        WaitForSingleObject(h, -1)
+        CloseHandle(h)
+    else
+        pthread_join(h, nothing)
+    end
+end
+say seen in order
+say work(4)
+say "done"
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["[\"thread 1: 20000100000\", \"thread 2: 20000100000\", \"thread 3: 20000100000\"]\n40\ndone\n", "", 0]);
+});
+
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;
 // more parts than items; none; a part that fails, which says what its copy said; and no files left behind
 test("tools/cores.moth does a list's items on every core at once, in copies of the program", { skip }, () => {
