@@ -1809,6 +1809,101 @@ say arrays's same(arrays's matmul(p, q), own)
   }
 });
 
+// tools/python.moth: CPython inside the program, through its C API, from the Python this computer has
+function pythonHere() {
+  for (const command of ["python3", "python"]) {
+    const asked = spawnSync(command, ["-E", "-c", "import sys, os, sysconfig\n" +
+      "v = sys.version_info\n" +
+      "if os.name == 'nt': print(os.path.join(sys.base_prefix, 'python%d%d.dll' % (v[0], v[1])))\n" +
+      "else: print(os.path.join(sysconfig.get_config_var('LIBDIR') or '', sysconfig.get_config_var('INSTSONAME') or ''))\n" +
+      "import importlib.util; print(importlib.util.find_spec('numpy') is not None)"], { encoding: "utf8", cwd: tmpdir() });
+    if (asked.error || asked.status !== 0) continue;
+    const [library, numpy] = asked.stdout.trim().split(/\r?\n/);
+    if (existsSync(library)) return { library, numpy: numpy === "True" };
+  }
+  return null;
+}
+const python = target ? pythonHere() : null;
+test("tools/python.moth runs Python inside the program: code, modules, values both ways, and Python's mistakes", { skip: skip || (!python && "Python's library isn't installed") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-python-"));
+  try {
+    const files = {};
+    for (const name of ["python.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "python.moth" as python
+use "arrays.moth" as arrays
+say python's start() is not nothing
+python's run("import math\\nx = math.factorial(10)")
+say python's evaluate("x // 3")
+set math to python's import_module("math")
+say math
+say python's call(math, "sqrt", list of 2) " " python's call_object(python's attribute(math, "hypot"), list of 3, 4)
+say python's evaluate("[1, 'two', None, True, False, 2.5, (3, 4), {'a': [1]}, 2 ** 70]")
+python's set_variable("given", list of 3, "x", nothing, yes, 1.5, (dictionary where "k" is list of 1, 2))
+say python's evaluate("repr(given)")
+say python's evaluate("given[5]['k'][1] * 10")
+say python's variable("x")
+say python's evaluate("'héllo ' + chr(0x1F600)")
+set held to python's to_python(list of 1, 2)
+say python's call(held, "count", list of 2) " " python's from_python(held)
+python's release(held)
+for each code in list of "1 / 0", "undefined_name", "int('x')"
+    try
+        python's evaluate(code)
+    if it fails with why
+        say why
+    end
+end
+try
+    python's run("raise ValueError('bad thing')")
+if it fails with why
+    say why
+end
+try
+    python's import_module("no_such_module_here")
+if it fails with why
+    say why
+end
+try
+    python's call(5, "x")
+if it fails with why
+    say why
+end
+if python's evaluate("__import__('importlib.util').util.find_spec('numpy') is not None")
+    set np to python's import_module("numpy")
+    say python's call(np, "linspace", list of 0, 1, 5)
+    say python's call(np, "round", (list of 2.567), dictionary where "decimals" is 1)
+    python's set_variable("a", arrays's array(list of (list of 1, 2), (list of 3, 4)))
+    say python's evaluate("a.T @ a") " " python's evaluate("str(a.dtype)")
+    say python's evaluate("__import__('numpy').array(['a', 'b'])")
+end
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, PYTHON_LIBRARY: python.library } });
+    const numpy = python.numpy ? "[0, 0.25, 0.5, 0.75, 1]\n2.6\n[[10, 14], [14, 20]] float64\n[\"a\", \"b\"]\n" : "";
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`yes
+1209600
+<python <module 'math' (built-in)>>
+1.4142135623731 5
+[1, "two", nothing, yes, no, 2.5, [3, 4], (dictionary where "a" is [1]), 1.1805916207174113e+21]
+[3, 'x', None, True, 1.5, {'k': [1, 2]}]
+20
+3628800
+héllo 😀
+1 [1, 2]
+Python: ZeroDivisionError: division by zero
+Python: NameError: name 'undefined_name' is not defined
+Python: ValueError: invalid literal for int() with base 10: 'x'
+Python: ValueError: bad thing
+Python: ModuleNotFoundError: No module named 'no_such_module_here'
+'call' needs a Python object (as import_module gives), not a number
+${numpy}`, "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
 test("tools/system.moth copies, moves and removes files and folders, and reads the environment", { skip }, () => {
   const ran = libraryRun(String.raw`use "system.moth" as system

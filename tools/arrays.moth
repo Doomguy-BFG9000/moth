@@ -1141,6 +1141,9 @@ end
 
 # what a value is, for a mistake
 to arrays_kind_name with v
+    if arrays_is_number(v)
+        return "a number"
+    end
     if arrays_is_text(v)
         return "text"
     end
