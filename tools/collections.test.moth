@@ -1,0 +1,83 @@
+# collections.moth's tests, which moth.test.js runs on every engine
+
+use "collections.moth" as c
+
+to first_letter with word
+    return item 1 of word
+end
+
+to test_counting
+    set counts to c's counted(split "a b a c a b" by " ")
+    expect counts is dictionary where "a" is 3, "b" is 2, "c" is 1
+    set top to c's most_common(c's counted(split "x y z y z" by " "), 2)
+    expect length of top is 2
+    expect value of item 1 of top is "y"
+    expect count of item 1 of top is 2
+    expect value of item 2 of top is "z"
+    expect c's grouped(split "apple avocado banana cherry blueberry" by " ", first_letter) is dictionary where "a" is (list of "apple", "avocado"), "b" is (list of "banana", "blueberry"), "c" is (list of "cherry")
+end
+
+to test_queue
+    set q to c's queue()
+    c's push(q, 1)
+    c's push(q, 2)
+    c's push_front(q, 0)
+    expect c's items_of(q) is list of 0, 1, 2
+    expect c's size(q) is 3
+    expect c's peek_front(q) is 0
+    expect c's peek(q) is 2
+    expect c's pop_front(q) is 0
+    expect c's pop(q) is 2
+    expect c's pop(q) is 1
+    expect c's size(q) is 0
+    for each k from 1 to 1000
+        c's push(q, k)
+    end
+    set sum to 0
+    repeat while c's size(q) is greater than 0
+        set sum to sum + c's pop_front(q)
+    end
+    expect sum is 500500
+    try
+        c's pop_front(q)
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "the queue is empty"
+    end
+end
+
+to test_heap
+    set h to c's heap()
+    for each x in list of 5, 3, 8, 1, 9, 2, 7
+        c's heap_push(h, x)
+    end
+    expect c's heap_size(h) is 7
+    expect c's heap_peek(h) is 1
+    set made to empty list
+    repeat while c's heap_size(h) is greater than 0
+        add c's heap_pop(h) to made
+    end
+    expect made is list of 1, 2, 3, 5, 7, 8, 9
+    c's heap_push(h, "pear")
+    c's heap_push(h, "apple")
+    expect c's heap_pop(h) is "apple"
+    try
+        c's heap_pop(h)
+        c's heap_pop(h)
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "the heap is empty"
+    end
+end
+
+to test_sorted
+    set xs to list of 1, 3, 3, 5
+    expect c's where_sorted(xs, 3) is 3
+    expect c's where_sorted_first(xs, 3) is 1
+    expect c's where_sorted(xs, 0) is 0
+    expect c's where_sorted(xs, 9) is 4
+    c's insert_sorted(xs, 4)
+    c's insert_sorted(xs, 0)
+    c's insert_sorted(xs, 6)
+    expect xs is list of 0, 1, 3, 3, 4, 5, 6
+end

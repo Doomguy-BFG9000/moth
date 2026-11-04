@@ -1,0 +1,228 @@
+# Statistics, as Python's statistics module has them: the middle of numbers (mean, median, mode), how spread
+# out they are (variance, standard deviation, quantiles), and how two sets of them go together (covariance,
+# correlation, a straight line through them). In Moth alone, so it works everywhere.
+#
+#   use "stats.moth" as stats
+#   set xs to list of 2, 4, 4, 4, 5, 5, 7, 9
+#   say stats's mean(xs)                     # 5
+#   say stats's median(xs)                   # 4.5; median_low and median_high are one of them
+#   say stats's mode(xs)                     # 4; modes(xs) is every one seen most
+#   say stats's stdev(xs)                    # of a sample: n - 1; pstdev of the whole population: n
+#   say stats's variance(xs)                 # and pvariance
+#   say stats's quantiles(xs, 4)             # the 3 cut points into 4 parts, as Python's "exclusive" way
+#   say stats's correlation(xs, ys)          # Pearson's, from -1 to 1; covariance(xs, ys) of a sample
+#   set line to stats's straight_line(xs, ys)    # (record with slope ..., intercept ...), by least squares
+#   say stats's geometric_mean(xs)           # and harmonic_mean
+#
+# Each fails with a `fail with` that says why when there are too few numbers.
+
+use "math.moth" as stats_math
+
+to stats_needs with numbers, n, what
+    if length of numbers is less than n
+        if n is 1
+            fail with what + " needs at least one number"
+        end
+        fail with what + " needs at least " + n + " numbers"
+    end
+end
+
+to stats_sum with numbers
+    set sum to 0
+    set lost to 0 # Kahan's: what each sum rounded away, put back
+    for each x in numbers
+        set y to x - lost
+        set next_sum to sum + y
+        set lost to (next_sum - sum) - y
+        set sum to next_sum
+    end
+    return sum
+end
+
+to mean with numbers
+    stats_needs(numbers, 1, "mean")
+    return stats_sum(numbers) / length of numbers
+end
+
+to median with numbers
+    stats_needs(numbers, 1, "median")
+    set sorted_numbers to numbers in order
+    set n to length of sorted_numbers
+    if remainder of n divided by 2 is 1
+        return item ((n + 1) / 2) of sorted_numbers
+    end
+    return (item (n / 2) of sorted_numbers + item (n / 2 + 1) of sorted_numbers) / 2
+end
+
+to median_low with numbers
+    stats_needs(numbers, 1, "median_low")
+    set sorted_numbers to numbers in order
+    set n to length of sorted_numbers
+    return item ((n + 1 - remainder of (n + 1) divided by 2) / 2) of sorted_numbers
+end
+
+to median_high with numbers
+    stats_needs(numbers, 1, "median_high")
+    set sorted_numbers to numbers in order
+    set n to length of sorted_numbers
+    return item ((n - remainder of n divided by 2) / 2 + 1) of sorted_numbers
+end
+
+# the one seen most, the first of those seen as often
+to mode with things
+    stats_needs(things, 1, "mode")
+    return item 1 of modes(things)
+end
+
+# each seen most, in the order they first come
+to modes with things
+    stats_needs(things, 1, "modes")
+    set counts to empty dictionary
+    set order to empty list
+    for each x in things
+        if x is in counts
+            set item x of counts to item x of counts + 1
+        else
+            set item x of counts to 1
+            add x to order
+        end
+    end
+    set most to 0
+    for each x in order
+        if item x of counts is greater than most
+            set most to item x of counts
+        end
+    end
+    set made to empty list
+    for each x in order
+        if item x of counts is most
+            add x to made
+        end
+    end
+    return made
+end
+
+# the sum of the squares of how far each is from the mean
+to stats_squares with numbers
+    set m to mean(numbers)
+    set made to empty list
+    for each x in numbers
+        add (x - m) * (x - m) to made
+    end
+    return stats_sum(made)
+end
+
+to variance with numbers
+    stats_needs(numbers, 2, "variance")
+    return stats_squares(numbers) / (length of numbers - 1)
+end
+
+to pvariance with numbers
+    stats_needs(numbers, 1, "pvariance")
+    return stats_squares(numbers) / length of numbers
+end
+
+to stdev with numbers
+    stats_needs(numbers, 2, "stdev")
+    return stats_root(variance(numbers))
+end
+
+to pstdev with numbers
+    stats_needs(numbers, 1, "pstdev")
+    return stats_root(pvariance(numbers))
+end
+
+to stats_root with x
+    if x is less than 0
+        fail with "there's no square root of a number below 0"
+    end
+    return stats_math's sqrt(x)
+end
+
+# the n - 1 cut points that split the numbers into n parts as alike as can be: Python's "exclusive" way
+to quantiles with numbers, n
+    stats_needs(numbers, 2, "quantiles")
+    if not (n is divisible by 1) or n is less than 1
+        fail with "quantiles needs a whole number of parts from 1 up, not " + n
+    end
+    set sorted_numbers to numbers in order
+    set m to length of sorted_numbers + 1
+    set made to empty list
+    for each i from 1 to n - 1
+        set j to (i * m - remainder of (i * m) divided by n) / n # the whole part of i * m / n
+        set delta to i * m - j * n
+        if j is less than 1
+            set j to 1
+            set delta to 0
+        else if j is at least length of sorted_numbers
+            set j to length of sorted_numbers - 1
+            set delta to n
+        end
+        add (item j of sorted_numbers * (n - delta) + item (j + 1) of sorted_numbers * delta) / n to made
+    end
+    return made
+end
+
+to stats_pair_check with xs, ys, what
+    if length of xs is not length of ys
+        fail with what + " needs as many of each: " + length of xs + " and " + length of ys
+    end
+    stats_needs(xs, 2, what)
+end
+
+# of a sample: n - 1
+to covariance with xs, ys
+    stats_pair_check(xs, ys, "covariance")
+    set mx to mean(xs)
+    set my to mean(ys)
+    set made to empty list
+    for each k from 1 to length of xs
+        add (item k of xs - mx) * (item k of ys - my) to made
+    end
+    return stats_sum(made) / (length of xs - 1)
+end
+
+to correlation with xs, ys
+    stats_pair_check(xs, ys, "correlation")
+    set sx to stats_squares(xs)
+    set sy to stats_squares(ys)
+    if sx is 0 or sy is 0
+        fail with "correlation needs numbers that aren't all the same"
+    end
+    return covariance(xs, ys) * (length of xs - 1) / stats_root(sx * sy)
+end
+
+# the straight line nearest every point, by least squares: y = slope * x + intercept
+to straight_line with xs, ys
+    stats_pair_check(xs, ys, "straight_line")
+    set sx to stats_squares(xs)
+    if sx is 0
+        fail with "straight_line needs xs that aren't all the same"
+    end
+    set slope to covariance(xs, ys) * (length of xs - 1) / sx
+    return record with slope slope, intercept mean(ys) - slope * mean(xs)
+end
+
+to geometric_mean with numbers
+    stats_needs(numbers, 1, "geometric_mean")
+    set logs to empty list
+    for each x in numbers
+        if x is at most 0
+            fail with "geometric_mean needs numbers above 0"
+        end
+        add stats_math's ln(x) to logs
+    end
+    return stats_math's exp(stats_sum(logs) / length of logs)
+end
+
+to harmonic_mean with numbers
+    stats_needs(numbers, 1, "harmonic_mean")
+    set made to empty list
+    for each x in numbers
+        if x is at most 0
+            fail with "harmonic_mean needs numbers above 0"
+        end
+        add 1 / x to made
+    end
+    return length of numbers / stats_sum(made)
+end

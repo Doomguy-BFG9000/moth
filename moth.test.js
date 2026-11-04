@@ -1053,7 +1053,8 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
   }
 });
 
-test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth, toml.moth and options.moth pass their own tests on all three engines", () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth, toml.moth, options.moth, collections.moth, lists.moth and stats.moth pass their own tests on all three engines", () => {
+  const found = (name) => (name === "math.moth" ? readFileSync(new URL("./math.moth", import.meta.url), "utf8") : tool(name));
   for (const engine of ENGINES) {
     for (const [file, names] of [
       ["text.test.moth", ["test_whole_matches", "test_finding", "test_replacing_and_splitting", "test_no_endless_loops",
@@ -1065,12 +1066,15 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       ["base64.test.moth", ["test_rfc_4648", "test_text_and_bytes", "test_passing_over"]],
       ["toml.test.moth", ["test_values", "test_multiline_strings", "test_tables", "test_writing", "test_mistakes"]],
       ["options.test.moth", ["test_reading", "test_help", "test_mistakes"]],
+      ["collections.test.moth", ["test_counting", "test_queue", "test_heap", "test_sorted"]],
+      ["lists.test.moth", ["test_shapes", "test_choosing", "test_functions", "test_sorting"]],
+      ["stats.test.moth", ["test_middles", "test_spread", "test_two_sets", "test_mistakes"]],
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
         "test_comparing", "test_mistakes"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",
         "test_writing", "test_mistakes"]],
       ["zip.test.moth", ["test_checks", "test_reading_what_zlib_makes", "test_round_trips", "test_archives", "test_mistakes"]]]) {
-      const results = testMoth(tool(file), { engine, files: (name) => tool(name) });
+      const results = testMoth(tool(file), { engine, files: found });
       assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
     }
   }

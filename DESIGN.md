@@ -3662,3 +3662,42 @@ hold them to agreeing.
   in machine code; logging and adding to a file in machine code on Windows
   and Linux.
 
+## 91. Collections, lists, statistics and time zones
+
+- **Why.** Python's `collections`, `heapq`, `bisect`, `itertools`,
+  `functools`, `statistics` and `zoneinfo`: each saves a program writing the
+  same loops again, and the last one can't be written without the world's
+  zone data.
+- **collections.moth.** `counted` and `most_common` (most first, and those
+  counted the same in the order they came: sorted by the count below 0,
+  as Moth's sort keeps order); `grouped` by a function; a queue whose
+  things are in a dictionary by place, from `first` to `last`, so both ends
+  are quick, as Moth's lists can't be shortened at their end (`remove` takes
+  a key from a dictionary); a heap in a list, with its own count, as a list
+  only grows; and `where_sorted`, `where_sorted_first` and `insert_sorted`.
+- **lists.moth.** chunks, windows, paired, numbered, flattened, product,
+  permutations, combinations, running totals, total, folded, mapped,
+  kept_by, dropped_by, split_by, taken_while, dropped_while, every_one,
+  some_one, sorted_by (by a key, those the same kept in order),
+  smallest_by, largest_by and repeated. A list given before another input
+  goes in brackets, as `list of` takes what comes after it.
+- **stats.moth.** mean (summed with Kahan's way), median and its low and
+  high, mode and modes, variance and standard deviation of a sample and of
+  a population, quantiles (Python's "exclusive" way), covariance,
+  correlation, a straight line by least squares, and the geometric and
+  harmonic means, with math.moth's square root, logs and powers.
+- **zones.moth.** A moment is seconds since 1970 in UTC. On Windows, ICU's
+  calendar in icu.dll (Windows 10 1903 and later): the zone's name checked,
+  then its offset and summer time's at that moment. On Linux, the zone's
+  zoneinfo file (TZif): its changes, the offset before the first, and the
+  POSIX TZ rule after the last (EST5EDT,M3.2.0,M11.1.0), which says when
+  summer time starts and ends in years past the file's, north or south of
+  the equator. A negative 64-bit moment is read from its bytes flipped, so
+  it's exact. `moment_of` a time in a zone tries the offsets on either side,
+  as Python's zoneinfo does: of a time that's there twice, the first; of
+  one that's skipped, as if the clocks hadn't changed yet. `local_zone` is
+  ICU's default on Windows, and TZ or where /etc/localtime points on Linux.
+- **Tested.** collections, lists and stats with their own tests on the three
+  engines and in machine code; zones against Node's own (ICU's), in nine
+  zones at nine moments, on Windows and Linux.
+

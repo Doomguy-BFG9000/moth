@@ -1264,7 +1264,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth", "log.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth", "log.moth", "zones.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1458,20 +1458,20 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
-    "options.test.moth"]) {
+    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "54 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "66 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
@@ -2206,6 +2206,43 @@ say length of split read "app.log" by "\n"
 system's remove_file("app.log")
 `, ["--allow-libraries", "--allow-read"]);
   assert.deepEqual([ran.stdout, ran.stderr.replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\|/, "(now)|"), ran.status], ["ERROR db: to the file\nCRITICAL db: and another, é\n\n[\"INFO started\", \"DEBUG now shown\", \"WARNING db: slow\", \"ERROR db: to the file\", \"CRITICAL db: and another, é\", \"WARNING back on the error output\"]\n19\nERROR timed\nthere's no level called 'loud': debug, info, warning, error and critical are\n4\n", "INFO started\nDEBUG now shown\nWARNING db: slow\nWARNING back on the error output\n(now)|ERROR|timed\n", 0]);
+});
+
+// tools/zones.moth: offsets in nine zones at nine moments, around summer time's edges, south of the equator,
+// at :45 past, far ahead (from the zone's rule, on Linux) and in 1900, as Node's own zones (ICU's) have them;
+// times in a zone, a time summer time skips and one it has twice, and a zone that isn't there
+test("tools/zones.moth knows the world's time zones, as Node's own do", { skip }, () => {
+  const zones = ["Asia/Kolkata", "America/New_York", "Europe/London", "Australia/Sydney", "America/Sao_Paulo", "Asia/Kathmandu", "Pacific/Chatham", "Europe/Berlin", "UTC"];
+  const moments = [946684800, 1277942400, 1772953199, 1772953200, 1793512799, 1793512800, 2224713600, 1790000000, -2174428800];
+  const offset = (zone, m) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      .formatToParts(new Date(m * 1000)).map((p) => [p.type, p.value]));
+    return Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) / 1000 - m;
+  };
+  let source = 'use "zones.moth" as zones\n';
+  const want = [];
+  for (const z of zones) for (const m of moments) {
+    source += `say zones's offset_at("${z}", ${m})\n`;
+    want.push(String(offset(z, m)));
+  }
+  source += `say zones's zone_text(zones's in_zone(1772953200, "America/New_York"))
+say zones's utc_text(1772953200)
+say zones's moment_of(2026, 7, 4, 9, 0, 0, "America/New_York")
+say zones's moment_of(2026, 3, 8, 2, 30, 0, "America/New_York")
+say zones's moment_of(2026, 11, 1, 1, 30, 0, "America/New_York")
+say zones's zone_text(zones's in_zone(1772953200, "Asia/Kathmandu"))
+try
+    zones's offset_at("Mars/Olympus", 0)
+if it fails with why
+    say why
+end
+say length of zones's local_zone() is greater than 0
+say zones's now() is greater than 1700000000
+`;
+  want.push("2026-03-08T03:00:00-04:00", "2026-03-08T07:00:00Z", String(Date.UTC(2026, 6, 4, 13) / 1000), String(Date.UTC(2026, 2, 8, 7, 30) / 1000),
+    String(Date.UTC(2026, 10, 1, 5, 30) / 1000), "2026-03-08T12:45:00+05:45", "there's no time zone called 'Mars/Olympus'", "yes", "yes");
+  const ran = libraryRun(source, ["--allow-libraries", "--allow-read"]);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [want.join("\n") + "\n", "", 0]);
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;

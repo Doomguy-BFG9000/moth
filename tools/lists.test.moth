@@ -1,0 +1,70 @@
+# lists.moth's tests, which moth.test.js runs on every engine
+
+use "lists.moth" as lists
+
+to adding with a, b
+    return a + b
+end
+
+to is_even with n
+    return n is divisible by 2
+end
+
+to doubled with n
+    return n * 2
+end
+
+to is_small with n
+    return n is less than 3
+end
+
+to length_of with words
+    return length of words
+end
+
+to test_shapes
+    expect lists's chunks((list of 1, 2, 3, 4, 5), 2) is list of (list of 1, 2), (list of 3, 4), (list of 5)
+    expect lists's windows((list of 1, 2, 3, 4), 2) is list of (list of 1, 2), (list of 2, 3), (list of 3, 4)
+    expect lists's windows((list of 1), 2) is empty list
+    expect lists's paired((list of 1, 2, 3), list of "a", "b") is list of (list of 1, "a"), (list of 2, "b")
+    expect lists's numbered(list of "a", "b") is list of (list of 1, "a"), (list of 2, "b")
+    expect lists's flattened(list of (list of 1, 2), (list of 3), empty list) is list of 1, 2, 3
+    expect lists's repeated("x", 3) is list of "x", "x", "x"
+end
+
+to test_choosing
+    expect lists's product((list of 1, 2), list of "x", "y") is list of (list of 1, "x"), (list of 1, "y"), (list of 2, "x"), (list of 2, "y")
+    expect lists's permutations((list of 1, 2, 3), 2) is list of (list of 1, 2), (list of 1, 3), (list of 2, 1), (list of 2, 3), (list of 3, 1), (list of 3, 2)
+    expect length of lists's permutations((list of 1, 2, 3, 4), 4) is 24
+    expect lists's combinations((list of 1, 2, 3, 4), 2) is list of (list of 1, 2), (list of 1, 3), (list of 1, 4), (list of 2, 3), (list of 2, 4), (list of 3, 4)
+    expect lists's combinations((list of 1, 2), 2) is list of (list of 1, 2)
+end
+
+to test_functions
+    set numbers to list of 1, 2, 3, 4, 5
+    expect lists's running_totals(numbers) is list of 1, 3, 6, 10, 15
+    expect lists's total(numbers) is 15
+    expect lists's folded(numbers, adding, 100) is 115
+    expect lists's mapped(numbers, doubled) is list of 2, 4, 6, 8, 10
+    expect lists's kept_by(numbers, is_even) is list of 2, 4
+    expect lists's dropped_by(numbers, is_even) is list of 1, 3, 5
+    expect lists's split_by(numbers, is_even) is list of (list of 2, 4), (list of 1, 3, 5)
+    expect lists's taken_while(numbers, is_small) is list of 1, 2
+    expect lists's dropped_while(numbers, is_small) is list of 3, 4, 5
+    expect lists's every_one((list of 2, 4), is_even) is yes
+    expect lists's every_one(numbers, is_even) is no
+    expect lists's some_one(numbers, is_even) is yes
+end
+
+to test_sorting
+    set words to list of "pear", "fig", "apple", "kiwi", "date"
+    expect lists's sorted_by(words, length_of) is list of "fig", "pear", "kiwi", "date", "apple"
+    expect lists's smallest_by(words, length_of) is "fig"
+    expect lists's largest_by(words, length_of) is "apple"
+    try
+        lists's chunks(words, 0)
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "a size is a whole number from 1 up, not 0"
+    end
+end

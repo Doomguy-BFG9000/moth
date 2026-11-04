@@ -1,0 +1,258 @@
+# Collections, as Python's collections, heapq and bisect have them: counting things, a queue both ends of which
+# are quick, a heap that gives the smallest first, and a sorted list kept sorted. In Moth alone, so it works
+# everywhere.
+#
+#   use "collections.moth" as c
+#   set counts to c's counted(split "a b a c a b" by " ")    # (dictionary where "a" is 3, "b" is 2, "c" is 1)
+#   say c's most_common(counts, 2)                           # [(record with value "a", count 3, ...), ...]
+#
+#   set q to c's queue()                     # a deque
+#   c's push(q, 1)                           # at the back; push_front at the front
+#   say c's pop_front(q)                     # 1; pop at the back; size(q), peek_front(q), peek(q), items_of(q)
+#
+#   set h to c's heap()                      # the smallest first: numbers, or text
+#   c's heap_push(h, 5)
+#   say c's heap_pop(h)                      # heap_peek(h), heap_size(h)
+#
+#   set xs to list of 1, 3, 5
+#   say c's where_sorted(xs, 4)              # 3: where 4 goes, after anything equal (bisect)
+#   c's insert_sorted(xs, 4)                 # [1, 3, 4, 5]
+#
+#   set by_first to c's grouped(split "apple avocado banana" by " ", first_letter)   # a dictionary of lists
+#
+# heap_push and the rest take a record heap() made, and push and the rest one queue() made.
+
+# ---------- counting ----------
+
+# how many times each thing is in the list, as a dictionary
+to counted with things
+    set made to empty dictionary
+    for each x in things
+        if x is in made
+            set item x of made to item x of made + 1
+        else
+            set item x of made to 1
+        end
+    end
+    return made
+end
+
+# the n things counted most, most first, those counted the same in the order they were first counted
+to most_common with counts, n
+    set made to empty list
+    for each key in counts
+        add (record with value key, count item key of counts, fewer 0 - item key of counts) to made
+    end
+    set made to made in order by fewer # the most first, and those the same in the order they came
+    set chosen to empty list
+    for each r in made
+        if length of chosen is less than n
+            add r to chosen
+        end
+    end
+    return chosen
+end
+
+# the list's things in groups by what the function says of each, as a dictionary of lists, each in order
+to grouped with things, key_of
+    set made to empty dictionary
+    for each x in things
+        set key to key_of(x)
+        if not (key is in made)
+            set item key of made to empty list
+        end
+        set kept to item key of made
+        add x to kept
+    end
+    return made
+end
+
+# ---------- a queue, quick at both ends ----------
+
+# A queue keeps its things in a dictionary, by where each is: from `first` to `last`, so either end gives and
+# takes at once.
+to queue
+    return record with slots empty dictionary, first 1, last 0
+end
+
+# at the back
+to push with q, x
+    set last of q to last of q + 1
+    set kept to slots of q
+    set item (last of q) of kept to x
+end
+
+to push_front with q, x
+    set first of q to first of q - 1
+    set kept to slots of q
+    set item (first of q) of kept to x
+end
+
+to size with q
+    return last of q - first of q + 1
+end
+
+# the thing at the front, taken off
+to pop_front with q
+    if size(q) is 0
+        fail with "the queue is empty"
+    end
+    set kept to slots of q
+    set x to item (first of q) of kept
+    remove (first of q) from kept
+    set first of q to first of q + 1
+    return x
+end
+
+# the thing at the back, taken off
+to pop with q
+    if size(q) is 0
+        fail with "the queue is empty"
+    end
+    set kept to slots of q
+    set x to item (last of q) of kept
+    remove (last of q) from kept
+    set last of q to last of q - 1
+    return x
+end
+
+to peek_front with q
+    if size(q) is 0
+        fail with "the queue is empty"
+    end
+    return item (first of q) of slots of q
+end
+
+to peek with q
+    if size(q) is 0
+        fail with "the queue is empty"
+    end
+    return item (last of q) of slots of q
+end
+
+# the queue's things, front first
+to items_of with q
+    set made to empty list
+    set kept to slots of q
+    for each k from first of q to last of q
+        add item k of kept to made
+    end
+    return made
+end
+
+# ---------- a heap: the smallest first ----------
+
+# A heap keeps its things in a list, each no greater than the two after it (at 2k and 2k + 1), and how many of
+# the list's are its, as a list only grows.
+to heap
+    return record with things empty list, count 0
+end
+
+to heap_size with h
+    return count of h
+end
+
+to heap_push with h, x
+    set t to things of h
+    set k to count of h + 1
+    if k is greater than length of t
+        add x to t
+    else
+        set item k of t to x
+    end
+    set count of h to k
+    repeat while k is greater than 1
+        set parent to (k - remainder of k divided by 2) / 2
+        if not (item k of t is less than item parent of t)
+            return nothing
+        end
+        set kept to item k of t
+        set item k of t to item parent of t
+        set item parent of t to kept
+        set k to parent
+    end
+end
+
+to heap_peek with h
+    if count of h is 0
+        fail with "the heap is empty"
+    end
+    return item 1 of things of h
+end
+
+# the smallest, taken off
+to heap_pop with h
+    set t to things of h
+    set n to count of h
+    if n is 0
+        fail with "the heap is empty"
+    end
+    set smallest to item 1 of t
+    set item 1 of t to item n of t
+    set item n of t to nothing
+    set n to n - 1
+    set count of h to n
+    set k to 1
+    repeat while yes
+        set left to 2 * k
+        set right to left + 1
+        set least to k
+        if left is at most n and item left of t is less than item least of t
+            set least to left
+        end
+        if right is at most n and item right of t is less than item least of t
+            set least to right
+        end
+        if least is k
+            return smallest
+        end
+        set kept to item k of t
+        set item k of t to item least of t
+        set item least of t to kept
+        set k to least
+    end
+end
+
+# ---------- a sorted list kept sorted ----------
+
+# where x goes in a sorted list, after anything equal to it: the number of things not greater than it
+to where_sorted with sorted_things, x
+    set low to 0
+    set high to length of sorted_things
+    repeat while low is less than high
+        set middle to (low + high - remainder of (low + high) divided by 2) / 2
+        if x is less than item (middle + 1) of sorted_things
+            set high to middle
+        else
+            set low to middle + 1
+        end
+    end
+    return low
+end
+
+# where x first is, or would go, in a sorted list: the number of things less than it
+to where_sorted_first with sorted_things, x
+    set low to 0
+    set high to length of sorted_things
+    repeat while low is less than high
+        set middle to (low + high - remainder of (low + high) divided by 2) / 2
+        if item (middle + 1) of sorted_things is less than x
+            set low to middle + 1
+        else
+            set high to middle
+        end
+    end
+    return low
+end
+
+# x put in a sorted list where it goes, so it stays sorted
+to insert_sorted with sorted_things, x
+    set at to where_sorted(sorted_things, x)
+    add x to sorted_things
+    set k to length of sorted_things
+    repeat while k is greater than at + 1
+        set item k of sorted_things to item (k - 1) of sorted_things
+        set k to k - 1
+    end
+    set item (at + 1) of sorted_things to x
+end

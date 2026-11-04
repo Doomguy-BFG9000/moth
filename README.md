@@ -392,6 +392,18 @@ bytes and dictionaries:
   kind) and base32, and back; and [`secrets.moth`](tools/secrets.moth) gives
   bytes, tokens and numbers no one can guess, from the system, as Python's
   `secrets` does.
+- [`collections.moth`](tools/collections.moth) counts things, and has a queue
+  quick at both ends, a heap that gives the smallest first, and a sorted
+  list kept sorted, as Python's `collections`, `heapq` and `bisect` do;
+  [`lists.moth`](tools/lists.moth) goes through lists as `itertools` and
+  `functools` do: chunks, windows, pairs, every choice and ordering,
+  running totals, folding, sorting by a function; and
+  [`stats.moth`](tools/stats.moth) has `statistics`' means, medians, modes,
+  spread, quantiles, correlation and a straight line through points.
+- [`zones.moth`](tools/zones.moth) knows the world's time zones, as
+  `zoneinfo` does: what time it is in "Asia/Kolkata", with summer time,
+  and the moment a time in a zone is, from Windows' own zones or Linux's
+  zoneinfo files.
 - [`toml.moth`](tools/toml.moth) reads TOML settings files (pyproject.toml,
   Cargo.toml) as Python's `tomllib` does, and writes them;
   [`options.moth`](tools/options.moth) reads a program's command line as

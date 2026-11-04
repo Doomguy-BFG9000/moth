@@ -1,0 +1,505 @@
+# Time zones, as Python's zoneinfo has them: what time it is in any of the world's zones, by its name
+# ("Asia/Kolkata", "America/New_York", "UTC"), with its summer time, and the moment a time in one is. A moment
+# is seconds since 1970 began in UTC, as the system's clock counts them. On Windows the zones are the
+# system's own (ICU, in icu.dll, from Windows 10 1903); on Linux, the zoneinfo files. A program `moth build`
+# makes can use it, built with --allow-libraries (and on Linux --allow-read, to read the zone's file).
+#
+#   use "zones.moth" as zones
+#   set now to zones's now()                         # seconds since 1970, UTC
+#   set t to zones's in_zone(now, "Asia/Kolkata")    # (record with year, month, day, hour, minute, second,
+#   say t                                            #   offset (seconds east of UTC), zone)
+#   say zones's zone_text(t)                         # 2026-11-04T11:55:38+05:30
+#   say zones's offset_at("America/New_York", now)   # -18000 in winter, -14400 in summer
+#   say zones's moment_of(2026, 7, 4, 9, 0, 0, "America/New_York")   # that time there, as a moment
+#   say zones's local_zone()                         # this computer's own zone's name
+#   say zones's utc_text(now)                        # 2026-11-04T06:25:38Z
+#
+# A zone that isn't there is a `fail with` that says so: catch it with `try`.
+
+use "dates.moth" as zones_dates
+use the library "icu"
+    "ucal_open" as icu_open(wide text, a whole number, a pointer, a whole number, bytes) gives a pointer
+    "ucal_close" as icu_close(a pointer)
+    "ucal_setMillis" as icu_set_millis(a pointer, a number, bytes)
+    "ucal_get" as icu_get(a pointer, a whole number, bytes) gives a whole number
+    "ucal_getDefaultTimeZone" as icu_default_zone(bytes, a whole number, bytes) gives a whole number
+    "ucal_getCanonicalTimeZoneID" as icu_canonical(wide text, a whole number, bytes, a whole number, bytes, bytes) gives a whole number
+end
+use the library "msvcrt"
+    "_time64" as zones_windows_time(a pointer) gives a long whole number
+end
+use the library "c"
+    "time" as zones_unix_time(a pointer) gives a long whole number
+    "readlink" as zones_readlink(text, bytes, a long whole number) gives a long whole number
+    "getenv" as zones_getenv(text) gives text
+end
+
+set zones_windows to yes
+try
+    zones_windows_time(nothing)
+if it fails
+    set zones_windows to no
+end
+set zones_files to empty dictionary # each zone's file, read once: its changes and the rule after them
+
+# seconds since 1970 began, UTC
+to now
+    if zones_windows
+        return zones_windows_time(nothing)
+    end
+    return zones_unix_time(nothing)
+end
+
+# seconds east of UTC in this zone at this moment
+to offset_at with zone, moment
+    if zone is "UTC" or zone is "Etc/UTC" or zone is "GMT" or zone is "Z"
+        return 0
+    end
+    if zones_windows
+        return zones_icu_offset(zone, moment)
+    end
+    return zones_file_offset(zone, moment)
+end
+
+# the moment as the date and time in this zone
+to in_zone with moment, zone
+    set offset to offset_at(zone, moment)
+    set made to zones_parts(moment + offset)
+    set offset of made to offset
+    set zone of made to zone
+    return made
+end
+
+# the moment a date and time in this zone is, as Python's zoneinfo has it: for one summer time has twice, the
+# first; for one it skips, as if the clocks hadn't changed yet (so 2:30 in a night that goes from 2:00 to 3:00
+# is 3:30)
+to moment_of with year, month, day, hour, minute, second, zone
+    zones_dates's date(year, month, day)
+    set wall to zones_dates's day_number(record with year year, month month, day day) * 86400 + hour * 3600 + minute * 60 + second
+    set before to offset_at(zone, wall - 86400)
+    set after to offset_at(zone, wall + 86400)
+    set first_try to wall - before
+    set second_try to wall - after
+    set first_fits to first_try + offset_at(zone, first_try) is wall
+    set second_fits to second_try + offset_at(zone, second_try) is wall
+    if first_fits and second_fits
+        if first_try is less than second_try
+            return first_try
+        end
+        return second_try
+    else if first_fits
+        return first_try
+    else if second_fits
+        return second_try
+    end
+    return first_try
+end
+
+# a moment's date and time in UTC, as a record with year, month, day, hour, minute and second
+to zones_parts with seconds
+    set rest to remainder of seconds divided by 86400
+    if rest is less than 0
+        set rest to rest + 86400
+    end
+    set days to (seconds - rest) / 86400
+    set made to zones_dates's date_of_day(days)
+    set hour of made to (rest - remainder of rest divided by 3600) / 3600
+    set minute of made to (remainder of rest divided by 3600 - remainder of rest divided by 60) / 60
+    set second of made to remainder of rest divided by 60
+    return made
+end
+
+to utc_text with moment
+    set t to zones_parts(moment)
+    return zones_date_text(t) + "Z"
+end
+
+# a time in_zone gave, as ISO 8601 has it with its offset
+to zone_text with t
+    set offset to offset of t
+    set sign to "+"
+    if offset is less than 0
+        set sign to "-"
+        set offset to 0 - offset
+    end
+    set hours to (offset - remainder of offset divided by 3600) / 3600
+    set minutes to (remainder of offset divided by 3600) / 60
+    return zones_date_text(t) + sign + zones_two(hours) + ":" + zones_two(minutes)
+end
+
+to zones_date_text with t
+    set year_text to "" + year of t
+    repeat while length of year_text is less than 4
+        set year_text to "0" + year_text
+    end
+    return year_text + "-" + zones_two(month of t) + "-" + zones_two(day of t) + "T" + zones_two(hour of t) + ":" + zones_two(minute of t) + ":" + zones_two(second of t)
+end
+
+to zones_two with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+# this computer's own zone's name
+to local_zone
+    if zones_windows
+        set room to 256 bytes
+        set status to 4 bytes
+        set n to icu_default_zone(room, 128, status)
+        set made to empty list
+        for each k from 1 to n
+            add byte (2 * k - 1) of room + byte (2 * k) of room * 256 to made
+        end
+        return zones_ascii(made)
+    end
+    set from_env to zones_getenv("TZ")
+    if from_env is not nothing and from_env is not ""
+        if zones_starts(from_env, ":")
+            set from_env to items 2 to (length of from_env) of from_env
+        end
+        return from_env
+    end
+    set room to 1024 bytes
+    set n to zones_readlink("/etc/localtime", room, 1024)
+    if n is greater than 0
+        set target to (items 1 to n of room) as text
+        set marker to "zoneinfo/"
+        set at to position of marker in target
+        if at is greater than 0
+            return items (at + length of marker) to (length of target) of target
+        end
+    end
+    return "UTC"
+end
+
+to zones_ascii with codes
+    return codes as bytes as text
+end
+
+to zones_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+# ---------- Windows: ICU ----------
+
+to zones_icu_offset with zone, moment
+    set status to 4 bytes
+    set room to 256 bytes
+    set system_id to 1 bytes
+    icu_canonical(zone, -1, room, 128, system_id, status)
+    if zones_signed_low(status) is greater than 0 # an error; below 0 is a warning
+        fail with "there's no time zone called '" + zone + "'"
+    end
+    set status to 4 bytes
+    set calendar to icu_open(zone, -1, nothing, 1, status) # UCAL_GREGORIAN
+    if calendar is nothing or zones_signed_low(status) is greater than 0
+        fail with "there's no time zone called '" + zone + "'"
+    end
+    icu_set_millis(calendar, moment * 1000, status)
+    set made to icu_get(calendar, 15, status) + icu_get(calendar, 16, status) # UCAL_ZONE_OFFSET and _DST_OFFSET
+    icu_close(calendar)
+    return made / 1000
+end
+
+# a 32-bit number, the lowest byte first, which can be below 0, as C's int is
+to zones_signed_low with b
+    set made to byte 1 of b + byte 2 of b * 256 + byte 3 of b * 65536 + byte 4 of b * 16777216
+    if made is at least 2147483648
+        return made - 4294967296
+    end
+    return made
+end
+
+# ---------- Linux: the zoneinfo files ----------
+
+to zones_file_offset with zone, moment
+    set info to zones_file(zone)
+    set times to times of info
+    set n to length of times
+    if n is 0 or moment is less than item 1 of times
+        if rule of info is not nothing and n is 0
+            return zones_rule_offset(rule of info, moment)
+        end
+        return first_offset of info
+    end
+    if moment is at least item n of times and rule of info is not nothing
+        return zones_rule_offset(rule of info, moment)
+    end
+    set low to 1
+    set high to n
+    repeat while low is less than high # the last change at or before the moment
+        set middle to (low + high + 1 - remainder of (low + high + 1) divided by 2) / 2
+        if item middle of times is at most moment
+            set low to middle
+        else
+            set high to middle - 1
+        end
+    end
+    return item low of offsets of info
+end
+
+# a zone's file: each change's moment and the offset from then, the offset before the first, and the rule after
+# the last (a POSIX TZ string, read), from the file's second part, of 64-bit moments
+to zones_file with zone
+    if zone is in zones_files
+        return item zone of zones_files
+    end
+    for each c in zone
+        if not (c is in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_+-")
+            fail with "there's no time zone called '" + zone + "'"
+        end
+    end
+    if ".." is in zone
+        fail with "there's no time zone called '" + zone + "'"
+    end
+    set b to nothing
+    try
+        set b to read bytes "/usr/share/zoneinfo/" + zone
+    if it fails
+        fail with "there's no time zone called '" + zone + "'"
+    end
+    if length of b is less than 44 or (items 1 to 4 of b) as text is not "TZif"
+        fail with "the time zone file for '" + zone + "' isn't one"
+    end
+    set version to byte 5 of b
+    set at to 1
+    set size to 4
+    if version is not 0
+        set counts to zones_counts(b, 1)
+        set at to 45 + item 4 of counts * 5 + item 5 of counts * 6 + item 6 of counts + item 3 of counts * 8 + item 2 of counts + item 1 of counts
+        set size to 8
+    end
+    set counts to zones_counts(b, at)
+    set time_count to item 4 of counts
+    set type_count to item 5 of counts
+    set p to at + 44
+    set times to empty list
+    for each k from 1 to time_count
+        add zones_signed(b, p, size) to times
+        set p to p + size
+    end
+    set indexes to empty list
+    for each k from 1 to time_count
+        add byte p of b to indexes
+        set p to p + 1
+    end
+    set type_offsets to empty list
+    set type_dst to empty list
+    for each k from 1 to type_count
+        add zones_signed(b, p, 4) to type_offsets
+        add byte (p + 4) of b to type_dst
+        set p to p + 6
+    end
+    set offsets to empty list
+    for each k from 1 to time_count
+        add item (item k of indexes + 1) of type_offsets to offsets
+    end
+    set first_offset to item 1 of type_offsets
+    set found_standard to no
+    for each k from 1 to type_count
+        if item k of type_dst is 0 and not found_standard
+            set first_offset to item k of type_offsets
+            set found_standard to yes
+        end
+    end
+    set rule to nothing
+    if version is not 0
+        set p to p + item 6 of counts + item 3 of counts * 12 + item 2 of counts + item 1 of counts
+        if p + 1 is at most length of b and byte p of b is 10
+            set ends to p + 1
+            repeat while ends is at most length of b and byte ends of b is not 10
+                set ends to ends + 1
+            end
+            if ends is greater than p + 1
+                set rule to zones_read_rule((items (p + 1) to (ends - 1) of b) as text)
+            end
+        end
+    end
+    set made to record with times times, offsets offsets, first_offset first_offset, rule rule
+    set item zone of zones_files to made
+    return made
+end
+
+# the six counts in a header: UT/local flags, standard/wall flags, leap seconds, changes, kinds, letters
+to zones_counts with b, at
+    set made to empty list
+    for each k from 0 to 5
+        add zones_signed(b, at + 20 + 4 * k, 4) to made
+    end
+    return made
+end
+
+# a number from `size` bytes, the highest first, which can be below 0: one below 0 counted from its bytes
+# flipped, so it's exact however many bytes it has, up to 2^53
+to zones_signed with b, at, size
+    set below to byte at of b is at least 128
+    set made to 0
+    for each k from 0 to size - 1
+        set x to byte (at + k) of b
+        if below
+            set x to 255 - x
+        end
+        set made to made * 256 + x
+    end
+    if below
+        return 0 - made - 1
+    end
+    return made
+end
+
+# ---------- POSIX TZ rules: EST5EDT,M3.2.0,M11.1.0 ----------
+
+# a rule read: its standard offset and, if it has summer time, that offset and when it starts and ends
+to zones_read_rule with words
+    set state to record with words words, at 1
+    zones_name(state)
+    set standard to 0 - zones_hms(state)
+    if zones_letter(state) is ""
+        return record with standard standard, summer nothing
+    end
+    zones_name(state)
+    set summer to standard + 3600
+    if zones_letter(state) is not "," and zones_letter(state) is not ""
+        set summer to 0 - zones_hms(state)
+    end
+    if zones_letter(state) is not ","
+        return record with standard standard, summer nothing # a rule with no dates: keep to standard time
+    end
+    set at of state to at of state + 1
+    set begins to zones_when(state)
+    set at of state to at of state + 1 # the comma
+    set finishes to zones_when(state)
+    return record with standard standard, summer summer, begins begins, finishes finishes
+end
+
+to zones_letter with state
+    if at of state is greater than length of words of state
+        return ""
+    end
+    return item (at of state) of words of state
+end
+
+# a zone's letters, as EST, or in < > as <+0530>
+to zones_name with state
+    if zones_letter(state) is "<"
+        repeat while zones_letter(state) is not ">" and zones_letter(state) is not ""
+            set at of state to at of state + 1
+        end
+        set at of state to at of state + 1
+        return nothing
+    end
+    repeat while zones_letter(state) is not "" and zones_letter(state) is in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        set at of state to at of state + 1
+    end
+end
+
+# [+-]h[:mm[:ss]] as seconds
+to zones_hms with state
+    set sign to 1
+    if zones_letter(state) is "-"
+        set sign to -1
+        set at of state to at of state + 1
+    else if zones_letter(state) is "+"
+        set at of state to at of state + 1
+    end
+    set parts to list of 0, 0, 0
+    set k to 1
+    repeat while yes
+        set n to 0
+        repeat while zones_letter(state) is not "" and zones_letter(state) is in "0123456789"
+            set n to n * 10 + number of zones_letter(state)
+            set at of state to at of state + 1
+        end
+        set item k of parts to n
+        if zones_letter(state) is ":" and k is less than 3
+            set at of state to at of state + 1
+            set k to k + 1
+        else
+            return sign * (item 1 of parts * 3600 + item 2 of parts * 60 + item 3 of parts)
+        end
+    end
+end
+
+# Mm.w.d[/time], Jn[/time] or n[/time]: which day, and the time on it (2:00 if not said)
+to zones_when with state
+    set kind to "day of year"
+    set month to 0
+    set week to 0
+    set weekday to 0
+    set day to 0
+    if zones_letter(state) is "M"
+        set at of state to at of state + 1
+        set kind to "month"
+        set month to zones_number(state)
+        set at of state to at of state + 1
+        set week to zones_number(state)
+        set at of state to at of state + 1
+        set weekday to zones_number(state)
+    else if zones_letter(state) is "J"
+        set at of state to at of state + 1
+        set kind to "julian"
+        set day to zones_number(state)
+    else
+        set day to zones_number(state)
+    end
+    set time_of_day to 7200
+    if zones_letter(state) is "/"
+        set at of state to at of state + 1
+        set time_of_day to zones_hms(state)
+    end
+    return record with kind kind, month month, week week, weekday weekday, day day, time_of_day time_of_day
+end
+
+to zones_number with state
+    set n to 0
+    repeat while zones_letter(state) is not "" and zones_letter(state) is in "0123456789"
+        set n to n * 10 + number of zones_letter(state)
+        set at of state to at of state + 1
+    end
+    return n
+end
+
+# the offset a rule gives at a moment: summer time from its start, in standard time, to its end, in summer time
+to zones_rule_offset with rule, moment
+    if summer of rule is nothing
+        return standard of rule
+    end
+    set year to year of zones_parts(moment + standard of rule)
+    set starts_at to zones_when_moment(begins of rule, year) - standard of rule
+    set ends_at to zones_when_moment(finishes of rule, year) - summer of rule
+    if starts_at is less than ends_at # the north: summer in the middle of the year
+        if moment is at least starts_at and moment is less than ends_at
+            return summer of rule
+        end
+        return standard of rule
+    end
+    if moment is at least ends_at and moment is less than starts_at # the south: summer over the year's turn
+        return standard of rule
+    end
+    return summer of rule
+end
+
+# when in a year a rule's day and time is, as local seconds since 1970
+to zones_when_moment with w, year
+    set day_number to 0
+    if kind of w is "month"
+        set first_day to zones_dates's day_number(record with year year, month month of w, day 1)
+        set first_weekday to remainder of (first_day + 4) divided by 7 # 1970-01-01 was a Thursday: 0 is Sunday
+        set first_match to first_day + remainder of (weekday of w - first_weekday + 7) divided by 7
+        set day_number to first_match + 7 * (week of w - 1)
+        set days_in to zones_dates's days_in_month(year, month of w)
+        repeat while day_number is greater than first_day + days_in - 1
+            set day_number to day_number - 7
+        end
+    else if kind of w is "julian" # 1 to 365, February the 29th never counted
+        set day_number to zones_dates's day_number(record with year year, month 1, day 1) + day of w - 1
+        if zones_dates's is_leap_year(year) and day of w is greater than 59
+            set day_number to day_number + 1
+        end
+    else
+        set day_number to zones_dates's day_number(record with year year, month 1, day 1) + day of w
+    end
+    return day_number * 86400 + time_of_day of w
+end
