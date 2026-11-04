@@ -493,6 +493,18 @@ for each i from 1 to 100
         stop                        # leave the loop
     end
 end
+for each i from 10 to 1 by -2       # 10, 8, 6, 4, 2: a step, as Python's range has
+    say i
+end
+
+match command                       # the first `when` that fits runs
+    when "go", "walk"
+        say "going"
+    when is greater than 100        # any of is's comparisons
+        say "a big number"
+    else
+        say "what?"
+end
 
 to area with width and height       # make a function
     return width * height
@@ -510,6 +522,13 @@ to welcome with person, greeting or "Hello"   # an input a call can leave out
     say greeting ", " person
 end
 welcome("Ana")                      # Hello, Ana
+welcome("Bo", greeting "Hi")        # an input given by its name: Hi, Bo
+
+set a, b to 1, 2                    # several names at once
+set a, b to b, a                    # a swap
+for each name, age in list of (list of "Sam", 20), (list of "Ana", 31)
+    say name " is " age             # each item's items
+end
 
 set double to function with x gives x * 2   # a function with no name, as a value
 say double(21)
@@ -564,6 +583,8 @@ try                                         # catch a mistake and carry on
     set age to number of ask "Age?"
 if it fails with why
     say "That's not a number: " why
+either way                                  # runs however it ends: a mistake, a return, a stop
+    say "asked"
 end
 
 set ages to dictionary where "Sam" is 20, "Ana" is 31   # look things up by key
@@ -783,6 +804,9 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   written out (or a list of them), which each call that leaves the input out
   gets afresh. Every input after one with `or` needs one too. A call through a
   variable gives them all.
+- **Inputs by name:** `greet("Sam", mark "?")`, a name and its value, after
+  the inputs given in order, for a function made with `to`; the ones left out
+  get their `or`. They're worked out in the order of the function's inputs.
 - **Variables:** inside a function, `set` (or `add`, `for each`) changes a
   variable the top level, or an enclosing function, made above the function's
   `to` line; otherwise the variable is the function's own. A name a function
@@ -1267,6 +1291,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   bytes) is nothing in the next entry, two names holding the same list hold
   copies of it after the entry, a task doesn't outlive its entry, and an entry
   that ends with a mistake keeps nothing it set. Ctrl+C ends the shell too.
+- A mistake passed on after `either way` is reported where the `try` is, with
+  its message (or what `fail with` gave), not where it happened, and with no
+  calls under it; `stop the program` in a `try` ends the program without
+  running what's after `either way`.
 - `moth debug` stops before a line, not inside one, and shows variables by
   name, not other values (`show x`, not `show x + 1`). At a mistake it stops
   after the report, with what the line could see, for `show`, `vars`,

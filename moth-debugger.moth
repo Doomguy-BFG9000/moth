@@ -137,11 +137,13 @@ to failed
                 say "show needs a variable's name: show x"
             end
         else if command is "vars" or command is "v"
-            if length of names of w is 0
+            if written_count(names of w) is 0
                 say "no variables here"
             end
             for each name in names of w
-                say_value(name, names of w, values of w, given of w)
+                if written(name)
+                    say_value(name, names of w, values of w, given of w)
+                end
             end
         else if command is "where" or command is "w"
             say_calls(line of w, file of w, fn of w)
@@ -359,11 +361,13 @@ to here with line, file, depth, fn, names, values, given
                 say "show needs a variable's name: show x"
             end
         else if command is "vars" or command is "v"
-            if length of names is 0
+            if written_count(names) is 0
                 say "no variables here"
             end
             for each name in names
-                say_value(name, names, values, given)
+                if written(name)
+                    say_value(name, names, values, given)
+                end
             end
         else if command is "where" or command is "w"
             say_calls(line, file, fn)
@@ -377,4 +381,20 @@ to here with line, file, depth, fn, names, values, given
             say "I don't know '" command "': help says what I do"
         end
     end
+end
+
+# whether a name is one the program wrote, not one made for what a statement is written as (`the step on line 3`)
+to written with name
+    return not (" on line " is in name)
+end
+
+# how many of the names the program wrote
+to written_count with names
+    set n to 0
+    for each name in names
+        if written(name)
+            set n to n + 1
+        end
+    end
+    return n
 end

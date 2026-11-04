@@ -3806,3 +3806,68 @@ hold them to agreeing.
   without it, ends at 20 of 60), fifty values through a queue that holds 3, a
   task waiting on a flag, a wait for any, and a queue that gives up.
 
+## 95. finally, inputs by name, unpacking, match and steps
+
+- **Why.** Next to Python, Moth had no `finally`, no keyword arguments, no
+  `a, b = b, a`, no `match`, and no `range` with a step: each a few lines of
+  Python that took a helper variable or a loop by hand in Moth.
+- **Only the parsers, again.** As in §66, each is written in terms of what
+  Moth already had, so the VM, the JIT, WebAssembly, machine code, the
+  checker and the shell needed nothing new; moth.js and compiler.moth make
+  the same tree, and compiler.moth still writes the JIT's JavaScript byte for
+  byte. A statement that becomes several (`several`) is put in its place in
+  the block, as a used file's code is. The variables they need have names no
+  program can write: `the step on line 3`, with `of shapes.moth` in a file the
+  program uses, and `(2)` for a second on one line; the debuggers leave a name
+  with "on line" in it out of what they show. A number they write in has a
+  token of its own, with the number as its text, as the JIT writes numbers as
+  they were written.
+- **Steps.** `for each k from 10 to 1 by -2` keeps where it starts and the
+  step, fails if the step is 0, and counts from 0 to `(10 - start) / step
+  rounded down`, setting k to `start + count * step` each time round: so it
+  ends before an end it doesn't land on, a step the wrong way runs no times,
+  `stop` works as in any loop, and `by 0.25` lands on 1 exactly, as the
+  division is rounded as it's shown.
+- **Unpacking.** `set a, b to x` keeps x, fails if its length isn't 2 (`can't
+  set 2 names from a list of 3`), and sets each name its item; with values
+  after `to` (`set a, b to b, a`) they make a list first, so a swap works, and
+  as there are as many as names there's no length to check. `for each name,
+  age in people` is a loop over a variable of its own, unpacked first, before
+  any `where`. `set a, b` used to be a mistake, so no program changed.
+- **match.** `match x`, then `when` lines, is the statement only when the
+  next line starts with `when`; `match` alone is still a name, and `match x`
+  without it still calls `match`. Each clause is an `if` of x, kept in a
+  variable of its own, the next in its `else`: `when 1, 2` (or `1 or 2`) is
+  `is` to each, deep equality as `is` always is; `when is greater than 5`
+  and the rest are what `is` takes after it, with x before it, so comparing
+  text to a number is the mistake it always is; `else` is the rest. A `when`
+  in a clause starts the next clause, so an app's handler can't be inside one.
+- **Inputs by name.** `greet("Sam", mark "?")`: a name followed by a value,
+  in a call, was always a mistake, so it can mean this. The parser keeps them
+  among the call's inputs, and once the whole program is read, before the
+  inputs left out get their `or` (§66), each goes in its place, by the
+  function's last `to`; one left out before them gets its `or`, or the call
+  is the mistake that it needs it. A call through a variable, or by a name no
+  `to` made, can't give one, as there's nothing to say where it goes; nor can
+  one come before an input given in order, or be given twice.
+- **finally: `either way`.** After a try's statements, or its `if it fails`,
+  `either way` alone on a line starts what runs however the try ends. The try
+  goes inside another, whose `if it fails` keeps the mistake and notes that
+  there was one; then what's after `either way` runs, then the mistake is
+  passed on with `fail with`, so a `try` around it sees the same value, a
+  record as a record. A `return` in the try, or a `stop` of a loop around it,
+  would skip all that, so each becomes: keep the value, note how it left, and
+  `stop` a loop that runs once, put around the inner try for it (a loop
+  inside, with a return in it, stops the loop it's in too, after it ends).
+  After what runs either way, the noted return or stop is made. A `return` or
+  a `stop` after `either way` itself is left as it is, so it ends what it
+  ends, as Python's `return` in a `finally` does. The mistake passed on is
+  reported at the `try`, with its message: what's lost is where it was, since
+  Moth has no way to fail again with the same mistake.
+- **Tested.** Each, on the three engines, in compiler.moth against the JIT,
+  in machine code on Windows and Linux: the order inputs are given in, a swap,
+  steps down, by fractions and the wrong way, every kind of clause, a try left
+  by a return in a loop, by a stop, by a mistake caught and one passed on, a
+  try with `either way` inside another, and each mistake they can make; and
+  `moth format` lays out `match` and `either way` as it does `if` and `else`.
+

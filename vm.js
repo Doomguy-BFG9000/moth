@@ -2356,10 +2356,11 @@ export class Machine {
   // For a debugger: the functions being run (outermost first), and every variable with a value that the
   // running function can see, innermost scope first: its own, then those of the functions it was made
   // inside, then the top level's. Scopes and functions nest the same way, so the two chains walk together.
+  // A name no program can write, made for what a statement is written as (`the step on line 3`), isn't shown.
   inspect() {
     const scopes = [];
     for (let fn = this.fn, env = this.env; fn; fn = fn.parent, env = env[0]) {
-      scopes.push({ name: fn.name, vars: fn.names.flatMap((name, slot) => (env[slot] === UNSET ? [] : [[name, show(env[slot], true)]])) });
+      scopes.push({ name: fn.name, vars: fn.names.flatMap((name, slot) => (env[slot] === UNSET || name.includes(" on line ") ? [] : [[name, show(env[slot], true)]])) });
     }
     return { line: this.line, calls: [...this.frames.map((f) => f.fn.name), this.fn.name], scopes };
   }

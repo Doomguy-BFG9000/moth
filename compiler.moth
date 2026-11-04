@@ -531,6 +531,7 @@ to parse with tokens, reading
     set nesting to 0 # blocks around the statement being read, for `lay`
     set hoisted to empty list # functions the statement being read makes for its values (see unnamed)
     set unnamed_on_line to empty dictionary # how many each line has made, so each has a name of its own
+    set hidden_on_line to empty dictionary # the same, for variables of the program's own (see hidden_name)
     set tight_marks to empty list # the marks tight made, in order, so a phrase that isn't one can take its own back
 
     # where a statement starts, and how deep it is, for tidying
@@ -921,15 +922,39 @@ to parse with tokens, reading
         return type of next is "word" and value of next is "it" and type of after is "word" and value of after is "fails"
     end
 
-    # `in_try`: the statements of a `try`, which also end at its `if it fails`
-    to statements with opener, in_try
+    # the line that starts what a `try` does however it ends: `either way`, alone on its line
+    to is_either_way
+        if not is_word("either") or not word_at(pos + 1, "way")
+            return no
+        end
+        if nl of item (pos + 1) of tokens
+            return no
+        end
+        set ew_after to item (pos + 2) of tokens
+        return type of ew_after is "eof" or nl of ew_after
+    end
+
+    # where a block's statements end, besides `end` and `else`: "try" for a try's, at `if it fails` or `either
+    # way`; "handler" for its `if it fails`'s, at `either way`; "match" for a `when`'s, at the next `when`
+    to ends_block with stop_at
+        if stop_at is "try"
+            return is_if_it_fails() or is_either_way()
+        end
+        if stop_at is "handler"
+            return is_either_way()
+        end
+        return stop_at is "match" and is_word("when")
+    end
+
+    # `stop_at`: where else the block's statements end (see ends_block)
+    to statements with opener, stop_at
         set body to empty list
         set outside_top to at_top
         set at_top to opener is nothing
         if opener is not nothing
             set nesting to nesting + 1
         end
-        repeat while more(opener) and not (in_try and is_if_it_fails())
+        repeat while more(opener) and not ends_block(stop_at)
             if check("eof")
                 fail with problem(peek(), "'" + value of opener + "' from line " + line of opener + " is missing its 'end'")
             end
@@ -941,7 +966,7 @@ to parse with tokens, reading
                 add made_fn to body
             end
             set hoisted to made_before
-            if kind of made is "use" # the file's code, in its place
+            if kind of made is "use" or kind of made is "several" # the file's code, or what the statement is written as, in its place
                 for each inner in body of made
                     add inner to body
                 end
@@ -1310,7 +1335,7 @@ to parse with tokens, reading
         if not nl of peek()
             expected("a new line")
         end
-        return statements(opener, no)
+        return statements(opener, "")
     end
 
     to loop_body with opener
@@ -1380,6 +1405,22 @@ to parse with tokens, reading
                 return record with kind "turtle", action "set slider", value (record with kind "list", items slider_items, at t), at t
             end
             set variable to take_name("a variable name")
+            if check(",") # `set a, b to pair`, `set a, b to b, a`: each name an item of what's after `to`
+                set up_names to list of variable
+                repeat while match(",")
+                    add take_name("a variable name") to up_names
+                end
+                expect_word("to")
+                set up_values to list of expression()
+                repeat while match(",")
+                    add expression() to up_values
+                end
+                set up_value to item 1 of up_values
+                if length of up_values is greater than 1
+                    set up_value to record with kind "list", items up_values, at t
+                end
+                return record with kind "several", body unpacked(up_names, up_value, t), at t
+            end
             if check("'s") and not contains(aliases, variable) # `set rex's name to ...` changes a field
                 set own_field to possessive(record with kind "name", name variable, at t)
                 if kind of own_field is not "field"
@@ -1430,13 +1471,33 @@ to parse with tokens, reading
         if word("for")
             expect_word("each")
             set variable to take_name("a variable name")
-            if word("from")
+            set each_names to list of variable # `for each name, age in people`: each item's items
+            repeat while match(",")
+                add take_name("a variable name") to each_names
+            end
+            set counting to no
+            if length of each_names is 1
+                set counting to word("from")
+            end
+            if counting
                 set start to expression()
                 expect_word("to")
-                return record with kind "count", name variable, start start, limit expression(), body loop_body(t), at t
+                set limit to expression()
+                set by_token to no # `for each k from 10 to 1 by -2`
+                if not nl of peek()
+                    set by_token to word("by")
+                end
+                if by_token
+                    set step to expression()
+                    return stepped(variable, start, limit, step, loop_body(t), t, by_token)
+                end
+                return record with kind "count", name variable, start start, limit limit, body loop_body(t), at t
             end
             if not word("in")
-                expected("'in' or 'from'")
+                if length of each_names is 1
+                    expected("'in' or 'from'")
+                end
+                expected("'in'")
             end
             set over to expression()
             set where_token to word("where") # `for each row in sales where price of row is greater than 10`
@@ -1449,7 +1510,15 @@ to parse with tokens, reading
                 set guarded to list of (record with kind "if", cond filter, then body, otherwise empty list, at where_token)
                 set body to guarded
             end
-            return record with kind "each", name variable, over over, body body, at t
+            if length of each_names is 1
+                return record with kind "each", name variable, over over, body body, at t
+            end
+            set each_one to hidden_name("each item", t)
+            set each_body to unpacked(each_names, (record with kind "name", name each_one, at t), t)
+            for each each_s in body
+                add each_s to each_body
+            end
+            return record with kind "each", name each_one, over over, body each_body, at t
         end
         if word("to")
             set fn_name to take_name("a function name")
@@ -1613,16 +1682,35 @@ to parse with tokens, reading
             if not nl of peek()
                 expected("a new line")
             end
-            set body to statements(t, yes)
-            if not is_if_it_fails()
+            set body to statements(t, "try")
+            set caught_name to nothing
+            set try_handler to nothing
+            if is_if_it_fails()
+                set pos to pos + 3
+                if word("with")
+                    set caught_name to take_name("a variable name")
+                end
+                if not nl of peek()
+                    expected("a new line")
+                end
+                set try_handler to statements(t, "handler")
+            else if not is_either_way()
                 expected("'if it fails'")
             end
-            set pos to pos + 3
-            set caught_name to nothing
-            if word("with")
-                set caught_name to take_name("a variable name")
+            if not is_either_way()
+                expect_word("end")
+                return record with kind "try", body body, name caught_name, handler try_handler, at t
             end
-            return record with kind "try", body body, name caught_name, handler block_end(t), at t
+            set pos to pos + 2
+            return either_way(t, body, caught_name, try_handler, block_end(t))
+        end
+        if is_word("match") # `match command`, then `when "go"` lines: the first that fits runs (see matched)
+            if not nl of item (pos + 1) of tokens
+                if when_next()
+                    set pos to pos + 1
+                    return matched(t)
+                end
+            end
         end
         if word("use")
             if is_word("the") and not nl of peek() and word_at(pos + 1, "library")
@@ -1947,9 +2035,9 @@ to parse with tokens, reading
                 end
                 set own_given to list of subject of own_made
                 if not nl of peek()
-                    add expression() to own_given
+                    an_input(own_given)
                     repeat while match(",")
-                        add expression() to own_given
+                        an_input(own_given)
                     end
                 end
                 return made_call(name of own_made, own_given, at of own_made)
@@ -1961,9 +2049,9 @@ to parse with tokens, reading
             if tight(match("("))
                 set args to arg_list()
             else if not nl of peek()
-                add expression() to args
+                an_input(args)
                 repeat while match(",")
-                    add expression() to args
+                    an_input(args)
                 end
             end
             return made_call(called, args, t)
@@ -2064,6 +2152,11 @@ to parse with tokens, reading
             set pos to pos + 2
             return record with kind "builtin", name "has ended", args (list of left), at t
         end
+        return compared(left)
+    end
+
+    # `is`, `is not`, `is greater than`... and what's after it, with what's before it given
+    to compared with left
         set t to word("is")
         if not t
             return left
@@ -2624,7 +2717,7 @@ to parse with tokens, reading
         set args to empty list
         set going to not check(")")
         repeat while going
-            add expression() to args
+            an_input(args)
             set going to match(",") and not check(")")
         end
         if not match(")")
@@ -2634,7 +2727,256 @@ to parse with tokens, reading
         return args
     end
 
-    set made to statements(nothing, no)
+    # An input of a call, or one given by its name, `greet("Sam", greeting "Hi")`: a name with a value after it,
+    # which fill_defaults puts in its place, as no call could have a name followed by a value before.
+    to an_input with given_args
+        set ni_value to expression()
+        if kind of ni_value is "name"
+            if not ("'s" is in name of ni_value) and not nl of peek() and not check(",") and not check(")")
+                add (record with kind "named", name name of ni_value, value expression(), at at of ni_value) to given_args
+                return nothing
+            end
+        end
+        for each ni_one in given_args
+            if kind of ni_one is "named"
+                fail with problem(at of ni_value, "the inputs given in order come before those given by name")
+            end
+        end
+        add ni_value to given_args
+    end
+
+    # A variable of the program's own, for what a statement is written as, with a name no program can write:
+    # `the step on line 3`, in a file the program uses `the step on line 3 of shapes.moth`, then `(2)`, `(3)`...
+    to hidden_name with what, t
+        set hn_named to what + " on line " + line of t
+        if file of t is not ""
+            set hn_named to hn_named + " of " + file of t
+        end
+        set hn_n to 1
+        if hn_named is in hidden_on_line
+            set hn_n to item hn_named of hidden_on_line + 1
+        end
+        set item hn_named of hidden_on_line to hn_n
+        if hn_n is greater than 1
+            return hn_named + " (" + hn_n + ")"
+        end
+        return hn_named
+    end
+
+    # `set a, b to pair`: what's after `to` kept in a variable of its own, then each name its item, once there
+    # are as many as names. Gives the statements.
+    to unpacked with up_names, up_value, t
+        set up_kept to hidden_name("the values", t)
+        set up_made to list of (record with kind "set", name up_kept, value up_value, at t)
+        set up_known to no
+        if kind of up_value is "list"
+            if length of items of up_value is length of up_names
+                set up_known to yes
+            end
+        end
+        if not up_known
+            set up_text to record with kind "value", type "string", value "can't set " + length of up_names + " names from a list of ", at t
+            set up_why to record with kind "math", op "+", left up_text, right (record with kind "length", subject (record with kind "name", name up_kept, at t), at t), at t
+            set up_count to record with kind "length", subject (record with kind "name", name up_kept, at t), at t
+            set up_test to record with kind "compare", op "is", negate yes, left up_count, right (record with kind "value", type "number", value "" + length of up_names, at t), at t
+            add (record with kind "if", cond up_test, then (list of (record with kind "fail", value up_why, at t)), otherwise empty list, at t) to up_made
+        end
+        for each up_k from 1 to length of up_names
+            set up_item to record with kind "item", index (record with kind "value", type "number", value "" + up_k, at t), subject (record with kind "name", name up_kept, at t), at t
+            add (record with kind "set", name item up_k of up_names, value up_item, at t) to up_made
+        end
+        return up_made
+    end
+
+    # `for each k from 10 to 1 by -2`: a count from 0 to the steps there's room for, with k worked out from it
+    # each time round, so a step that doesn't land on the end stops before it, as Python's range does
+    to stepped with st_variable, st_from, st_to, st_step, st_body, t, by_token
+        set st_start to hidden_name("the start", t)
+        set st_size to hidden_name("the step", t)
+        set st_count to hidden_name("the count", t)
+        set st_left to record with kind "math", op "-", left st_to, right (record with kind "name", name st_start, at by_token), at by_token
+        set st_ratio to record with kind "math", op "/", left st_left, right (record with kind "name", name st_size, at by_token), at by_token
+        set st_steps to record with kind "builtin", name "rounded down", args (list of st_ratio), at by_token
+        set st_zero to record with kind "compare", op "is", negate no, left (record with kind "name", name st_size, at by_token), right (record with kind "value", type "number", value "0", at by_token), at by_token
+        set st_times to record with kind "math", op "*", left (record with kind "name", name st_count, at by_token), right (record with kind "name", name st_size, at by_token), at by_token
+        set st_sum to record with kind "math", op "+", left (record with kind "name", name st_start, at by_token), right st_times, at by_token
+        set st_loop_body to list of (record with kind "set", name st_variable, value st_sum, at by_token)
+        for each st_s in st_body
+            add st_s to st_loop_body
+        end
+        set st_made to list of (record with kind "set", name st_start, value st_from, at by_token)
+        add (record with kind "set", name st_size, value st_step, at by_token) to st_made
+        set st_fail to record with kind "fail", value (record with kind "value", type "string", value "'by' needs a step that isn't 0", at by_token), at by_token
+        add (record with kind "if", cond st_zero, then (list of st_fail), otherwise empty list, at by_token) to st_made
+        add (record with kind "count", name st_count, start (record with kind "value", type "number", value "0", at by_token), limit st_steps, body st_loop_body, at t) to st_made
+        return record with kind "several", body st_made, at t
+    end
+
+    # whether how a try was left is `lb_how`
+    to left_by with lb_leaving, lb_how, t
+        return record with kind "compare", op "is", negate no, left (record with kind "name", name lb_leaving, at t), right (record with kind "value", type "string", value lb_how, at t), at t
+    end
+
+    # A try's statements, each `return` and each `stop` that leaves it made a note of how, then a stop of the
+    # loop either_way puts it in; a loop with such a return in it stops the loop it's in after it, too.
+    to ew_rewrite with rw_list, rw_in_loop, rw_left, rw_leaving, rw_giving, t
+        set rw_made to empty list
+        for each rw_s in rw_list
+            set rw_what to kind of rw_s
+            if rw_what is "return"
+                set returns of rw_left to yes
+                set rw_value to value of rw_s
+                if rw_value is nothing
+                    set rw_value to record with kind "value", type "nothing", value nothing, at at of rw_s
+                end
+                add (record with kind "set", name rw_giving, value rw_value, at at of rw_s) to rw_made
+                add (record with kind "set", name rw_leaving, value (record with kind "value", type "string", value "return", at at of rw_s), at at of rw_s) to rw_made
+                add (record with kind "stop", at at of rw_s) to rw_made
+            else if rw_what is "stop" and not rw_in_loop
+                set stops of rw_left to yes
+                add (record with kind "set", name rw_leaving, value (record with kind "value", type "string", value "stop", at at of rw_s), at at of rw_s) to rw_made
+                add (record with kind "stop", at at of rw_s) to rw_made
+            else if rw_what is "if"
+                set then of rw_s to ew_rewrite(then of rw_s, rw_in_loop, rw_left, rw_leaving, rw_giving, t)
+                set otherwise of rw_s to ew_rewrite(otherwise of rw_s, rw_in_loop, rw_left, rw_leaving, rw_giving, t)
+                add rw_s to rw_made
+            else if rw_what is "try"
+                set body of rw_s to ew_rewrite(body of rw_s, rw_in_loop, rw_left, rw_leaving, rw_giving, t)
+                set handler of rw_s to ew_rewrite(handler of rw_s, rw_in_loop, rw_left, rw_leaving, rw_giving, t)
+                add rw_s to rw_made
+            else if rw_what is "while" or rw_what is "repeat" or rw_what is "count" or rw_what is "each"
+                set rw_before to returns of rw_left
+                set returns of rw_left to no
+                set body of rw_s to ew_rewrite(body of rw_s, yes, rw_left, rw_leaving, rw_giving, t)
+                set rw_returns to returns of rw_left
+                set returns of rw_left to rw_before or rw_returns
+                add rw_s to rw_made
+                if rw_returns
+                    add (record with kind "if", cond left_by(rw_leaving, "return", t), then (list of (record with kind "stop", at t)), otherwise empty list, at t) to rw_made
+                end
+            else
+                add rw_s to rw_made
+            end
+        end
+        return rw_made
+    end
+
+    # `try ... either way ... end`: what's after `either way` runs however the try's statements end, written in
+    # what Moth has, as moth.js's eitherWay does
+    to either_way with t, ew_body, ew_caught, ew_handler, ew_after
+        set ew_failed to hidden_name("whether it failed", t)
+        set ew_mistake to hidden_name("the mistake", t)
+        set ew_leaving to hidden_name("how it left", t)
+        set ew_giving to hidden_name("what it gave", t)
+        set ew_left to record with returns no, stops no
+        set ew_start to ew_body
+        if ew_handler is not nothing
+            set ew_start to list of (record with kind "try", body ew_body, name ew_caught, handler ew_handler, at t)
+        end
+        set ew_inner to ew_rewrite(ew_start, no, ew_left, ew_leaving, ew_giving, t)
+        set ew_set_failed to record with kind "set", name ew_failed, value (record with kind "value", type "yes", value yes, at t), at t
+        set ew_keeping to record with kind "try", body ew_inner, name ew_mistake, handler (list of ew_set_failed), at t
+        set ew_made to list of (record with kind "set", name ew_failed, value (record with kind "value", type "no", value no, at t), at t)
+        if returns of ew_left or stops of ew_left
+            add (record with kind "set", name ew_leaving, value (record with kind "value", type "nothing", value nothing, at t), at t) to ew_made
+            add (record with kind "repeat", count (record with kind "value", type "number", value "1", at t), body (list of ew_keeping), at t) to ew_made
+        else
+            add ew_keeping to ew_made
+        end
+        for each ew_s in ew_after
+            add ew_s to ew_made
+        end
+        set ew_pass_on to record with kind "fail", value (record with kind "name", name ew_mistake, at t), at t
+        add (record with kind "if", cond (record with kind "name", name ew_failed, at t), then (list of ew_pass_on), otherwise empty list, at t) to ew_made
+        if returns of ew_left
+            set ew_give to record with kind "return", value (record with kind "name", name ew_giving, at t), at t
+            add (record with kind "if", cond left_by(ew_leaving, "return", t), then (list of ew_give), otherwise empty list, at t) to ew_made
+        end
+        if stops of ew_left
+            add (record with kind "if", cond left_by(ew_leaving, "stop", t), then (list of (record with kind "stop", at t)), otherwise empty list, at t) to ew_made
+        end
+        return record with kind "several", body ew_made, at t
+    end
+
+    # whether the line after this one starts with `when`, as a `match`'s first clause does
+    to when_next
+        set wn_i to pos + 1
+        set wn_going to yes
+        repeat while wn_going
+            if type of item wn_i of tokens is "eof" or nl of item wn_i of tokens
+                set wn_going to no
+            else
+                set wn_i to wn_i + 1
+            end
+        end
+        return word_at(wn_i, "when")
+    end
+
+    # `match command` and its clauses: `when "go", "walk"` (or `when "go" or "walk"`), `when is greater than 5`,
+    # then `else`, each an `if` of the value, kept in a variable of its own, the next clause in its `else`
+    to matched with t
+        set mt_subject to expression()
+        if not nl of peek()
+            expected("a new line")
+        end
+        set mt_kept to hidden_name("the value matched", t)
+        set mt_clauses to empty list
+        set nesting to nesting + 1
+        repeat while is_word("when")
+            set mt_w to peek()
+            lay(mt_w)
+            set pos to pos + 1
+            set mt_cond to nothing
+            if is_word("is")
+                set mt_cond to compared(record with kind "name", name mt_kept, at mt_w)
+            else
+                set mt_values to list of bitwise()
+                set mt_more to yes
+                repeat while mt_more
+                    if match(",")
+                        add bitwise() to mt_values
+                    else if word("or")
+                        add bitwise() to mt_values
+                    else
+                        set mt_more to no
+                    end
+                end
+                for each mt_v in mt_values
+                    set mt_one to record with kind "compare", op "is", negate no, left (record with kind "name", name mt_kept, at mt_w), right mt_v, at mt_w
+                    if mt_cond is nothing
+                        set mt_cond to mt_one
+                    else
+                        set mt_cond to record with kind "or", left mt_cond, right mt_one, at mt_w
+                    end
+                end
+            end
+            if not nl of peek()
+                expected("a new line")
+            end
+            add (record with kind "if", cond mt_cond, then statements(t, "match"), otherwise empty list, at mt_w) to mt_clauses
+        end
+        set mt_chain to empty list
+        if word("else")
+            set mt_chain to block(t)
+        end
+        set nesting to nesting - 1
+        lay(peek())
+        expect_word("end")
+        set mt_k to length of mt_clauses
+        repeat while mt_k is at least 1
+            set mt_c to item mt_k of mt_clauses
+            set otherwise of mt_c to mt_chain
+            set mt_chain to list of mt_c
+            set mt_k to mt_k - 1
+        end
+        set mt_made to list of (record with kind "set", name mt_kept, value mt_subject, at t)
+        for each mt_s in mt_chain
+            add mt_s to mt_made
+        end
+        return record with kind "several", body mt_made, at t
+    end
+
+    set made to statements(nothing, "")
     set depth of reading to depth of reading - 1
     if depth of reading is 0
         fill_defaults(reading)
@@ -2789,6 +3131,13 @@ end
 # call with all of them. A function made more than once with that name: its last. Through a value, a call
 # needs them all.
 to fill_defaults with reading
+    set made_fns to empty dictionary
+    for each f in defines of reading
+        set item (name of f) of made_fns to f
+    end
+    for each call in calls of reading
+        place_named(call, made_fns)
+    end
     set with_defaults to empty dictionary
     for each f in defines of reading
         set item (name of f) of with_defaults to f
@@ -2813,6 +3162,62 @@ to fill_defaults with reading
             end
         end
     end
+end
+
+# Inputs given by name, `greet("Sam", greeting "Hi")`, each put in its place, and each left out before one of
+# them given what's after its `or`
+to place_named with pn_call, made_fns
+    set pn_in_order to empty list
+    set pn_by_name to empty list
+    for each pn_a in args of pn_call
+        if kind of pn_a is "named"
+            add pn_a to pn_by_name
+        else
+            add pn_a to pn_in_order
+        end
+    end
+    if length of pn_by_name is 0
+        return nothing
+    end
+    set pn_first to item 1 of pn_by_name
+    if not (name of pn_call is in made_fns)
+        fail with problem(at of pn_first, "'" + name of pn_call + "' isn't a function made with 'to' here, so its inputs can't be given by name")
+    end
+    set pn_f to item (name of pn_call) of made_fns
+    set pn_placed to empty dictionary
+    set pn_count to length of pn_in_order
+    for each pn_k from 1 to length of pn_in_order
+        set item pn_k of pn_placed to item pn_k of pn_in_order
+    end
+    for each pn_g in pn_by_name
+        set pn_k to slot_of(params of pn_f, name of pn_g)
+        if pn_k is 0
+            fail with problem(at of pn_g, "'" + name of pn_call + "' has no input called '" + name of pn_g + "'")
+        end
+        if pn_k is in pn_placed
+            fail with problem(at of pn_g, "'" + name of pn_g + "' is given twice")
+        end
+        set item pn_k of pn_placed to value of pn_g
+        if pn_k is greater than pn_count
+            set pn_count to pn_k
+        end
+    end
+    set pn_filled to empty list
+    for each pn_k from 1 to pn_count
+        if pn_k is in pn_placed
+            add item pn_k of pn_placed to pn_filled
+        else
+            set pn_default to nothing
+            if defaults of pn_f is not nothing
+                set pn_default to item pn_k of defaults of pn_f
+            end
+            if pn_default is nothing
+                fail with problem(at of pn_first, "'" + name of pn_call + "' needs its input '" + item pn_k of params of pn_f + "' too, as it has no 'or'")
+            end
+            add copied(pn_default) to pn_filled
+        end
+    end
+    set args of pn_call to pn_filled
 end
 
 # a value written out after an input's `or`, made again for a call: a list's own items too
@@ -3002,6 +3407,9 @@ to rename with node, alias, hidden
     end
     if what is "call" or what is "builtin"
         rename_all(args of node, alias, hidden)
+    end
+    if what is "named"
+        rename(value of node, alias, hidden)
     end
     if what is "math" or what is "compare" or what is "or" or what is "and" or what is "random"
         rename(left of node, alias, hidden)

@@ -37723,7 +37723,7 @@ end
 to statement_lines with body, lines, seen
     for each s in body
         set key to file of at of s + " line " + line of at of s
-        if file of at of s is not debugger_file and not (key is in seen)
+        if file of at of s is not debugger_file and not (key is in seen) and not parser_made(s)
             set item key of seen to yes
             add (list of file of at of s, line of at of s) to lines
         end
@@ -37742,6 +37742,15 @@ to statement_lines with body, lines, seen
             statement_lines(body of fn of s, lines, seen)
         end
     end
+end
+
+# a function the parser made for what a statement is written as (`speak of the record on line 3`, made at the
+# program's top): it has no line of its own, as the statement it's for has when it runs
+to parser_made with s
+    if kind of s is not "define"
+        return no
+    end
+    return " on line " is in name of s
 end
 
 to statement_part with s, part
@@ -38450,7 +38459,7 @@ to gen_block with fc, body
             set marked of fc to marked of fc + 1
             mark(a of fc, item (marked of fc) of marks of fc)
         end
-        if debugging of st of fc and file of at of s is not debugger_file
+        if debugging of st of fc and file of at of s is not debugger_file and not parser_made(s)
             gen_hook(fc, s)
         end
         gen_statement(fc, s)

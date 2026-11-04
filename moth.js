@@ -215,7 +215,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const check = (type) => tokens[pos].type === type;
   const match = (type) => check(type) && tokens[pos++];
   const isWord = (w) => check("word") && tokens[pos].value === w;
-  // a call by a name, noted for the inputs it may leave out (see fillDefaults)
+  // a call by a name, noted for the inputs it may leave out, or give by name (see fillDefaults)
   const madeCall = (name, args, at) => {
     const made = { kind: "call", name, args, at };
     reading.calls.push(made);
@@ -281,6 +281,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // the line that starts a `try`'s handler: `if it fails`
   const isIfItFails = () => isWord("if") && tokens[pos + 1].type === "word" && tokens[pos + 1].value === "it"
     && tokens[pos + 2]?.type === "word" && tokens[pos + 2].value === "fails";
+  // the line that starts what a `try` does however it ends: `either way`, alone on its line
+  const isEitherWay = () => isWord("either") && wordAt(pos + 1, "way") && !tokens[pos + 1].nl && (tokens[pos + 2].type === "eof" || tokens[pos + 2].nl);
+  // where a block's statements end, besides `end` and `else`: "try" for a try's, at `if it fails` or `either
+  // way`; "handler" for its `if it fails`'s, at `either way`; "match" for a `when`'s, at the next `when`
+  const endsBlock = (stopAt) => (stopAt === "try" ? isIfItFails() || isEitherWay() : stopAt === "handler" ? isEitherWay() : stopAt === "match" && isWord("when"));
 
   // For format(): how deep in blocks each statement starts, and each end, else and if it fails, by "line:col";
   // and the pieces written with no space after them: a negating minus, and a call's bracket (no space before)
@@ -296,13 +301,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return t;
   };
 
-  // `inTry`: the statements of a `try`, which also end at its `if it fails`
-  function statements(opener, inTry = false) {
+  // `stopAt`: where else the block's statements end (see endsBlock)
+  function statements(opener, stopAt = "") {
     const body = [];
     const outside = atTop;
     atTop = !opener;
     if (opener) nesting++;
-    while (opener ? !isWord("end") && !isWord("else") && !(inTry && isIfItFails()) : !check("eof")) {
+    while (opener ? !isWord("end") && !isWord("else") && !endsBlock(stopAt) : !check("eof")) {
       if (check("eof")) fail(peek(), `'${opener.value}' from line ${opener.line} is missing its 'end'`);
       lay(peek());
       const madeBefore = hoisted;
@@ -310,7 +315,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const s = statement();
       body.push(...hoisted); // functions its values made, made before it runs
       hoisted = madeBefore;
-      if (s.kind === "use") body.push(...s.body); // the file's code, in its place
+      if (s.kind === "use" || s.kind === "several") body.push(...s.body); // the file's code, or what the statement is written as, in its place
       else body.push(s);
       if (!peek().nl) expected("a new line");
     }
@@ -528,6 +533,14 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         return { kind: "turtle", action: "set slider", value: { kind: "list", items: [label, expression()], at: t }, at: t };
       }
       const variable = name("a variable name");
+      if (check(",")) { // `set a, b to pair`, `set a, b to b, a`: each name an item of what's after `to`
+        const names = [variable];
+        while (match(",")) names.push(name("a variable name"));
+        expectWord("to");
+        const values = [expression()];
+        while (match(",")) values.push(expression());
+        return { kind: "several", body: unpacked(names, values.length > 1 ? { kind: "list", items: values, at: t } : values[0], t), at: t };
+      }
       if (check("'s") && !aliases.has(variable)) { // `set rex's name to ...` changes a field
         const field = possessive({ kind: "name", name: variable, at: t });
         if (field.kind !== "field") fail(field.at, `a call can't be given a value: set a field, as in 'set ${variable}'s name to ...'`);
@@ -565,17 +578,28 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (word("for")) {
       expectWord("each");
       const variable = name("a variable name");
-      if (word("from")) {
+      const names = [variable]; // `for each name, age in people`: each item's items
+      while (match(",")) names.push(name("a variable name"));
+      if (names.length === 1 && word("from")) {
         const from = expression();
         expectWord("to");
-        return { kind: "count", name: variable, from, to: expression(), body: loopBody(t), at: t };
+        const to = expression();
+        const by = !peek().nl && word("by"); // `for each k from 10 to 1 by -2`
+        if (by) {
+          const step = expression();
+          return stepped(variable, from, to, step, loopBody(t), t, by);
+        }
+        return { kind: "count", name: variable, from, to, body: loopBody(t), at: t };
       }
-      if (!word("in")) expected("'in' or 'from'");
+      if (!word("in")) expected(names.length === 1 ? "'in' or 'from'" : "'in'");
       const list = expression();
       const where = word("where"); // `for each row in sales where price of row is greater than 10`
       const cond = where && expression();
       const body = loopBody(t);
-      return { kind: "each", name: variable, list, body: where ? [{ kind: "if", cond, then: body, otherwise: [], at: where }] : body, at: t };
+      const kept = where ? [{ kind: "if", cond, then: body, otherwise: [], at: where }] : body;
+      if (names.length === 1) return { kind: "each", name: variable, list, body: kept, at: t };
+      const one = hidden("each item", t);
+      return { kind: "each", name: one, list, body: [...unpacked(names, { kind: "name", name: one, at: t }, t), ...kept], at: t };
     }
     if (word("to")) {
       const fnName = name("a function name");
@@ -668,11 +692,25 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("try")) {
       if (!peek().nl) expected("a new line");
-      const body = statements(t, true);
-      if (!isIfItFails()) expected("'if it fails'");
-      pos += 3;
-      const caught = word("with") ? name("a variable name") : null;
-      return { kind: "try", body, name: caught, handler: blockEnd(t), at: t };
+      const body = statements(t, "try");
+      let [caught, handler] = [null, null];
+      if (isIfItFails()) {
+        pos += 3;
+        caught = word("with") ? name("a variable name") : null;
+        if (!peek().nl) expected("a new line");
+        handler = statements(t, "handler");
+      } else if (!isEitherWay()) expected("'if it fails'");
+      if (!isEitherWay()) {
+        expectWord("end");
+        return { kind: "try", body, name: caught, handler, at: t };
+      }
+      pos += 2;
+      return eitherWay(t, body, caught, handler, blockEnd(t));
+    }
+    // `match command`, then `when "go"` lines: the first that fits runs (see matched)
+    if (isWord("match") && !tokens[pos + 1].nl && whenNext()) {
+      pos++;
+      return matched(t);
     }
     if (word("use")) {
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "library")) return library(t);
@@ -859,13 +897,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
         const made = possessive({ kind: "name", name: t.value, at: t });
         if (made.kind === "call") return made;
         const args = [made.of];
-        if (!peek().nl) do args.push(expression()); while (match(","));
+        if (!peek().nl) do anInput(args); while (match(","));
         return madeCall(made.name, args, made.at);
       }
       if (isWord("is")) fail(t, `to give '${called}' a value write 'set ${called} to ...'`);
       let args = [];
       if (tight(match("("))) args = argList();
-      else if (!peek().nl) do args.push(expression()); while (match(","));
+      else if (!peek().nl) do anInput(args); while (match(","));
       return madeCall(called, args, t);
     }
     fail(t, `a line can't start with ${describe(t)}`);
@@ -928,6 +966,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       pos += 2;
       return { kind: "builtin", name: "has ended", args: [left], at: t };
     }
+    return compared(left);
+  }
+
+  // `is`, `is not`, `is greater than`... and what's after it, with what's before it given
+  function compared(left) {
     const t = word("is");
     if (!t) return left;
     const negate = Boolean(word("not"));
@@ -1331,12 +1374,144 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     indexing = false;
     const args = [];
     while (!check(")")) {
-      args.push(expression());
+      anInput(args);
       if (!match(",")) break;
     }
     if (!match(")")) expected("')'");
     indexing = outside;
     return args;
+  }
+
+  // An input of a call, or one given by its name, `greet("Sam", greeting "Hi")`: a name with a value after it,
+  // which fillDefaults puts in its place, as no call could have a name followed by a value before.
+  function anInput(args) {
+    const e = expression();
+    if (e.kind === "name" && !e.name.includes("'s") && !peek().nl && !check(",") && !check(")")) {
+      args.push({ kind: "named", name: e.name, value: expression(), at: e.at });
+      return;
+    }
+    if (args.some((a) => a.kind === "named")) fail(e.at, "the inputs given in order come before those given by name");
+    args.push(e);
+  }
+
+  // A variable of the program's own, for what a statement is written as, with a name no program can write:
+  // `the step on line 3`, in a file the program uses `the step on line 3 of shapes.moth`, then `(2)`, `(3)`...
+  // a number written in at a token, as if written there, as the JIT writes a number as it was written
+  const numberAt = (n, t) => ({ kind: "value", value: n, at: { ...t, type: "number", value: n, text: String(n) } });
+
+  const hiddenOnLine = new Map();
+  function hidden(what, t) {
+    const named = `${what} on line ${t.line}${t.file ? ` of ${t.file}` : ""}`;
+    const n = (hiddenOnLine.get(named) ?? 0) + 1;
+    hiddenOnLine.set(named, n);
+    return n > 1 ? `${named} (${n})` : named;
+  }
+
+  // `set a, b to pair`: what's after `to` kept in a variable of its own, then each name its item, once there
+  // are as many as names. Gives the statements.
+  function unpacked(names, value, t) {
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const kept = hidden("the values", t);
+    const made = [at("set", { name: kept, value })];
+    if (!(value.kind === "list" && value.items.length === names.length)) {
+      const count = () => at("length", { of: at("name", { name: kept }) });
+      const why = at("math", { op: "+", left: at("value", { value: `can't set ${names.length} names from a list of ` }), right: count() });
+      made.push(at("if", { cond: at("compare", { op: "is", negate: true, left: count(), right: numberAt(names.length, t) }), then: [at("fail", { value: why })], otherwise: [] }));
+    }
+    names.forEach((n, i) => made.push(at("set", { name: n, value: at("item", { index: numberAt(i + 1, t), of: at("name", { name: kept }) }) })));
+    return made;
+  }
+
+  // `for each k from 10 to 1 by -2`: a count from 0 to the steps there's room for, with k worked out from it
+  // each time round, so a step that doesn't land on the end stops before it, as Python's range does
+  function stepped(variable, from, to, step, body, t, by) {
+    const at = (kind, rest) => ({ ...rest, kind, at: by });
+    const [start, size, count] = [hidden("the start", t), hidden("the step", t), hidden("the count", t)];
+    const ref = (n) => at("name", { name: n });
+    const steps = at("builtin", { name: "rounded down", args: [at("math", { op: "/", left: at("math", { op: "-", left: to, right: ref(start) }), right: ref(size) })] });
+    const zero = at("compare", { op: "is", negate: false, left: ref(size), right: numberAt(0, by) });
+    const here = at("set", { name: variable, value: at("math", { op: "+", left: ref(start), right: at("math", { op: "*", left: ref(count), right: ref(size) }) }) });
+    return { kind: "several", body: [at("set", { name: start, value: from }), at("set", { name: size, value: step }),
+      at("if", { cond: zero, then: [at("fail", { value: at("value", { value: "'by' needs a step that isn't 0" }) })], otherwise: [] }),
+      { kind: "count", name: count, from: numberAt(0, by), to: steps, body: [here, ...body], at: t }], at: t };
+  }
+
+  // `try ... either way ... end`: what's after `either way` runs however the try's statements end, written in
+  // what Moth has. The try goes in another, whose `if it fails` keeps the mistake; with a `return` or a `stop`
+  // that leaves it, both go in a loop that runs once, and each becomes a note of how it left and a `stop` of
+  // that loop (a loop it's in stops, and the loop after it). Then what runs either way, and then the mistake
+  // is passed on, or the return or the stop made.
+  function eitherWay(t, body, caught, handler, after) {
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const [failed, mistake, leaving, giving] = [hidden("whether it failed", t), hidden("the mistake", t), hidden("how it left", t), hidden("what it gave", t)];
+    const ref = (n) => at("name", { name: n });
+    const leftBy = (how) => at("compare", { op: "is", negate: false, left: ref(leaving), right: at("value", { value: how }) });
+    const left = { return: false, stop: false };
+    const leave = (how, s) => [...(how === "return" ? [{ kind: "set", name: giving, value: s.value ?? { kind: "value", value: null, at: s.at }, at: s.at }] : []),
+      { kind: "set", name: leaving, value: { kind: "value", value: how, at: s.at }, at: s.at }, { kind: "stop", at: s.at }];
+    const rewrite = (list, inLoop) => list.flatMap((s) => {
+      if (s.kind === "return") return (left.return = true), leave("return", s);
+      if (s.kind === "stop" && !inLoop) return (left.stop = true), leave("stop", s);
+      if (s.kind === "if") return [{ ...s, then: rewrite(s.then, inLoop), otherwise: rewrite(s.otherwise, inLoop) }];
+      if (s.kind === "try") return [{ ...s, body: rewrite(s.body, inLoop), handler: rewrite(s.handler, inLoop) }];
+      if (!["while", "repeat", "count", "each"].includes(s.kind)) return [s];
+      const before = left.return;
+      left.return = false;
+      const loop = { ...s, body: rewrite(s.body, true) };
+      const returns = left.return;
+      left.return = before || returns;
+      return returns ? [loop, at("if", { cond: leftBy("return"), then: [at("stop", {})], otherwise: [] })] : [loop];
+    });
+    const inner = rewrite(handler ? [at("try", { body, name: caught, handler })] : body, false);
+    const keeping = at("try", { body: inner, name: mistake, handler: [at("set", { name: failed, value: at("value", { value: true }) })] });
+    const made = [at("set", { name: failed, value: at("value", { value: false }) })];
+    if (left.return || left.stop) made.push(at("set", { name: leaving, value: at("value", { value: null }) }), at("repeat", { count: numberAt(1, t), body: [keeping] }));
+    else made.push(keeping);
+    made.push(...after, at("if", { cond: ref(failed), then: [at("fail", { value: ref(mistake) })], otherwise: [] }));
+    if (left.return) made.push(at("if", { cond: leftBy("return"), then: [at("return", { value: ref(giving) })], otherwise: [] }));
+    if (left.stop) made.push(at("if", { cond: leftBy("stop"), then: [at("stop", {})], otherwise: [] }));
+    return { kind: "several", body: made, at: t };
+  }
+
+  // whether the line after this one starts with `when`, as a `match`'s first clause does
+  function whenNext() {
+    let i = pos + 1;
+    while (tokens[i].type !== "eof" && !tokens[i].nl) i++;
+    return wordAt(i, "when");
+  }
+
+  // `match command` and its clauses: `when "go", "walk"` (or `when "go" or "walk"`), `when is greater than 5`
+  // (any of `is`'s comparisons), then `else`. The value is kept in a variable of its own, and each clause is an
+  // `if` of it, the next clause in its `else`.
+  function matched(t) {
+    const subject = expression();
+    if (!peek().nl) expected("a new line");
+    const kept = hidden("the value matched", t);
+    const ref = (at) => ({ kind: "name", name: kept, at });
+    const clauses = [];
+    nesting++;
+    while (isWord("when")) {
+      const w = peek();
+      lay(w);
+      pos++;
+      let cond;
+      if (isWord("is")) cond = compared(ref(w));
+      else {
+        const values = [bitwise()];
+        while (match(",") || word("or")) values.push(bitwise());
+        cond = values.map((v) => ({ kind: "compare", op: "is", negate: false, left: ref(w), right: v, at: w })).reduce((a, b) => ({ kind: "or", left: a, right: b, at: w }));
+      }
+      if (!peek().nl) expected("a new line");
+      clauses.push({ cond, then: statements(t, "match"), at: w });
+    }
+    let otherwise = [];
+    if (word("else")) otherwise = block(t);
+    nesting--;
+    lay(peek());
+    expectWord("end");
+    let chain = otherwise;
+    for (const c of clauses.reverse()) chain = [{ kind: "if", cond: c.cond, then: c.then, otherwise: chain, at: c.at }];
+    return { kind: "several", body: [{ kind: "set", name: kept, value: subject, at: t }, ...chain], at: t };
   }
 
   const made = statements(null);
@@ -1394,8 +1569,29 @@ function madeNames(body, names) {
 // A call by a function's name that leaves inputs out, `greet("Sam")` for `to greet with name, greeting or
 // "Hello"`, gets what each was given after its `or`, once the whole program is read, so every engine sees a
 // call with all of them. A function made more than once with that name: its last. Through a value, a call
-// needs them all.
+// needs them all. Inputs given by name, `greet("Sam", greeting "Hi")`, go in their places first, each left
+// out before one of them getting its `or`.
 function fillDefaults(reading) {
+  const made = new Map();
+  for (const f of reading.defines) made.set(f.name, f);
+  for (const call of reading.calls) {
+    const first = call.args.findIndex((a) => a.kind === "named");
+    if (first < 0) continue;
+    const f = made.get(call.name);
+    const given = call.args.splice(first);
+    if (!f) fail(given[0].at, `'${call.name}' isn't a function made with 'to' here, so its inputs can't be given by name`);
+    for (const g of given) {
+      const k = f.params.indexOf(g.name);
+      if (k < 0) fail(g.at, `'${call.name}' has no input called '${g.name}'`);
+      if (call.args[k] !== undefined) fail(g.at, `'${g.name}' is given twice`);
+      call.args[k] = g.value;
+    }
+    for (let k = 0; k < call.args.length; k++) {
+      if (call.args[k] !== undefined) continue;
+      if (!f.defaults?.[k]) fail(given[0].at, `'${call.name}' needs its input '${f.params[k]}' too, as it has no 'or'`);
+      call.args[k] = copied(f.defaults[k]);
+    }
+  }
   const withDefaults = new Map();
   for (const f of reading.defines) withDefaults.set(f.name, f.defaults ? f : null);
   for (const call of reading.calls) {
@@ -1457,8 +1653,11 @@ class Compiler extends Scope {
     else this.emit(null, HALT);
   }
 
-  // In a debug build, the machine can pause here: a statement on this line is about to run.
+  // In a debug build, the machine can pause here: a statement on this line is about to run. A function the
+  // parser made for what a statement is written as (`speak of the record on line 3`, made at the program's top)
+  // marks no line of its own, as the statement it's for does when it runs.
   mark(s) {
+    if (s.kind === "define" && s.name.includes(" on line ")) return;
     if (this.debug && !s.at.file) this.emit(s.at, LINE, s.at.line); // the debugger steps through this file, not the ones it uses
   }
 
@@ -1967,7 +2166,8 @@ export function format(source) {
     const here = depth === undefined ? indent + 4 : depth * 4;
     if (depth !== undefined) indent = here;
     // a comment just before an end, else or if it fails belongs to the block it closes
-    const closing = /^(end|else)$/i.test(pieces[0].text) || pieces.slice(0, 3).map((p) => p.text.toLowerCase()).join(" ") === "if it fails";
+    const closing = /^(end|else)$/i.test(pieces[0].text) || pieces.slice(0, 3).map((p) => p.text.toLowerCase()).join(" ") === "if it fails"
+      || pieces.slice(0, 2).map((p) => p.text.toLowerCase()).join(" ") === "either way";
     for (const at of waiting) tidy[at] = " ".repeat(closing ? here + 4 : here) + tidy[at];
     waiting = [];
     let text = " ".repeat(here) + joined(pieces, i + 1, tight);

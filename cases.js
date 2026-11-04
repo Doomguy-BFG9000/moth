@@ -182,6 +182,18 @@ export const PROGRAMS = [
   ["set r to record with go (function with s gives 5)\ntry\n    r's nope()\nif it fails with why\n    say \"caught: \" why\nend\nsay r's go()", "caught: there is no function called 'nope'\n5"],
   // lists as sets: without repeats
   ["set xs to list of 3, 1, 3, 2, 1, 0.1 * 30\nsay xs without repeats\nsay \"banana\" without repeats\nset a to list of 1, 2, 3, 4\nset b to list of 3, 4, 5\nsay list of x for each x in a where x is in b\nsay list of x for each x in a where not (x is in b)\nset both to empty list\nfor each x in a\n    add x to both\nend\nfor each x in b\n    add x to both\nend\nsay both without repeats\nsay (list of (list of 1, 2), (list of 1, 2), (record with n 1), (record with n 1)) without repeats\nsay length of (empty list without repeats)\nset seen to dictionary where \"x\" is yes\nsay \"x\" is in seen\nset without to 4\nsay without + 1", "[3, 1, 2]\n[\"b\", \"a\", \"n\"]\n[3, 4]\n[1, 2]\n[1, 2, 3, 4, 5]\n[[1, 2], (record with n 1)]\n0\nyes\n5"],
+  // inputs given by name, in any order, the rest from their `or`
+  ["to greet with name, greeting or \"Hello\", mark or \"!\"\n    return greeting + \", \" + name + mark\nend\nsay greet(\"Sam\", mark \"?\")\nsay greet(mark \".\", name \"Ana\", greeting \"Hi\")\ngreet \"Bo\", greeting \"Yo\"\nsay greet(\"Cy\", \"Hey\", mark \"...\")", "Hello, Sam?\nHi, Ana.\nHey, Cy..."],
+  // unpacking: several names set at once, a swap, and a loop's items
+  ["set a, b to 1, 2\nset a, b to b, a\nsay a \" \" b\nset name, age to list of \"Sam\", 20\nsay name \" is \" age\nfor each who, years in list of (list of \"Ana\", 31), (list of \"Bo\", 7) where years is greater than 10\n    say who \" is \" years\nend\nset first, rest to split \"x,y\" by \",\"\nsay first rest", "2 1\nSam is 20\nAna is 31\nxy"],
+  // steps: down, by fractions, past the end, and none the wrong way
+  ["for each k from 10 to 1 by -3\n    say k\nend\nfor each k from 0 to 1 by 0.25\n    say k\nend\nfor each k from 1 to 10 by 4\n    say k\nend\nfor each k from 1 to 3 by -1\n    say \"never\"\nend\nsay k", "10\n7\n4\n1\n0\n0.25\n0.5\n0.75\n1\n1\n5\n9\n9"],
+  // match: values, `or`, comparisons, else, and none that fit
+  ["to sized with thing\n    match thing\n        when 1, 2\n            return \"small\"\n        when \"x\" or \"y\"\n            return \"a letter\"\n        when is greater than 100\n            return \"big\"\n        when is in list of 50, 60\n            return \"fifty or sixty\"\n        else\n            return \"other\"\n    end\nend\nsay sized(2) \" \" sized(\"y\") \" \" sized(500) \" \" sized(60) \" \" sized(7)\nmatch 3\n    when 1\n        say \"one\"\nend\nset match to \"a name still\"\nsay match", "small a letter big fifty or sixty other\na name still"],
+  // either way: after a return, a mistake caught, a loop's stop and a mistake passed on
+  ["to tidy with n\n    try\n        if n is 0\n            return \"zero\"\n        end\n        for each k from 1 to 5\n            if k is n\n                return \"found \" + k\n            end\n        end\n        say 10 / (n - 9)\n    if it fails with why\n        say \"caught \" why\n        return \"failed\"\n    either way\n        say \"tidied \" n\n    end\n    return \"done\"\nend\nsay tidy(0)\nsay tidy(3)\nsay tidy(9)\nsay tidy(20)\nfor each k from 1 to 5\n    try\n        if k is 3\n            stop\n        end\n    either way\n        say \"after \" k\n    end\nend\ntry\n    try\n        say 1 / 0\n    either way\n        say \"cleaned\"\n    end\nif it fails with why\n    say \"outer caught: \" why\nend", "tidied 0\nzero\ntidied 3\nfound 3\ncaught can't divide by zero\ntidied 9\nfailed\n0.909090909090909\ntidied 20\ndone\nafter 1\nafter 2\nafter 3\ncleaned\nouter caught: can't divide by zero"],
+  // either way inside either way, and a record a mistake gave passed on as it was
+  ["to inner\n    try\n        try\n            fail with record with kind \"missing\"\n        either way\n            say \"inner done\"\n        end\n    either way\n        say \"outer done\"\n    end\nend\ntry\n    inner()\nif it fails with why\n    say kind of why\nend", "inner done\nouter done\nmissing"],
   // a text a letter at a time: past one byte, views of one text's bytes, and the collector in between
   ["set words to \"aé😀b, ça va? ✓ plain ascii too\"\nset made to \"\"\nfor each k from 1 to length of words\n    add item k of words to made\nend\nsay made is words\nsay item 3 of words \" \" item 1 of words \" \" item (length of words) of words \" \" item 2 of words\nsay items 2 to 4 of words\nsay items 5 to 9 of words \" \" item 6 of words \" \" items 1 to 2 of words\nset other to \"x😀y\"\nsay item 2 of words \" \" item 2 of other \" \" item 3 of words \" \" item 3 of other\nset ascii to \"hello\"\nsay item 5 of ascii \" \" item 1 of ascii\nset big to \"\"\nrepeat 3000 times\n    add \"é\" to big\nend\nadd \"!\" to big\nsay item (length of big) of big\nset counted to 0\nfor each k from 1 to length of big\n    if item k of big is \"é\"\n        add 1 to counted\n    end\nend\nsay counted\nsay item 1 of big \" \" item 2999 of big", "yes\n😀 a o é\né😀b\n, ça    aé\né 😀 😀 y\no h\n!\n3000\né é"],
 ];
@@ -544,6 +556,15 @@ export const ERRORS = [
   ["say items 2 to 9 of list of 1, 2", "line 1: there is no item 9, the list only has 2 items"],
   ["say items 0 to 1 of \"ab\"", "line 1: there is no item 0, items are counted from 1"],
   ["to f with a or b\nend", "line 1: an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out"],
+  // inputs given by name, unpacking and steps
+  ["to f with a, b or 2\n    return a + b\nend\nsay f(a 1, c 3)", "line 4: 'f' has no input called 'c'"],
+  ["to f with a, b or 2\n    return a + b\nend\nsay f(1, a 3)", "line 4: 'a' is given twice"],
+  ["to f with a, b or 2\n    return a + b\nend\nsay f(b 3)", "line 4: 'f' needs its input 'a' too, as it has no 'or'"],
+  ["to f with a, b or 2\n    return a + b\nend\nsay f(a 1, 2)", "line 4: the inputs given in order come before those given by name"],
+  ["set g to 5\nsay g(x 1)", "line 2: 'g' isn't a function made with 'to' here, so its inputs can't be given by name"],
+  ["set a, b to list of 1, 2, 3", "line 1: can't set 2 names from a list of 3"],
+  ["for each k from 1 to 2 by 0\n    say k\nend", "line 1: 'by' needs a step that isn't 0"],
+  ["for each a, b from 1 to 3\n    say a\nend", "line 1: expected 'in' but found 'from'"],
   ["to f with a or 1, b\nend", "line 1: 'b' needs an 'or' too, as an input before it has one"],
   ["to f with a or 1\n    return a\nend\nsay f(1, 2)", "line 4: 'f' needs 1 input but got 2"],
   ["say list of 10 / x for each x in list of 2, 0", "line 1: can't divide by zero"],

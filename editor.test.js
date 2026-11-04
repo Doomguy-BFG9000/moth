@@ -119,14 +119,14 @@ test("the editor colours the words the playground colours, and text, values in t
   }
 });
 
-test("the editor indents after a line that opens a block, and takes it back at end, else and if it fails", () => {
+test("the editor indents after a line that opens a block, and takes it back at end, else, if it fails and either way", () => {
   const rules = JSON.parse(readFileSync(here("editors/vscode/language-configuration.json"), "utf8")).indentationRules;
   const more = new RegExp(rules.increaseIndentPattern);
   const less = new RegExp(rules.decreaseIndentPattern);
-  for (const line of ["to area with w, h", "if x is 1", "else", "    repeat 3 times", "for each i from 1 to 9", "try", "if it fails with why", "when a key is pressed", 'use the library "user32"'])
+  for (const line of ["to area with w, h", "if x is 1", "else", "    repeat 3 times", "for each i from 1 to 9", "try", "if it fails with why", "either way", "match command", "when a key is pressed", 'use the library "user32"'])
     assert.ok(more.test(line), line);
   for (const line of ["say 1", "set to_do to 1", "end", "toast()", "# if it's so"]) assert.ok(!more.test(line), line);
-  for (const line of ["end", "  else", "if it fails"]) assert.ok(less.test(line), line);
+  for (const line of ["end", "  else", "if it fails", "either way"]) assert.ok(less.test(line), line);
   for (const line of ["ending()", "say 1"]) assert.ok(!less.test(line), line);
 });
 
