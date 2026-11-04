@@ -1,0 +1,506 @@
+# Asking web servers, as Python's urllib.request (and the requests package) do: any method, headers of one's
+# own, bodies of text, bytes or JSON, redirects followed, and answers sent in chunks or squeezed with gzip,
+# over HTTP and HTTPS, on sockets.moth. A program `moth build` makes can use it, built with --allow-libraries.
+#
+#   use "http.moth" as http
+#   set r to http's get("https://example.com/")
+#   say status of r                      # 200; reason of r is "OK"
+#   say item "content-type" of headers of r   # each header's name in small letters
+#   say text of r                        # what it sent, as text; body of r is its bytes; url of r where it ended
+#   set r to http's request("PUT", "https://example.com/api/1", record with name "Sam",
+#       dictionary where "authorization" is "Bearer xyz")   # a record, list or dictionary goes as JSON
+#   set r to http's post("https://example.com/form", http's form_of(dictionary where "q" is "moth"))
+#   http's check(r)                      # a mistake if the server said no (400 and up)
+#   say http's get_json("https://example.com/data.json")   # what its JSON says
+#
+# head, get, post, put, patch and delete are request with that method. A request fails only when it can't be
+# made or answered: an answer of 404 or 500 is a response like any other. Redirects (301, 302, 303, 307,
+# 308) are followed, up to 10, as browsers do: after a 303, or a 301 or 302 to a POST, as a GET with no body;
+# Authorization isn't sent on to another host. wait_at_most(ms) is how long an answer may take (30000);
+# trust(file) trusts a PEM file's certificates besides the system's. HTTPS uses OpenSSL as sockets.moth does.
+
+use "sockets.moth" as http_net
+use "zip.moth" as http_zip
+
+set http_time_limit to 30000
+set http_line_end to (list of 13, 10) as bytes as text
+set http_hex to "0123456789ABCDEF"
+
+to wait_at_most with milliseconds
+    set http_time_limit to milliseconds
+end
+
+to trust with file
+    http_net's trust(file)
+end
+
+to head with url
+    return request("HEAD", url, nothing, empty dictionary)
+end
+
+to get with url
+    return request("GET", url, nothing, empty dictionary)
+end
+
+to post with url, body
+    return request("POST", url, body, empty dictionary)
+end
+
+to put with url, body
+    return request("PUT", url, body, empty dictionary)
+end
+
+to patch with url, body
+    return request("PATCH", url, body, empty dictionary)
+end
+
+to delete with url
+    return request("DELETE", url, nothing, empty dictionary)
+end
+
+# what a URL's JSON says, after checking it was sent
+to get_json with url
+    set r to request("GET", url, nothing, dictionary where "accept" is "application/json")
+    check(r)
+    return json from text of r
+end
+
+# a mistake if the server said no: 400 and up
+to check with response
+    if status of response is at least 400
+        fail with "the server said " + status of response + " " + reason of response + " to " + url of response
+    end
+end
+
+# A request: its method, where, its body (nothing, text, bytes, or a record, list or dictionary sent as JSON)
+# and headers of its own (a dictionary), its answer a record: status, reason, headers, body (bytes), text and
+# url (where it ended, after redirects)
+to request with method, url, body, headers
+    set verb to uppercase of method
+    set at to url
+    set sending to body
+    set own to empty dictionary
+    for each name in headers
+        set item (lowercase of name) of own to item name of headers
+    end
+    set moves to 0
+    repeat while yes
+        set r to http_once(verb, at, sending, own)
+        set where to nothing
+        if "location" is in headers of r
+            set where to item "location" of headers of r
+        end
+        set code to status of r
+        if where is nothing or not (code is 301 or code is 302 or code is 303 or code is 307 or code is 308)
+            return r
+        end
+        set moves to moves + 1
+        if moves is greater than 10
+            fail with "too many redirects, from " + url
+        end
+        set next to http_joined(at, where)
+        if code is 303 or ((code is 301 or code is 302) and verb is "POST")
+            set verb to "GET"
+            set sending to nothing
+            set cleared to empty dictionary
+            for each name in own
+                if name is not "content-type" and name is not "content-length"
+                    set item name of cleared to item name of own
+                end
+            end
+            set own to cleared
+        end
+        if host of http_parts(next) is not host of http_parts(at) and "authorization" is in own
+            set kept to empty dictionary
+            for each name in own
+                if name is not "authorization"
+                    set item name of kept to item name of own
+                end
+            end
+            set own to kept
+        end
+        set at to next
+    end
+end
+
+# ---------- one request, one answer ----------
+
+to http_once with verb, url, body, own
+    set parts to http_parts(url)
+    set data to nothing
+    set lines to empty list
+    add verb + " " + path of parts + " HTTP/1.1" to lines
+    set host_line to host of parts
+    if ":" is in host_line
+        set host_line to "[" + host_line + "]"
+    end
+    if port of parts is not default of parts
+        set host_line to host_line + ":" + port of parts
+    end
+    set given to dictionary where "host" is host_line, "user-agent" is "Moth", "accept" is "*/*",
+        "accept-encoding" is "gzip", "connection" is "close"
+    if body is not nothing
+        if http_is_bytes(body)
+            set data to body
+        else if http_is_text(body)
+            set data to body as bytes
+            set item "content-type" of given to "text/plain; charset=utf-8"
+        else
+            set data to (body as json) as bytes
+            set item "content-type" of given to "application/json"
+        end
+    end
+    if data is not nothing or verb is "POST" or verb is "PUT" or verb is "PATCH"
+        set size to 0
+        if data is not nothing
+            set size to length of data
+        end
+        set item "content-length" of given to "" + size
+    end
+    for each name in own
+        set item name of given to "" + item name of own
+    end
+    for each name in given
+        set value to item name of given
+        if "\n" is in name or "\n" is in value or (list of 13) as bytes as text is in value
+            fail with "a header can't have a line end in it: " + name
+        end
+        add http_header_name(name) + ": " + value to lines
+    end
+    set head_text to (join lines with http_line_end) + http_line_end + http_line_end
+    set c to nothing
+    if scheme of parts is "https"
+        set c to http_net's connect_secure(host of parts, port of parts)
+    else
+        set c to http_net's connect(host of parts, port of parts)
+    end
+    set answer to nothing
+    try
+        http_net's wait_at_most(c, http_time_limit)
+        http_net's send(c, head_text)
+        if data is not nothing
+            http_net's send(c, data)
+        end
+        set answer to http_net's receive_all(c)
+        http_net's close(c)
+    if it fails with why
+        http_net's close(c)
+        fail with why
+    end
+    return http_answer(answer, verb, url)
+end
+
+# the bytes the server sent, as a response
+to http_answer with b, verb, url
+    set ends to http_find(b, (list of 13, 10, 13, 10) as bytes, 1)
+    if ends is 0
+        fail with "the server at " + url + " didn't answer in HTTP"
+    end
+    set lines to split (items 1 to (ends - 1) of b) as text by http_line_end
+    set first to item 1 of lines
+    set words to split first by " "
+    if length of words is less than 2 or not (http_starts(item 1 of words, "HTTP/"))
+        fail with "the server at " + url + " didn't answer in HTTP: " + first
+    end
+    set code to number of item 2 of words
+    set reason to ""
+    if length of words is greater than 2
+        set reason to join (items 3 to (length of words) of words) with " "
+    end
+    set headers to empty dictionary
+    for each k from 2 to length of lines
+        set line to item k of lines
+        set colon to position of ":" in line
+        if colon is greater than 0
+            set name to lowercase of http_trim(items 1 to (colon - 1) of line)
+            set value to ""
+            if colon is less than length of line
+                set value to http_trim(items (colon + 1) to (length of line) of line)
+            end
+            if name is in headers
+                set item name of headers to item name of headers + ", " + value
+            else
+                set item name of headers to value
+            end
+        end
+    end
+    set body to 0 bytes
+    if ends + 4 is at most length of b
+        set body to items (ends + 4) to (length of b) of b
+    end
+    if verb is "HEAD" or code is 204 or code is 304 or (code is at least 100 and code is less than 200)
+        set body to 0 bytes
+    else if "transfer-encoding" is in headers and "chunked" is in lowercase of item "transfer-encoding" of headers
+        set body to http_unchunked(body, url)
+    else if "content-length" is in headers
+        set size to number of item "content-length" of headers
+        if size is less than length of body
+            set body to items 1 to size of body
+        end
+    end
+    if "content-encoding" is in headers and lowercase of item "content-encoding" of headers is "gzip" and length of body is greater than 0
+        set body to http_zip's gunzip(body)
+    end
+    return record with status code, reason reason, headers headers, body (body as bytes), text (body as text), url url
+end
+
+# a body sent in chunks: each its size in hex, its bytes, and \r\n, until one of none
+to http_unchunked with b, url
+    set made to empty list
+    set at to 1
+    repeat while yes
+        set line_end to http_find(b, (list of 13, 10) as bytes, at)
+        if line_end is 0
+            fail with "the server at " + url + " sent chunks that end too soon"
+        end
+        set size_text to item 1 of split (items at to (line_end - 1) of b) as text by ";"
+        set size to http_hex_value(http_trim(size_text))
+        if size is nothing
+            fail with "the server at " + url + " sent a chunk whose size isn't hex: " + size_text
+        end
+        if size is 0
+            return made as bytes
+        end
+        set start_at to line_end + 2
+        if start_at + size - 1 is greater than length of b
+            fail with "the server at " + url + " sent chunks that end too soon"
+        end
+        for each k from start_at to start_at + size - 1
+            add byte k of b to made
+        end
+        set at to start_at + size + 2
+    end
+end
+
+to http_hex_value with words
+    if words is ""
+        return nothing
+    end
+    set made to 0
+    for each c in uppercase of words
+        set d to position of c in http_hex
+        if d is 0
+            return nothing
+        end
+        set made to made * 16 + d - 1
+    end
+    return made
+end
+
+# where `needle`'s bytes first are in b, from byte `from`, or 0
+to http_find with b, needle, from
+    set n to length of needle
+    set last to length of b - n + 1
+    set first_byte to byte 1 of needle
+    set k to from
+    repeat while k is at most last
+        if byte k of b is first_byte
+            set same to yes
+            set i to 2
+            repeat while same and i is at most n
+                if byte (k + i - 1) of b is not byte i of needle
+                    set same to no
+                end
+                set i to i + 1
+            end
+            if same
+                return k
+            end
+        end
+        set k to k + 1
+    end
+    return 0
+end
+
+# ---------- addresses ----------
+
+# a URL's scheme, host, port (and the scheme's own), and path with its query
+to http_parts with url
+    set rest to url
+    set scheme to "http"
+    set colon_slashes to position of "://" in rest
+    if colon_slashes is greater than 0
+        set scheme to lowercase of items 1 to (colon_slashes - 1) of rest
+        set rest to items (colon_slashes + 3) to (length of rest) of rest
+    end
+    if scheme is not "http" and scheme is not "https"
+        fail with "http.moth asks http:// and https:// addresses, not " + url
+    end
+    set hash_at to position of "#" in rest
+    if hash_at is greater than 0
+        set rest to items 1 to (hash_at - 1) of rest
+    end
+    set slash to position of "/" in rest
+    set question to position of "?" in rest
+    set cut to slash
+    if cut is 0 or (question is greater than 0 and question is less than cut)
+        set cut to question
+    end
+    set authority to rest
+    set path to "/"
+    if cut is greater than 0
+        set authority to items 1 to (cut - 1) of rest
+        set path to items cut to (length of rest) of rest
+        if not http_starts(path, "/")
+            set path to "/" + path
+        end
+    end
+    set at_sign to position of "@" in authority
+    if at_sign is greater than 0
+        set authority to items (at_sign + 1) to (length of authority) of authority
+    end
+    set default to 80
+    if scheme is "https"
+        set default to 443
+    end
+    set host to authority
+    set port to default
+    if http_starts(authority, "[")
+        set close_at to position of "]" in authority
+        if close_at is 0
+            fail with "'" + url + "' has a [ with no ]"
+        end
+        set host to items 2 to (close_at - 1) of authority
+        if close_at is less than length of authority
+            set port to number of items (close_at + 2) to (length of authority) of authority
+        end
+    else if ":" is in authority
+        set bits to split authority by ":"
+        set host to item 1 of bits
+        set port to number of item 2 of bits
+    end
+    if host is ""
+        fail with "'" + url + "' has no host"
+    end
+    return record with scheme scheme, host lowercase of host, port port, default default, path path
+end
+
+# where a redirect goes: an address of its own, or one on this one's host or by its path
+to http_joined with url, where
+    if "://" is in where
+        return where
+    end
+    set parts to http_parts(url)
+    set origin to scheme of parts + "://"
+    set host_part to host of parts
+    if ":" is in host_part
+        set host_part to "[" + host_part + "]"
+    end
+    if port of parts is not default of parts
+        set host_part to host_part + ":" + port of parts
+    end
+    if http_starts(where, "//")
+        return scheme of parts + ":" + where
+    end
+    if http_starts(where, "/")
+        return origin + host_part + where
+    end
+    set path to item 1 of split path of parts by "?"
+    set pieces to split path by "/"
+    set folder to join (items 1 to (length of pieces - 1) of pieces) with "/"
+    return origin + host_part + folder + "/" + where
+end
+
+# text as a URL has it: its UTF-8, but letters, digits and -._~ as %XX (a space as %20)
+to encoded with words
+    set made to empty list
+    for each b in words as bytes
+        set c to (list of b) as bytes as text
+        if b is less than 128 and c is in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+            add c to made
+        else
+            add "%" + item ((shift b right by 4) + 1) of http_hex + item ((b bit and 15) + 1) of http_hex to made
+        end
+    end
+    return join made with ""
+end
+
+# %XX back to its bytes, and + to a space, as a form's are
+to decoded with words
+    set made to empty list
+    set b to words as bytes
+    set k to 1
+    repeat while k is at most length of b
+        set x to byte k of b
+        if x is 37 and k + 2 is at most length of b
+            set v to http_hex_value((items (k + 1) to (k + 2) of b) as text)
+            if v is not nothing
+                add v to made
+                set k to k + 3
+            else
+                add x to made
+                set k to k + 1
+            end
+        else if x is 43
+            add 32 to made
+            set k to k + 1
+        else
+            add x to made
+            set k to k + 1
+        end
+    end
+    return made as bytes as text
+end
+
+# a dictionary as a form's body, or a query after ?: name=value&..., each encoded
+to form_of with fields
+    set made to empty list
+    for each name in fields
+        add encoded("" + name) + "=" + encoded("" + item name of fields) to made
+    end
+    return join made with "&"
+end
+
+# ---------- small things ----------
+
+to http_bytes_check with value as bytes
+    return yes
+end
+
+to http_is_bytes with value
+    try
+        return http_bytes_check(value)
+    if it fails
+        return no
+    end
+end
+
+to http_text_check with value as text
+    return yes
+end
+
+to http_is_text with value
+    try
+        return http_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to http_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to http_trim with words
+    set made to words
+    repeat while length of made is greater than 0 and (item 1 of made is " " or item 1 of made is "\t")
+        set made to items 2 to (length of made) of made
+    end
+    repeat while length of made is greater than 0 and (item (length of made) of made is " " or item (length of made) of made is "\t")
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end
+
+# "content-type" as Content-Type
+to http_header_name with name
+    set made to empty list
+    for each word in split name by "-"
+        if word is ""
+            add word to made
+        else
+            add uppercase of item 1 of word + items 2 to (length of word) of word to made
+        end
+    end
+    return join made with "-"
+end

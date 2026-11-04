@@ -354,6 +354,11 @@ bytes and dictionaries:
   one secure after it began (STARTTLS), and `secure_as_server` is the other
   end. `ready(sockets, ms)` says which of many have something to take, as
   `select` does; with tasks, too, one program can talk to many at once.
+- [`http.moth`](tools/http.moth) asks web servers as Python's
+  `urllib.request` (and the requests package) do: any method, headers of its
+  own, bodies of text, bytes or JSON, redirects followed, and answers in
+  chunks or gzipped, over HTTP and HTTPS: `http's request("PUT", url, body,
+  headers)`, `get`, `post`, `put`, `patch`, `delete`, `get_json`, `check`.
 - [`email.moth`](tools/email.moth) sends mail as Python's `smtplib` and
   `email` do: `mail's message(sender, recipients, subject, text)`, with cc,
   bcc, a page of HTML and files (`attach`), in MIME with UTF-8 headers,

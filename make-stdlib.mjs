@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 
 // the libraries: each file a program uses for what it does, not a program, an example or a test; and the
 // profiler `moth profile` builds into a program
-export const STANDARD = ["math.moth", "moth-profiler.moth", ...["base64", "big", "cores", "dates", "email", "game", "hash", "json", "linux", "secrets", "server", "sockets", "sqlite",
+export const STANDARD = ["math.moth", "moth-profiler.moth", ...["base64", "big", "cores", "dates", "email", "game", "hash", "http", "json", "linux", "secrets", "server", "sockets", "sqlite",
   "system", "tasks", "text", "ui", "windows", "xml", "zip"].map((name) => `tools/${name}.moth`)];
 
 // a file's text as a Moth text: \ " and { escaped, line ends and tabs as \n and \t

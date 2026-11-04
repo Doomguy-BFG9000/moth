@@ -1264,7 +1264,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1754,6 +1754,118 @@ if it fails with why
 end
 `);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["16\nno\n0\n100000\n16\nyes\n22\nyes\nyes\n0\nyes\nonly\n[1, 2, 3, 4, 5]\nyes\nno\nno\nbelow needs a whole number from 1 to 2^48, not 0\nbelow needs a whole number from 1 to 2^48, not 2.5\nbelow needs a whole number from 1 to 2^48, not 281474976710657\nchoice needs something to choose from: the list is empty\nrandom_bytes needs a whole number of bytes from 0 up, not -1\n", "", 0]);
+});
+
+// tools/http.moth, asking server.moth, which a task of the program's runs: GET, PUT with a header of its own,
+// POST of a record as JSON, PATCH of bytes, DELETE and HEAD; JSON read; redirects after 302, 303 and 307, and
+// to another host, which isn't told the Authorization; a body squeezed with gzip; a 404, and checking it;
+// redirects that never end; encoding and forms; a body in chunks; and each mistake
+test("tools/http.moth asks servers with any method, follows redirects, and reads chunked and gzipped bodies", { skip }, () => {
+  const port = 21000 + (process.pid % 2000);
+  const ran = libraryRun(`use "http.moth" as http
+use "server.moth" as web
+use "zip.moth" as zip
+
+set port to ${port}
+set base to "http://127.0.0.1:" + port
+
+to answer with request
+    set p to path of request
+    if p is "/"
+        return "<h1>Hello</h1>"
+    else if p is "/echo"
+        set seen to "nothing"
+        if "x-custom" is in headers of request
+            set seen to item "x-custom" of headers of request
+        end
+        set kind to "none"
+        if "content-type" is in headers of request
+            set kind to item "content-type" of headers of request
+        end
+        set said to "nobody"
+        if "authorization" is in headers of request
+            set said to item "authorization" of headers of request
+        end
+        return method of request + " " + body of request + " | " + kind + " | " + seen + " | " + said + " | " + item "q" of query of request
+    else if p is "/json"
+        return dictionary where "name" is "Sam", "scores" is (list of 1, 2, 3)
+    else if p is "/move"
+        return record with status 302, body "moved", headers (dictionary where "location" is "/echo?q=after302")
+    else if p is "/see"
+        return record with status 303, body "", headers (dictionary where "location" is "/echo?q=after303")
+    else if p is "/keep"
+        return record with status 307, body "", headers (dictionary where "location" is "echo?q=after307")
+    else if p is "/far"
+        return record with status 302, body "", headers (dictionary where "location" is "http://localhost:" + port + "/echo?q=far")
+    else if p is "/loop"
+        return record with status 302, body "", headers (dictionary where "location" is "/loop")
+    else if p is "/gz"
+        return record with status 200, body zip's gzip("squeezed é, squeezed é, squeezed é"), headers (dictionary where "content-encoding" is "gzip")
+    else if p is "/stop"
+        web's stop_serving()
+        return "bye"
+    end
+    return record with status 404, body "nothing at " + p
+end
+
+set job to start web's serve(port, answer)
+wait 200 milliseconds
+set r to http's get(base + "/")
+say status of r + " " + reason of r + " " + text of r + " " + item "content-type" of headers of r
+set r to http's request("put", base + "/echo?q=one%20two", "a body é", dictionary where "X-Custom" is "mine")
+say text of r
+set r to http's post(base + "/echo?q=json", record with name "Sam")
+say text of r
+set r to http's patch(base + "/echo?q=bytes", (list of 104, 105) as bytes)
+say text of r
+set r to http's delete(base + "/echo?q=gone")
+say text of r
+set r to http's head(base + "/")
+say status of r + " " + length of body of r
+say http's get_json(base + "/json")
+set r to http's get(base + "/move")
+say text of r + " at " + url of r
+set r to http's post(base + "/see", "posted")
+say text of r
+set r to http's post(base + "/keep", "kept")
+say text of r
+set r to http's request("GET", base + "/far", nothing, dictionary where "Authorization" is "Bearer secret")
+say text of r
+set r to http's get(base + "/gz")
+say text of r + " " + length of body of r
+set r to http's get(base + "/missing")
+say status of r + " " + text of r
+try
+    http's check(r)
+if it fails with why
+    say why
+end
+try
+    http's get(base + "/loop")
+if it fails with why
+    say why
+end
+say http's encoded("a b&c=d/é") + " " + http's decoded("a+b%26c%3Dd%2F%C3%A9")
+say http's form_of(dictionary where "q" is "moth lang", "n" is 2)
+say http's http_unchunked(("5" + http's http_line_end + "hello" + http's http_line_end + "6;x=y" + http's http_line_end + " world" + http's http_line_end + "0" + http's http_line_end + http's http_line_end) as bytes, "x") as text
+for each bad in list of "ftp://example.com/", "http:///nohost", "http://[::1/x"
+    try
+        http's get(bad)
+    if it fails with why
+        say why
+    end
+end
+try
+    http's get("http://127.0.0.1:1/")
+if it fails with why
+    say why
+end
+http's get(base + "/stop")
+wait for job
+say "done"
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`200 OK <h1>Hello</h1> text/html; charset=utf-8\nPUT a body é | text/plain; charset=utf-8 | mine | nobody | one two\nPOST {\"name\":\"Sam\"} | application/json | nothing | nobody | json\nPATCH hi | none | nothing | nobody | bytes\nDELETE  | none | nothing | nobody | gone\n200 0\n(dictionary where \"name\" is \"Sam\", \"scores\" is [1, 2, 3])\nGET  | none | nothing | nobody | after302 at http://127.0.0.1:${port}/echo?q=after302\nGET  | none | nothing | nobody | after303\nPOST kept | text/plain; charset=utf-8 | nothing | nobody | after307\nGET  | none | nothing | nobody | far\nsqueezed é, squeezed é, squeezed é 37\n404 nothing at /missing\nthe server said 404 Not Found to http://127.0.0.1:${port}/missing\ntoo many redirects, from http://127.0.0.1:${port}/loop\na%20b%26c%3Dd%2F%C3%A9 a b&c=d/é\nq=moth%20lang&n=2\nhello world\nhttp.moth asks http:// and https:// addresses, not ftp://example.com/\n'http:///nohost' has no host\n'http://[::1/x' has a [ with no ]\ncan't connect to 127.0.0.1 port 1: nothing answered there\ndone\n`, `listening on http://127.0.0.1:${port}/
+`, 0]);
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;

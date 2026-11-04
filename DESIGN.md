@@ -3550,3 +3550,29 @@ hold them to agreeing.
   bytes of every length around a block's edges, on the three engines and in
   machine code on Windows and Linux; base64 and base32 against RFC 4648's
   and Node's; secrets on Windows and Linux.
+
+## 87. Asking web servers: http.moth
+
+- **Why.** `read` and `send` ask sites through the system (WinHTTP, curl),
+  and only `read` and POST: no PUT, PATCH or DELETE, and a redirect isn't
+  followed. Python's urllib.request does any method.
+- **What it is.** tools/http.moth, in Moth over sockets.moth (§82), in the
+  standard library. `request(method, url, body, headers)` and `head`, `get`,
+  `post`, `put`, `patch`, `delete`; a body is text, bytes, or a record, list
+  or dictionary sent as JSON; the answer is a record of status, reason,
+  headers (each name in small letters), body, text and url. A 404 is an
+  answer like any other: `check` makes one a mistake; `get_json` reads JSON.
+- **What it does on the way.** Connection: close, so the answer ends when
+  the connection does; Accept-Encoding: gzip, undone with zip.moth; a body in
+  chunks put together; redirects followed up to 10, as browsers do: a 303,
+  or a 301 or 302 to a POST, goes on as a GET with no body; a 307 or 308
+  keeps both; Authorization isn't sent on to another host. A header with a
+  line end in it is a mistake. `encoded`, `decoded` and `form_of` write and
+  read what goes in an address or a form.
+- **Where.** HTTPS uses OpenSSL as sockets.moth does, so on Windows its DLLs
+  go beside the program; `read` and `send` need nothing there.
+- **Tested.** In machine code on Windows and Linux, asking server.moth in a
+  task of the program's: each method, a header of its own, JSON both ways,
+  bytes, each redirect, one to another host, gzip, a 404, a loop of
+  redirects, chunks, and each mistake. By hand, example.com over HTTP and
+  HTTPS.
