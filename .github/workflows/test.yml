@@ -10,6 +10,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # OpenBLAS and ONNX Runtime (the library in its Python package), so that the tests of arrays.moth's use_blas
+      # and of tools/onnx.moth run here, not skip, as they do where those aren't installed
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libopenblas0-pthread
+          python3 -m venv "$RUNNER_TEMP/ort"
+          "$RUNNER_TEMP/ort/bin/pip" install -q onnxruntime
+          library=$(ls "$RUNNER_TEMP"/ort/lib/python3*/site-packages/onnxruntime/capi/libonnxruntime.so.1.*)
+          sudo cp "$library" /usr/local/lib/
+          sudo ln -sf "$(basename "$library")" /usr/local/lib/libonnxruntime.so.1
+          sudo ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so
+          sudo ldconfig
       # the JavaScript engines, the playground's, and machine.moth's machine code against them, moth.exe included; on
       # a display of Xvfb's, where there's one, for tools/linux.moth's GTK windows
       - run: if command -v xvfb-run > /dev/null; then xvfb-run -a npm test; else npm test; fi

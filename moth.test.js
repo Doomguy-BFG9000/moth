@@ -1071,7 +1071,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       ["stats.test.moth", ["test_middles", "test_spread", "test_two_sets", "test_mistakes"]],
       ["arrays.test.moth", ["test_making", "test_element_by_element", "test_broadcasting", "test_matrices", "test_along_axes", "test_shapes",
         "test_machine_code_agrees", "test_nan_and_infinity", "test_mistakes"]],
-      ["ai.test.moth", ["test_requests", "test_events_however_they_come", "test_vectors"]],
+      ["ai.test.moth", ["test_requests", "test_events_however_they_come", "test_a_fallback_part_of_the_way", "test_vectors"]],
       ["sync.test.moth", ["test_lock", "test_semaphore", "test_holding", "test_flag", "test_queue", "test_tasks"]],
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
         "test_comparing", "test_mistakes", "test_more", "test_more_mistakes"]],

@@ -2836,7 +2836,7 @@ to cli_sh_program with cli_sh, cli_uses, cli_names
     add "set moth_shell_kept to empty dictionary" to cli_out
     if length of cli_uses is greater than 1
         add "try" to cli_out
-        add "    set moth_shell_kept to load \"" + cli_sh_state + "\"" to cli_out
+        add "    set moth_shell_kept to load \"" + state of cli_sh + "\"" to cli_out
         add "if it fails" to cli_out
         add "end" to cli_out
     end
@@ -2848,21 +2848,21 @@ to cli_sh_program with cli_sh, cli_uses, cli_names
     add "end" to cli_out
     add "to moth_shell_keep with moth_shell_all" to cli_out
     add "    try" to cli_out
-    add "        save moth_shell_all to \"" + cli_sh_state + "\"" to cli_out
+    add "        save moth_shell_all to \"" + state of cli_sh + "\"" to cli_out
     add "        return nothing" to cli_out
     add "    if it fails" to cli_out
     add "    end" to cli_out
     add "    set moth_shell_fine to empty dictionary" to cli_out
     add "    for each moth_shell_name in keys of moth_shell_all" to cli_out
     add "        try" to cli_out
-    add "            save (dictionary where moth_shell_name is item moth_shell_name of moth_shell_all) to \"" + cli_sh_state + "\"" to cli_out
+    add "            save (dictionary where moth_shell_name is item moth_shell_name of moth_shell_all) to \"" + state of cli_sh + "\"" to cli_out
     add "            set item moth_shell_name of moth_shell_fine to item moth_shell_name of moth_shell_all" to cli_out
     add "        if it fails with moth_shell_why" to cli_out
     add "            say \"(\" + moth_shell_name + \" can't be kept for the next entry: \" + moth_shell_why + \")\" to the error output" to cli_out
     add "            set item moth_shell_name of moth_shell_fine to nothing" to cli_out
     add "        end" to cli_out
     add "    end" to cli_out
-    add "    save moth_shell_fine to \"" + cli_sh_state + "\"" to cli_out
+    add "    save moth_shell_fine to \"" + state of cli_sh + "\"" to cli_out
     add "end" to cli_out
     for each cli_name in early of cli_sh
         add "set " + cli_name + " to moth_shell_get(\"" + cli_name + "\")" to cli_out
@@ -2932,7 +2932,7 @@ to cli_sh_entry with cli_sh, cli_typed
     set cli_text to cli_sh_showing(cli_sh, cli_typed, cli_read, cli_files)
     set typed of cli_sh to typed of cli_sh + 1
     set cli_file to "[" + typed of cli_sh + "]"
-    if keeping of cli_sh # a notebook's: its blocks, by their number
+    if piece of cli_sh is not nothing # a notebook's blocks, or the kernel's cells, by their number
         set cli_file to piece of cli_sh + " " + typed of cli_sh
     end
     set said of cli_sh to ""
@@ -2970,12 +2970,14 @@ to cli_sh_entry with cli_sh, cli_typed
             return nothing
         end
         cli_report(cli_why, "moth shell", cli_source, cli_all_names, cli_all_texts)
+        set failed of cli_sh to yes
         return nothing
     end
     try
         write cli_bytes as bytes to program of cli_sh
     if it fails with cli_whynot
         say "moth: " + cli_whynot to the error output
+        set failed of cli_sh to yes
         return nothing
     end
     if cli_sh_run(cli_sh) is not 0 # a mistake, or `stop the program`: nothing it did is kept
@@ -3018,11 +3020,13 @@ to cli_sh_run with cli_sh
     return cli_ended
 end
 
-# what the shell (or a notebook, `keeping` what each entry says) knows: the entries so far, and the rest
+# what the shell (or a notebook, `keeping` what each entry says) knows: the entries so far, and the rest; the
+# file each entry's names are kept in for the next (`state`), and what an entry is called in a mistake, if
+# not [1], [2] and so on (`piece`: "block" for a notebook's, "cell" for the kernel's)
 to cli_sh_new with cli_host_now, cli_allowing, cli_program, cli_keeping
     return record with entries empty list, labels empty list, typed 0, early empty list, known empty list, functions empty list,
         file_names empty list, file_texts empty list, host cli_host_now, allowing cli_allowing, program cli_program,
-        keeping cli_keeping, said "", failed no, piece "block"
+        keeping cli_keeping, said "", failed no, piece nothing, state cli_sh_state
 end
 
 # ---------- notebooks ----------
@@ -3047,6 +3051,7 @@ to cli_notebook with cli_path, cli_flags
     add "--allow-read=" + cli_sh_state to cli_allowing
     add "--allow-write=" + cli_sh_state to cli_allowing
     set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, yes)
+    set piece of cli_sh to "block"
     set cli_lines to split cli_text by "\n"
     set cli_out to empty list
     set cli_blocks to 0
@@ -3166,25 +3171,31 @@ to cli_nb_showing with cli_sh, cli_code
 end
 
 # ---------- the kernel ----------
-# `moth kernel [--allow-...]`, for editors/jupyter's kernel: each line it's given names a file holding a cell's
+# `moth kernel [--allow-...]`, for editors/jupyter's kernel: each line it reads names a file holding a cell's
 # code, which runs as a notebook's block does (so a cell has what the cells before it made, its last line's
-# value is shown, and one that fails keeps nothing), and what it said is written between a line of byte 1
-# and "moth-cell" and one of byte 1 and "moth-done ok" (or "moth-done failed"). An empty line, or the
-# input's end, ends it. (DESIGN §107)
+# value is shown, and one that fails keeps nothing), but as the shell's entries do: what it says, and its
+# mistakes, go out as they come, and it asks this program's input, so a cell can ask a question. Before
+# the cell, a line of byte 1 and "moth-cell"; after it, one of byte 1 and "moth-done" on the error output,
+# then one of byte 1 and "moth-done ok" (or "moth-done failed"). A number and a space before the file's name
+# number the cell, as Jupyter does, if that's past the last cell's number. An empty line, or the input's end,
+# ends it. Its program and the file it keeps names in are its own, so two kernels can run in one folder.
+# (DESIGN §111)
 to cli_kernel with cli_flags
     set cli_host_now to cli_host()
-    set cli_program to "./.moth-kernel"
+    set cli_own to ".moth-kernel-" + (random number from 100000 to 999999)
+    set cli_program to "./" + cli_own
     if cli_host_now is "windows"
-        set cli_program to "./.moth-kernel.exe"
+        set cli_program to cli_program + ".exe"
     end
     set cli_allowing to empty list
     for each cli_flag in cli_flags
         add cli_flag to cli_allowing
     end
-    add "--allow-read=" + cli_sh_state to cli_allowing
-    add "--allow-write=" + cli_sh_state to cli_allowing
-    set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, yes)
+    add "--allow-read=" + cli_own + "-state" to cli_allowing
+    add "--allow-write=" + cli_own + "-state" to cli_allowing
+    set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, no)
     set piece of cli_sh to "cell"
+    set state of cli_sh to cli_own + "-state"
     set cli_mark to (list of 1) as bytes as text
     repeat while yes
         set cli_line to nothing
@@ -3195,23 +3206,30 @@ to cli_kernel with cli_flags
         if cli_line is nothing or cli_sh_strip(cli_line) is ""
             stop
         end
-        set cli_code_text to cli_text_of(cli_sh_strip(cli_line))
+        say cli_mark + "moth-cell"
         set failed of cli_sh to no
-        set said of cli_sh to ""
+        set cli_path to cli_sh_strip(cli_line)
+        set cli_space to position of " " in cli_path
+        if cli_space is greater than 1 and cli_kernel_whole(cli_first(cli_path, cli_space - 1))
+            set cli_number to number of cli_first(cli_path, cli_space - 1)
+            set cli_path to cli_sh_strip(cli_tail(cli_path, cli_space + 1))
+            if cli_number - 1 is greater than typed of cli_sh # numbers never go back, so each cell's is its own
+                set typed of cli_sh to cli_number - 1
+            end
+        end
+        set cli_code_text to cli_text_of(cli_path)
         if cli_code_text is nothing
             set failed of cli_sh to yes
-            set said of cli_sh to "can't read the cell's file, " + cli_sh_strip(cli_line)
-        else if cli_sh_strip(cli_code_text) is not ""
-            cli_sh_entry(cli_sh, cli_nb_showing(cli_sh, split cli_code_text by "\n"))
+        else
+            set cli_code to split cli_code_text by "\n"
+            repeat while length of cli_code is greater than 0 and cli_sh_strip(item (length of cli_code) of cli_code) is ""
+                set cli_code to items 1 to (length of cli_code - 1) of cli_code
+            end
+            if length of cli_code is greater than 0
+                cli_sh_entry(cli_sh, cli_nb_showing(cli_sh, cli_code))
+            end
         end
-        set cli_said to said of cli_sh
-        if length of cli_said is greater than 0 and item (length of cli_said) of cli_said is "\n"
-            set cli_said to items 1 to (length of cli_said - 1) of cli_said
-        end
-        say cli_mark + "moth-cell"
-        if cli_said is not ""
-            say cli_said
-        end
+        say cli_mark + "moth-done" to the error output
         if failed of cli_sh
             say cli_mark + "moth-done failed"
         else
@@ -3219,10 +3237,20 @@ to cli_kernel with cli_flags
         end
     end
     try
-        remove the file cli_sh_state
+        remove the file state of cli_sh
     if it fails
     end
     return 0
+end
+
+# whether a text is digits alone
+to cli_kernel_whole with cli_text
+    for each cli_c in cli_text
+        if position of cli_c in "0123456789" is 0
+            return no
+        end
+    end
+    return yes
 end
 
 to cli_shell with cli_flags

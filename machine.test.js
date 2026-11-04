@@ -10,6 +10,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { networkInterfaces, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
@@ -888,6 +889,68 @@ test("moth.exe notebook runs a Markdown file's blocks, and writes what each said
     assert.equal(readFileSync(join(sub, "notes.md"), "utf8"), after, `run ${time}`);
   }
   assert.deepEqual(readdirSync(sub), ["notes.md"], "what it built to run the blocks was left behind");
+});
+
+// `moth kernel` (DESIGN §111), as editors/jupyter's kernel talks to it: each line names a file of a cell's code,
+// which runs as a notebook's block does, with its output and mistakes going out as they come, between a line of
+// byte 1 and "moth-cell" and one of byte 1 and "moth-done ok" or "moth-done failed", and one of byte 1 and
+// "moth-done" on the error output; a number before the file's name numbers the cell, unless that would go back;
+// a question is answered from the input. Each line is written once what it waits for has come, as the kernel
+// writes them, and what the kernel built and kept is gone at the end.
+test("moth.exe kernel runs cells for Jupyter, each with what the ones before made", { skip }, async () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "kernel");
+  mkdirSync(sub);
+  const cells = { "1.moth": 'set xs to list of 1, 2, 3\nsay "made " + length of xs\n', "2.moth": "xs\n\n", "3.moth": "set xs to list of 9\nsay item 9 of xs\n",
+    "4.moth": "to double with n\n    return n * 2\nend\ndouble(item 3 of xs)\n", "5.moth": "\n  \n", "6.moth": 'say "to the error output" to the error output\nsay nope\n',
+    "7.moth": 'set name to ask "Name?"\nsay "hi " + name\n' };
+  for (const [name, code] of Object.entries(cells)) writeFileSync(join(sub, name), code);
+  const child = spawn(exe, ["kernel", "--allow-read"], { cwd: sub, stdio: ["pipe", "pipe", "pipe"] });
+  let [stdout, stderr] = ["", ""];
+  child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+  child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+  const ended = new Promise((resolve) => child.on("close", resolve));
+  const until = async (ready, what) => {
+    for (const start = Date.now(); !ready(); await new Promise((r) => setTimeout(r, 20)))
+      if (Date.now() - start > 120_000) throw new Error(`waited for ${what}: ${JSON.stringify(stdout)} ${JSON.stringify(stderr)}`);
+  };
+  const done = () => (stdout.match(/\x01moth-done (ok|failed)\n/g) ?? []).length;
+  for (const line of ["1.moth", "2.moth", "3.moth", "4.moth", "5.moth", "9 6.moth", "missing.moth", "7.moth", "Ana", "8 3.moth"]) {
+    const before = done();
+    child.stdin.write(line + "\n");
+    if (line === "7.moth") await until(() => stdout.endsWith("Name? "), "the question");
+    else await until(() => done() > before, line);
+  }
+  child.stdin.write("\n");
+  const status = await ended;
+  const mistake = (cell, line, why, code, at) => `cell ${cell}:${line}:${at}: ${why}\n${code}\n${" ".repeat(at - 1)}^\n`;
+  assert.deepEqual([stdout, stderr, status], [" 1.moth\n\x01moth-cell\nmade 3\n\x01moth-done ok\n 2.moth\n\x01moth-cell\n[1, 2, 3]\n\x01moth-done ok\n"
+    + " 3.moth\n\x01moth-cell\n\x01moth-done failed\n 4.moth\n\x01moth-cell\n6\n\x01moth-done ok\n 5.moth\n\x01moth-cell\n\x01moth-done ok\n"
+    + " 9 6.moth\n\x01moth-cell\n\x01moth-done failed\n missing.moth\n\x01moth-cell\n\x01moth-done failed\n"
+    + " 7.moth\n\x01moth-cell\nName? Ana\nhi Ana\n\x01moth-done ok\n 8 3.moth\n\x01moth-cell\n\x01moth-done failed\n \n",
+  "\x01moth-done\n\x01moth-done\n" + mistake(3, 2, "there is no item 9, the list only has 1 item", "say item 9 of xs", 5) + "\x01moth-done\n\x01moth-done\n\x01moth-done\n"
+    + "to the error output\n" + mistake(9, 2, "'nope' has no value yet (give it one with 'set nope to ...')", "say nope", 5) + "\x01moth-done\n"
+    + "moth: there is no file called 'missing.moth'\n\x01moth-done\n\x01moth-done\n"
+    + mistake(11, 2, "there is no item 9, the list only has 1 item", "say item 9 of xs", 5) + "\x01moth-done\n", 0]);
+  assert.deepEqual(readdirSync(sub).sort(), Object.keys(cells).sort(), "what the kernel built or kept was left behind");
+});
+
+// editors/jupyter's kernel (DESIGN §111): its own tests, in Python, against a stand-in for moth kernel and against
+// the moth built here; and, where ipykernel and jupyter_client are installed, as Jupyter runs it
+function pythonCommand() {
+  for (const command of ["python3", "python"]) {
+    const asked = spawnSync(command, ["-c", "import sys; print(sys.version_info >= (3, 8))"], { encoding: "utf8", cwd: tmpdir() });
+    if (!asked.error && asked.stdout.trim() === "True") return command;
+  }
+  return null;
+}
+const jupyterPython = target ? pythonCommand() : null;
+test("editors/jupyter's kernel runs cells through moth kernel, as Jupyter runs them", { skip: skip || (!jupyterPython && "there's no Python 3.8 or later here") }, () => {
+  const { exe } = mothExe();
+  const ran = spawnSync(jupyterPython, ["-B", fileURLToPath(new URL("./editors/jupyter/test_moth_kernel.py", import.meta.url))],
+    { cwd: tmpdir(), env: { ...process.env, MOTH: exe }, encoding: "utf8", timeout: 600_000 });
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.match(ran.stderr, /\nOK( \(skipped=\d+\))?\n$/);
 });
 
 // The shell: a line whose value makes functions of its own (a list built from a list) runs once, not again in
@@ -1871,7 +1934,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
   assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
 });
 
-// tools/arrays.moth (DESIGN §103): its own tests, in machine code, where machine code's own loops do the work and
+// tools/arrays.moth (DESIGN §107): its own tests, in machine code, where machine code's own loops do the work and
 // must give what Moth gives to the last bit
 test("arrays.moth and ai.moth pass their own tests in machine code, where machine code's own loops do the work", { skip }, () => {
   const { dir, exe } = mothExe();
@@ -1883,7 +1946,7 @@ test("arrays.moth and ai.moth pass their own tests in machine code, where machin
   writeFileSync(join(sub, "math.moth"), readFileSync(new URL("./math.moth", import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "arrays.test.moth", "ai.test.moth", "--allow-libraries"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "12 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "13 passed");
 });
 
 // Moth's own library, which needs no --allow-libraries and isn't a library the program loads, and a list of
@@ -1920,7 +1983,7 @@ memcpy(to_here, (list of 1, "two"), 16)`);
     (err) => err.reason === "a library's function can't give a list of numbers: only a function's input can be one");
 });
 
-// A library's function "at an address" (DESIGN §104): the first input is where the function is, a pointer C
+// A library's function "at an address" (DESIGN §108): the first input is where the function is, a pointer C
 // gave, as ONNX Runtime's C API gives a table of them
 test("a library's function at an address is called where a pointer says it is", { skip }, () => {
   const finding = target === "windows" ? `use the library "kernel32"
@@ -2175,7 +2238,7 @@ ${numpy}`, "", 0]);
   }
 });
 
-// tools/ai.moth (DESIGN §106), against a server of the test's own that answers as Anthropic's Messages API and
+// tools/ai.moth (DESIGN §110), against a server of the test's own that answers as Anthropic's Messages API and
 // OpenAI's chat completions and embeddings do: plain and streamed answers (server-sent events, in chunks),
 // tools, JSON, embeddings, and the APIs' mistakes. The keys are made up, and only ever in the environment.
 async function aiMock() {
@@ -2231,7 +2294,8 @@ async function aiMock() {
         return events(list, false);
       }
       if (req.url === "/v1/chat/completions" || req.url === "/v1/embeddings") {
-        if (req.headers.authorization !== "Bearer test-openai-key") return json(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error" } });
+        const keyless = sent.model === "local-model" && !("authorization" in req.headers); // a local server, which wants none
+        if (!keyless && req.headers.authorization !== "Bearer test-openai-key") return json(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error" } });
         if (req.url === "/v1/embeddings") return json(200, { data: sent.input.map((t, index) => ({ index, embedding: embedding(t) })).reverse(), model: sent.model });
         const last = lastUser(sent.messages);
         const system = sent.messages[0].role === "system" ? ` [${sent.messages[0].content}]` : "";
@@ -2307,29 +2371,57 @@ ai's add_vector(index, texts, embedded)
 for each found in ai's search(index, ai's embed(gpt, "night moth"), 2)
     say found's key " " found's score with 3 decimals
 end
-set wrong to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base, "key_variable" is "WRONG_KEY")
-for each attempt in list of 1, 2
-    try
-        if attempt is 1
-            ai's answer(wrong, "x")
-        else
-            ai's stream(wrong, "x", keep_piece)
-        end
-    if it fails with why
-        say why
-    end
-end
-try
-    ai's answer(ai's anthropic("claude-opus-5-5", dictionary where "key_variable" is "NO_SUCH_KEY_HERE"), "x")
-if it fails with why
-    say why
-end
+say ai's answer(ai's openai_compatible(base + "/v1", "local-model"), "Hi, with no key")
+say ai's answer(ai's openai_compatible(base + "/v1", "gpt-test", yes), "Hi, with a key")
 try
     ai's embed(claude, "x")
 if it fails with why
     say why
 end
 `;
+
+// the keys: a wrong one, as the API says, or none, as ai.moth says, for each client
+const AI_KEYS_PROGRAM = `use "ai.moth" as ai
+use "system.moth" as system
+set base to system's environment("MOCK_BASE")
+to ignore with piece
+end
+set claude to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base)
+for each attempt in list of 1, 2
+    try
+        if attempt is 1
+            ai's answer(claude, "x")
+        else
+            ai's stream(claude, "x", ignore)
+        end
+    if it fails with why
+        say why
+    end
+end
+for each gpt in list of (ai's openai("gpt-test", dictionary where "base_url" is base + "/v1")), (ai's openai_compatible(base + "/v1", "gpt-test", yes))
+    try
+        ai's answer(gpt, "x")
+    if it fails with why
+        say why
+    end
+end
+say ai's answer(ai's openai_compatible(base + "/v1", "local-model"), "no key needed")
+`;
+
+function runAi(exe, cwd, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, [], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let [stdout, stderr] = ["", ""];
+    child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.on("error", reject);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, status });
+    });
+  });
+}
 
 test("tools/ai.moth talks to Anthropic's and OpenAI's APIs: answers, streams, tools, JSON and embeddings", { skip }, async () => {
   const { server, seen, base } = await aiMock();
@@ -2341,20 +2433,7 @@ test("tools/ai.moth talks to Anthropic's and OpenAI's APIs: answers, streams, to
     const exe = executable(dir, "p");
     writeFileSync(exe, machine(AI_PROGRAM, { target, name: "p.moth", files, allow: ["--allow-libraries", "--allow-net"] }));
     if (target === "linux") chmodSync(exe, 0o755);
-    const env = { ...process.env, MOCK_BASE: base, ANTHROPIC_API_KEY: "test-key-not-real", OPENAI_API_KEY: "test-openai-key", WRONG_KEY: "nope" };
-    delete env.NO_SUCH_KEY_HERE;
-    const ran = await new Promise((resolve, reject) => {
-      const child = spawn(exe, [], { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"] });
-      let [stdout, stderr] = ["", ""];
-      child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
-      child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
-      const timer = setTimeout(() => child.kill(), 120_000);
-      child.on("error", reject);
-      child.on("close", (status) => {
-        clearTimeout(timer);
-        resolve({ stdout, stderr, status });
-      });
-    });
+    const ran = await runAi(exe, dir, { ...process.env, MOCK_BASE: base, ANTHROPIC_API_KEY: "test-key-not-real", OPENAI_API_KEY: "test-openai-key" });
     assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`an Anthropic client (claude-opus-5-5)
 You said: Name a moth.
 You said: Hi [Be brief.] | end_turn | 11 7 | claude-opus-5-5
@@ -2373,9 +2452,8 @@ tool_calls [(record with id "call_1", name "get_weather", input (dictionary wher
 [[1, 1, 0, 0, 1], [0, 0, 1, 1, 1], [2, 1, 0, 0, 0]]
 a moth at night, a moth 0.949
 moths fly at night 0.816
-Anthropic said 401: authentication_error: invalid x-api-key
-Anthropic said 401: authentication_error: invalid x-api-key
-set NO_SUCH_KEY_HERE to your API key for Anthropic
+You said: Hi, with no key
+You said: Hi, with a key
 Anthropic's API has no embeddings: use openai_compatible() with a server that has them, as Voyage AI, OpenAI or Ollama
 `, "", 0]);
     // what was sent: the first request as the Messages API wants it (no fallbacks to a server that isn't
@@ -2390,7 +2468,32 @@ Anthropic's API has no embeddings: use openai_compatible() with a server that ha
     assert.deepEqual(toolRound.body.messages[2].content, [{ type: "tool_result", tool_use_id: "toolu_1", content: "sunny in Paris" }]);
     const openaiRound = seen.find((s) => s.url === "/v1/chat/completions" && s.body.messages.some((m) => m.role === "tool"));
     assert.deepEqual(openaiRound.body.messages.at(-1), { role: "tool", tool_call_id: "call_1", content: "sunny in Paris" });
-    assert.ok(seen.every((s) => !JSON.stringify(s.body).includes("test-key-not-real")), "no key in a request's body");
+    assert.ok(seen.every((s) => !/test-key-not-real|test-openai-key/.test(JSON.stringify(s.body))), "no key in a request's body");
+    // each key goes only to its own API, and none to a server that wants none
+    assert.ok(seen.every((s) => (s.url === "/v1/messages" ? !("authorization" in s.headers) : !("x-api-key" in s.headers))), "a key went to the other API");
+    assert.equal(seen.find((s) => s.body.model === "local-model").headers.authorization, undefined);
+    assert.equal(seen.filter((s) => s.body.model === "gpt-test").at(-1).headers.authorization, "Bearer test-openai-key");
+    // a wrong key, and none
+    const keys = executable(dir, "keys");
+    writeFileSync(keys, machine(AI_KEYS_PROGRAM, { target, name: "keys.moth", files, allow: ["--allow-libraries", "--allow-net"] }));
+    if (target === "linux") chmodSync(keys, 0o755);
+    const without = { ...process.env, MOCK_BASE: base };
+    delete without.ANTHROPIC_API_KEY;
+    delete without.OPENAI_API_KEY;
+    const wrong = await runAi(keys, dir, { ...without, ANTHROPIC_API_KEY: "not-the-key" });
+    assert.deepEqual([wrong.stdout, wrong.stderr, wrong.status], [`Anthropic said 401: authentication_error: invalid x-api-key
+Anthropic said 401: authentication_error: invalid x-api-key
+set OPENAI_API_KEY to your API key for OpenAI
+set OPENAI_API_KEY to your API key for OpenAI
+You said: no key needed
+`, "", 0]);
+    const none = await runAi(keys, dir, { ...without, ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "not-the-key" });
+    assert.deepEqual([none.stdout, none.stderr, none.status], [`set ANTHROPIC_API_KEY to your API key for Anthropic
+set ANTHROPIC_API_KEY to your API key for Anthropic
+OpenAI said 401: invalid_request_error: Incorrect API key provided
+OpenAI said 401: invalid_request_error: Incorrect API key provided
+You said: no key needed
+`, "", 0]);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });
