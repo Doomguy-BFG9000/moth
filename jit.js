@@ -241,17 +241,23 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     for (let i = depth - 1; i >= 0; i--) calls.push({ name: running[i].fn.name, at: ats[from[i]] });
     return trailOf(calls);
   };
-  const tick = (k) => {
-    if (++steps > maxSteps) {
-      const calls = trail();
-      depth = 0;
-      fail(ats[k], stoppedMessage(maxSteps), undefined, true, calls); // final: no try catches it
-    }
+  // the program stopped, at k, for taking too many steps
+  const tooMany = (k) => {
+    const calls = trail();
+    depth = 0;
+    fail(ats[k], stoppedMessage(maxSteps), undefined, true, calls); // final: no try catches it
   };
+  const tick = (k) => {
+    if (++steps > maxSteps) tooMany(k);
+  };
+  // A call begins: its inputs counted (and checked, for a function whose inputs say what they are), a step
+  // taken, and the call noted for a mistake's trail. Each check is done here first, as it's so on every call,
+  // and the functions that say what went wrong are only called when it did.
   const enter = (f, argc, name, k, args) => {
-    checkInputs(f, argc, name, errors[k]);
+    const fn = f.fn;
+    if (fn.params.length !== argc) checkInputs(f, argc, name, errors[k]);
     if (args) checkKinds(f, args, name, errors[k]); // only a function whose inputs say what they are gets them
-    tick(k);
+    if (++steps > maxSteps) tooMany(k);
     if (depth >= MAX_DEPTH) {
       depth = 0;
       throw new TooDeep();

@@ -4046,3 +4046,89 @@ hold them to agreeing.
   text, a PNG's background and bar colour where they should be, each
   mistake, on every engine and in machine code; and the PNGs looked at.
 
+## 101. Faster on the web, and every core with less to write
+
+- **Why.** The playground and the pages `moth build --web` makes ran on the
+  JIT. WebAssembly was already quicker at sums and calls, but two to three
+  times slower with lists of numbers and with text: each number in a list was
+  a box of its own, which the GC kept and copied (73% of the time, adding
+  3,000,000 numbers to a list), and each `+` on text went into JavaScript and
+  back six times. Counting steps took a call each turn of a loop. And
+  cores.moth (§75) asked for a `work_here` line before anything that should
+  run once.
+- **Small whole numbers, unboxed.** A whole number from -2^30 to 2^30 - 1 is
+  an i31 value, as yes and no already were. No and yes keep 0 and 1, so the
+  numbers 0 and 1 are boxes, each made once, and -0 is a box of its own.
+  Whatever reads a number takes either: isNum is an i31 of at least 2 (as
+  unsigned) or a box, numOf the i31's value or the box's; `box` makes one from
+  an f64, and truthy gives exactly 0 or 1. An i31 that reaches JavaScript is a
+  number there, 1 and 0 being yes and no.
+- **Text in one call.** Text + text, text + a number and a number + text call
+  JavaScript once, with the strings and the number; and a list that starts
+  with text comes to JavaScript one call an item, not three.
+- **remainder of, and rounded.** A builtin went to JavaScript with its inputs
+  in a list. `remainder of` two whole numbers that fit in 32 bits is now
+  i32.rem_s, given the divisor's sign as vm.js gives it. `rounded down`,
+  `rounded up` and `rounded` give a whole number itself, and work out a
+  fraction here when it's further from a whole number (and from a half) than
+  rounding it to 15 digits can move it, which is at most half its size times
+  10^-14: floor, ceil, or half away from 0, never -0. Anything else, and every
+  mistake, goes to the builtin as before.
+- **Steps counted down.** A global i32 holds the steps left, refilled from
+  JavaScript at most 2^30 at a time; a loop counts down a local of its own,
+  handed back to the global around a call, at a return and after the loop,
+  and, by a catch_all that keeps the smaller, when a mistake leaves it. So a
+  loop's turn makes no call, and a program still stops at the same step on
+  every engine. A JIT call checks how many inputs it got, and counts its step,
+  before calling anything, which it does only when one is wrong.
+- **The page's engine.** The playground starts on WebAssembly where the
+  browser validates a module with a GC struct and one with try and
+  catch_all, and on the JIT where it doesn't; Engine still picks any of the
+  three.
+- **No box for a moment.** `add x to total`, with total a number, adds x
+  straight to the f64 when x is a number, and `item i of xs` or `byte i of
+  b` with i a number takes the place as an f64, so neither makes a box only
+  to take it apart again.
+- **What it gave.** WebAssembly, best of five in Node, before and after:
+  adding 3,000,000 numbers to a list and summing them by item, 352 to 71 ms;
+  `for each` over them, 277 to 68; 300,000 records in a list, 206 to 79;
+  joining 200,000 pieces of text, 148 to 52; a million bytes filled and
+  summed, 47 to 38; a million-round loop, 5.3 to 3.9. 300,000 records, each
+  with a `remainder of`, run once as the playground runs a program: 227 to
+  87 ms (the JIT: 76). Primes up to 5,000, which compares numbers from a
+  list, went from 15 to 18 ms, as each number now says which kind it is.
+- **cores.moth with no work_here.** Each each_at_once outside a part has a
+  number, counted as the program runs. A copy is started with its call's
+  number and runs the program to it: a call before its own gives what it gave
+  the program, from a file each_at_once saves them to (with how many calls
+  were made inside each, which the copy skips), and its own call does its
+  part and stops the copy. In a part, each_at_once does its items there. A
+  call that failed in the program isn't saved, so the copy does it, and fails
+  and carries on as the program did. work_here still stops a copy at once,
+  and nothing is saved for a call whose function had a work_here before the
+  first each_at_once.
+- **A part's mistakes.** At its own each_at_once, a copy may be inside the
+  program's `try`, which mustn't catch the part's mistake: so the part
+  catches it, and saves it, with which item it was on, where each_at_once
+  looks for what the part gave; each_at_once fails with `part 1 of 2 failed:
+  falls_over failed on item 3: can't divide by zero`. A copy that comes to
+  another function's each_at_once says so. At work_here, as before, the
+  copy's own mistake, with its line and trail.
+- **Shared in turn.** With n copies, the 1st, n+1st, 2n+1st... items go to the
+  first, the 2nd, n+2nd... to the second, so a list whose items take longer
+  and longer is shared evenly: counting the primes below 60,000 to 1,920,000,
+  32 items, on 6 copies, 5.0 s before and 3.4 s now (one copy: 12.0 s). On 12
+  or more both take 2.7 s, which is what 6 cores with two threads each give.
+- **Waiting.** tasks.moth's wait_for waits on the process (Windows) or its
+  output (Linux) for up to 10 ms, so it wakes when the task ends, not at the
+  next 10 ms. Starting and finishing 12 copies took 117 ms, now 100 ms on
+  Windows (most of it CreateProcess, 6 ms each), and 8 ms on Linux.
+- **Tested.** Numbers either side of every edge (0, 1, -1, 2, ±2^30, -0,
+  fractions, bytes, as yes and no, through kinds, dictionaries and records),
+  `remainder of` every sign with whole numbers, fractions, 2^31 and more, and
+  `rounded` near whole numbers and halves, small and big: the VM, the JIT and
+  WebAssembly say the same. cores.moth in machine code on Windows and Linux:
+  two calls in a row, one in a loop, records, calls inside a part and inside
+  one done here, a part's mistake inside the program's own try, a copy that
+  came to another each_at_once, and no files left behind.
+

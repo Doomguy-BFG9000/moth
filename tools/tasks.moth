@@ -136,7 +136,25 @@ end
 # waits until the task has ended
 to wait_for with task
     repeat while not done(task)
-        pause(10)
+        task_wait(task)
+    end
+end
+
+# waits up to 10 milliseconds, and less if the task ends or says something: on Windows for the process, on
+# Linux for its output (whose end comes when it ends)
+to task_wait with task
+    if task_windows
+        WaitForSingleObject(process of task, 10)
+    else if closed of task
+        pause(1) # its output has ended, and the process is ending
+    else
+        set asked to 8 bytes # struct pollfd: the pipe, and POLLIN
+        set made to reading of task
+        set byte 1 of asked to made bit and 255
+        set byte 2 of asked to (shift made right by 8) bit and 255
+        set byte 3 of asked to (shift made right by 16) bit and 255
+        set byte 5 of asked to 1
+        unix_poll(asked, 1, 10)
     end
 end
 
@@ -226,6 +244,7 @@ to task_take with task
             set room to 65536 bytes
             set waiting to unix_read(reading of task, room, 65536)
             if waiting is at most 0
+                set closed of task to yes # ready, with nothing in it: its end
                 return taken
             end
         end
@@ -240,7 +259,7 @@ to task_take with task
 end
 
 to task_record with process, reading
-    return record with process process, reading reading, said empty list, ended no, gone no, code nothing
+    return record with process process, reading reading, said empty list, ended no, gone no, closed no, code nothing
 end
 
 # Windows' rules for a command line, which CommandLineToArgvW undoes: an input with a space, a tab or a " in it,

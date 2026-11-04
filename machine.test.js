@@ -2671,8 +2671,88 @@ end
 say every_way is less than one_way * 4 # not a test of speed: the parts ran, and gave back`, ["--allow-libraries", "--allow-read", "--allow-write"]);
   const lines = ran.stdout.split("\n");
   assert.equal(lines.slice(0, 5).join("\n") + "\n", "[25997, 26800, 27608, 28404, 29182, 29977, 30757, 31522]\nyes\nyes\n[4, 8]\n[]\n", ran.stdout + ran.stderr);
-  assert.match(lines.slice(5).join("\n"), /^part 2 of 2 failed: p\.moth:21:18: can't divide by zero\n[^]*in 'falls_over'[^]*\nyes\n$/);
+  assert.match(lines.slice(5).join("\n"), /^part 1 of 2 failed: p\.moth:21:18: can't divide by zero\n[^]*in 'falls_over'[^]*\nyes\n$/);
   assert.deepEqual([ran.stderr, ran.status], ["", 0]);
+});
+
+// tools/cores.moth with no work_here line (DESIGN §101): each copy runs the program to its own each_at_once,
+// told what the ones before gave: two in a row, one in a loop, records, calls inside a part and inside one done
+// here, a part's mistake inside the program's own try, one that failed with calls inside it, a copy that came to
+// another each_at_once, and no files left
+test("tools/cores.moth needs no work_here: a copy runs the program to its own each_at_once", { skip }, () => {
+  const ran = libraryRun(String.raw`use "cores.moth" as cores
+to doubled with n
+    return n * 2
+end
+to pair_of with n
+    return record with n n, words ("x" + n)
+end
+to inner_sum with n
+    return total of cores's each_at_once_on(2, doubled, list of n, n + 1)
+end
+to falls_over with n
+    if n is 3
+        return 1 / 0
+    end
+    return n
+end
+to nested_fails with n
+    if n is 2
+        return 1 / 0
+    end
+    return length of cores's each_at_once_on(2, pair_of, list of n, n)
+end
+say "said once"
+set first to cores's each_at_once_on(3, doubled, list of 1, 2, 3, 4, 5, 6, 7)
+say first
+say cores's each_at_once_on(2, doubled, first)
+for each round from 1 to 2
+    say cores's each_at_once_on(2, pair_of, list of round, round + 10)
+end
+say cores's each_at_once_on(1, inner_sum, list of 1, 2)
+say cores's each_at_once_on(2, inner_sum, list of 1, 2)
+try
+    cores's each_at_once_on(2, falls_over, list of 1, 2, 3, 4)
+if it fails with why
+    say why
+end
+say cores's each_at_once_on(2, doubled, list of 5, 6)
+try
+    cores's each_at_once_on(2, nested_fails, list of 1, 2)
+if it fails with why
+    say why
+end
+say cores's each_at_once_on(2, doubled, list of 8, 9)
+try
+    if length of arguments is 0
+        say cores's each_at_once_on(2, doubled, list of 1, 2)
+    else
+        say cores's each_at_once_on(2, pair_of, list of 1, 2)
+    end
+if it fails with why
+    say why
+end
+set left to 0
+for each name in read the folder "."
+    if ".moth-cores" is in name
+        set left to left + 1
+    end
+end
+say left`, ["--allow-libraries", "--allow-read", "--allow-write"]);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`said once
+[2, 4, 6, 8, 10, 12, 14]
+[4, 8, 12, 16, 20, 24, 28]
+[(record with n 1, words "x1"), (record with n 11, words "x11")]
+[(record with n 2, words "x2"), (record with n 12, words "x12")]
+[6, 10]
+[6, 10]
+part 1 of 2 failed: falls_over failed on item 3: can't divide by zero
+[10, 12]
+part 2 of 2 failed: nested_fails failed on item 2: can't divide by zero
+[16, 18]
+part 1 of 2 failed: its copy of the program came to this each_at_once with pair_of, not doubled: what comes before it must come to the same each_at_once in each copy
+0
+`, "", 0]);
 });
 
 // tools/tasks.moth: the program started again in the background, with inputs Windows' command line must quote

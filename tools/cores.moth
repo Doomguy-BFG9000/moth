@@ -7,16 +7,21 @@
 #       ... a lot of work ...
 #       return n * n
 #   end
-#   cores's work_here(slow_square)       # where a copy does its part: after the functions, before the rest
 #   say cores's each_at_once(slow_square, list of 1, 2, 3, 4, 5, 6, 7, 8)   # [1, 4, 9, 16, 25, 36, 49, 64]
 #
-# each_at_once gives what the function gave for each item, in the items' order, splitting them into as many
-# parts as there are cores (or `each_at_once_on(n, ...)` for n). Each copy starts the program again with
-# arguments of its own, so everything above the work_here line runs in each copy too, and work_here sees it's a
-# copy, does its part and stops it; the copy's part and what it gives go through files, with save and load, so
-# they're numbers, text, yes and no, nothing, lists, records and dictionaries. A mistake in a part is a
-# `fail with` that says what the copy said. Where there are no processes to start (the playground, or the
-# JavaScript engines), it does the items one after another, here, and gives the same.
+# each_at_once gives what the function gave for each item, in the items' order, shared out among as many
+# copies as there are cores (or `each_at_once_on(n, ...)` for n) in turn: with 4, the 1st, 5th, 9th, ... to
+# the first, the 2nd, 6th, 10th, ... to the second, so each gets as much of a list whose items take longer and
+# longer. Each copy starts the program again, with arguments of its own, and runs it to the same each_at_once,
+# where it does its part and stops; an each_at_once before that one gives it what it gave the program, without
+# doing it again. So what comes before runs in each copy too, and must come to the same each_at_once there:
+# input asked for, or random numbers that change which, can't. A line `cores's work_here(slow_square)` after
+# the functions is where a copy does its part for slow_square at once, and nothing after it runs in the copy.
+#
+# A part and what it gives go through files, with save and load, so they're numbers, text, yes and no,
+# nothing, lists, records and dictionaries. A mistake in a part is a `fail with` that says what the copy said.
+# In a part, each_at_once does its items there, one after another; and so does each_at_once where there are
+# no processes to start (the playground, or the JavaScript engines), giving the same.
 #
 # Built with --allow-libraries (to start the copies), --allow-read and --allow-write (for their files).
 
@@ -30,6 +35,11 @@ use the library "c"
 end
 
 set cores_part_flag to "--moth-cores-part"
+set cores_calls to 0 # each_at_once's calls so far, outside a part: a copy knows its own by its number
+set cores_done to empty dictionary # by number: what each gave, or why it failed, and the calls made inside it
+set cores_placed to empty list # the functions work_here was given before the first each_at_once
+set cores_in_part to no # yes in a copy doing its part
+set cores_told to nothing # in a copy, what the each_at_once before its own gave, from the program's file
 
 # how many cores this computer has, or 1 if it can't say
 to count_of_cores
@@ -50,30 +60,136 @@ to count_of_cores
     return 1
 end
 
+# in a copy each_at_once started, what it was started with: the function's name, the call's number, the
+# part's file, the file for what it gives, and the file of what the calls before gave ("" if none); anywhere
+# else nothing
+to cores_given
+    set given to arguments
+    if length of given is less than 6 or item 1 of given is not cores_part_flag
+        return nothing
+    end
+    return given
+end
+
 # In a copy each_at_once started for this function: its part done, saved where each_at_once looks, and the
 # copy stopped. Anywhere else, or for another function, nothing.
 to work_here with job
-    set given to arguments
-    if length of given is less than 4 or item 1 of given is not cores_part_flag or item 2 of given is not "" + job
+    set given to cores_given()
+    if given is nothing
+        if cores_calls is 0 and not (("" + job) is in cores_placed)
+            add "" + job to cores_placed # a copy for it stops here, before any each_at_once
+        end
         return nothing
     end
-    set part_file to item 3 of given
-    set done_file to item 4 of given
+    if item 2 of given is "" + job
+        cores_part(job, given, yes)
+    end
+    return nothing
+end
+
+# a copy's part: each item given to the function, what it gave saved, and the copy stopped. At work_here a
+# mistake is the copy's, said with where it was; at each_at_once the program may be in a `try`, which mustn't
+# catch it, so it's saved instead, with which item it was, for each_at_once to fail with
+to cores_part with job, given, at_work_here
+    set cores_in_part to yes
+    set part_file to item 4 of given
+    set done_file to item 5 of given
     set part to load part_file
     set made to empty list
-    for each one in part
+    if at_work_here
+        for each one in items of part
+            add job(one) to made
+        end
+    else
+        set at to 0
+        for each one in items of part
+            set at to at + 1
+            try
+                add job(one) to made
+            if it fails with why
+                cores_stop(done_file, cores_name(job) + " failed on item " + item at of places of part + ": " + why)
+            end
+        end
+    end
+    save (record with made made, failed nothing) to done_file
+    stop the program with 0
+end
+
+# a copy stopped, with what went wrong saved for each_at_once to say
+to cores_stop with done_file, why
+    save (record with made nothing, failed why) to done_file
+    stop the program with 0
+end
+
+# a function's name, as the program wrote it
+to cores_name with job
+    set words to "" + job
+    set pieces to split words by "<function "
+    if length of pieces is 2 and item 1 of pieces is ""
+        return item 1 of (split (item 2 of pieces) by ">")
+    end
+    return words
+end
+
+# the items given to the function one after another, here
+to cores_here with job, items
+    set made to empty list
+    for each one in items
         add job(one) to made
     end
-    save made to done_file
-    stop the program with 0
+    return made
 end
 
 to each_at_once with job, items
     return each_at_once_on(count_of_cores(), job, items)
 end
 
-# the items split into `ways` parts, each done by a copy of the program, all at once
+# the items shared out among `ways` copies of the program, all at once
 to each_at_once_on with ways, job, items
+    if cores_in_part
+        return cores_here(job, items)
+    end
+    set cores_calls to cores_calls + 1
+    set call to cores_calls
+    set given to cores_given()
+    if given is not nothing
+        return cores_in_copy(call, given, job, items)
+    end
+    set made to cores_spread(ways, job, items, call)
+    set item ("" + call) of cores_done to record with made made, nested cores_calls - call, failed nothing
+    return made
+end
+
+# in a copy: at its own each_at_once, its part; at one before, what that gave the program, as it was told
+to cores_in_copy with call, given, job, items
+    if call is (number of item 3 of given)
+        if item 2 of given is not "" + job
+            cores_stop(item 5 of given, "its copy of the program came to this each_at_once with " + cores_name(job) + ", not " + cores_name(item 2 of given) + ": what comes before it must come to the same each_at_once in each copy")
+        end
+        cores_part(job, given, no)
+    end
+    if cores_told is nothing
+        set cores_told to empty dictionary
+        set told to item 6 of given
+        if told is not ""
+            set cores_told to load told
+        end
+    end
+    set key to "" + call
+    if key is in cores_told
+        set was to item key of cores_told
+        if failed of was is not nothing
+            fail with failed of was # as it did in the program
+        end
+        set cores_calls to cores_calls + nested of was # the calls made inside it, which this one skips
+        return made of was
+    end
+    return cores_here(job, items) # done here in the program too, so it's done here
+end
+
+# the items shared out among copies of the program, each started for its part, waited for, and what each
+# gave put back in the items' order
+to cores_spread with ways, job, items, call
     if length of items is 0
         return empty list
     end
@@ -90,34 +206,46 @@ to each_at_once_on with ways, job, items
         end
     end
     if here_only
-        set made to empty list
-        for each one in items
-            add job(one) to made
-        end
-        return made
+        return cores_here(job, items)
     end
     set stem to ".moth-cores-" + (random number from 1 to 1000000000) + "-"
-    set started to empty list
-    set where to empty list
-    set at to 1
+    set files to empty list # every file made, taken away at the end
     set problem to nothing
+    set told to ""
+    if call is greater than 1 and not (("" + job) is in cores_placed)
+        set told to stem + "told"
+        add told to files
+        try
+            save cores_done to told
+        if it fails with why
+            set problem to "couldn't save what each_at_once gave before, for its copies: " + why
+        end
+    end
+    set started to empty list
     for each k from 1 to parts
-        set size to (length of items - at + 1 + parts - k) / (parts - k + 1) rounded down # the rest, shared out
-        set part to items at to (at + size - 1) of items
-        set at to at + size
-        set given to stem + k + ".part"
-        set back to stem + k + ".done"
-        add (list of given, back) to where
+        set mine to empty list
+        set places to empty list # where each is in the list
+        set i to k
+        repeat while i is at most length of items
+            add item i of items to mine
+            add i to places
+            set i to i + parts
+        end
+        set part to record with items mine, places places
+        set part_file to stem + k + ".part"
+        set done_file to stem + k + ".done"
+        add part_file to files
+        add done_file to files
         if problem is nothing
             try
-                save part to given
-                add tasks's start_self(list of cores_part_flag, "" + job, given, back) to started
+                save part to part_file
+                add tasks's start_self(list of cores_part_flag, "" + job, "" + call, part_file, done_file, told) to started
             if it fails with why
                 set problem to "couldn't start part " + k + " of " + parts + ": " + why
             end
         end
     end
-    set made to empty list
+    set backs to empty list
     for each k from 1 to length of started
         set task to item k of started
         tasks's wait_for(task)
@@ -125,32 +253,43 @@ to each_at_once_on with ways, job, items
             if tasks's code_of(task) is not 0
                 set problem to "part " + k + " of " + parts + " failed: " + tasks's output_of(task)
             else
+                set back to nothing
                 try
-                    set done_file to item 2 of item k of where
-                    for each one in load done_file
-                        add one to made
-                    end
+                    set done_file to stem + k + ".done"
+                    set back to load done_file
                 if it fails with why
-                    set problem to "part " + k + " of " + parts + " gave nothing back: " + why
+                    set problem to "part " + k + " of " + parts + " gave nothing back, as its copy didn't come to this each_at_once: " + why
+                end
+                if back is not nothing
+                    if failed of back is not nothing
+                        set problem to "part " + k + " of " + parts + " failed: " + failed of back
+                    else
+                        add made of back to backs
+                    end
                 end
             end
         end
     end
-    cores_tidy(where)
+    cores_tidy(files)
     if problem is not nothing
+        set item ("" + call) of cores_done to record with made nothing, nested 0, failed problem # for a copy to fail with
         fail with problem
+    end
+    set made to empty list
+    for each i from 1 to length of items
+        set p to (remainder of (i - 1) divided by parts) + 1
+        set j to ((i - 1) / parts rounded down) + 1
+        add item j of item p of backs to made
     end
     return made
 end
 
 # the parts' files, gone
-to cores_tidy with where
-    for each pair in where
-        for each name in pair
-            try
-                remove the file name
-            if it fails
-            end
+to cores_tidy with files
+    for each name in files
+        try
+            remove the file name
+        if it fails
         end
     end
 end

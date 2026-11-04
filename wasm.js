@@ -1,8 +1,10 @@
 // The WebAssembly engine: Moth's third back end. It compiles a program to a WebAssembly module, byte by
 // byte (wasm-binary.js), which the browser or node compiles to machine code.
 //
-// Moth's values live inside the module, as WebAssembly GC values: a number is a struct holding an f64,
-// yes and no are i31 values, nothing is null, and lists, records and functions are structs. Text is a
+// Moth's values live inside the module, as WebAssembly GC values: a number is a struct holding an f64, or,
+// if it's whole and fits in 31 bits, an i31 value, so a list of them is no boxes for the GC to keep; yes and
+// no are the i31 values 1 and 0 (so the numbers 1 and 0 are boxes, made once), nothing is null, and lists,
+// records and functions are structs. Text is a
 // struct holding a JavaScript string, so joining it is as cheap as in JavaScript (which joins long text
 // without copying it) and it fails at exactly the same length. The common cases run in WebAssembly: arithmetic on numbers, comparisons, list
 // items, fields, calls and loops. Everything else, and every mistake, calls out to the same checks the VM
@@ -21,6 +23,7 @@ const F64 = "f64";
 const MAX_DEPTH = 2000; // as in the JIT: deeper calls go to the VM, which has its own stack
 const MATH = ["+", "-", "*", "/"];
 const BIT_BUILTINS = ["bit and", "bit or", "bit xor", "shift left", "shift right"]; // in the order R.bits numbers them
+const ROUNDINGS = ["rounded down", "rounded up", "rounded"]; // in the order R.rnd numbers them
 const TAGS = { number: 1, text: 2, list: 3, record: 4, function: 5, unset: 6, dictionary: 7, bytes: 8, quantity: 9 };
 // ncmp's answer (-1, 0, 1, or 2 for NaN) made yes or no, for each comparison of two numbers
 const ORDER_TESTS = {
@@ -50,6 +53,10 @@ const IMPORTS = {
   divisible: [[F64, F64], [I32]],
   equal: [[EQ, EQ], [I32]],
   sameText: [["externref", "externref"], [I32]],
+  // text + text, text + a number, a number + text: the strings joined in one call
+  concat: [["externref", "externref"], ["externref"]],
+  textNum: [["externref", F64], ["externref"]],
+  numText: [[F64, "externref"], ["externref"]],
   text: [[I32], ["externref"]], // the program's text, by number
   lengthOf: [[EQ, I32], [F64]],
   item: [[EQ, EQ, I32], [EQ]],
@@ -72,6 +79,8 @@ const IMPORTS = {
   checkInputs: [[EQ, I32, I32, I32], []],
   checkKind: [[I32, I32, EQ, I32, I32], []],
   stopped: [[I32], []],
+  refill: [[I32], [I32]], // more steps, as a step count's last ran out: how many are left after this one
+  grant: [[], [I32]], // the steps a run (or an app's handler) starts with
   tooDeep: [[], []],
   turtle: [[I32, EQ, I32], []],
   field: [[EQ, I32, I32], []],
@@ -130,8 +139,13 @@ function declareTypes(m) {
 }
 
 // Small helpers for writing WebAssembly by hand: each takes the Code and emits a few instructions.
-const isNum = (c, T, local) => c.emit("local.get", local).emit("ref.test", T.num);
-const numOf = (c, T, local) => c.emit("local.get", local).emit("ref.cast", T.num).emit("struct.get", T.num, 0);
+// A number is a box, or an i31 that isn't 0 or 1 (no and yes): as unsigned, at least 2.
+const isNum = (c, T, local) => c.emit("local.get", local).emit("ref.test", "i31").emit("if", I32)
+  .emit("local.get", local).emit("ref.cast", "i31").emit("i31.get_u").emit("i32.const", 2).emit("i32.ge_u")
+  .emit("else").emit("local.get", local).emit("ref.test", T.num).emit("end");
+const numOf = (c, T, local) => c.emit("local.get", local).emit("ref.test", "i31").emit("if", F64)
+  .emit("local.get", local).emit("ref.cast", "i31").emit("i31.get_s").emit("f64.convert_i32_s")
+  .emit("else").emit("local.get", local).emit("ref.cast", T.num).emit("struct.get", T.num, 0).emit("end");
 const bothNums = (c, T, a, b) => (isNum(c, T, a), isNum(c, T, b), c.emit("i32.and"));
 const mapOf = (c, T, local) => c.emit("local.get", local).emit("ref.cast", T.host).emit("struct.get", T.host, 0); // a dictionary's Map
 const textOf = (c, T, local) => c.emit("local.get", local).emit("ref.cast", T.text).emit("struct.get", T.text, 0); // text's JavaScript string
@@ -152,9 +166,28 @@ function declareRuntime(m, T, im) {
   fn("truthy", [EQ], [I32], (c) => {
     c.emit("local.get", 0).emit("ref.is_null").emit("if", I32).emit("i32.const", 0).emit("else");
     c.emit("local.get", 0).emit("ref.test", "i31").emit("if", I32);
-    c.emit("local.get", 0).emit("ref.cast", "i31").emit("i31.get_u").emit("else").emit("i32.const", 1).emit("end");
+    c.emit("local.get", 0).emit("ref.cast", "i31").emit("i31.get_u").emit("i32.const", 0).emit("i32.ne").emit("else").emit("i32.const", 1).emit("end");
     c.emit("end");
   });
+
+  // An f64 as a Moth value: an i31 if it's whole, fits in 31 bits and isn't 0 or 1; 1 and 0 as boxes made once
+  // (-0 a box of its own); anything else a new box
+  const one = m.global(ref(T.num), false, new Code().emit("f64.const", 1).emit("struct.new", T.num));
+  const zero = m.global(ref(T.num), false, new Code().emit("f64.const", 0).emit("struct.new", T.num));
+  m.globalNames[one] = "the number 1";
+  m.globalNames[zero] = "the number 0";
+  fn("box", [F64], [EQ], (c, f) => {
+    const n = f.local(I32);
+    wholeIn(c, 0, -(2 ** 30), 2 ** 30 - 1).emit("if", EQ);
+    c.emit("local.get", 0).emit("i32.trunc_f64_s").emit("local.tee", n).emit("i32.const", 2).emit("i32.ge_u").emit("if", EQ);
+    c.emit("local.get", n).emit("ref.i31");
+    c.emit("else").emit("local.get", n).emit("if", EQ).emit("global.get", one);
+    c.emit("else").emit("f64.const", 1).emit("local.get", 0).emit("f64.copysign").emit("f64.const", 0).emit("f64.gt").emit("if", EQ).emit("global.get", zero);
+    c.emit("else").emit("local.get", 0).emit("struct.new", T.num).emit("end").emit("end").emit("end");
+    c.emit("else").emit("local.get", 0).emit("struct.new", T.num).emit("end");
+  });
+  // a Moth value that's a number, as an f64
+  fn("unbox", [EQ], [F64], (c) => numOf(c, T, 0));
 
   // + - * /: two numbers here, anything else (joining text, or a mistake) in JavaScript
   MATH.forEach((sign, op) => {
@@ -163,21 +196,46 @@ function declareRuntime(m, T, im) {
       if (sign === "/") numOf(c, T, 1).emit("f64.const", 0).emit("f64.ne").emit("if", EQ);
       numOf(c, T, 0);
       numOf(c, T, 1);
-      c.emit(["f64.add", "f64.sub", "f64.mul", "f64.div"][op]).emit("struct.new", T.num);
+      c.emit(["f64.add", "f64.sub", "f64.mul", "f64.div"][op]).emit("call", R.box);
       const slow = () => {
         if (sign === "+") c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.plus);
         else c.emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic); // an amount, or a mistake
       };
       if (sign === "/") c.emit("else").emit("i32.const", op).emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("call", im.arithmetic).emit("unreachable").emit("end");
       c.emit("else");
-      slow();
+      if (sign === "+") { // text and text, or text and a number, joined by one call; the rest as before
+        const isText = (x) => c.emit("local.get", x).emit("ref.test", T.text);
+        isText(0).emit("if", EQ);
+        isText(1).emit("if", EQ);
+        textOf(c, T, 0);
+        textOf(c, T, 1);
+        c.emit("call", im.concat).emit("struct.new", T.text);
+        c.emit("else");
+        isNum(c, T, 1).emit("if", EQ);
+        textOf(c, T, 0);
+        numOf(c, T, 1);
+        c.emit("call", im.textNum).emit("struct.new", T.text);
+        c.emit("else");
+        slow();
+        c.emit("end").emit("end");
+        c.emit("else");
+        isText(1);
+        isNum(c, T, 0);
+        c.emit("i32.and").emit("if", EQ);
+        numOf(c, T, 0);
+        textOf(c, T, 1);
+        c.emit("call", im.numText).emit("struct.new", T.text);
+        c.emit("else");
+        slow();
+        c.emit("end").emit("end");
+      } else slow();
       c.emit("end");
     });
   });
 
   fn("neg", [EQ, I32], [EQ], (c) => {
     isNum(c, T, 0).emit("if", EQ);
-    numOf(c, T, 0).emit("f64.neg").emit("struct.new", T.num);
+    numOf(c, T, 0).emit("f64.neg").emit("call", R.box);
     c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.negate).emit("end"); // an amount, or a mistake
   });
 
@@ -241,7 +299,7 @@ function declareRuntime(m, T, im) {
   fn("dvf", [F64, F64, I32], [I32], (c) => {
     const whole = (x) => c.emit("local.get", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq").emit("local.get", x).emit("f64.abs").emit("f64.const", 2 ** 52).emit("f64.lt").emit("i32.and");
     c.emit("local.get", 1).emit("f64.const", 0).emit("f64.eq").emit("if");
-    c.emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("struct.new", T.num).emit("local.get", 1).emit("struct.new", T.num);
+    c.emit("i32.const", COMPARE_OPS.indexOf("divisible by")).emit("local.get", 0).emit("call", R.box).emit("local.get", 1).emit("call", R.box);
     c.emit("local.get", 2).emit("call", im.compare).emit("return").emit("end");
     whole(0);
     whole(1);
@@ -263,7 +321,7 @@ function declareRuntime(m, T, im) {
     c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1).emit("f64.convert_i32_s");
     c.emit("else").emit("local.get", 0).emit("ref.test", T.bytes).emit("if", F64);
     bytesOf(c, T, 0).emit("array.len").emit("f64.convert_i32_s");
-    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.lengthOf).emit("end").emit("end").emit("struct.new", T.num);
+    c.emit("else").emit("local.get", 0).emit("local.get", 1).emit("call", im.lengthOf).emit("end").emit("end").emit("call", R.box);
   });
 
   // The 0-based place of item n in a list, if n is a whole number from 1 to its length, or -1.
@@ -296,7 +354,7 @@ function declareRuntime(m, T, im) {
     c.emit("local.get", 0).emit("local.get", 1).emit("call", R.place).emit("local.tee", at).emit("i32.const", 0).emit("i32.ge_s").emit("if");
     c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", at).emit("array.get", T.items).emit("return").emit("end");
     c.emit("local.get", 0).emit("local.get", 1).emit("call", R.bytePlace).emit("local.tee", at).emit("i32.const", 0).emit("i32.ge_s").emit("if");
-    bytesOf(c, T, 0).emit("local.get", at).emit("array.get_u", T.u8).emit("f64.convert_i32_u").emit("struct.new", T.num).emit("return").emit("end");
+    bytesOf(c, T, 0).emit("local.get", at).emit("array.get_u", T.u8).emit("f64.convert_i32_u").emit("call", R.box).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.host).emit("if");
     c.emit("local.get", 1).emit("ref.test", T.text).emit("if");
     mapOf(c, T, 0);
@@ -356,6 +414,53 @@ function declareRuntime(m, T, im) {
   // `bit and`, `bit or`, `bit xor` (which = 0, 1, 2) and `shift ... left/right by` (3, 4), here when both are
   // whole numbers below 2^31 (and a shift left is by at most 21, a right by at most 31, so the result is
   // exact); anything else goes to the shared code, as built-in number `index`
+  // `remainder of a divided by b` (vm.js's remainder): of two whole numbers that fit in 32 bits, b not 0, here,
+  // exactly, with b's sign; anything else, and every mistake, through the builtin
+  fn("rem", [EQ, EQ, I32, I32], [EQ], (c, f) => {
+    const [x, y, b, r] = [f.local(F64), f.local(F64), f.local(I32), f.local(I32)];
+    bothNums(c, T, 0, 1).emit("if");
+    numOf(c, T, 0).emit("local.set", x);
+    numOf(c, T, 1).emit("local.set", y);
+    wholeIn(c, x, -(2 ** 31 - 1), 2 ** 31 - 1);
+    wholeIn(c, y, -(2 ** 31 - 1), 2 ** 31 - 1);
+    c.emit("i32.and").emit("local.get", y).emit("f64.const", 0).emit("f64.ne").emit("i32.and").emit("if");
+    c.emit("local.get", x).emit("i32.trunc_f64_s").emit("local.get", y).emit("i32.trunc_f64_s").emit("local.tee", b).emit("i32.rem_s").emit("local.tee", r);
+    c.emit("i32.const", 0).emit("i32.ne"); // not 0, with a sign that isn't b's: b added
+    c.emit("local.get", r).emit("i32.const", 0).emit("i32.lt_s").emit("local.get", b).emit("i32.const", 0).emit("i32.lt_s").emit("i32.ne").emit("i32.and");
+    c.emit("if").emit("local.get", r).emit("local.get", b).emit("i32.add").emit("local.set", r).emit("end");
+    c.emit("local.get", r).emit("f64.convert_i32_s").emit("call", R.box).emit("return");
+    c.emit("end").emit("end");
+    c.emit("local.get", 2).emit("local.get", 0).emit("local.get", 1).emit("array.new_fixed", T.items, 2).emit("i32.const", 2).emit("struct.new", T.list);
+    c.emit("local.get", 3).emit("call", im.builtin);
+  });
+
+  // rounded down, rounded up and rounded (vm.js's rounded, which rounds the number to 15 digits first): a whole
+  // number is itself; a fraction further from a whole number (and from a half, for rounded) than 15 digits can
+  // move it, which is at most half its size times 10^-14, here; anything else, and every mistake, through the
+  // builtin
+  fn("rnd", [EQ, I32, I32, I32], [EQ], (c, f) => {
+    const [x, size, part, margin] = [f.local(F64), f.local(F64), f.local(F64), f.local(F64)];
+    const far = (from) => c.emit("local.get", part).emit("f64.const", from).emit("f64.sub").emit("f64.abs").emit("local.get", margin).emit("f64.gt");
+    isNum(c, T, 0).emit("if");
+    numOf(c, T, 0).emit("local.tee", x).emit("local.get", x).emit("f64.trunc").emit("f64.eq").emit("if").emit("local.get", 0).emit("return").emit("end");
+    c.emit("local.get", x).emit("f64.abs").emit("local.tee", size).emit("f64.const", 2 ** 52).emit("f64.lt");
+    c.emit("local.get", size).emit("local.get", size).emit("f64.floor").emit("f64.sub").emit("local.set", part);
+    c.emit("local.get", size).emit("f64.const", 2e-14).emit("f64.mul").emit("local.set", margin);
+    far(0);
+    c.emit("i32.and");
+    far(1);
+    c.emit("i32.and").emit("if");
+    c.emit("local.get", 1).emit("i32.eqz").emit("if").emit("local.get", x).emit("f64.floor").emit("call", R.box).emit("return").emit("end");
+    c.emit("local.get", 1).emit("i32.const", 1).emit("i32.eq").emit("if").emit("local.get", x).emit("f64.ceil").emit("f64.const", 0).emit("f64.add").emit("call", R.box).emit("return").emit("end");
+    far(0.5);
+    c.emit("if"); // to the nearest, a half away from 0, never -0
+    c.emit("local.get", size).emit("f64.floor").emit("f64.const", 1).emit("f64.const", 0).emit("local.get", part).emit("f64.const", 0.5).emit("f64.ge").emit("select").emit("f64.add");
+    c.emit("local.get", x).emit("f64.copysign").emit("f64.const", 0).emit("f64.add").emit("call", R.box).emit("return");
+    c.emit("end").emit("end").emit("end");
+    c.emit("local.get", 2).emit("local.get", 0).emit("array.new_fixed", T.items, 1).emit("i32.const", 1).emit("struct.new", T.list);
+    c.emit("local.get", 3).emit("call", im.builtin);
+  });
+
   fn("bits", [EQ, EQ, I32, I32, I32], [EQ], (c, f) => {
     const [x, y, a, b] = [f.local(F64), f.local(F64), f.local(I32), f.local(I32)];
     bothNums(c, T, 0, 1).emit("if");
@@ -367,12 +472,12 @@ function declareRuntime(m, T, im) {
     c.emit("local.get", x).emit("i32.trunc_f64_s").emit("local.set", a).emit("local.get", y).emit("i32.trunc_f64_s").emit("local.set", b);
     ["i32.and", "i32.or", "i32.xor"].forEach((op, which) => {
       c.emit("local.get", 2).emit("i32.const", which).emit("i32.eq").emit("if");
-      c.emit("local.get", a).emit("local.get", b).emit(op).emit("f64.convert_i32_u").emit("struct.new", T.num).emit("return").emit("end");
+      c.emit("local.get", a).emit("local.get", b).emit(op).emit("f64.convert_i32_u").emit("call", R.box).emit("return").emit("end");
     });
     c.emit("local.get", 2).emit("i32.const", 3).emit("i32.eq").emit("local.get", b).emit("i32.const", 21).emit("i32.le_u").emit("i32.and").emit("if");
-    c.emit("local.get", x).emit("i32.const", 1).emit("local.get", b).emit("i32.shl").emit("f64.convert_i32_u").emit("f64.mul").emit("struct.new", T.num).emit("return").emit("end");
+    c.emit("local.get", x).emit("i32.const", 1).emit("local.get", b).emit("i32.shl").emit("f64.convert_i32_u").emit("f64.mul").emit("call", R.box).emit("return").emit("end");
     c.emit("local.get", 2).emit("i32.const", 4).emit("i32.eq").emit("local.get", b).emit("i32.const", 31).emit("i32.le_u").emit("i32.and").emit("if");
-    c.emit("local.get", a).emit("local.get", b).emit("i32.shr_u").emit("f64.convert_i32_u").emit("struct.new", T.num).emit("return").emit("end");
+    c.emit("local.get", a).emit("local.get", b).emit("i32.shr_u").emit("f64.convert_i32_u").emit("call", R.box).emit("return").emit("end");
     c.emit("end").emit("end");
     c.emit("local.get", 3).emit("local.get", 0).emit("local.get", 1).emit("array.new_fixed", T.items, 2).emit("i32.const", 2).emit("struct.new", T.list);
     c.emit("local.get", 4).emit("call", im.builtin);
@@ -388,6 +493,25 @@ function declareRuntime(m, T, im) {
     c.emit("end");
     c.emit("local.get", 1).emit("local.get", 0).emit("array.new_fixed", T.items, 1).emit("i32.const", 1).emit("struct.new", T.list);
     c.emit("local.get", 2).emit("call", im.builtin);
+  });
+
+  // `item i of xs` with i an f64: a list's item, or a byte, at a whole place from 1 here; anything else, and
+  // every mistake, as item does it
+  fn("itemN", [EQ, F64, I32], [EQ], (c, f) => {
+    const at = f.local(I32);
+    wholeIn(c, 1, 1, 2 ** 31 - 1).emit("if");
+    c.emit("local.get", 1).emit("i32.trunc_f64_s").emit("i32.const", 1).emit("i32.sub").emit("local.set", at);
+    c.emit("local.get", 0).emit("ref.test", T.list).emit("if");
+    c.emit("local.get", at).emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1).emit("i32.lt_u").emit("if");
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", at).emit("array.get", T.items).emit("return");
+    c.emit("end").emit("end");
+    c.emit("local.get", 0).emit("ref.test", T.bytes).emit("if");
+    c.emit("local.get", at);
+    bytesOf(c, T, 0).emit("array.len").emit("i32.lt_u").emit("if");
+    bytesOf(c, T, 0).emit("local.get", at).emit("array.get_u", T.u8).emit("f64.convert_i32_u").emit("call", R.box).emit("return");
+    c.emit("end").emit("end");
+    c.emit("end");
+    c.emit("local.get", 0).emit("local.get", 1).emit("call", R.box).emit("local.get", 2).emit("call", R.item);
   });
 
   // grows the list's array by doubling when it's full
@@ -407,7 +531,7 @@ function declareRuntime(m, T, im) {
     bothNums(c, T, 0, 1).emit("if");
     numOf(c, T, 0);
     numOf(c, T, 1);
-    c.emit("f64.add").emit("struct.new", T.num).emit("return").emit("end");
+    c.emit("f64.add").emit("call", R.box).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.list).emit("if").emit("local.get", 0).emit("local.get", 1).emit("call", R.push).emit("local.get", 0).emit("return").emit("end");
     c.emit("local.get", 0).emit("local.get", 1).emit("local.get", 2).emit("local.get", 3).emit("call", im.addInto);
   });
@@ -422,7 +546,7 @@ function declareRuntime(m, T, im) {
     c.emit("local.get", 0).emit("ref.test", T.bytes).emit("if"); // bytes: a list of their numbers
     bytesOf(c, T, 0).emit("local.tee", bytes).emit("array.len").emit("local.tee", n).emit("array.new_default", T.items).emit("local.set", copy);
     c.emit("block").emit("loop").emit("local.get", i).emit("local.get", n).emit("i32.ge_s").emit("br_if", 1);
-    c.emit("local.get", copy).emit("local.get", i).emit("local.get", bytes).emit("local.get", i).emit("array.get_u", T.u8).emit("f64.convert_i32_u").emit("struct.new", T.num).emit("array.set", T.items);
+    c.emit("local.get", copy).emit("local.get", i).emit("local.get", bytes).emit("local.get", i).emit("array.get_u", T.u8).emit("f64.convert_i32_u").emit("call", R.box).emit("array.set", T.items);
     c.emit("local.get", i).emit("i32.const", 1).emit("i32.add").emit("local.set", i).emit("br", 0).emit("end").emit("end");
     c.emit("local.get", copy).emit("ref.as_non_null").emit("local.get", n).emit("struct.new", T.list).emit("return").emit("end");
     c.emit("local.get", 0).emit("local.get", 1).emit("call", im.itemsOf).emit("ref.cast", T.list);
@@ -487,11 +611,12 @@ function declareRuntime(m, T, im) {
 function declareExports(m, T, R) {
   const fn = (label, params, results, write) => {
     const f = m.func(label, params, results);
-    write(f.code);
+    write(f.code, f);
     m.export(label, f.index);
   };
   fn("tag", [EQ], [I32], (c) => {
-    for (const [type, tag] of [[T.num, TAGS.number], [T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function]])
+    isNum(c, T, 0).emit("if").emit("i32.const", TAGS.number).emit("return").emit("end");
+    for (const [type, tag] of [[T.text, TAGS.text], [T.list, TAGS.list], [T.record, TAGS.record], [T.closure, TAGS.function]])
       c.emit("local.get", 0).emit("ref.test", type).emit("if").emit("i32.const", tag).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.host).emit("if").emit("local.get", 0).emit("ref.cast", T.host).emit("struct.get", T.host, 1).emit("return").emit("end");
     c.emit("local.get", 0).emit("ref.test", T.bytes).emit("if").emit("i32.const", TAGS.bytes).emit("return").emit("end");
@@ -502,12 +627,20 @@ function declareExports(m, T, R) {
   fn("textValue", [EQ], ["externref"], (c) => c.emit("local.get", 0).emit("ref.cast", T.text).emit("struct.get", T.text, 0));
   fn("listLength", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 1));
   fn("listItem", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", 1).emit("array.get", T.items));
+  // a list's item's JavaScript string, if it's text, or null: one call for each item of a list of text
+  fn("listText", [EQ, I32], ["externref"], (c, f) => {
+    const item = f.local(EQ);
+    c.emit("local.get", 0).emit("ref.cast", T.list).emit("struct.get", T.list, 0).emit("local.get", 1).emit("array.get", T.items).emit("local.tee", item);
+    c.emit("ref.test", T.text).emit("if", "externref");
+    textOf(c, T, item);
+    c.emit("else").emit("ref.null", "extern").emit("end");
+  });
   fn("recordSize", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 2));
   fn("recordKey", [EQ, I32], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 0).emit("local.get", 1).emit("array.get", T.ids));
   fn("recordValue", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 1).emit("local.get", 1).emit("array.get", T.items));
   fn("functionName", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 3));
   fn("functionInputs", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 2));
-  fn("makeNum", [F64], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.num));
+  fn("makeNum", [F64], [EQ], (c) => c.emit("local.get", 0).emit("call", R.box));
   fn("makeText", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.text));
   fn("newList", [], [EQ], (c) => c.emit("i32.const", 0).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.list));
   fn("listPush", [EQ, EQ], [], (c) => c.emit("local.get", 0).emit("local.get", 1).emit("call", R.push));
@@ -578,11 +711,12 @@ class WasmCompiler extends Scope {
     this.ctx = ctx;
     this.labels = 0; // blocks, loops and ifs open where code is being written
     this.stops = []; // for each loop being written, the label count outside it, which a `stop` breaks out to
+    this.lefts = []; // for each loop being written, the local its steps are counted down in (see loop)
     const { m, T } = ctx;
     this.f = parent ? m.func(name, [refNull(T.env), ...params.map(() => EQ)], [EQ]) : m.func("main", [F64], []);
     this.c = this.f.code;
     const c = this.c;
-    if (!parent) c.emit("local.get", 0).emit("global.set", ctx.maxSteps).emit("call", ctx.init.index);
+    if (!parent) c.emit("local.get", 0).emit("global.set", ctx.maxSteps).emit("call", ctx.init.index).emit("call", ctx.im.grant).emit("global.set", ctx.left);
     const captured = ctx.captured.get(body);
     this.numberSet = this.numericSlots(body, captured, parent ? params.length : 0);
     this.numbers = []; // slot -> { value, box } for the variables that only ever hold numbers
@@ -700,7 +834,7 @@ class WasmCompiler extends Scope {
     }
     if (e.kind === "negate" && this.unboxed(e)) return void (this.exprNum(e.operand), this.e("f64.neg"));
     this.expr(e); // gives a number or fails
-    this.e("ref.cast", T.num).e("struct.get", T.num, 0);
+    this.e("call", this.ctx.R.unbox);
   }
 
   // stores the f64 on the stack in a number variable, forgetting its old box
@@ -749,7 +883,7 @@ class WasmCompiler extends Scope {
   load(name) {
     const number = this.numberSlot(name);
     if (number) { // its box, made now if the number changed since the last one
-      this.e("local.get", number.box).e("ref.is_null").e("if").e("local.get", number.value).e("struct.new", this.ctx.T.num).e("local.set", number.box).e("end");
+      this.e("local.get", number.box).e("ref.is_null").e("if").e("local.get", number.value).e("call", this.ctx.R.box).e("local.set", number.box).e("end");
       return this.e("local.get", number.box).note(name);
     }
     const [depth, slot] = this.resolve(name);
@@ -776,11 +910,20 @@ class WasmCompiler extends Scope {
     this.e("i32.const", this.ctx.message(this.undefinedMessage(name, options))).e("i32.const", this.pos(at)).e("call", this.ctx.im.fail).e("unreachable");
   }
 
-  // Each loop counts a step at the end of each round, and each call when it starts, as the other engines do.
+  // Each loop counts a step at the end of each round, and each call when it starts, as the other engines do:
+  // `left` counts down the steps JavaScript has given, a whole number, and when it's gone below 0 JavaScript
+  // gives more, or stops the program if its steps are all taken (see refill), so a step costs no float and
+  // no call
   tick(k) {
     const { ctx } = this;
-    this.e("global.get", ctx.steps).e("f64.const", 1).e("f64.add").e("global.set", ctx.steps).e("global.get", ctx.steps).e("global.get", ctx.maxSteps).e("f64.gt");
-    this.e("if").e("i32.const", k).e("call", ctx.im.stopped).e("unreachable").e("end");
+    const counting = this.lefts.at(-1);
+    if (counting !== undefined) { // in a loop: its own count, a local
+      this.e("local.get", counting).e("i32.const", 1).e("i32.sub").e("local.tee", counting).e("i32.const", 0).e("i32.lt_s");
+      this.e("if").e("i32.const", k).e("call", ctx.im.refill).e("local.tee", counting).e("global.set", ctx.left).e("end");
+      return;
+    }
+    this.e("global.get", ctx.left).e("i32.const", 1).e("i32.sub").e("global.set", ctx.left).e("global.get", ctx.left).e("i32.const", 0).e("i32.lt_s");
+    this.e("if").e("i32.const", k).e("call", ctx.im.refill).e("global.set", ctx.left).e("end");
   }
 
   truthy() {
@@ -791,8 +934,20 @@ class WasmCompiler extends Scope {
     for (const s of body) this.statement(s);
   }
 
-  // block, loop, then `test` (leaving an i32 that is 1 to stop), the body, a step, and round again
+  // block, loop, then `test` (leaving an i32 that is 1 to stop), the body, a step, and round again. The loop
+  // counts its steps down in a local of its own, which a global would make a load and a store each round: it
+  // starts from the global (an outer loop's count put there first), goes back into it before each call (and
+  // comes back after), before a `return` and after the loop, and if a mistake leaves the loop, the global
+  // keeps the smaller of the two, as a count only goes down, so every step is counted as the other engines
+  // count them.
   loop(k, test, body) {
+    const { ctx } = this;
+    const outer = this.lefts.at(-1);
+    const counting = this.temp(I32);
+    if (outer !== undefined) this.e("local.get", outer).e("global.set", ctx.left);
+    this.e("global.get", ctx.left).e("local.set", counting);
+    this.lefts.push(counting);
+    this.e("try");
     this.stops.push(this.labels);
     this.e("block").e("loop");
     test();
@@ -801,6 +956,21 @@ class WasmCompiler extends Scope {
     this.tick(k);
     this.e("br", 0).e("end").e("end");
     this.stops.pop();
+    this.e("local.get", counting).e("global.set", ctx.left);
+    this.e("catch_all");
+    this.e("local.get", counting).e("global.get", ctx.left).e("local.get", counting).e("global.get", ctx.left).e("i32.lt_s").e("select").e("global.set", ctx.left);
+    this.e("rethrow", 0);
+    this.e("end");
+    this.lefts.pop();
+    if (outer !== undefined) this.e("global.get", ctx.left).e("local.set", outer);
+  }
+
+  // around a call that may count steps of its own: the loop's count given to the global, and taken back after
+  handingOver(call) {
+    const counting = this.lefts.at(-1);
+    if (counting !== undefined) this.e("local.get", counting).e("global.set", this.ctx.left);
+    call();
+    if (counting !== undefined) this.e("global.get", this.ctx.left).e("local.set", counting);
   }
 
   statement(s) {
@@ -881,10 +1051,13 @@ class WasmCompiler extends Scope {
         this.e("local.set", i);
         numOf(this.c, T, to);
         this.e("local.set", last);
-        return this.loop(k, () => (this.e("local.get", i).e("local.get", last).e("call", R.ncmp), ORDER_TESTS["at most"](this.c), this.e("i32.eqz")), () => {
+        // as vm.js's atMost: i <= last, and only when it isn't, the comparison to 15 digits, which an end that
+        // isn't whole needs; so a loop's turn makes no call
+        return this.loop(k, () => (this.e("local.get", i).e("local.get", last).e("f64.le").e("if", I32).e("i32.const", 0).e("else"),
+          this.e("local.get", i).e("local.get", last).e("call", R.ncmp), ORDER_TESTS["at most"](this.c), this.e("i32.eqz").e("end")), () => {
           const number = this.numberSlot(s.name);
           if (number) this.e("local.get", i), this.setNumber(number);
-          else this.store(s.name, () => this.e("local.get", i).e("struct.new", T.num));
+          else this.store(s.name, () => this.e("local.get", i).e("call", R.box));
           this.block(s.body);
           this.e("local.get", i).e("f64.const", 1).e("f64.add").e("local.set", i);
         });
@@ -923,6 +1096,7 @@ class WasmCompiler extends Scope {
       case "return":
         if (s.value) this.expr(s.value);
         else this.e("ref.null", "eq");
+        if (this.lefts.length) this.e("local.get", this.lefts.at(-1)).e("global.set", this.ctx.left); // the loop's count kept
         this.e("return");
         return;
       case "call":
@@ -1024,9 +1198,14 @@ class WasmCompiler extends Scope {
     this.e("local.get", number.box).e("global.get", this.ctx.unset).e("ref.eq");
     this.e("if").e("i32.const", this.id(s.name)).e("i32.const", k).e("call", im.unset).e("unreachable").e("end");
     if (fast) this.e("local.get", number.value).e("local.get", value).e("f64.add");
-    else { // any other value gives a number (if it is one) or fails, in the shared check
+    else { // a number added here; any other value gives a number (if it is one) or fails, in the shared check
+      isNum(this.c, T, value);
+      this.e("if", F64).e("local.get", number.value);
+      numOf(this.c, T, value);
+      this.e("f64.add").e("else");
       this.load(s.name);
-      this.e("local.get", value).e("i32.const", this.id(s.name)).e("i32.const", k).e("call", R.addInto).e("ref.cast", T.num).e("struct.get", T.num, 0);
+      this.e("local.get", value).e("i32.const", this.id(s.name)).e("i32.const", k).e("call", R.addInto).e("call", R.unbox);
+      this.e("end");
     }
     this.setNumber(number);
   }
@@ -1073,13 +1252,14 @@ class WasmCompiler extends Scope {
     this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 3).e("array.set", T.ids);
     this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 1);
     for (const a of args) this.e("local.get", a);
-    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 0).e("ref.cast", T.fn(args.length)).e("call_ref", T.fn(args.length)).note(e.name);
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 0).e("ref.cast", T.fn(args.length));
+    this.handingOver(() => this.e("call_ref", T.fn(args.length)).note(e.name));
     this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.sub").e("global.set", ctx.depth);
   }
 
   expr(e) {
     const { T, R, im } = this.ctx;
-    if (this.unboxed(e)) return void (this.exprNum(e), this.e("struct.new", T.num));
+    if (this.unboxed(e)) return void (this.exprNum(e), this.e("call", R.box));
     switch (e.kind) {
       case "value":
         if (e.value === null) this.e("ref.null", "eq");
@@ -1162,6 +1342,11 @@ class WasmCompiler extends Scope {
         return;
       case "item":
         this.expr(e.of);
+        if (this.isNumber(e.index)) { // the place as an f64, never boxed
+          this.exprNum(e.index);
+          this.e("i32.const", this.pos(e.at)).e("call", R.itemN);
+          return;
+        }
         this.expr(e.index);
         this.e("i32.const", this.pos(e.at)).e("call", R.item);
         return;
@@ -1223,6 +1408,16 @@ class WasmCompiler extends Scope {
           this.e("i32.const", bits).e("i32.const", index).e("i32.const", this.pos(e.at)).e("call", R.bits);
           return;
         }
+        if (e.name === "remainder") { // see R.rem
+          for (const arg of e.args) this.expr(arg);
+          this.e("i32.const", index).e("i32.const", this.pos(e.at)).e("call", R.rem);
+          return;
+        }
+        if (ROUNDINGS.includes(e.name)) { // see R.rnd
+          this.expr(e.args[0]);
+          this.e("i32.const", ROUNDINGS.indexOf(e.name)).e("i32.const", index).e("i32.const", this.pos(e.at)).e("call", R.rnd);
+          return;
+        }
         if (e.name === "bytes") {
           this.expr(e.args[0]);
           this.e("i32.const", index).e("i32.const", this.pos(e.at)).e("call", R.newBytes);
@@ -1231,7 +1426,8 @@ class WasmCompiler extends Scope {
         this.e("i32.const", index).note(e.name);
         for (const arg of e.args) this.expr(arg);
         this.e("array.new_fixed", T.items, e.args.length).e("i32.const", e.args.length).e("struct.new", T.list);
-        this.e("i32.const", this.pos(e.at)).e("call", im.builtin);
+        this.e("i32.const", this.pos(e.at));
+        this.handingOver(() => this.e("call", im.builtin)); // `start` runs a function
         return;
       }
     }
@@ -1258,7 +1454,7 @@ export function compileToWasmModule(program) {
     m, T, R, im, ats: [], names, messages, captured: findCaptured(program),
     kinds: [null], // what the inputs of each function whose inputs say so are (see closure())
     unset: named("unset", m.global(ref(T.unset), false, new Code().emit("struct.new", T.unset))),
-    steps: named("steps", m.global(F64, true, new Code().emit("f64.const", 0))),
+    left: named("left", m.global(I32, true, new Code().emit("i32.const", 0))),
     maxSteps: named("maxSteps", m.global(F64, true, new Code().emit("f64.const", Infinity))),
     depth: named("depth", m.global(I32, true, new Code().emit("i32.const", 0))),
     calls: named("calls", m.global(ref(T.ids), false, new Code().emit("i32.const", 2 * MAX_DEPTH).emit("array.new_default", T.ids))), // see call()
@@ -1309,7 +1505,7 @@ export function compileToWasmModule(program) {
   invoke.code.emit("ref.null", "eq");
   m.export("invoke", invoke.index);
   const restart = m.func("restart", [], []);
-  restart.code.emit("f64.const", 0).emit("global.set", ctx.steps).emit("i32.const", 0).emit("global.set", ctx.depth);
+  restart.code.emit("call", ctx.im.grant).emit("global.set", ctx.left).emit("i32.const", 0).emit("global.set", ctx.depth);
   m.export("restart", restart.index);
   return { bytes: m.encode(), listing: m.listing(ctx.init.index), ats: ctx.ats, names, messages, texts: ctx.texts, kinds: ctx.kinds };
 }
@@ -1327,6 +1523,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
   // tell which ones it was. A `fail with` keeps its value as WebAssembly holds it, so catching it keeps it whole.
   let lastError = null;
   let caughtError = null;
+  let granted = 0; // the steps given so far, of maxSteps (see refill)
   let failing;
   const throwing = (err) => {
     lastError = err;
@@ -1349,7 +1546,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
 
   function toJs(v, seen = new Map()) {
     if (v === null) return null;
-    if (typeof v === "number") return v === 1; // yes and no are i31 values, which reach JavaScript as numbers
+    if (typeof v === "number") return v === 1 ? true : v === 0 ? false : v; // i31 values reach JavaScript as numbers: 1 and 0 are yes and no
     if (seen.has(v)) return seen.get(v);
     switch (x.tag(v)) {
       case TAGS.number:
@@ -1359,7 +1556,15 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       case TAGS.list: {
         const list = [];
         seen.set(v, list);
-        for (let i = 0, n = x.listLength(v); i < n; i++) list.push(toJs(x.listItem(v, i), seen));
+        const n = x.listLength(v);
+        let i = 0;
+        if (n > 0 && x.listText(v, 0) !== null) { // a list of text, most likely: each text in one call
+          for (; i < n; i++) {
+            const text = x.listText(v, i);
+            list.push(text !== null ? text : toJs(x.listItem(v, i), seen));
+          }
+        }
+        for (; i < n; i++) list.push(toJs(x.listItem(v, i), seen));
         return list;
       }
       case TAGS.record: {
@@ -1437,6 +1642,9 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     divisible: (a, b) => (divisible(a, b) ? 1 : 0),
     equal: (a, b) => (equal(toJs(a), toJs(b)) ? 1 : 0),
     sameText: (a, b) => (a === b ? 1 : 0),
+    concat: (a, b) => a + b,
+    textNum: (a, n) => a + show(n),
+    numText: (n, b) => show(n) + b,
     text: (i) => texts[i],
     lengthOf: (v, k) => lengthOf(rawOf(v), errors[k]),
     item: (target, n, k) => { // a list's items are found in WebAssembly, so a list here is a mistake
@@ -1467,13 +1675,24 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     // input i of a function whose inputs say what they are: its kind from its tag, so a big list isn't copied
     checkKind: (id, i, v, name, k) => {
       const wanted = kinds[id].kinds[i];
-      const kind = v === null ? "nothing" : typeof v === "number" ? "yes/no" : TAG_KINDS[x.tag(v)];
+      const kind = v === null ? "nothing" : typeof v === "number" ? (v === 0 || v === 1 ? "yes/no" : "a number") : TAG_KINDS[x.tag(v)];
       if (wanted >= 0 && kind !== KIND_TAGS[wanted]) errors[k](`'${names[name]}' needs ${kinds[id].params[i]} to be ${KINDS[wanted]}, not ${kind}`);
     },
     stopped: (k) => {
       const err = new MothError(ats[k], stoppedMessage(maxSteps), undefined, trail());
       err.final = true; // no try catches it
       throwing(err);
+    },
+    // a step past those given so far: up to 2^30 more, of maxSteps, this one among them; or, with none left, stopped
+    refill: (k) => {
+      if (granted >= maxSteps) imports.stopped(k);
+      const more = Math.min(maxSteps - granted, 2 ** 30);
+      granted += more;
+      return more - 1;
+    },
+    grant: () => {
+      granted = Math.min(maxSteps, 2 ** 30);
+      return granted;
     },
     tooDeep: () => {
       throw new TooDeep();
@@ -1513,6 +1732,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
   };
   x = new WebAssembly.Instance(module, { moth: imports }).exports;
   host.call = (handler, inputs) => {
+    granted = 0; // each handler's call has steps of its own
     x.restart();
     const [a = null, b = null] = inputs.map(toWasm);
     x.invoke(handler.closure, a, b);

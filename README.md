@@ -145,29 +145,29 @@ randomly broken programs check that they do on every push:
 
 | `npm run bench` | VM | JIT | WebAssembly | Machine code |
 |:--|--:|--:|--:|--:|
-| a program that only starts | 0.1 ms | 0.1 ms | 3.4 ms | 9.0 ms |
-| fib(25), function calls | 66 ms | 11 ms | **7.1 ms** | 10 ms |
-| a million-round loop | 70 ms | 8.4 ms | **5.6 ms** | 9.3 ms |
-| primes up to 5,000 | 173 ms | 21 ms | **15 ms** | 24 ms |
-| 200,000 records | 100 ms | 20 ms | **9.4 ms** | 21 ms |
-| a million bytes, filled and summed | 495 ms | 136 ms | 50 ms | **43 ms** |
-| 200,000 words counted in a dictionary | 116 ms | 31 ms | 30 ms | **18 ms** |
+| a program that only starts | 0.1 ms | 0.1 ms | 3.5 ms | 8.3 ms |
+| fib(25), function calls | 64 ms | 8.9 ms | **7.4 ms** | 9.0 ms |
+| a million-round loop | 59 ms | 8.1 ms | **3.9 ms** | 8.3 ms |
+| primes up to 5,000 | 142 ms | 19 ms | **18 ms** | 22 ms |
+| 200,000 records | 92 ms | 18 ms | **7.3 ms** | 19 ms |
+| a million bytes, filled and summed | 402 ms | 94 ms | **38 ms** | **38 ms** |
+| 200,000 words counted in a dictionary | 102 ms | 29 ms | 24 ms | **18 ms** |
 
 Machine code is timed from start to finish, starting up included, which is most
 of these short runs on Windows (the first row); the others inside a program
 that's already running. With work big enough that starting up hardly counts, and
-taken off, machine code is the quickest of them at all of these, even making
+taken off, machine code is the quickest of them at all of these but making
 records, which WebAssembly doesn't make at all when they don't outlive the loop:
 
 | `npm run bench -- --big` | JIT | WebAssembly | Machine code |
 |:--|--:|--:|--:|
-| 2,000,000 records, made and read | 209 ms | 68 ms | **63 ms** |
-| a list: 3,000,000 added, then summed | 158 ms | 337 ms | **41 ms** |
-| a list: `for each` over 3,000,000 | 170 ms | 318 ms | **34 ms** |
-| `set item` 5,000,000 times | 321 ms | 118 ms | **24 ms** |
-| 2,000,000 words counted in a dictionary | 348 ms | 243 ms | **92 ms** |
-| 300,000 records in a list | 135 ms | 208 ms | **33 ms** |
-| 200,000 pieces of text joined | 57 ms | 164 ms | **20 ms** |
+| 2,000,000 records, made and read | 169 ms | **57 ms** | 62 ms |
+| a list: 3,000,000 added, then summed | 118 ms | 71 ms | **32 ms** |
+| a list: `for each` over 3,000,000 | 144 ms | 68 ms | **34 ms** |
+| `set item` 5,000,000 times | 234 ms | 101 ms | **24 ms** |
+| 2,000,000 words counted in a dictionary | 265 ms | 236 ms | **90 ms** |
+| 300,000 records in a list | 110 ms | 79 ms | **32 ms** |
+| 200,000 pieces of text joined | 44 ms | 52 ms | **18 ms** |
 
 **A compiler written in Moth.** [`compiler.moth`](compiler.moth) is 2,400
 lines of Moth that compile any Moth program, itself included, to exactly the
@@ -342,8 +342,9 @@ bytes and dictionaries:
   Python's or Git's), and reads bodies sent in chunks.
 - [`cores.moth`](tools/cores.moth) does a list's items on every core at once,
   as Python's multiprocessing does: `cores's each_at_once(work, items)`, in
-  copies of the program, each a process of its own, after a
-  `cores's work_here(work)` line that makes a copy do its part.
+  copies of the program, each a process of its own, sharing the items out in
+  turn so slow ones spread evenly; a `cores's work_here(work)` line after the
+  functions makes a copy start on its part at once.
 - [`sockets.moth`](tools/sockets.moth) talks over a network as Python's
   `socket` does: `connect("example.com", 80)`, `listen(9000)` and `accept`,
   `send`, `receive`, `receive_line`, `receive_all`, `finish_sending`,
@@ -900,8 +901,9 @@ say area(3, "4")
 nothing to install.
 
 - **Run** works in a background thread, so **Stop** ends even a loop that never
-  does. **Engine** picks the JIT, WebAssembly or the VM, and the status bar times
-  each run, so you can race them.
+  does. **Engine** picks WebAssembly (the one it starts on, where the browser
+  has WebAssembly GC), the JIT or the VM, and the status bar times each run, so
+  you can race them.
 - **Debug** records the run, then **Back**, **Step**, **End** and a slider move
   through it in either direction: the line about to run, the calls in progress,
   every variable in view, and the output and drawing as they were.
@@ -1458,7 +1460,7 @@ unboxed numbers were all caught, some only by the fuzzer.
 - The handwriting reader learned from shapes, not people, so unusual ways of
   writing a digit can fool it.
 - The WebAssembly engine needs WebAssembly GC: Node 22, Chrome 119, Firefox 120,
-  Safari 18.2, or later.
+  Safari 18.2, or later; on an older browser the playground starts on the JIT.
 - A program in machine code takes a few milliseconds to start, and on Windows
   more while the virus checker looks it over, which is most of a short
   program's time. It has no limit on its steps, so a loop that never ends runs
