@@ -1,0 +1,106 @@
+# Logging, as Python's logging module does it: a line for each thing that happened, with the time, how much it
+# matters, and what it was, for those that matter at least as much as the level set, to the error output or
+# added to the end of a file.
+#
+#   use "log.moth" as log
+#   log's info("started")                  # 2026-11-04 10:15:00 INFO started, on the error output
+#   log's warning("the disk is almost full")
+#   log's set_level("debug")               # debug, info (the first level), warning, error or critical
+#   log's to_file("app.log")               # each line added to the end of app.log (built with --allow-libraries)
+#   log's to_error_output()                # back to the error output
+#   log's set_name("db")                   # 2026-11-04 10:15:00 INFO db: connected
+#   log's set_format("%level%: %message%") # %time%, %level%, %name% and %message%, as you want them
+#   say log's lines()                      # the lines it's written since the program started
+#
+# Writing to a file goes through system.moth, so a program that logs to one is built with --allow-libraries.
+
+use "system.moth" as log_system
+
+set log_levels to list of "debug", "info", "warning", "error", "critical"
+set log_level to 2
+set log_file to nothing
+set log_name to ""
+set log_format to "%time% %level% %name%%message%"
+set log_written to empty list
+
+to set_level with name
+    set at to log_number_of(name)
+    set log_level to at
+end
+
+to log_number_of with name
+    set wanted to lowercase of name
+    for each k from 1 to length of log_levels
+        if item k of log_levels is wanted
+            return k
+        end
+    end
+    fail with "there's no level called '" + name + "': debug, info, warning, error and critical are"
+end
+
+to to_file with path
+    set log_file to path
+end
+
+to to_error_output
+    set log_file to nothing
+end
+
+to set_name with name
+    set log_name to name
+end
+
+to set_format with format
+    set log_format to format
+end
+
+to lines
+    return log_written
+end
+
+to debug with message
+    log_line(1, message)
+end
+
+to info with message
+    log_line(2, message)
+end
+
+to warning with message
+    log_line(3, message)
+end
+
+to error with message
+    log_line(4, message)
+end
+
+to critical with message
+    log_line(5, message)
+end
+
+# a line at this level, if it matters as much as the level set
+to log_line with level, message
+    if level is less than log_level
+        return nothing
+    end
+    set named to ""
+    if log_name is not ""
+        set named to log_name + ": "
+    end
+    set made to log_format
+    set made to log_put(made, "%time%", the date + " " + the time)
+    set made to log_put(made, "%level%", uppercase of item level of log_levels)
+    set made to log_put(made, "%name%", named)
+    set made to log_put(made, "%message%", "" + message)
+    add made to log_written
+    if log_file is nothing
+        say made to the error output
+    else
+        log_system's append_to_file(log_file, made + "\n")
+    end
+end
+
+# text with each `mark` in it made `value`
+to log_put with words, mark, value
+    return join (split words by mark) with value
+end

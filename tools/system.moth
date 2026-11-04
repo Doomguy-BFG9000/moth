@@ -8,6 +8,7 @@
 #   say system's file_size("notes.txt") " bytes, changed " system's modified("notes.txt")
 #   say system's environment("PATH")
 #   say system's home_folder()
+#   system's append_to_file("log.txt", "one more line\n")
 #
 # modified() is seconds since 1 January 1970, as dates.moth's day_number counts days. A program that uses it
 # is built with --allow-libraries.
@@ -28,6 +29,9 @@ use the library "kernel32"
     GetTempPathW(a whole number, bytes) gives a whole number
     "lstrcatW" as wide_in(bytes, wide text) gives wide text
     GetTickCount() gives a whole number
+    CreateFileW(wide text, a whole number, a whole number, a pointer, a whole number, a whole number, a pointer) gives a pointer
+    WriteFile(a pointer, bytes, a whole number, bytes, a pointer) gives yes or no
+    CloseHandle(a pointer) gives yes or no
 end
 use the library "c"
     "stat" as unix_stat(text, bytes) gives a whole number
@@ -40,6 +44,9 @@ use the library "c"
     "unsetenv" as unix_unsetenv(text) gives a whole number
     "getcwd" as unix_getcwd(bytes, a long whole number) gives a pointer
     "chdir" as unix_chdir(text) gives a whole number
+    "open" as unix_open(text, a whole number, a whole number) gives a whole number
+    "write" as unix_write(a whole number, bytes, a long whole number) gives a long whole number
+    "close" as unix_close(a whole number) gives a whole number
 end
 
 # which system it is: a library every Windows has, which no Linux has
@@ -158,6 +165,45 @@ to remove_file with path
     else if unix_unlink(path) is not 0
         fail with "can't remove the file '" + path + "'"
     end
+end
+
+# text or bytes added to the end of a file, which is made if it isn't there, as Python's open(name, "a") does
+to append_to_file with path, data
+    set b to data as bytes
+    if system_windows
+        set h to CreateFileW(path, 4, 3, nothing, 4, 128, nothing) # FILE_APPEND_DATA, shared, OPEN_ALWAYS
+        if h is nothing or h is 18446744073709551615
+            fail with "can't add to the file '" + path + "'"
+        end
+        set written to 4 bytes
+        set fine to yes
+        if length of b is greater than 0
+            set fine to WriteFile(h, b, length of b, written, nothing)
+        end
+        CloseHandle(h)
+        if not fine
+            fail with "can't add to the file '" + path + "'"
+        end
+        return nothing
+    end
+    set fd to unix_open(path, 1089, 420) # O_WRONLY, O_CREAT and O_APPEND; rw-r--r--
+    if fd is less than 0
+        fail with "can't add to the file '" + path + "'"
+    end
+    set at to 1
+    repeat while at is at most length of b
+        set piece to b
+        if at is greater than 1
+            set piece to items at to (length of b) of b
+        end
+        set sent to unix_write(fd, piece, length of piece)
+        if sent is less than 1
+            unix_close(fd)
+            fail with "can't add to the file '" + path + "'"
+        end
+        set at to at + sent
+    end
+    unix_close(fd)
 end
 
 # a folder, and the folders it's in if they aren't there; a folder that's there already is fine

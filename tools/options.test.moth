@@ -1,0 +1,77 @@
+# options.moth's tests, which moth.test.js runs on every engine
+
+use "options.moth" as options
+
+to greeter
+    set p to options's parser("greet", "Says hello to someone.")
+    options's option(p, "name", "n", "who to greet", "World")
+    options's option(p, "times", "t", "how many times", 1)
+    options's flag(p, "loud", "l", "shout it")
+    options's positional(p, "file", "the file to greet from")
+    options's rest(p, "more", "other files")
+    return p
+end
+
+to test_reading
+    set p to greeter()
+    set given to options's parse_or_fail(p, list of "--name", "Sam", "notes.txt", "-l", "a", "b")
+    expect item "name" of given is "Sam"
+    expect item "times" of given is 1
+    expect item "loud" of given is yes
+    expect item "file" of given is "notes.txt"
+    expect item "more" of given is list of "a", "b"
+    expect item "help" of given is no
+    set given to options's parse_or_fail(p, list of "--times=3", "-n", "Jo", "--", "-x", "-5")
+    expect item "times" of given is 3
+    expect item "name" of given is "Jo"
+    expect item "loud" of given is no
+    expect item "file" of given is "-x"
+    expect item "more" of given is list of "-5"
+    set given to options's parse_or_fail(p, list of "f", "-t", "-2.5")
+    expect item "times" of given is -2.5
+    expect item "more" of given is empty list
+end
+
+to test_help
+    set p to greeter()
+    expect item "help" of options's parse_or_fail(p, list of "-h") is yes
+    expect options's usage_text(p) is "usage: greet [-h] [-n NAME] [-t TIMES] [-l] file [more ...]"
+    set lines to split options's help_text(p) by "\n"
+    expect item 3 of lines is "Says hello to someone."
+    expect item 6 of lines is "  file                  the file to greet from"
+    expect item 10 of lines is "  -h, --help            say this, and stop"
+    expect item 11 of lines is "  -n, --name NAME       who to greet (World if it isn't given)"
+    expect item 13 of lines is "  -l, --loud            shout it"
+end
+
+to test_mistakes
+    set p to greeter()
+    set cases to list of (list of (list of "--nope", "f"), "there's no option --nope"),
+        (list of (list of "f", "--name"), "--name needs a value after it"),
+        (list of (list of "--times", "many", "f"), "--times takes a number, not many"),
+        (list of (list of "--loud=yes", "f"), "--loud is a flag: it takes no value"),
+        (list of empty list, "it needs file")
+    for each pair in cases
+        try
+            options's parse_or_fail(p, item 1 of pair)
+            expect "no mistake" is item 2 of pair
+        if it fails with why
+            expect why is options's usage_text(p) + "\ngreet: " + item 2 of pair
+        end
+    end
+    set q to options's parser("one", "")
+    options's positional(q, "x", "a name")
+    try
+        options's parse_or_fail(q, list of "a", "b")
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "usage: one [-h] x\none: there's one too many: b"
+    end
+    try
+        options's flag(q, "x2", "", "")
+        options's flag(q, "x2", "", "")
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "--x2 is there twice"
+    end
+end

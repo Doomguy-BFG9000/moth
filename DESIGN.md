@@ -3626,3 +3626,39 @@ hold them to agreeing.
   made, read back as it was; one another program wrote, in
   quoted-printable and Latin-1, with Q words and folded headers; and POP3
   and IMAP servers of the test's own, in tasks, with what each was told.
+
+## 90. TOML, command lines and logging
+
+- **Why.** Python reads settings with `tomllib`, its command line with
+  `argparse`, and says what happened with `logging`; Moth had none of them.
+- **toml.moth** reads TOML 1.0 into dictionaries and lists: bare, quoted and
+  dotted keys; [tables] and [[arrays of tables]]; basic strings with every
+  escape, literal strings, and both multiline kinds (a line end after the
+  opening dropped, a \ at a line's end joining it to the next); whole
+  numbers in hex, octal and binary, with _ between digits; decimals with
+  exponents, read as their digits times a power of 10, so rounded once
+  (`number of` doesn't take an exponent); true and false; arrays over many
+  lines; inline tables. Dates and times stay text, as written. inf and nan
+  are mistakes, as Moth's numbers have neither. `toml_of` writes a
+  dictionary back: its plain values, its tables, then its arrays of
+  tables. A mistake says which line.
+- **options.moth** reads `arguments`: `option` (--name value, -n value,
+  --name=value; a number if its default is), `flag`, `positional`, and
+  `rest`; `--` ends the options; a negative number is a name, not an
+  option. `--help` says the usage, the program's description and each
+  name's and option's help, and stops the program; a mistake says the usage
+  and why on the error output and stops it with 2, as argparse does.
+  `parse_or_fail` fails instead, for a `try`.
+- **log.moth** writes a line for each thing, with the date and time, its
+  level (debug, info, warning, error, critical), a name if one is set, and
+  the message, in a format of the program's own (%time%, %level%, %name%,
+  %message%, as `{` starts a value in Moth's text), for those at the level
+  set or above, to the error output or added to the end of a file.
+- **system.moth's append_to_file** adds to the end of a file, making it if
+  it isn't there: CreateFileW with FILE_APPEND_DATA on Windows, open with
+  O_APPEND on Linux.
+- **Tested.** TOML against Python's tomllib on a file with each of its
+  kinds, and toml.test.moth and options.test.moth, on the three engines and
+  in machine code; logging and adding to a file in machine code on Windows
+  and Linux.
+

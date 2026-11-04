@@ -1053,7 +1053,7 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
   }
 });
 
-test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth and zip.moth pass their own tests on all three engines", () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth, toml.moth and options.moth pass their own tests on all three engines", () => {
   for (const engine of ENGINES) {
     for (const [file, names] of [
       ["text.test.moth", ["test_whole_matches", "test_finding", "test_replacing_and_splitting", "test_no_endless_loops",
@@ -1063,6 +1063,8 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth and zip.
       ["hash.test.moth", ["test_known_hashes", "test_block_edges", "test_text_and_bytes", "test_other_hashes", "test_hmac", "test_pbkdf2",
         "test_hex_and_mistakes"]],
       ["base64.test.moth", ["test_rfc_4648", "test_text_and_bytes", "test_passing_over"]],
+      ["toml.test.moth", ["test_values", "test_multiline_strings", "test_tables", "test_writing", "test_mistakes"]],
+      ["options.test.moth", ["test_reading", "test_help", "test_mistakes"]],
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
         "test_comparing", "test_mistakes"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",

@@ -1,0 +1,77 @@
+# toml.moth's tests: what TOML 1.0 says, as Python's tomllib reads it, which moth.test.js runs on every engine
+
+use "toml.moth" as toml
+
+to test_values
+    set d to toml's read_toml("a = \"tab\\there \\u00e9 \\U0001F600\"\nb = 'C:\\path\\x'\nc = 0xff\nd = 0o17\ne = 0b101\nf = 1_000\ng = -3.5\nh = 5e3\ni = 1.5E-2\nj = true\nk = false\nl = 1979-05-27T07:32:00Z\nm = 07:32:00\nn = [1, [2, 3], \"x\",]\no = { x = 1, y.z = 2 }\n")
+    expect item "a" of d is "tab\there é 😀"
+    expect item "b" of d is "C:\\path\\x"
+    expect item "c" of d is 255
+    expect item "d" of d is 15
+    expect item "e" of d is 5
+    expect item "f" of d is 1000
+    expect item "g" of d is -3.5
+    expect item "h" of d is 5000
+    expect item "i" of d is 0.015
+    expect item "j" of d is yes
+    expect item "k" of d is no
+    expect item "l" of d is "1979-05-27T07:32:00Z"
+    expect item "m" of d is "07:32:00"
+    expect item "n" of d is list of 1, (list of 2, 3), "x"
+    expect item "o" of d is dictionary where "x" is 1, "y" is (dictionary where "z" is 2)
+end
+
+to test_multiline_strings
+    set d to toml's read_toml("a = \"\"\"\nfirst\nsecond \\\n    joined\"\"\"\nb = '''\nraw \\n here\n'''\nc = \"\"\"two \"\"quotes\"\"\"\"\"\n")
+    expect item "a" of d is "first\nsecond joined"
+    expect item "b" of d is "raw \\n here\n"
+    expect item "c" of d is "two \"\"quotes\"\""
+end
+
+to test_tables
+    set d to toml's read_toml("# settings\ntop = 1\n[server]\nhost = \"x\" # a comment\n[server.tls]\non = true\n\"quoted key\".a = 2\n[[item]]\nn = 1\n[[item]]\n[[item]]\nn = 3\n[[item.part]]\np = 9\n")
+    expect item "top" of d is 1
+    expect item "host" of item "server" of d is "x"
+    expect item "on" of item "tls" of item "server" of d is yes
+    expect item "a" of item "quoted key" of item "tls" of item "server" of d is 2
+    set items_made to item "item" of d
+    expect length of items_made is 3
+    expect item "n" of item 1 of items_made is 1
+    expect item 2 of items_made is empty dictionary
+    expect item "p" of item 1 of item "part" of item 3 of items_made is 9
+end
+
+to test_writing
+    set d to dictionary where "name" is "Sam \"S\"", "n" is 3, "list" is (list of 1, 2), "inner" is (dictionary where "x" is yes),
+        "rows" is (list of (dictionary where "a" is 1), (dictionary where "a" is 2)), "odd key" is "é\n"
+    set written to toml's toml_of(d)
+    expect written is "name = \"Sam \\\"S\\\"\"\nn = 3\nlist = [1, 2]\n\"odd key\" = \"é\\n\"\n\n[inner]\nx = true\n\n[[rows]]\na = 1\n\n[[rows]]\na = 2\n"
+    expect toml's read_toml(written) is d
+end
+
+to test_mistakes
+    set cases to list of (list of "a = 1\na = 2", "TOML line 2: the key 'a' is there twice"),
+        (list of "[t]\n[t]", "TOML line 2: the table [t] is there twice"),
+        (list of "x = ", "TOML line 1: a value was expected here"),
+        (list of "x = 'open", "TOML line 1: a string isn't closed on its line"),
+        (list of "x = 01", "TOML line 1: '01' has a 0 before its digits, which TOML doesn't allow"),
+        (list of "x = inf", "TOML line 1: Moth's numbers have no inf"),
+        (list of "[a\nb = 1", "TOML line 1: ']' was expected, not the line's end"),
+        (list of "x = 1 y", "TOML line 1: something more on a line that's done: 'y'"),
+        (list of "x = \"\\q\"", "TOML line 1: '\\q' isn't an escape TOML has"),
+        (list of "a = 1\na.b = 2", "TOML line 2: 'a' is already a value, so it can't have keys")
+    for each pair in cases
+        try
+            toml's read_toml(item 1 of pair)
+            expect "no mistake" is item 2 of pair
+        if it fails with why
+            expect why is item 2 of pair
+        end
+    end
+    try
+        toml's toml_of(dictionary where "x" is nothing)
+        expect "no mistake" is "a mistake"
+    if it fails with why
+        expect why is "TOML has no nothing: leave the key out instead"
+    end
+end

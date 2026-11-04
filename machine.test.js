@@ -1264,7 +1264,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth", "log.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1458,19 +1458,20 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
-    "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth"]) {
+    "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
+    "options.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "46 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "54 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
@@ -2162,6 +2163,49 @@ wait for job
 say "done"
 `);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["Sam Pudke <sam@example.com>\n[\"you@example.com\", \"\\\"Them, Two\\\" <them@example.com>\"]\n[\"cc@example.com\"]\nHéllo from Moth, a subject long enough for two encoded words ✓\nLine one\n.dot line\nLine three, é\n<p>Hi <b>there</b></p>\nnotes é.txt text/plain 11\ndata.bin application/octet-stream 5\nsome notes\n\nyes\nAndré <andre@example.com>\n[\"a@example.com\", \"b@example.com\"]\ncafé au lait ✓\nCafé crème, a line that goes on and on.\n\n2\nFirst | one\n.two\nHéllo from Moth, a subject long enough for two encoded words ✓\n[\"USER sam\", \"PASS secret\", \"STAT\", \"RETR 1\", \"RETR 2\", \"DELE 1\", \"QUIT\"]\nthe mail server said no to logging in: -ERR wrong password\nPASS wrong\n[\"INBOX\", \"Archive\"]\n3\n[4, 9, 12]\nHéllo from Moth, a subject long enough for two encoded words ✓\n2\nm8 LOGIN \"sam\" \"se\\\"cret\"\nm9 LIST \"\" \"*\"\nm10 SELECT \"INBOX\"\nm11 UID SEARCH UNSEEN\nm12 UID FETCH 9 BODY.PEEK[]\nm13 UID STORE 9 +FLAGS (\\Seen)\nm14 LOGOUT\nthe mail server said no to logging in: NO wrong password\ndone\n", "", 0]);
+});
+
+// tools/log.moth: levels, a name, a format of its own, lines added to a file, and on the error output, with the
+// time where it's asked for; and system.moth adding to the end of a file
+test("tools/log.moth writes what happened, at the levels asked for, to the error output or a file", { skip }, () => {
+  const ran = libraryRun(String.raw`use "log.moth" as log
+use "system.moth" as system
+
+log's set_format("%level% %name%%message%")
+log's debug("not shown: below the level")
+log's info("started")
+log's set_level("debug")
+log's debug("now shown")
+log's set_name("db")
+log's warning("slow")
+if system's exists("app.log")
+    system's remove_file("app.log")
+end
+log's to_file("app.log")
+log's error("to the file")
+log's critical("and another, é")
+log's to_error_output()
+log's set_name("")
+log's set_level("WARNING")
+log's info("not shown either")
+log's warning("back on the error output")
+say read "app.log"
+say log's lines()
+log's set_format("%time%|%level%|%message%")
+log's error("timed")
+set parts to split item (length of log's lines()) of log's lines() by "|"
+say length of item 1 of parts
+say item 2 of parts + " " + item 3 of parts
+try
+    log's set_level("loud")
+if it fails with why
+    say why
+end
+system's append_to_file("app.log", "more" + "\n")
+say length of split read "app.log" by "\n"
+system's remove_file("app.log")
+`, ["--allow-libraries", "--allow-read"]);
+  assert.deepEqual([ran.stdout, ran.stderr.replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\|/, "(now)|"), ran.status], ["ERROR db: to the file\nCRITICAL db: and another, é\n\n[\"INFO started\", \"DEBUG now shown\", \"WARNING db: slow\", \"ERROR db: to the file\", \"CRITICAL db: and another, é\", \"WARNING back on the error output\"]\n19\nERROR timed\nthere's no level called 'loud': debug, info, warning, error and critical are\n4\n", "INFO started\nDEBUG now shown\nWARNING db: slow\nWARNING back on the error output\n(now)|ERROR|timed\n", 0]);
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;

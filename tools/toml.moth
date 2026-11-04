@@ -1,0 +1,795 @@
+# TOML (v1.0), the settings files Python's tomllib reads (pyproject.toml, Cargo.toml and many more): read into
+# dictionaries and lists, and written back. In Moth alone, so it works everywhere.
+#
+#   use "toml.moth" as toml
+#   set settings to toml's read_toml(read "settings.toml")
+#   say item "name" of item "package" of settings
+#   write toml's toml_of(settings) to "settings.toml"
+#
+# Tables are dictionaries; arrays are lists; strings, numbers, true and false are text, numbers, yes and no;
+# dates and times stay text, as written ("1979-05-27T07:32:00Z"). A file that isn't TOML is a `fail with`
+# that says which line, and why: catch it with `try`.
+
+set toml_src to ""
+set toml_at to 1
+set toml_size to 0
+set toml_bare to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+set toml_hex to "0123456789abcdef"
+
+# ---------- reading ----------
+
+to read_toml with words
+    set toml_src to words
+    set toml_at to 1
+    set toml_size to length of words
+    set root to empty dictionary
+    set current to root
+    set defined to empty dictionary # the tables a [header] made, by their path, and those made by keys, which can't be
+    repeat while yes
+        toml_skip_space(yes)
+        if toml_at is greater than toml_size
+            return root
+        end
+        if toml_here() is "["
+            if toml_peek(1) is "["
+                set toml_at to toml_at + 2
+                set path to toml_key_path()
+                toml_take("]")
+                toml_take("]")
+                set parent to root
+                if length of path is greater than 1
+                    set parent to toml_walk(root, items 1 to (length of path - 1) of path, defined)
+                end
+                set last to item (length of path) of path
+                if not (last is in parent)
+                    set item last of parent to empty list
+                end
+                set tables to item last of parent
+                if not toml_is_list(tables)
+                    toml_problem("'" + (join path with ".") + "' is already something other than an array of tables")
+                end
+                set made to empty dictionary
+                add made to tables
+                set current to made
+            else
+                set toml_at to toml_at + 1
+                set path to toml_key_path()
+                toml_take("]")
+                set key to join path with "\n"
+                if key is in defined
+                    toml_problem("the table [" + (join path with ".") + "] is there twice")
+                end
+                set item key of defined to "table"
+                set current to toml_walk(root, path, defined)
+            end
+            toml_line_end()
+        else
+            set path to toml_key_path()
+            toml_take("=")
+            set value to toml_value()
+            toml_set(current, path, value, defined)
+            toml_line_end()
+        end
+    end
+end
+
+# the table at this path from the root, made where it isn't; through an array of tables, its last
+to toml_walk with root, path, defined
+    set at_table to root
+    for each key in path
+        if not (key is in at_table)
+            set item key of at_table to empty dictionary
+        end
+        set next to item key of at_table
+        if toml_is_list(next) and length of next is greater than 0 and toml_is_dictionary(item (length of next) of next)
+            set next to item (length of next) of next
+        else if not toml_is_dictionary(next)
+            toml_problem("'" + key + "' is already a value, so it can't be a table")
+        end
+        set at_table to next
+    end
+    return at_table
+end
+
+# a value for a dotted key, in this table, the tables before its last part made where they aren't
+to toml_set with table, path, value, defined
+    set at_table to table
+    for each k from 1 to length of path - 1
+        set key to item k of path
+        if not (key is in at_table)
+            set item key of at_table to empty dictionary
+        end
+        set next to item key of at_table
+        if not toml_is_dictionary(next)
+            toml_problem("'" + key + "' is already a value, so it can't have keys")
+        end
+        set at_table to next
+    end
+    set last to item (length of path) of path
+    if last is in at_table
+        toml_problem("the key '" + (join path with ".") + "' is there twice")
+    end
+    set item last of at_table to value
+end
+
+# a key, or dotted keys: bare, "basic" or 'literal', with spaces around the dots
+to toml_key_path
+    set made to empty list
+    repeat while yes
+        toml_skip_space(no)
+        set c to toml_here()
+        if c is "\""
+            add toml_basic_string() to made
+        else if c is "'"
+            add toml_literal_string() to made
+        else
+            set pieces to empty list
+            repeat while toml_at is at most toml_size and toml_here() is in toml_bare
+                add toml_here() to pieces
+                set toml_at to toml_at + 1
+            end
+            if length of pieces is 0
+                toml_problem("a key was expected here")
+            end
+            add join pieces with "" to made
+        end
+        toml_skip_space(no)
+        if toml_here() is not "."
+            return made
+        end
+        set toml_at to toml_at + 1
+    end
+end
+
+to toml_value
+    toml_skip_space(no)
+    set c to toml_here()
+    if c is "\""
+        if toml_peek(1) is "\"" and toml_peek(2) is "\""
+            return toml_multiline_basic()
+        end
+        return toml_basic_string()
+    else if c is "'"
+        if toml_peek(1) is "'" and toml_peek(2) is "'"
+            return toml_multiline_literal()
+        end
+        return toml_literal_string()
+    else if c is "["
+        return toml_array()
+    else if c is "{"
+        return toml_inline_table()
+    else if toml_starts("true")
+        set toml_at to toml_at + 4
+        return yes
+    else if toml_starts("false")
+        set toml_at to toml_at + 5
+        return no
+    end
+    return toml_number_or_date()
+end
+
+to toml_array
+    toml_take("[")
+    set made to empty list
+    repeat while yes
+        toml_skip_space(yes)
+        if toml_here() is "]"
+            set toml_at to toml_at + 1
+            return made
+        end
+        add toml_value() to made
+        toml_skip_space(yes)
+        if toml_here() is ","
+            set toml_at to toml_at + 1
+        else if toml_here() is not "]"
+            toml_problem("an array's values have commas between them, and a ] at the end")
+        end
+    end
+end
+
+to toml_inline_table
+    toml_take("{")
+    set made to empty dictionary
+    set none_defined to empty dictionary
+    toml_skip_space(no)
+    if toml_here() is "}"
+        set toml_at to toml_at + 1
+        return made
+    end
+    repeat while yes
+        set path to toml_key_path()
+        toml_take("=")
+        toml_set(made, path, toml_value(), none_defined)
+        toml_skip_space(no)
+        if toml_here() is "}"
+            set toml_at to toml_at + 1
+            return made
+        end
+        toml_take(",")
+    end
+end
+
+# "basic": escapes \b \t \n \f \r \" \\ \uXXXX \UXXXXXXXX, on one line
+to toml_basic_string
+    toml_take("\"")
+    set pieces to empty list
+    repeat while yes
+        if toml_at is greater than toml_size
+            toml_problem("a string isn't closed")
+        end
+        set c to toml_here()
+        if c is "\""
+            set toml_at to toml_at + 1
+            return join pieces with ""
+        else if c is "\n"
+            toml_problem("a string isn't closed on its line")
+        else if c is "\\"
+            add toml_escape() to pieces
+        else
+            add c to pieces
+            set toml_at to toml_at + 1
+        end
+    end
+end
+
+# after a \: the character it stands for
+to toml_escape
+    set toml_at to toml_at + 1
+    set c to toml_here()
+    set toml_at to toml_at + 1
+    if c is "n"
+        return "\n"
+    else if c is "t"
+        return "\t"
+    else if c is "\"" or c is "\\"
+        return c
+    else if c is "r"
+        return (list of 13) as bytes as text
+    else if c is "b"
+        return (list of 8) as bytes as text
+    else if c is "f"
+        return (list of 12) as bytes as text
+    else if c is "e"
+        return (list of 27) as bytes as text
+    else if c is "u" or c is "U"
+        set count to 4
+        if c is "U"
+            set count to 8
+        end
+        set code to 0
+        repeat count times
+            set d to position of lowercase of toml_here() in toml_hex
+            if d is 0
+                toml_problem("\\" + c + " needs " + count + " hex digits")
+            end
+            set code to code * 16 + d - 1
+            set toml_at to toml_at + 1
+        end
+        return toml_character(code)
+    end
+    toml_problem("'\\" + c + "' isn't an escape TOML has")
+end
+
+# a character by its number, as UTF-8 bytes, which `as text` reads
+to toml_character with code
+    if code is less than 128
+        return (list of code) as bytes as text
+    else if code is less than 2048
+        return (list of 192 + (shift code right by 6), 128 + (code bit and 63)) as bytes as text
+    else if code is less than 65536
+        return (list of 224 + (shift code right by 12), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+    end
+    return (list of 240 + (shift code right by 18), 128 + ((shift code right by 12) bit and 63), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+end
+
+# 'literal': as it is, on one line
+to toml_literal_string
+    toml_take("'")
+    set pieces to empty list
+    repeat while yes
+        if toml_at is greater than toml_size or toml_here() is "\n"
+            toml_problem("a string isn't closed on its line")
+        end
+        set c to toml_here()
+        set toml_at to toml_at + 1
+        if c is "'"
+            return join pieces with ""
+        end
+        add c to pieces
+    end
+end
+
+# """multiline""": a line end just after the opening dropped, and a \ at a line's end joining it to the next
+# without the spaces after
+to toml_multiline_basic
+    set toml_at to toml_at + 3
+    toml_drop_first_line_end()
+    set pieces to empty list
+    repeat while yes
+        if toml_at is greater than toml_size
+            toml_problem("a \"\"\" string isn't closed")
+        end
+        set c to toml_here()
+        if c is "\"" and toml_peek(1) is "\"" and toml_peek(2) is "\""
+            set extra to 0 # up to two more quotes are the string's own
+            repeat while extra is less than 2 and toml_peek(3 + extra) is "\""
+                set extra to extra + 1
+            end
+            repeat extra times
+                add "\"" to pieces
+            end
+            set toml_at to toml_at + 3 + extra
+            return join pieces with ""
+        else if c is "\\" and toml_line_ending_backslash()
+            set toml_at to toml_at + 1
+            repeat while toml_at is at most toml_size and (toml_here() is " " or toml_here() is "\t" or toml_here() is "\n" or toml_is_cr(toml_here()))
+                set toml_at to toml_at + 1
+            end
+        else if c is "\\"
+            add toml_escape() to pieces
+        else if toml_is_cr(c) and toml_peek(1) is "\n"
+            set toml_at to toml_at + 1
+        else
+            add c to pieces
+            set toml_at to toml_at + 1
+        end
+    end
+end
+
+# whether the \ here has only spaces after it on its line
+to toml_line_ending_backslash
+    set k to toml_at + 1
+    repeat while k is at most toml_size and (item k of toml_src is " " or item k of toml_src is "\t")
+        set k to k + 1
+    end
+    return k is greater than toml_size or item k of toml_src is "\n" or toml_is_cr(item k of toml_src)
+end
+
+to toml_multiline_literal
+    set toml_at to toml_at + 3
+    toml_drop_first_line_end()
+    set pieces to empty list
+    repeat while yes
+        if toml_at is greater than toml_size
+            toml_problem("a ''' string isn't closed")
+        end
+        set c to toml_here()
+        if c is "'" and toml_peek(1) is "'" and toml_peek(2) is "'"
+            set extra to 0
+            repeat while extra is less than 2 and toml_peek(3 + extra) is "'"
+                set extra to extra + 1
+            end
+            repeat extra times
+                add "'" to pieces
+            end
+            set toml_at to toml_at + 3 + extra
+            return join pieces with ""
+        else if toml_is_cr(c) and toml_peek(1) is "\n"
+            set toml_at to toml_at + 1
+        else
+            add c to pieces
+            set toml_at to toml_at + 1
+        end
+    end
+end
+
+to toml_drop_first_line_end
+    if toml_here() is "\n"
+        set toml_at to toml_at + 1
+    else if toml_is_cr(toml_here()) and toml_peek(1) is "\n"
+        set toml_at to toml_at + 2
+    end
+end
+
+# a number (whole: 0x, 0o, 0b, or with _ between digits; or with a . or an exponent), or a date or time, kept as
+# text
+to toml_number_or_date
+    for each word in list of "inf", "+inf", "-inf", "nan", "+nan", "-nan"
+        if toml_starts(word)
+            toml_problem("Moth's numbers have no " + word)
+        end
+    end
+    set pieces to empty list
+    repeat while toml_at is at most toml_size and toml_here() is in "0123456789ABCDEFabcdefxoOTtZz+-_.:"
+        add toml_here() to pieces
+        set toml_at to toml_at + 1
+    end
+    set token to join pieces with ""
+    if toml_is_date(token) and toml_here() is " " and toml_peek(1) is in "0123456789" # a date and a time, with a space
+        set toml_at to toml_at + 1
+        set more to empty list
+        repeat while toml_at is at most toml_size and toml_here() is in "0123456789Zz+-.:"
+            add toml_here() to more
+            set toml_at to toml_at + 1
+        end
+        return token + " " + join more with ""
+    end
+    if token is ""
+        toml_problem("a value was expected here")
+    end
+    if toml_is_date(token) or (":" is in token)
+        return token
+    end
+    set digits to join (split token by "_") with ""
+    if toml_starts_text(digits, "0x") or toml_starts_text(digits, "0o") or toml_starts_text(digits, "0b")
+        set base to 16
+        if item 2 of digits is "o"
+            set base to 8
+        else if item 2 of digits is "b"
+            set base to 2
+        end
+        set value to 0
+        for each c in lowercase of items 3 to (length of digits) of digits
+            set d to position of c in toml_hex
+            if d is 0 or d is greater than base
+                toml_problem("'" + token + "' isn't a number")
+            end
+            set value to value * base + d - 1
+        end
+        return value
+    end
+    set checked to digits
+    if toml_starts_text(checked, "+") or toml_starts_text(checked, "-")
+        set checked to items 2 to (length of checked) of checked
+    end
+    for each c in checked
+        if not (c is in "0123456789.eE+-")
+            toml_problem("'" + token + "' isn't a number")
+        end
+    end
+    if checked is "" or not (item 1 of checked is in "0123456789")
+        toml_problem("'" + token + "' isn't a number")
+    end
+    if length of checked is greater than 1 and item 1 of checked is "0" and item 2 of checked is in "0123456789"
+        toml_problem("'" + token + "' has a 0 before its digits, which TOML doesn't allow")
+    end
+    set value to toml_decimal(digits)
+    if value is nothing
+        toml_problem("'" + token + "' isn't a number")
+    end
+    return value
+end
+
+# a decimal number, with a . or an exponent or both, as its digits, a whole number, times a power of 10:
+# rounded once, when the power is at most 10^22, which is exact
+to toml_decimal with digits
+    set sign to 1
+    set rest to digits
+    if toml_starts_text(rest, "-")
+        set sign to -1
+        set rest to items 2 to (length of rest) of rest
+    else if toml_starts_text(rest, "+")
+        set rest to items 2 to (length of rest) of rest
+    end
+    set exponent to 0
+    set lower to lowercase of rest
+    if "e" is in lower
+        set halves to split lower by "e"
+        if length of halves is not 2 or item 2 of halves is ""
+            return nothing
+        end
+        set rest to item 1 of halves
+        set power_text to item 2 of halves
+        set power_sign to 1
+        if toml_starts_text(power_text, "-")
+            set power_sign to -1
+            set power_text to items 2 to (length of power_text) of power_text
+        else if toml_starts_text(power_text, "+")
+            set power_text to items 2 to (length of power_text) of power_text
+        end
+        for each c in power_text
+            if not (c is in "0123456789")
+                return nothing
+            end
+        end
+        if power_text is ""
+            return nothing
+        end
+        set exponent to power_sign * number of power_text
+    end
+    set whole_digits to rest
+    set places to 0
+    if "." is in rest
+        set halves to split rest by "."
+        if length of halves is not 2 or item 1 of halves is "" or item 2 of halves is ""
+            return nothing
+        end
+        set whole_digits to item 1 of halves + item 2 of halves
+        set places to length of item 2 of halves
+    end
+    for each c in whole_digits
+        if not (c is in "0123456789")
+            return nothing
+        end
+    end
+    set m to number of whole_digits
+    set e to exponent - places
+    if e is 0
+        return sign * m
+    else if e is greater than 0 and e is at most 22
+        return sign * m * (10 to the power of e)
+    else if e is less than 0 and e is at least -22
+        return sign * m / (10 to the power of (0 - e))
+    end
+    try
+        return sign * number of (whole_digits + "e" + e) # beyond 10^22: as the number's own reading has it
+    if it fails
+        return sign * m * (10 to the power of e)
+    end
+end
+
+# whether text starts as a date does: YYYY-MM-DD
+to toml_is_date with token
+    if length of token is less than 10
+        return no
+    end
+    for each k in list of 1, 2, 3, 4, 6, 7, 9, 10
+        if not (item k of token is in "0123456789")
+            return no
+        end
+    end
+    return item 5 of token is "-" and item 8 of token is "-"
+end
+
+# spaces and tabs, and with `lines` line ends and comments too; a comment's # to its line's end either way
+to toml_skip_space with lines
+    repeat while toml_at is at most toml_size
+        set c to toml_here()
+        if c is " " or c is "\t"
+            set toml_at to toml_at + 1
+        else if c is "#"
+            repeat while toml_at is at most toml_size and toml_here() is not "\n"
+                set toml_at to toml_at + 1
+            end
+        else if lines and (c is "\n" or toml_is_cr(c))
+            set toml_at to toml_at + 1
+        else
+            return nothing
+        end
+    end
+end
+
+# after a key's value or a table's header: nothing but a comment before the line ends
+to toml_line_end
+    toml_skip_space(no)
+    if toml_at is greater than toml_size
+        return nothing
+    end
+    if toml_is_cr(toml_here())
+        set toml_at to toml_at + 1
+    end
+    if toml_at is at most toml_size and toml_here() is not "\n"
+        toml_problem("something more on a line that's done: '" + toml_here() + "'")
+    end
+    set toml_at to toml_at + 1
+end
+
+to toml_take with wanted
+    toml_skip_space(no)
+    if toml_here() is not wanted
+        set found to "'" + toml_here() + "'"
+        if toml_here() is ""
+            set found to "the end"
+        else if toml_here() is "\n" or toml_is_cr(toml_here())
+            set found to "the line's end"
+        end
+        toml_problem("'" + wanted + "' was expected, not " + found)
+    end
+    set toml_at to toml_at + 1
+end
+
+to toml_here
+    if toml_at is greater than toml_size
+        return ""
+    end
+    return item toml_at of toml_src
+end
+
+to toml_peek with n
+    if toml_at + n is greater than toml_size
+        return ""
+    end
+    return item (toml_at + n) of toml_src
+end
+
+to toml_starts with word
+    set n to length of word
+    if toml_at + n - 1 is greater than toml_size
+        return no
+    end
+    return items toml_at to (toml_at + n - 1) of toml_src is word
+end
+
+to toml_starts_text with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to toml_is_cr with c
+    return c is (list of 13) as bytes as text
+end
+
+# a mistake, with the line it's on
+to toml_problem with why
+    set line to 1
+    set k to 1
+    repeat while k is less than toml_at and k is at most toml_size
+        if item k of toml_src is "\n"
+            set line to line + 1
+        end
+        set k to k + 1
+    end
+    fail with "TOML line " + line + ": " + why
+end
+
+to toml_list_check with value as a list
+    return yes
+end
+
+to toml_is_list with value
+    try
+        return toml_list_check(value)
+    if it fails
+        return no
+    end
+end
+
+to toml_dictionary_check with value as a dictionary
+    return yes
+end
+
+to toml_is_dictionary with value
+    try
+        return toml_dictionary_check(value)
+    if it fails
+        return no
+    end
+end
+
+to toml_text_check with value as text
+    return yes
+end
+
+to toml_is_text with value
+    try
+        return toml_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+# ---------- writing ----------
+
+# a dictionary as TOML: its plain values, then its tables, then its arrays of tables, each under its own header
+to toml_of with table
+    if not toml_is_dictionary(table)
+        fail with "TOML is a dictionary at the top"
+    end
+    set lines to empty list
+    toml_write_table(table, empty list, lines)
+    set made to join lines with "\n"
+    if made is not ""
+        set made to made + "\n"
+    end
+    return made
+end
+
+to toml_write_table with table, path, lines
+    set tables to empty list
+    set arrays to empty list
+    for each key in table
+        set value to item key of table
+        if toml_is_dictionary(value)
+            add key to tables
+        else if toml_is_list(value) and length of value is greater than 0 and toml_all_tables(value)
+            add key to arrays
+        else
+            add toml_key(key) + " = " + toml_value_text(value) to lines
+        end
+    end
+    for each key in tables
+        set inner to toml_longer(path, key)
+        if length of lines is greater than 0
+            add "" to lines
+        end
+        add "[" + toml_path_text(inner) + "]" to lines
+        toml_write_table(item key of table, inner, lines)
+    end
+    for each key in arrays
+        set inner to toml_longer(path, key)
+        for each one in item key of table
+            if length of lines is greater than 0
+                add "" to lines
+            end
+            add "[[" + toml_path_text(inner) + "]]" to lines
+            toml_write_table(one, inner, lines)
+        end
+    end
+end
+
+# a copy of the path with one more key
+to toml_longer with path, key
+    set made to empty list
+    for each k in path
+        add k to made
+    end
+    add key to made
+    return made
+end
+
+to toml_all_tables with values
+    for each v in values
+        if not toml_is_dictionary(v)
+            return no
+        end
+    end
+    return yes
+end
+
+to toml_path_text with path
+    set made to empty list
+    for each key in path
+        add toml_key(key) to made
+    end
+    return join made with "."
+end
+
+# a key as it is if it's bare letters, digits, _ and -; else in quotes
+to toml_key with key
+    set words to "" + key
+    if words is ""
+        return "\"\""
+    end
+    for each c in words
+        if not (c is in toml_bare)
+            return toml_string_text(words)
+        end
+    end
+    return words
+end
+
+to toml_value_text with value
+    if value is yes
+        return "true"
+    else if value is no
+        return "false"
+    else if value is nothing
+        fail with "TOML has no nothing: leave the key out instead"
+    else if toml_is_text(value)
+        return toml_string_text(value)
+    else if toml_is_list(value)
+        set made to empty list
+        for each v in value
+            add toml_value_text(v) to made
+        end
+        return "[" + (join made with ", ") + "]"
+    else if toml_is_dictionary(value)
+        set made to empty list
+        for each key in value
+            add toml_key(key) + " = " + toml_value_text(item key of value) to made
+        end
+        return "{" + (join made with ", ") + "}"
+    end
+    return "" + value
+end
+
+# text in TOML's basic quotes: " and \ escaped, and the characters below a space as \n, \t or \uXXXX
+to toml_string_text with words
+    set made to empty list
+    for each c in words
+        set code to byte 1 of (c as bytes)
+        if c is "\""
+            add "\\\"" to made
+        else if c is "\\"
+            add "\\\\" to made
+        else if c is "\n"
+            add "\\n" to made
+        else if c is "\t"
+            add "\\t" to made
+        else if code is less than 32 or code is 127
+            add "\\u00" + item ((shift code right by 4) + 1) of toml_hex + item ((code bit and 15) + 1) of toml_hex to made
+        else
+            add c to made
+        end
+    end
+    return "\"" + (join made with "") + "\""
+end

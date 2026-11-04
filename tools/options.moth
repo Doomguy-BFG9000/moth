@@ -1,0 +1,271 @@
+# A program's command line read, as Python's argparse reads it: options with values, flags, and the names in
+# order after them, with a --help made from what each is for. In Moth alone, so it works everywhere.
+#
+#   use "options.moth" as options
+#   set p to options's parser("greet", "Says hello to someone.")
+#   options's option(p, "name", "n", "who to greet", "World")   # --name Sam, -n Sam or --name=Sam; World if not
+#   options's option(p, "times", "t", "how many times", 1)      # a default that's a number makes it a number
+#   options's flag(p, "loud", "l", "shout it")                  # --loud or -l: yes; no if it isn't there
+#   options's positional(p, "file", "the file to greet from")   # needed, in order
+#   options's rest(p, "more", "other files")                    # the rest, as a list, which can be empty
+#   set given to options's parse(p, arguments)                  # a dictionary: name, times, loud, file, more
+#   say item "name" of given
+#
+# --help or -h says how to use it, and stops the program. A mistake on the command line (an option it doesn't
+# know, one with no value, a name missing, one too many) says how to use it and why on the error output, and
+# stops the program with 2, as argparse does. parse_or_fail is parse with a `fail with` instead, which `try`
+# can catch: its why is the usage, then a line that says what's wrong; and given a --help, it gives the
+# dictionary with "help" set to yes. help_text(p) is what --help says. A short name can be "", for none.
+
+to parser with name, description
+    return record with name name, description description, options empty list, positionals empty list, rest nothing
+end
+
+to option with p, name, short, help, default
+    options_add(p, record with kind "option", name name, short short, help help, default default)
+end
+
+to flag with p, name, short, help
+    options_add(p, record with kind "flag", name name, short short, help help, default no)
+end
+
+to options_add with p, made
+    for each other in options of p
+        if name of other is name of made or (short of made is not "" and short of other is short of made)
+            fail with "--" + name of made + " is there twice"
+        end
+    end
+    set kept to options of p
+    add made to kept
+    set options of p to kept
+end
+
+to positional with p, name, help
+    set kept to positionals of p
+    add (record with name name, help help) to kept
+    set positionals of p to kept
+end
+
+to rest with p, name, help
+    set rest of p to record with name name, help help
+end
+
+# the command line read, or the usage and what's wrong on the error output and the program stopped with 2
+to parse with p, given_arguments
+    set made to nothing
+    try
+        set made to parse_or_fail(p, given_arguments)
+    if it fails with why
+        say why to the error output
+        stop the program with 2
+    end
+    if item "help" of made
+        say help_text(p)
+        stop the program with 0
+    end
+    return made
+end
+
+to parse_or_fail with p, given_arguments
+    set made to dictionary where "help" is no
+    for each o in options of p
+        set item (name of o) of made to default of o
+    end
+    set names to empty list
+    set only_names to no # after --, everything is a name
+    set k to 1
+    set n to length of given_arguments
+    repeat while k is at most n
+        set a to "" + item k of given_arguments
+        if only_names or a is "-" or not options_starts(a, "-") or options_is_number(a)
+            add a to names
+        else if a is "--"
+            set only_names to yes
+        else if a is "--help" or a is "-h"
+            set item "help" of made to yes
+        else
+            set value to nothing
+            set wanted to a
+            if options_starts(a, "--") and "=" is in a
+                set at to position of "=" in a
+                set wanted to items 1 to (at - 1) of a
+                set value to ""
+                if at is less than length of a
+                    set value to items (at + 1) to (length of a) of a
+                end
+            end
+            set found to nothing
+            for each o in options of p
+                if wanted is "--" + name of o or (short of o is not "" and wanted is "-" + short of o)
+                    set found to o
+                end
+            end
+            if found is nothing
+                options_problem(p, "there's no option " + wanted)
+            end
+            if kind of found is "flag"
+                if value is not nothing
+                    options_problem(p, wanted + " is a flag: it takes no value")
+                end
+                set item (name of found) of made to yes
+            else
+                if value is nothing
+                    if k is n
+                        options_problem(p, wanted + " needs a value after it")
+                    end
+                    set k to k + 1
+                    set value to "" + item k of given_arguments
+                end
+                set item (name of found) of made to options_typed(p, found, value)
+            end
+        end
+        set k to k + 1
+    end
+    if item "help" of made
+        return made
+    end
+    set needed to length of positionals of p
+    if length of names is less than needed
+        options_problem(p, "it needs " + name of item (length of names + 1) of positionals of p)
+    end
+    for each i from 1 to needed
+        set item (name of item i of positionals of p) of made to item i of names
+    end
+    if rest of p is nothing
+        if length of names is greater than needed
+            options_problem(p, "there's one too many: " + item (needed + 1) of names)
+        end
+    else
+        set others to empty list
+        for each i from needed + 1 to length of names
+            add item i of names to others
+        end
+        set item (name of rest of p) of made to others
+    end
+    return made
+end
+
+# a value as its option's default is: a number for a number
+to options_typed with p, o, value
+    if options_is_number_value(default of o)
+        if not options_is_number(value)
+            options_problem(p, "--" + name of o + " takes a number, not " + value)
+        end
+        return number of value
+    end
+    return value
+end
+
+to options_number_check with value as a number
+    return yes
+end
+
+to options_is_number_value with value
+    try
+        return options_number_check(value)
+    if it fails
+        return no
+    end
+end
+
+# whether text is a number: digits, with a - or + before them and a . among them
+to options_is_number with words
+    set digits_part to words
+    if options_starts(digits_part, "-") or options_starts(digits_part, "+")
+        set digits_part to items 2 to (length of digits_part) of digits_part
+    end
+    if digits_part is "" or digits_part is "."
+        return no
+    end
+    set dots to 0
+    for each c in digits_part
+        if c is "."
+            set dots to dots + 1
+        else if not (c is in "0123456789")
+            return no
+        end
+    end
+    return dots is at most 1
+end
+
+to options_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to options_problem with p, why
+    fail with usage_text(p) + "\n" + name of p + ": " + why
+end
+
+# the line that says how to use it
+to usage_text with p
+    set made to list of "usage: " + name of p, "[-h]"
+    for each o in options of p
+        set shown to "--" + name of o
+        if short of o is not ""
+            set shown to "-" + short of o
+        end
+        if kind of o is "option"
+            set shown to shown + " " + uppercase of name of o
+        end
+        add "[" + shown + "]" to made
+    end
+    for each a in positionals of p
+        add name of a to made
+    end
+    if rest of p is not nothing
+        add "[" + name of rest of p + " ...]" to made
+    end
+    return join made with " "
+end
+
+# what --help says: the usage, what the program does, and what each name and option is for
+to help_text with p
+    set lines to list of usage_text(p)
+    if description of p is not ""
+        add "" to lines
+        add description of p to lines
+    end
+    set named to empty list
+    for each a in positionals of p
+        add (list of name of a, help of a) to named
+    end
+    if rest of p is not nothing
+        add (list of name of rest of p, help of rest of p) to named
+    end
+    if length of named is greater than 0
+        add "" to lines
+        add "names:" to lines
+        for each pair in named
+            add options_column(item 1 of pair, item 2 of pair) to lines
+        end
+    end
+    add "" to lines
+    add "options:" to lines
+    add options_column("-h, --help", "say this, and stop") to lines
+    for each o in options of p
+        set shown to "--" + name of o
+        if short of o is not ""
+            set shown to "-" + short of o + ", " + shown
+        end
+        set said to help of o
+        if kind of o is "option"
+            set shown to shown + " " + uppercase of name of o
+            if default of o is not nothing
+                set said to said + " (" + default of o + " if it isn't given)"
+            end
+        end
+        add options_column(shown, said) to lines
+    end
+    return join lines with "\n"
+end
+
+to options_column with left, right
+    set made to "  " + left
+    if length of made is at least 24
+        return made + "  " + right
+    end
+    repeat while length of made is less than 24
+        set made to made + " "
+    end
+    return made + right
+end

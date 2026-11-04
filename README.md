@@ -392,10 +392,17 @@ bytes and dictionaries:
   kind) and base32, and back; and [`secrets.moth`](tools/secrets.moth) gives
   bytes, tokens and numbers no one can guess, from the system, as Python's
   `secrets` does.
+- [`toml.moth`](tools/toml.moth) reads TOML settings files (pyproject.toml,
+  Cargo.toml) as Python's `tomllib` does, and writes them;
+  [`options.moth`](tools/options.moth) reads a program's command line as
+  `argparse` does: options with values, flags, names in order, `--help`;
+  and [`log.moth`](tools/log.moth) writes what happened as `logging` does,
+  at levels, with the time, to the error output or a file.
 - [`system.moth`](tools/system.moth) copies, moves and removes files, makes
   and removes folders, says whether a name is a file or a folder, how big a
-  file is and when it changed, reads and sets environment variables, and
-  knows the current, home and temporary folders, on Windows and Linux.
+  file is and when it changed, adds to the end of a file, reads and sets
+  environment variables, and knows the current, home and temporary folders,
+  on Windows and Linux.
 - [`windows.moth`](tools/windows.moth) makes Windows' own windows and controls,
   written in Moth on user32.dll: buttons, labels, text boxes and areas,
   checkboxes, lists, dropdowns, menus with their keys (`"Save\tCtrl+S"`),
