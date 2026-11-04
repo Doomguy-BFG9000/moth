@@ -3742,3 +3742,33 @@ hold them to agreeing.
   with every shape the conventions sort; and three of C's threads calling a
   callback at once (and 24, and on one core, by hand).
 
+## 93. Tools: stopping at a mistake, coverage, and versions of packages
+
+- **Why.** Python's pdb stops where an exception happened (`pdb.pm()`), coverage.py
+  says which lines ran, and pip and uv take a package at a version.
+- **At a mistake.** In a program built to be debugged, each mistake's stub
+  (stub_start and fail_stub, which every mistake goes through) first tells
+  the debugger where it is and every variable the line can see, as the hook
+  before a line does (`failing`), with debugging off while that call is
+  written, so a mistake of its own isn't told too, and what the code around
+  it knows of its variables kept as it was; the debugger keeps the last.
+  After the mistake's report the runtime calls `failed` (rt_dbg_failed),
+  once, before the last word: the debugger says where it stopped and takes
+  `show`, `vars`, `where` and `list` until another command ends it. With no
+  more commands (the input over), it ends at once.
+- **moth coverage.** As `moth profile`, with moth-coverage.moth in the
+  debugger's place, from the standard library: `start` is told now every
+  line a statement is on, in the blocks inside others too (with_debugger
+  walks the program for them), and `wants` notes each line that runs; at
+  the end, however the program ends, it says how many of each file's ran,
+  the program's own first, and those that didn't, as runs (5-7).
+- **Versions.** `moth add thing@v1.2`: what's after an @ in a source's last
+  part is a tag, branch or commit, checked out after the clone, and kept in
+  moth.packages with the source, so `moth get` fetches the same commit as
+  before and `moth update` moves a branch's to its newest and leaves a tag's
+  or a commit's where it is.
+- **Tested.** Through moth.exe: coverage of a program and a file it uses; a
+  package at a tag, which update leaves, on a branch, which it follows, and
+  at a version that isn't there; and a program built to be debugged
+  stopping at its mistake, with its variables, its calls and its lines.
+

@@ -1,0 +1,114 @@
+# What `moth coverage` builds into a program, in the debugger's place (DESIGN §93), as Python's coverage.py
+# does: before each line of the program and of the files it uses, wants() notes it ran; when the program
+# ends, however it ends, finish() says, on the error output, how many of each file's lines with a statement on
+# them ran, and which didn't. It never stops the program.
+
+set program_name to "" # the program's own file, for saying where a line is
+set every_line to empty list # each line a statement is on: its file ("" for the program's own) and its number
+set ran to empty dictionary # those that ran, each "file line"
+
+to start with name, file_names, texts, statement_lines
+    set program_name to name
+    set every_line to statement_lines
+end
+
+to wants with line, file, depth, fn
+    set item (file + " line " + line) of ran to yes
+    return no
+end
+
+# never called: wants never stops the program
+to here with line, file, depth, fn, names, values, given
+end
+
+to failing with line, file, depth, fn, names, values, given
+end
+
+to failed
+end
+
+to waits
+end
+
+# how many lines ran, of how many, each file's, the program's own first, and the lines that didn't, as runs
+# ("12-14")
+to finish
+    set files to list of ""
+    set counts to empty dictionary
+    set missed to empty dictionary
+    for each pair in every_line
+        set file to item 1 of pair
+        if not (file is in counts)
+            set item file of counts to list of 0, 0
+            set item file of missed to empty list
+            if file is not ""
+                add file to files
+            end
+        end
+        set count to item file of counts
+        set item 2 of count to item 2 of count + 1
+        if (file + " line " + item 2 of pair) is in ran
+            set item 1 of count to item 1 of count + 1
+        else
+            set kept to item file of missed
+            add item 2 of pair to kept
+        end
+    end
+    set run_total to 0
+    set all_total to 0
+    for each file in counts
+        set run_total to run_total + item 1 of item file of counts
+        set all_total to all_total + item 2 of item file of counts
+    end
+    say "moth coverage: " + run_total + " of " + all_total + " lines run (" + coverage_share(run_total, all_total) + ")" to the error output
+    for each file in files
+        if file is in counts
+            set count to item file of counts
+            set shown to file
+            if file is ""
+                set shown to program_name
+            end
+            set line to "  " + shown + ": " + item 1 of count + " of " + item 2 of count + " (" + coverage_share(item 1 of count, item 2 of count) + ")"
+            if length of item file of missed is greater than 0
+                set line to line + ", not run: " + coverage_runs(item file of missed in order)
+            end
+            say line to the error output
+        end
+    end
+end
+
+# a part of the whole, as "84.5%"
+to coverage_share with part, whole
+    if whole is 0
+        return "100.0%"
+    end
+    set tenths to (part / whole * 1000) rounded
+    return (tenths - remainder of tenths divided by 10) / 10 + "." + remainder of tenths divided by 10 + "%"
+end
+
+# numbers in order, those one after another as a run: 3, 5-7, 10
+to coverage_runs with numbers
+    set made to empty list
+    set first to nothing
+    set previous to nothing
+    for each n in numbers
+        if first is nothing
+            set first to n
+        else if n is not previous + 1
+            add coverage_run(first, previous) to made
+            set first to n
+        end
+        set previous to n
+    end
+    if first is not nothing
+        add coverage_run(first, previous) to made
+    end
+    return join made with ", "
+end
+
+to coverage_run with first, last
+    if first is last
+        return "" + first
+    end
+    return first + "-" + last
+end

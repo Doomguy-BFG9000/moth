@@ -2459,7 +2459,9 @@ to emit_mistakes with a
     load(a, rsi, rip("b_ptr"))
     load(a, rdx, rip("b_len"))
     call_to(a, "rt_write")
-    if last_word of a # what the profiler found, up to the mistake
+    if last_word of a # the debugger stopped where it went wrong, then what the profiler found, up to the mistake
+        call_to(a, "rt_dbg_failed")
+        call_to(a, "rt_flush_out")
         call_to(a, "rt_last_word")
         call_to(a, "rt_flush_out")
     end
@@ -37608,6 +37610,12 @@ to emit_debugger_calls with a, st
     jcc(a, cc_ne, said) # the last word said: nothing more
     debugger_call(a, st, "waits")
     ret(a)
+    mark(a, "rt_dbg_failed") # after a mistake's report: moth_debugger's failed, once
+    load(a, rax, rip("dbg_said"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, said)
+    debugger_call(a, st, "failed")
+    ret(a)
 end
 
 to debugger_call with a, st, name
@@ -37654,8 +37662,14 @@ to with_debugger with debugger_body, body, files, source, program_name
             add text_node(text of f, at) to texts
         end
     end
+    set lines to empty list # each statement's place, as the debugger can stop there: for coverage (DESIGN §93)
+    statement_lines(body, lines, empty dictionary)
+    set line_nodes to empty list
+    for each pair in lines
+        add (record with kind "list", items (list of text_node(item 1 of pair, at), (record with kind "value", type "number", value "" + item 2 of pair, at at)), at at) to line_nodes
+    end
     set args to list of (text_node(program_name, at)), (record with kind "list", items names, at at),
-        (record with kind "list", items texts, at at)
+        (record with kind "list", items texts, at at), (record with kind "list", items line_nodes, at at)
     set made to empty list
     for each s in debugger_body
         add s to made
@@ -37665,6 +37679,42 @@ to with_debugger with debugger_body, body, files, source, program_name
         add s to made
     end
     return made # the runtime calls its finish, however the program ends, and its waits (see emit_debugger_calls)
+end
+
+# each statement's file and line, in the blocks inside it too, but the debugger's own, once each
+to statement_lines with body, lines, seen
+    for each s in body
+        set key to file of at of s + " line " + line of at of s
+        if file of at of s is not debugger_file and not (key is in seen)
+            set item key of seen to yes
+            add (list of file of at of s, line of at of s) to lines
+        end
+        for each part in list of "then", "otherwise", "body", "handler"
+            set inner to nothing
+            try
+                set inner to statement_part(s, part)
+            if it fails
+                set inner to nothing
+            end
+            if inner is not nothing
+                statement_lines(inner, lines, seen)
+            end
+        end
+        if kind of s is "when" or kind of s is "every"
+            statement_lines(body of fn of s, lines, seen)
+        end
+    end
+end
+
+to statement_part with s, part
+    if part is "then"
+        return then of s
+    else if part is "otherwise"
+        return otherwise of s
+    else if part is "body"
+        return body of s
+    end
+    return handler of s
 end
 
 to text_node with t, at
@@ -37832,6 +37882,9 @@ to fail_stub with fc, at, message
     end
     set label to new_label(a)
     mark(a, label)
+    if debugging of st of fc and file of at is not debugger_file # where it went wrong, and what was there
+        gen_failing(fc, at)
+    end
     fake_call(fc)
     lea(a, rsi, rip(site))
     call_to(a, "rt_e_start")
@@ -37855,6 +37908,9 @@ end
 # the start of a mistake whose message is put together as it happens: after it, the pieces, then rt_e_end
 to stub_start with fc, at
     set a to a of fc
+    if debugging of st of fc and file of at is not debugger_file # where it went wrong, and what was there
+        gen_failing(fc, at)
+    end
     fake_call(fc)
     lea(a, rsi, rip(site_of(fc, at)))
     call_to(a, "rt_e_start")
@@ -38361,6 +38417,34 @@ to gen_block with fc, body
         end
         gen_statement(fc, s)
     end
+end
+
+# A mistake found, in a program built to be debugged (DESIGN §93): the debugger told where, as at a line, and
+# every variable there, before the mistake's report; it keeps them for after the report (see rt_dbg_failed).
+# What the code around it knows about its variables is as it was: this is a stub's, off the way it goes.
+to gen_failing with fc, at
+    set fn to name of fc
+    if main of fc
+        set fn to ""
+    end
+    set told to list of (record with kind "value", type "number", value "" + line of at, at at), text_node(file of at, at),
+        (record with kind "debug_depth", at at), text_node(fn, at)
+    set names to empty list
+    set values to empty list
+    set given to empty list
+    for each n in debug_names(fc)
+        add text_node(n, at) to names
+        add record with kind "debug_value", name n, at at to values
+        add record with kind "debug_set", name n, at at to given
+    end
+    add record with kind "list", items names, at at to told
+    add record with kind "list", items values, at at to told
+    add record with kind "list", items given, at at to told
+    set kept to facts_copy(facts of fc)
+    set debugging of st of fc to no # a mistake its own call could make is told nothing more
+    gen_statement(fc, (record with kind "call", name "moth_debugger's failing", args told, at at))
+    set debugging of st of fc to yes
+    set facts of fc to kept
 end
 
 # Before a line of a program built to be debugged: the debugger is asked whether to stop, told where the line

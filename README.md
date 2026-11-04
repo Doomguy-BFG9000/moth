@@ -853,6 +853,7 @@ moth build --web hello.moth              or hello.html: a page that runs it in a
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
+moth coverage hello.moth Sam 3           the same, then how many of its lines ran, and which didn't, file by file
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
 moth search hello                        the package index's packages with "hello" in their name or what they're for
@@ -1259,8 +1260,9 @@ unboxed numbers were all caught, some only by the fuzzer.
   copies of it after the entry, a task doesn't outlive its entry, and an entry
   that ends with a mistake keeps nothing it set. Ctrl+C ends the shell too.
 - `moth debug` stops before a line, not inside one, and shows variables by
-  name, not other values (`show x`, not `show x + 1`). A mistake ends the
-  program as it always does, with no stop to look around first. A program
+  name, not other values (`show x`, not `show x + 1`). At a mistake it stops
+  after the report, with what the line could see, for `show`, `vars`,
+  `where` and `list`, and then the program ends as it always does. A program
   built to be debugged is slower: before every line it asks the debugger
   whether to stop, and keeps its loops' variables in memory.
 - A program learns about the world through `ask`, its files, the sites it
@@ -1306,9 +1308,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   `math's ...`. It only reads files in the program's folder, or folders inside
   it: not `../lib.moth`, and not through a link out. A file it uses uses files
   from its own folder.
-- Packages come from Git repositories, through the system's `git`: there's no
-  list of packages to search, so a package is found by where it is, and
-  `moth.packages` keeps only one of each name, the first, if two packages
+- Packages come from Git repositories, through the system's `git`, found by
+  where they are or by their name in the package index; one can be asked
+  for at a tag, branch or commit (`thing@v1.2`), not a range of versions;
+  and `moth.packages` keeps only one of each name, the first, if two packages
   want different commits of a third.
 - In text, a `{` right before a letter or a bracket starts a value, so text
   that means one there as itself, as curl's `%{http_code}` does, needs `\{`.

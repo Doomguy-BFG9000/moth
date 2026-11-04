@@ -24,7 +24,7 @@ set waiting to 0 # the seconds it spent waiting for what happens next
 set is_waiting to no # whether it's waiting now
 
 # Before the program's first line: its name, and each file's name and text
-to start with name, file_names, texts
+to start with name, file_names, texts, statement_lines
     set program_name to name
     for each k from 1 to length of file_names
         set item (item k of file_names) of sources to split item k of texts by "\n"
@@ -103,6 +103,13 @@ end
 
 # never called: wants never stops the program
 to here with line, file, depth, fn, names, values, given
+end
+
+# a mistake found, and after its report: nothing for the profiler to do but say, as ever, where the time went
+to failing with line, file, depth, fn, names, values, given
+end
+
+to failed
 end
 
 # When the program ends: the functions by the time their own lines took, then the lines that took longest

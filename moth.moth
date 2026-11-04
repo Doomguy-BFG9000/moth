@@ -24,7 +24,7 @@ use "webpage.moth" as webpage # the page moth build --web writes a program into
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest; remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] | moth get | moth update [name] | moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk.\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -459,9 +459,9 @@ end
 
 # `moth profile file.moth a b`: as moth run, with the profiler (moth-profiler.moth, from the standard library)
 # built into the program in the debugger's place, which counts each line and says where the time went once
-# the program has ended
-to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on
-    set cli_temp to cli_temp_for(cli_path, cli_target, "-profile")
+# the program has ended; `moth coverage`, with moth-coverage.moth there, which says which lines ran
+to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on, cli_watcher
+    set cli_temp to cli_temp_for(cli_path, cli_target, "-" + item 1 of split (item 2 of split cli_watcher by "-") by ".")
     if cli_in_the_way(cli_temp)
         return 1
     end
@@ -472,8 +472,8 @@ to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on
     set cli_used to cli_sources_of(cli_path, cli_source)
     set cli_names to names of cli_used
     set cli_texts to texts of cli_used
-    add "moth-debugger.moth" to cli_names # the profiler, where the debugger would be
-    add standard's standard_text("moth-profiler.moth") to cli_texts
+    add "moth-debugger.moth" to cli_names # the profiler, or coverage, where the debugger would be
+    add standard's standard_text(cli_watcher) to cli_texts
     try
         set cli_bytes to machine's compile_debugging(cli_source, cli_names, cli_texts, cli_target, cli_name_of(cli_path), cli_allowing)
     if it fails with cli_why
@@ -1619,13 +1619,24 @@ end
 # a package's clone, at `cli_commit`, or its newest if nothing: the commit it's at, or nothing, said why
 to cli_fetch with cli_name, cli_source, cli_commit
     set cli_dir to "packages/" + cli_name
-    set cli_answer to cli_git(list of "clone", "--quiet", cli_source, cli_dir)
+    set cli_split to cli_source_and_ref(cli_source)
+    set cli_answer to cli_git(list of "clone", "--quiet", place of cli_split, cli_dir)
     if cli_answer is nothing
         return nothing
     end
     if code of cli_answer is not 0
-        say "moth: git couldn't fetch " + cli_source + ": " + cli_git_said(cli_answer) to the error output
+        say "moth: git couldn't fetch " + place of cli_split + ": " + cli_git_said(cli_answer) to the error output
         return nothing
+    end
+    if cli_commit is nothing and ref of cli_split is not nothing # the version wanted: a tag, a branch or a commit
+        set cli_answer to cli_git(list of "-C", cli_dir, "checkout", "--quiet", ref of cli_split)
+        if cli_answer is nothing
+            return nothing
+        end
+        if code of cli_answer is not 0
+            say "moth: " + place of cli_split + " has no tag, branch or commit called " + ref of cli_split + ": " + cli_git_said(cli_answer) to the error output
+            return nothing
+        end
     end
     if cli_commit is not nothing
         set cli_answer to cli_git(list of "-C", cli_dir, "checkout", "--quiet", cli_commit)
@@ -1809,6 +1820,24 @@ to cli_search with cli_words, cli_index
     return 0
 end
 
+# a package's source as moth.packages has it, split: where it is, and after an @ in its last part, the tag,
+# branch or commit wanted (DESIGN §93), or nothing
+to cli_source_and_ref with cli_source
+    set cli_cut to 0
+    for each cli_k from 1 to length of cli_source
+        set cli_c to item cli_k of cli_source
+        if cli_c is "/" or cli_c is "\\" or cli_c is ":"
+            set cli_cut to 0
+        else if cli_c is "@"
+            set cli_cut to cli_k
+        end
+    end
+    if cli_cut is 0 or cli_cut is length of cli_source
+        return record with place cli_source, ref nothing
+    end
+    return record with place cli_first(cli_source, cli_cut - 1), ref cli_tail(cli_source, cli_cut + 1)
+end
+
 # where a package comes from, as git takes it: github.com/someone/thing is https://github.com/someone/thing
 to cli_package_source with cli_given
     for each cli_site in list of "github.com/", "gitlab.com/", "codeberg.org/", "bitbucket.org/"
@@ -1825,7 +1854,7 @@ to cli_add with cli_given, cli_named
     set cli_source to cli_package_source(cli_given)
     set cli_name to cli_named
     if cli_name is nothing
-        set cli_name to cli_package_name_of(cli_source)
+        set cli_name to cli_package_name_of(place of cli_source_and_ref(cli_source))
     end
     if not cli_package_name(cli_name)
         say "moth: '" + cli_name + "' can't be a package's name (letters, digits, '-', '_' and '.' make one): give it one, as in moth add " + cli_given + " thing" to the error output
@@ -1850,7 +1879,12 @@ to cli_add with cli_given, cli_named
         return 1
     end
     add record with name cli_name, source cli_source, commit cli_commit to cli_list
-    say "added " + cli_name + " at " + cli_short(cli_commit) + ", from " + cli_source
+    set cli_wanted to ref of cli_source_and_ref(cli_source)
+    if cli_wanted is nothing
+        say "added " + cli_name + " at " + cli_short(cli_commit) + ", from " + cli_source
+    else
+        say "added " + cli_name + " at " + cli_short(cli_commit) + " (" + cli_wanted + "), from " + place of cli_source_and_ref(cli_source)
+    end
     if not cli_is_file("packages/" + cli_name + "/" + cli_name + ".moth")
         say "  it has no " + cli_name + ".moth, so use the package \"" + cli_name + "\" won't find it: use its files by name, as in use \"packages/" + cli_name + "/...\""
     end
@@ -1961,8 +1995,19 @@ to cli_update with cli_named
             if cli_ready
                 set cli_answer to cli_git(list of "-C", cli_dir, "fetch", "--quiet", "origin")
             end
+            set cli_wanted to ref of cli_source_and_ref(source of cli_one)
+            set cli_newest_of to "origin/HEAD"
+            if cli_wanted is not nothing # a branch moves on; a tag or a commit stays where it is
+                set cli_newest_of to "origin/" + cli_wanted
+                if cli_answer is not nothing and code of cli_answer is 0
+                    set cli_branch to cli_git(list of "-C", cli_dir, "rev-parse", "--verify", "--quiet", cli_newest_of)
+                    if cli_branch is nothing or code of cli_branch is not 0
+                        set cli_newest_of to commit of cli_one
+                    end
+                end
+            end
             if cli_answer is not nothing and code of cli_answer is 0
-                set cli_answer to cli_git(list of "-C", cli_dir, "checkout", "--quiet", "origin/HEAD")
+                set cli_answer to cli_git(list of "-C", cli_dir, "checkout", "--quiet", cli_newest_of)
             end
             if cli_answer is nothing
                 set cli_ended to 1
@@ -1971,7 +2016,9 @@ to cli_update with cli_named
                 set cli_ended to 1
             else
                 set cli_newest to cli_head(cli_dir)
-                if cli_newest is commit of cli_one
+                if cli_newest is commit of cli_one and cli_wanted is not nothing and cli_newest_of is commit of cli_one
+                    say name of cli_one + " stays at " + cli_wanted + ", " + cli_short(cli_newest)
+                else if cli_newest is commit of cli_one
                     say name of cli_one + " is at its newest, " + cli_short(cli_newest)
                 else
                     say name of cli_one + ": " + cli_short(commit of cli_one) + " -> " + cli_short(cli_newest)
@@ -2668,11 +2715,11 @@ to cli_main
         end
         stop the program with cli_package_command(cli_command, cli_rest)
     end
-    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "notebook" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
+    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "coverage" or cli_command is "notebook" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
-        if cli_file is not nothing and (cli_command is "run" or cli_command is "debug" or cli_command is "profile") # after the file, everything is the program's own
+        if cli_file is not nothing and (cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "coverage") # after the file, everything is the program's own
             add cli_arg to cli_passed
             add 1 to cli_k
         else if cli_command is "tidy" and cli_arg is "--check"
@@ -2755,7 +2802,10 @@ to cli_main
         stop the program with cli_debug(cli_file, cli_target, cli_flags, cli_passed)
     end
     if cli_command is "profile"
-        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed)
+        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-profiler.moth")
+    end
+    if cli_command is "coverage"
+        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-coverage.moth")
     end
     if not cli_build(cli_file, cli_target, cli_flags, cli_out_for(cli_file, cli_target), yes) # a mistake in the program, or a file that can't be read: 1
         stop the program with 1

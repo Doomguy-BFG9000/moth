@@ -1,6 +1,8 @@
 # The debugger `moth debug` builds into a program (DESIGN §59). Before each line of the program, and of the
 # files it uses, runs, the program asks `wants` whether to stop there; when it does, `here` says which line
-# it is and takes commands, typed or from the input, until one says to go on.
+# it is and takes commands, typed or from the input, until one says to go on. When a mistake is found, it's
+# told where, and what the line could see (`failing`), and after the mistake's report it stops there
+# (`failed`), so what went wrong can be looked at before the program ends (DESIGN §93).
 
 set program_name to "" # the program's own file, for saying where a line is
 set sources to empty dictionary # each file's lines, by its name ("" for the program's own)
@@ -11,9 +13,11 @@ set breaks to empty dictionary # the breakpoints, each "file:line"
 set calls to empty list # the calls in progress, outermost first: the line each was made on
 set last to nothing # the line before this one: its file, line and function
 set level to 0 # how many calls were in progress then
+set went_wrong to nothing # where the last mistake was found, and what was there, for after its report
+set commands_over to no # whether the input has ended, so there's no one to ask
 
 # Before the program's first line: its name, and each file's name and text
-to start with name, file_names, texts
+to start with name, file_names, texts, statement_lines
     set program_name to name
     for each k from 1 to length of file_names
         set lines to split item k of texts by "\n"
@@ -97,6 +101,59 @@ end
 # once the program has ended, however it ended: nothing more to do (the profiler, in the debugger's place, says
 # what it found)
 to finish
+end
+
+# a mistake found, before its report: where, and what the line could see, kept (a `try` may catch it, and the
+# program go on)
+to failing with line, file, depth, fn, names, values, given
+    follow(line, file, depth, fn)
+    set went_wrong to record with line line, file file, depth depth, fn fn, names names, values values, given given
+end
+
+# after the report of a mistake that ends the program: stopped where it was found, and commands until one
+# goes on, which ends it
+to failed
+    if went_wrong is nothing or commands_over
+        return nothing
+    end
+    set w to went_wrong
+    say "stopped at the mistake, at " place_name(file of w, line of w) in_function(fn of w) ": " unindented(line_of(file of w, line of w))
+    repeat while yes
+        set said to nothing
+        try
+            set said to ask "(moth)"
+        if it fails
+            return nothing
+        end
+        set words to words_of(said)
+        set command to ""
+        if length of words is at least 1
+            set command to lowercase of item 1 of words
+        end
+        if command is "show" or command is "p" or command is "print"
+            if length of words is 2
+                say_value(lowercase of item 2 of words, names of w, values of w, given of w)
+            else
+                say "show needs a variable's name: show x"
+            end
+        else if command is "vars" or command is "v"
+            if length of names of w is 0
+                say "no variables here"
+            end
+            for each name in names of w
+                say_value(name, names of w, values of w, given of w)
+            end
+        else if command is "where" or command is "w"
+            say_calls(line of w, file of w, fn of w)
+        else if command is "list" or command is "l"
+            say_lines(file of w, line of w)
+        else if command is "help" or command is "h" or command is "?" or command is ""
+            say "the program has stopped at its mistake: show x (p), vars (v), where (w) and list (l) look at it, and"
+            say "anything else ends it"
+        else
+            return nothing
+        end
+    end
 end
 
 # when the program's lines stop for now, and it waits for what happens next, as an app between its handlers:
@@ -252,6 +309,7 @@ to here with line, file, depth, fn, names, values, given
         if it fails # the input ended: the program runs on, stopping nowhere
             set mode to "go"
             set breaks to empty dictionary
+            set commands_over to yes
             return nothing
         end
         set words to words_of(said)

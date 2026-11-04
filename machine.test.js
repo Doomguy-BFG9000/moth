@@ -358,7 +358,8 @@ test("a program built to be debugged, told to go, says and fails just as its usu
       const want = ran(usual, `u${i}`);
       const got = ran(debugged, `d${i}`);
       const first = /^[^\n]*\n\(moth\) go\n/.exec(got.stdout); // where it stopped first, and the command
-      assert.deepEqual({ stdout: first ? got.stdout.slice(first[0].length) : got.stdout, stderr: got.stderr, status: got.status },
+      const stopped = got.stdout.replace(/stopped at the mistake, at [^\n]*\n\(moth\) \n?$/, ""); // and where it stopped at a mistake (DESIGN §93)
+      assert.deepEqual({ stdout: first ? stopped.slice(first[0].length) : stopped, stderr: got.stderr, status: got.status },
         { stdout: want.stdout, stderr: want.stderr, status: want.status }, source);
       compared++;
     });
@@ -422,6 +423,57 @@ test("moth search lists a package index, and moth add takes a package by its nam
   const bad = moth(app, "search", "--index", "bad.json");
   assert.deepEqual([bad[0], bad[2]], ["", 1]);
   assert.match(bad[1], /^moth: the package index at bad\.json isn't one: /);
+});
+
+// a package asked for at a version (DESIGN §93): at a tag, which update leaves there, and on a branch, which
+// update follows; and a version that isn't there
+test("moth add takes a package at a tag, a branch or a commit, and update keeps to it", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "versions");
+  mkdirSync(root, { recursive: true });
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const lib = join(root, "kind");
+  mkdirSync(lib);
+  writeFileSync(join(lib, "kind.moth"), 'set word to "one"\n');
+  git(lib, "init", "-q");
+  git(lib, "add", ".");
+  git(lib, "commit", "-qm", "one");
+  git(lib, "tag", "v1");
+  const one = git(lib, "rev-parse", "HEAD");
+  git(lib, "checkout", "-qb", "next");
+  writeFileSync(join(lib, "kind.moth"), 'set word to "two"\n');
+  git(lib, "commit", "-qam", "two");
+  const two = git(lib, "rev-parse", "HEAD");
+  const pinned = join(root, "pinned");
+  const following = join(root, "following");
+  for (const at of [pinned, following]) {
+    mkdirSync(at);
+    writeFileSync(join(at, "app.moth"), 'use the package "kind" as kind\nsay kind\'s word\n');
+  }
+  assert.deepEqual(moth(pinned, "add", "../kind@v1"), [`added kind at ${one.slice(0, 7)} (v1), from ../kind\n`, "", 0]);
+  assert.deepEqual(moth(pinned, "run", "app.moth"), ["one\n", "", 0]);
+  assert.deepEqual(moth(following, "add", "../kind@next"), [`added kind at ${two.slice(0, 7)} (next), from ../kind\n`, "", 0]);
+  assert.deepEqual(moth(following, "run", "app.moth"), ["two\n", "", 0]);
+  writeFileSync(join(lib, "kind.moth"), 'set word to "three"\n');
+  git(lib, "commit", "-qam", "three");
+  const three = git(lib, "rev-parse", "HEAD");
+  assert.deepEqual(moth(pinned, "update"), [`kind stays at v1, ${one.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(following, "update"), [`kind: ${two.slice(0, 7)} -> ${three.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(following, "run", "app.moth"), ["three\n", "", 0]);
+  assert.match(readFileSync(join(following, "moth.packages"), "utf8"), new RegExp(`\\nkind \\.\\./kind@next ${three}\\n$`));
+  const nowhere = join(root, "nowhere");
+  mkdirSync(nowhere);
+  const missing = moth(nowhere, "add", "../kind@v9");
+  assert.deepEqual([missing[0], missing[2]], ["", 1]);
+  assert.match(missing[1], /^moth: \.\.\/kind has no tag, branch or commit called v9: /);
 });
 
 test("moth add, update, get and remove keep packages/ and moth.packages, and use the package finds them", { skip: skip || (gitHere ? false : "there's no git") }, () => {
@@ -587,6 +639,38 @@ test("moth.exe profile runs a program, then says where its time went", { skip },
   assert.match(keys.stderr, /\n +\d+\.\d{3} s +\d+\.\d% +2  keys\.moth:4  say "key " \+ key\n/);
   rmSync(join(sub, "keys.bmp"), { force: true });
   assert.deepEqual(readdirSync(sub).sort(), ["keys.moth", "oops.moth", "stops.moth", "work.moth"], "the program built to profile was left behind");
+});
+
+// `moth coverage` (DESIGN §93): the program runs, then the error output says how many lines with a statement
+// on them ran, and which didn't, in the program's file and in a file it uses
+test("moth.exe coverage says which lines of a program and the files it uses ran", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "covering");
+  mkdirSync(sub);
+  writeFileSync(join(sub, "half.moth"), "to half with n\n    if n is divisible by 2\n        return n / 2\n    end\n    return nothing\nend\n");
+  writeFileSync(join(sub, "cov.moth"), 'use "half.moth"\nsay half(4)\nif no\n    say "never"\nend\nset x to 1\n');
+  const ran = spawnSync(exe, ["coverage", "cov.moth"], { cwd: sub, encoding: "utf8", timeout: 120_000 });
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["2\n", "moth coverage: 6 of 8 lines run (75.0%)\n  cov.moth: 3 of 4 (75.0%), not run: 4\n"
+    + "  half.moth: 3 of 4 (75.0%), not run: 5\n", 0]);
+  assert.deepEqual(readdirSync(sub).sort(), ["cov.moth", "half.moth"], "the program built for coverage was left behind");
+});
+
+// a program built to be debugged stops at its mistake, after the report, with the variables the line could see
+test("a program built to be debugged stops at a mistake, to look at what went wrong", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-debug-"));
+  try {
+    const exe = executable(dir, "d");
+    writeFileSync(exe, machine("to divide with a, b\n    set half to a / 2\n    return a / b\nend\nset total to 10\nsay divide(total, 2)\nsay divide(total, 0)\nsay \"never\"\n",
+      { target, name: "p.moth", debug: true, files: { "moth-debugger.moth": here("moth-debugger.moth") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { input: "go\nvars\nshow b\nwhere\nlist\nquit\n", encoding: "utf8", timeout: 60_000 });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["p.moth:1: to divide with a, b\n(moth) go\n5\nstopped at the mistake, at p.moth:3, in 'divide': return a / b\n"
+      + "(moth) vars\na is 10\nb is 0\nhalf is 5\ntotal is 10\n(moth) show b\nb is 0\n(moth) where\n  p.moth:3, in 'divide'\n  p.moth:7\n(moth) list\n"
+      + "   1  to divide with a, b\n   2      set half to a / 2\n-> 3      return a / b\n   4  end\n   5  set total to 10\n   6  say divide(total, 2)\n(moth) quit\n",
+      "p.moth:3:14: can't divide by zero\n    return a / b\n             ^\n  in 'divide', called from line 7\n", 1]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // The standard library: in a folder with nothing else in it, a program uses json.moth, math.moth and big.moth,
