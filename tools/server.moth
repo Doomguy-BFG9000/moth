@@ -17,8 +17,29 @@
 # type (as "text/css"), headers (a dictionary) and file (a file's name, whose bytes are the body, its type from
 # its name). A mistake in it is sent as 500, and said to the error output, and the server goes on.
 #
-# serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. Requests are
-# answered one at a time; stop_serving() ends serve() after the one it's answering. Built with --allow-libraries.
+# Many connections at once (DESIGN §103): the server waits for whichever of them has something to say, reads
+# what has come and answers when a whole request is there, so one client that sends a byte at a time, or that
+# stops halfway, holds up nobody. A connection is kept open for the requests after the first (HTTP/1.1
+# keep-alive), and answers them in the order they came, even when they come together. Each request is given
+# `timeout` milliseconds to arrive and `idle_timeout` to begin, and a connection that goes over is answered
+# 408 and closed; a request bigger than `most_bytes` is answered 413, and headers over 64 KB 431. Only
+# `most_connections` are held at once, and while they are, the rest wait in the system's own queue.
+#
+#   web's set_timeout(30000)          # how long a request has to arrive, once it has begun
+#   web's set_idle_timeout(5000)      # how long a kept connection may sit with nothing on it
+#   web's set_most_bytes(16777216)    # the biggest request, headers and body together
+#   web's set_most_connections(1024)  # how many are held at once
+#   web's set_most_requests(1000)     # how many a connection answers before it's closed
+#   web's set_keep_alive(no)          # a connection closed after each request, as HTTP/1.0 had it
+#
+# serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. stop_serving()
+# ends serve() once the requests it's answering are sent. Built with --allow-libraries.
+#
+# serve_on_workers(8080, answer, 4) answers on 4 workers (DESIGN §104), each with a core and a copy of the
+# program's variables of its own, so handlers that do a lot of work don't wait for each other; 0 for a worker
+# a core. A handler there can't change what the program's variables hold for anyone else, and the workers
+# share nothing, so what is to be kept goes in a database or a file. Where there are no workers (the
+# JavaScript engines) it serves on this one.
 #
 # serve_secure(443, answer, "cert.pem", "key.pem") answers with HTTPS instead, through OpenSSL 3, with a
 # certificate (and the chain after it) and its key, each in a PEM file; serve_secure_everywhere() as well. Linux
@@ -34,6 +55,8 @@ use the library "ws2_32"
     "accept" as win_accept(a pointer, a pointer, a pointer) gives a pointer
     "recv" as win_recv(a pointer, bytes, a whole number, a whole number) gives a whole number
     "send" as win_send(a pointer, bytes, a whole number, a whole number) gives a whole number
+    "ioctlsocket" as win_control(a pointer, a whole number, bytes) gives a whole number
+    "WSAPoll" as win_poll(bytes, a whole number, a whole number) gives a whole number
     closesocket(a pointer) gives a whole number
 end
 use the library "c"
@@ -44,6 +67,8 @@ use the library "c"
     "accept" as unix_accept(a whole number, a pointer, a pointer) gives a whole number
     "recv" as unix_recv(a whole number, bytes, a long whole number, a whole number) gives a long whole number
     "send" as unix_send(a whole number, bytes, a long whole number, a whole number) gives a long whole number
+    "ioctl" as unix_control(a whole number, a long whole number, bytes) gives a whole number
+    "poll" as unix_poll(bytes, a long whole number, a whole number) gives a whole number
     "close" as unix_close(a whole number) gives a whole number
 end
 use the library "kernel32"
@@ -60,6 +85,7 @@ use the library "libssl-3" or "libssl-3-x64" or "ssl"
     SSL_accept(a pointer) gives a whole number
     SSL_read(a pointer, bytes, a whole number) gives a whole number
     SSL_write(a pointer, bytes, a whole number) gives a whole number
+    SSL_get_error(a pointer, a whole number) gives a whole number
     SSL_shutdown(a pointer) gives a whole number
     SSL_free(a pointer)
 end
@@ -73,13 +99,22 @@ if it fails
 end
 set web_running to no
 set web_secure to nothing # OpenSSL's context, while answering with HTTPS
-set web_session to nothing # its connection, for the request being answered
 set web_cr to (list of 13) as bytes as text
 set web_line to web_cr + "\n"
 set web_most to 16777216 # the most a request can be, in bytes
+set web_most_head to 65536 # the most its headers can be
+set web_timeout to 30000 # milliseconds for a request to arrive, once it has begun
+set web_idle_timeout to 5000 # milliseconds a kept connection may sit with nothing on it
+set web_most_connections to 1024
+set web_most_requests to 1000 # requests one connection answers before it's closed
+set web_keep_alive to yes
+set web_backlog to 512 # connections the system holds for accept() while the server is busy
+set web_round_wait to 50 # milliseconds a round waits for something to happen, so time limits are kept
+set web_scratch to nothing # where a read puts what came, made once
 set web_statuses to dictionary where 200 is "OK", 201 is "Created", 204 is "No Content", 301 is "Moved Permanently",
     302 is "Found", 303 is "See Other", 304 is "Not Modified", 400 is "Bad Request", 401 is "Unauthorized",
-    403 is "Forbidden", 404 is "Not Found", 405 is "Method Not Allowed", 409 is "Conflict", 413 is "Content Too Large",
+    403 is "Forbidden", 404 is "Not Found", 405 is "Method Not Allowed", 408 is "Request Timeout", 409 is "Conflict",
+    413 is "Content Too Large", 431 is "Request Header Fields Too Large",
     500 is "Internal Server Error", 503 is "Service Unavailable"
 set web_types to dictionary where "html" is "text/html; charset=utf-8", "htm" is "text/html; charset=utf-8",
     "css" is "text/css; charset=utf-8", "js" is "text/javascript; charset=utf-8", "json" is "application/json",
@@ -99,6 +134,36 @@ end
 
 to stop_serving
     set web_running to no
+end
+
+# how long a request has to arrive, in milliseconds, once its first byte has come
+to set_timeout with milliseconds
+    set web_timeout to milliseconds
+end
+
+# how long a connection kept for another request may sit with nothing on it, in milliseconds
+to set_idle_timeout with milliseconds
+    set web_idle_timeout to milliseconds
+end
+
+# the biggest request, headers and body together, in bytes
+to set_most_bytes with how_many
+    set web_most to how_many
+end
+
+# how many connections are held at once; while they are, the rest wait in the system's own queue
+to set_most_connections with how_many
+    set web_most_connections to how_many
+end
+
+# how many requests one connection answers before it's closed
+to set_most_requests with how_many
+    set web_most_requests to how_many
+end
+
+# whether a connection is kept open for the requests after the first
+to set_keep_alive with keeping
+    set web_keep_alive to keeping
 end
 
 # with HTTPS: the certificate's PEM file (the chain after it, if it has one) and its key's
@@ -148,35 +213,440 @@ to web_serve with everywhere, port, handler
         set scheme to "https"
     end
     say "listening on " + scheme + "://" + host + ":" + port + "/" to the error output
-    set web_running to yes
-    repeat while web_running
-        set client to web_accept(listener)
-        set agreed to yes
-        if web_secure is not nothing # TLS first: the browser and the server agree on keys
-            set web_session to SSL_new(web_secure)
-            SSL_set_fd(web_session, client)
-            if SSL_accept(web_session) is not 1
-                set agreed to no
-                say "a connection that couldn't agree on TLS with the server" to the error output
-            end
-        end
-        if agreed
-            try
-                web_answer(client, handler)
-            if it fails with why # a request it couldn't read, or a connection gone
-                say "couldn't answer a request: " + why to the error output
-            end
-        end
-        if web_session is not nothing
-            if agreed
-                SSL_shutdown(web_session)
-            end
-            SSL_free(web_session)
-            set web_session to nothing
-        end
-        web_close(client)
-    end
+    web_loop(listener, handler)
     web_close(listener)
+end
+
+# the rounds, until stop_serving: whichever connections have something to say are seen to, the rest left be
+to web_loop with listener, handler
+    set web_running to yes
+    if web_scratch is nothing
+        set web_scratch to 65536 bytes
+    end
+    web_blocking(listener, no)
+    set live to empty dictionary # each connection, by its socket
+    repeat while web_running
+        web_round(listener, handler, live)
+    end
+    for each one in keys of live
+        web_shut(item one of live)
+    end
+end
+
+# one round: a wait for anything to happen, then the connections that can go on, and the ones out of time
+to web_round with listener, handler, live
+    set waiting to empty list
+    set taking to length of keys of live is less than web_most_connections
+    if taking
+        add record with handle listener, writing no to waiting
+    end
+    set ones to empty list
+    for each one in keys of live
+        set c to item one of live
+        add c to ones
+        add record with handle handle of c, writing writing of c to waiting
+    end
+    set came to web_wait(waiting, web_round_wait)
+    set at to 0
+    if taking
+        set at to 1
+        if item 1 of came is not 0
+            web_take_in(listener, live)
+        end
+    end
+    for each k from 1 to length of ones
+        set c to item k of ones
+        set what_came to item (at + k) of came
+        if open of c
+            if what_came is not 0
+                web_step(c, what_came, handler, live)
+            else if the clock is at least due of c
+                web_out_of_time(c, live)
+            end
+        end
+    end
+end
+
+# the connections waiting to be accepted, taken in while there's room for them
+to web_take_in with listener, live
+    repeat while length of keys of live is less than web_most_connections
+        set client to web_accept(listener)
+        if not web_real(client)
+            stop
+        end
+        web_blocking(client, no)
+        set c to record with handle client, ssl nothing, stage "reading", buffer nothing, used 0, room 0,
+            head_end 0, head "", wanted -1, chunked no, body nothing, out empty list, out_at 0,
+            due the clock + web_timeout / 1000, keep yes, served 0, writing no, closing no, open yes
+        if web_secure is not nothing
+            set ssl of c to SSL_new(web_secure)
+            SSL_set_fd(ssl of c, client)
+            set stage of c to "agreeing"
+        end
+        set item client of live to c
+    end
+end
+
+# whether accept() gave a connection, or said there is none waiting (-1, which a pointer may show as a number
+# far past any socket)
+to web_real with handle
+    return handle is at least 0 and handle is less than 9007199254740992
+end
+
+# a connection that can go on: the handshake, more of its request read, or more of its answer sent
+to web_step with c, what_came, handler, live
+    if web_went_wrong(what_came)
+        web_finish(c, live)
+        return nothing
+    end
+    if stage of c is "agreeing"
+        web_agree(c, live)
+    else if stage of c is "writing"
+        web_push(c, handler, live)
+    else
+        web_pull(c, handler, live)
+    end
+end
+
+# whether what came says the connection is broken, rather than ready: POLLERR or POLLNVAL
+to web_went_wrong with what_came
+    if web_windows
+        return (what_came bit and 1) is not 0 or (what_came bit and 4) is not 0
+    end
+    return (what_came bit and 8) is not 0 or (what_came bit and 32) is not 0
+end
+
+# a connection out of time: 408 if it had begun a request, else just closed
+to web_out_of_time with c, live
+    if stage of c is "reading" and used of c is greater than 0
+        web_refuse(c, live, 408, "The request took too long to arrive")
+        return nothing
+    end
+    web_finish(c, live)
+end
+
+# TLS: the browser and the server agree on keys, over as many rounds as it takes
+to web_agree with c, live
+    set how to SSL_accept(ssl of c)
+    if how is 1
+        set stage of c to "reading"
+        set writing of c to no
+        return nothing
+    end
+    if web_tls_waiting(c, how)
+        return nothing
+    end
+    say "a connection that couldn't agree on TLS with the server" to the error output
+    web_finish(c, live)
+end
+
+# whether OpenSSL only wants to read or write again, which it says after SSL_accept, SSL_read or SSL_write on
+# a socket that doesn't wait; sets which way the connection waits for
+to web_tls_waiting with c, how
+    set why to SSL_get_error(ssl of c, how)
+    if why is 2 # SSL_ERROR_WANT_READ
+        set writing of c to no
+        return yes
+    end
+    if why is 3 # SSL_ERROR_WANT_WRITE
+        set writing of c to yes
+        return yes
+    end
+    return no
+end
+
+# what has come on a connection, read and put with the rest of its request
+to web_pull with c, handler, live
+    set got to web_receive(c, web_scratch)
+    if got is 0 # the other end has said all it will
+        set closing of c to yes
+        if used of c is 0
+            web_finish(c, live)
+            return nothing
+        end
+    else if got is less than 0
+        if not web_tls_waited
+            web_finish(c, live)
+        end
+        return nothing
+    else
+        if used of c is 0 # the whole of it in one read: its bytes as they are, with nothing copied
+            set buffer of c to items 1 to got of web_scratch
+            set used of c to got
+            set room of c to got
+            set due of c to the clock + web_timeout / 1000
+        else
+            web_add_in(c, web_scratch, got)
+        end
+        if used of c is greater than web_most
+            web_refuse(c, live, 413, "The request is too big")
+            return nothing
+        end
+    end
+    web_try_request(c, handler, live)
+end
+
+# `got` bytes of `from`, put after what the connection has already
+to web_add_in with c, from, got
+    if used of c + got is greater than room of c
+        set bigger to (2 * (used of c + got)) bytes
+        for each k from 1 to used of c
+            set byte k of bigger to byte k of buffer of c
+        end
+        set buffer of c to bigger
+        set room of c to length of bigger
+    end
+    set holding to buffer of c
+    set at to used of c
+    for each k from 1 to got
+        set byte (at + k) of holding to byte k of from
+    end
+    set used of c to at + got
+end
+
+# The request a connection has so far, answered if all of it is there. The headers come first, and say how
+# long the body is, or that it comes in chunks; `wanted` is then the whole request's bytes.
+to web_try_request with c, handler, live
+    if head_end of c is 0
+        set head_end of c to web_head_end(buffer of c, used of c)
+        if head_end of c is 0
+            if used of c is greater than web_most_head
+                web_refuse(c, live, 431, "The request's headers are too long")
+            else if closing of c
+                web_finish(c, live)
+            end
+            return nothing
+        end
+        if head_end of c is greater than web_most_head
+            web_refuse(c, live, 431, "The request's headers are too long")
+            return nothing
+        end
+        set head of c to (items 1 to (head_end of c - 1) of buffer of c) as text
+        if web_is_chunked(head of c)
+            set chunked of c to yes
+        else
+            set said to web_body_length(head of c)
+            if said is less than 0
+                web_refuse(c, live, 400, "The request's length can't be read")
+                return nothing
+            end
+            set wanted of c to head_end of c + 3 + said
+            if wanted of c is greater than web_most
+                web_refuse(c, live, 413, "The request is too big")
+                return nothing
+            end
+        end
+    end
+    if chunked of c and body of c is nothing
+        set found to web_chunks(buffer of c, head_end of c + 4, used of c)
+        if found is nothing
+            if closing of c
+                web_finish(c, live)
+            end
+            return nothing
+        end
+        if not ok of found
+            web_refuse(c, live, 400, "The request's chunks can't be read")
+            return nothing
+        end
+        set body of c to body of found
+        set wanted of c to ended of found - 1
+    end
+    if used of c is less than wanted of c
+        if closing of c
+            web_finish(c, live)
+        end
+        return nothing
+    end
+    web_answer(c, handler, live)
+end
+
+# a whole request given to the handler, and what it gave back made ready to send
+to web_answer with c, handler, live
+    set body_bytes to body of c
+    if body_bytes is nothing
+        set body_bytes to items (head_end of c + 4) to (wanted of c) of buffer of c
+    end
+    set request to web_request(head of c, body_bytes)
+    set answer to nothing
+    try
+        set answer to handler(request)
+    if it fails with why
+        say "a mistake answering " + method of request + " " + path of request + ": " + why to the error output
+        set answer to record with status 500, body "A mistake: " + why
+    end
+    set keep of c to web_keeps(c)
+    set served of c to served of c + 1
+    web_move_on(c)
+    web_ready(c, answer, method of request)
+    web_push(c, handler, live)
+end
+
+# whether this connection is kept open for another request: the program's say, how many it has answered, what
+# the request's own HTTP version and Connection header asked for, and whether the other end has finished
+to web_keeps with c
+    if not web_keep_alive or closing of c or served of c + 1 is at least web_most_requests
+        return no
+    end
+    set lines to split head of c by web_line
+    set first to split item 1 of lines by " "
+    set version to ""
+    if length of first is at least 3
+        set version to item 3 of first
+    end
+    set said to ""
+    set at to 0
+    for each one in lines
+        add 1 to at
+        set colon to position of ":" in one
+        if at is greater than 1 and colon is greater than 0 and lowercase of web_trim(web_text_part(one, 1, colon - 1)) is "connection"
+            set said to lowercase of one
+        end
+    end
+    if position of "close" in said is greater than 0
+        return no
+    end
+    if position of "HTTP/1.1" in version is greater than 0
+        return yes
+    end
+    return position of "keep-alive" in said is greater than 0 # HTTP/1.0 keeps one only if it asks
+end
+
+# this request's bytes dropped, keeping whatever came after it, which is the next request (sent together)
+to web_move_on with c
+    set over to wanted of c
+    if over is less than 0 or over is greater than used of c
+        set over to used of c
+    end
+    if over is at least used of c
+        set used of c to 0
+    else
+        set buffer of c to items (over + 1) to (used of c) of buffer of c
+        set used of c to used of c - over
+        set room of c to length of buffer of c
+    end
+    set head_end of c to 0
+    set head of c to ""
+    set wanted of c to -1
+    set chunked of c to no
+    set body of c to nothing
+end
+
+# a status and some words sent, and the connection closed once they are
+to web_refuse with c, live, status, words
+    set keep of c to no
+    set closing of c to yes
+    web_ready(c, (record with status status, body words), "GET")
+    web_push(c, nothing, live)
+end
+
+# what the handler gave, made the bytes to send: the status line and headers, then the body
+to web_ready with c, answer, method
+    set status to 200
+    set body to ""
+    set kind to nothing
+    set extra to empty dictionary
+    if answer is nothing
+        set status to 204
+    else if web_is_text(answer)
+        set body to answer
+    else if web_is_collection(answer)
+        set body to answer as json
+        set kind to "application/json"
+    else
+        set status to web_field(answer, "status", 200)
+        set body to web_field(answer, "body", "")
+        set kind to web_field(answer, "type", nothing)
+        set extra to web_field(answer, "headers", empty dictionary)
+        set named to web_field(answer, "file", nothing)
+        if named is not nothing
+            try
+                set body to read bytes named
+                if kind is nothing
+                    set kind to web_type_of(named)
+                end
+            if it fails
+                set status to 404
+                set body to "There's no file called '" + named + "'"
+            end
+        end
+    end
+    if web_is_collection(body)
+        set body to body as json
+        if kind is nothing
+            set kind to "application/json"
+        end
+    end
+    set sent to body
+    if web_is_text(body)
+        set sent to body as bytes
+        if kind is nothing
+            set kind to "text/plain; charset=utf-8"
+            if length of body is greater than 0 and web_text_part(body, 1, 1) is "<"
+                set kind to "text/html; charset=utf-8"
+            end
+        end
+    end
+    if kind is nothing
+        set kind to "application/octet-stream"
+    end
+    set reason to "OK"
+    if status is in web_statuses
+        set reason to item status of web_statuses
+    end
+    set head to "HTTP/1.1 " + status + " " + reason + web_line + "Content-Type: " + kind + web_line
+    set head to head + "Content-Length: " + length of sent + web_line
+    if keep of c
+        set head to head + "Connection: keep-alive" + web_line + "Keep-Alive: timeout=" + ((web_idle_timeout / 1000) rounded) + web_line
+    else
+        set head to head + "Connection: close" + web_line
+    end
+    for each name in extra
+        set head to head + name + ": " + item name of extra + web_line
+    end
+    set blocks to list of ((head + web_line) as bytes)
+    # HEAD asks for the headers alone, and 204 and 304 have no body: sending one would be read as the next answer
+    if length of sent is greater than 0 and method is not "HEAD" and status is not 204 and status is not 304
+        add sent to blocks
+    end
+    set out of c to blocks
+    set out_at of c to 0
+    set stage of c to "writing"
+    set writing of c to yes
+    set due of c to the clock + web_timeout / 1000
+end
+
+# as much of the answer sent as the connection will take; then it's kept for another request, or closed
+to web_push with c, handler, live
+    repeat while length of out of c is greater than 0
+        set block to item 1 of out of c
+        set piece to block
+        if out_at of c is greater than 0
+            set piece to items (out_at of c + 1) to (length of block) of block
+        end
+        set sent to web_send_some(c, piece)
+        if sent is at most 0
+            if sent is 0 or not web_tls_waited
+                web_finish(c, live)
+            end
+            return nothing
+        end
+        set out_at of c to out_at of c + sent
+        if out_at of c is at least length of block
+            set out of c to items 2 to (length of out of c) of out of c
+            set out_at of c to 0
+        end
+    end
+    set writing of c to no
+    if not keep of c
+        web_finish(c, live)
+        return nothing
+    end
+    set stage of c to "reading"
+    set due of c to the clock + web_idle_timeout / 1000
+    if used of c is greater than 0 and handler is not nothing # another request came with the one just answered
+        web_try_request(c, handler, live)
+    end
 end
 
 to web_listener with everywhere, port
@@ -195,7 +665,7 @@ to web_listener with everywhere, port
         if win_bind(listener, address, 16) is not 0
             fail with taken
         end
-        win_listen(listener, 64)
+        win_listen(listener, web_backlog)
         return listener
     end
     set listener to unix_socket(2, 1, 0)
@@ -205,7 +675,7 @@ to web_listener with everywhere, port
     if unix_bind(listener, address, 16) is not 0
         fail with taken
     end
-    unix_listen(listener, 64)
+    unix_listen(listener, web_backlog)
     return listener
 end
 
@@ -216,25 +686,147 @@ to web_accept with listener
     return unix_accept(listener, nothing, nothing)
 end
 
-to web_receive with client, room
-    if web_session is not nothing
-        return SSL_read(web_session, room, length of room)
+# whether a socket waits for what it's asked to do (yes), or says at once that it would have to (no)
+to web_blocking with handle, waits
+    set value to 4 bytes # an int: 1 for not waiting
+    if not waits
+        set byte 1 of value to 1
     end
     if web_windows
-        return win_recv(client, room, length of room, 0)
+        win_control(handle, 2147772030, value) # FIONBIO
+    else
+        unix_control(handle, 21537, value) # FIONBIO
     end
-    return unix_recv(client, room, length of room, 0)
 end
 
-to web_send with client, sent
-    set at to 0
-    if web_session is not nothing
-        return SSL_write(web_session, sent, length of sent)
+# Waits up to `waiting` milliseconds for any of these sockets to be ready to read, or to write for those with
+# `writing`; gives what came for each, in their order, and 0 for one with nothing.
+to web_wait with waiting_on, waiting
+    set size to 8 # pollfd: Linux's an int, the events and what came; Windows' the SOCKET, 8 bytes
+    set in_bit to 1 # POLLIN
+    set out_bit to 4 # POLLOUT
+    set came_at to 7 # revents, after the socket and the events asked for
+    if web_windows
+        set size to 16
+        set in_bit to 256 # POLLRDNORM
+        set out_bit to 16 # POLLWRNORM
+        set came_at to 11
+    end
+    set n to length of waiting_on
+    if n is 0
+        return empty list
+    end
+    set table to (n * size) bytes
+    for each k from 1 to n
+        set one to item k of waiting_on
+        set at to (k - 1) * size + 1
+        set want to in_bit
+        if writing of one
+            set want to out_bit
+        end
+        if web_windows
+            web_put(table, at, 8, handle of one)
+            web_put(table, at + 8, 2, want)
+        else
+            web_put(table, at, 4, handle of one)
+            web_put(table, at + 4, 2, want)
+        end
+    end
+    set got to 0
+    if web_windows
+        set got to win_poll(table, n, waiting)
+    else
+        set got to unix_poll(table, n, waiting)
+    end
+    set made to empty list
+    for each k from 1 to n
+        if got is at most 0
+            add 0 to made
+        else
+            add web_get(table, (k - 1) * size + came_at, 2) to made
+        end
+    end
+    return made
+end
+
+# a whole number of `count` bytes of `b`, from byte `from`, lowest first
+to web_get with b, from, count
+    set made to 0
+    set k to from + count - 1
+    repeat while k is at least from
+        set made to made * 256 + byte k of b
+        set k to k - 1
+    end
+    return made
+end
+
+to web_put with b, from, count, n
+    set left to n
+    for each k from 0 to count - 1
+        set low to remainder of left divided by 256
+        set byte (from + k) of b to low
+        set left to (left - low) / 256
+    end
+end
+
+set web_tls_waited to no # whether the last read or write only wants to be asked again, so the connection is good
+
+to web_receive with c, room
+    set web_tls_waited to no
+    if ssl of c is not nothing
+        set got to SSL_read(ssl of c, room, length of room)
+        if got is at most 0
+            set web_tls_waited to web_tls_waiting(c, got)
+            if web_tls_waited
+                return -1
+            end
+            return 0
+        end
+        return got
     end
     if web_windows
-        return win_send(client, sent, length of sent, 0)
+        return win_recv(handle of c, room, length of room, 0)
     end
-    return unix_send(client, sent, length of sent, 16384) # MSG_NOSIGNAL: a connection gone is a mistake, not the end
+    return unix_recv(handle of c, room, length of room, 0)
+end
+
+# as many of these bytes as the connection will take now, or -1 if it will take none just now
+to web_send_some with c, sent
+    set web_tls_waited to no
+    if ssl of c is not nothing
+        set gone to SSL_write(ssl of c, sent, length of sent)
+        if gone is at most 0
+            set web_tls_waited to web_tls_waiting(c, gone)
+            if web_tls_waited
+                return -1
+            end
+            return 0
+        end
+        return gone
+    end
+    if web_windows
+        return win_send(handle of c, sent, length of sent, 0)
+    end
+    return unix_send(handle of c, sent, length of sent, 16384) # MSG_NOSIGNAL: a connection gone is a mistake, not the end
+end
+
+# a connection done with: closed, and forgotten
+to web_finish with c, live
+    web_shut(c)
+    remove (handle of c) from live
+end
+
+to web_shut with c
+    if not open of c
+        return nothing
+    end
+    set open of c to no
+    if ssl of c is not nothing
+        SSL_shutdown(ssl of c)
+        SSL_free(ssl of c)
+        set ssl of c to nothing
+    end
+    web_close(handle of c)
 end
 
 to web_close with handle
@@ -243,15 +835,6 @@ to web_close with handle
     else
         unix_close(handle)
     end
-end
-
-# the first `count` bytes of `b`, from byte `from`
-to web_part with b, from, count
-    set made to count bytes
-    for each k from 1 to count
-        set byte k of made to byte (from + k - 1) of b
-    end
-    return made
 end
 
 # where the blank line after the headers starts, from 1, or 0 if it hasn't come yet
@@ -264,86 +847,21 @@ to web_head_end with b, used
     return 0
 end
 
-# a request read, and answered
-to web_answer with client, handler
-    set whole to 65536 bytes
-    set used to 0
-    set room to 65536 bytes
-    set head_end to 0
-    set wanted to -1 # the whole request's bytes, once the headers say how long its body is
-    set chunked to no # the body in chunks, each with its length first, until one of none
-    set body to nothing
-    repeat while wanted is -1 or used is less than wanted
-        set got to web_receive(client, room)
-        if got is at most 0
-            if head_end is 0
-                return nothing # gone before it said anything
-            end
-            stop
-        end
-        if used + got is greater than length of whole
-            set bigger to (2 * (used + got)) bytes
-            for each k from 1 to used
-                set byte k of bigger to byte k of whole
-            end
-            set whole to bigger
-        end
-        for each k from 1 to got
-            set byte (used + k) of whole to byte k of room
-        end
-        set used to used + got
-        if head_end is 0
-            set head_end to web_head_end(whole, used)
-            if head_end is not 0
-                set head to web_part(whole, 1, head_end - 1) as text
-                if web_is_chunked(head)
-                    set chunked to yes
-                else
-                    set wanted to head_end + 3 + web_body_length(head)
-                end
-            else if used is greater than 65536
-                web_reply(client, record with status 431, body "The request's headers are too long")
-                return nothing
-            end
-        end
-        if chunked
-            set found to web_chunks(whole, head_end + 4, used)
-            if found is not nothing
-                if not ok of found
-                    web_reply(client, record with status 400, body "The request's chunks can't be read")
-                    return nothing
-                end
-                set body to body of found
-                set wanted to used
-            end
-        end
-        if wanted is greater than web_most or used is greater than web_most
-            web_reply(client, record with status 413, body "The request is too big")
-            return nothing
-        end
-    end
-    if body is nothing
-        set body to web_part(whole, head_end + 4, used - head_end - 3)
-        if chunked # it ended before its last chunk
-            set body to 0 bytes
-        end
-    end
-    set request to web_request(web_part(whole, 1, head_end - 1) as text, body)
-    set answer to nothing
-    try
-        set answer to handler(request)
-    if it fails with why
-        say "a mistake answering " + method of request + " " + path of request + ": " + why to the error output
-        set answer to record with status 500, body "A mistake: " + why
-    end
-    web_reply(client, answer)
-end
-
+# how long the headers say the body is, or -1 if what they say isn't a number
 to web_body_length with head
     for each one in split head by web_line
         set parts to split one by ":"
         if length of parts is at least 2 and lowercase of item 1 of parts is "content-length"
-            return number of item 2 of parts
+            set said to web_trim(item 2 of parts)
+            for each c in said
+                if position of c in "0123456789" is 0
+                    return -1
+                end
+            end
+            if said is ""
+                return -1
+            end
+            return number of said
         end
     end
     return 0
@@ -361,9 +879,9 @@ to web_is_chunked with head
 end
 
 # A body in chunks, from byte `from` of the `used` bytes come so far: nothing if its last chunk hasn't come
-# yet, else a record of whether it could be read and the body's bytes. Each chunk is its length in hex (and
-# anything after a ;), a line end, its bytes, a line end; the last has length 0, then lines of trailers,
-# which are passed over, until an empty one.
+# yet, else a record of whether it could be read, the body's bytes, and where it ended, which is the next
+# request's first byte. Each chunk is its length in hex (and anything after a ;), a line end, its bytes, a
+# line end; the last has length 0, then lines of trailers, which are passed over, until an empty one.
 to web_chunks with b, from, used
     set made to empty list
     set at to from
@@ -381,12 +899,12 @@ to web_chunks with b, from, used
                 set size to size * 16 + web_hex(c)
                 set digits to digits + 1
             else if c is not 32 and c is not 9
-                return record with ok no, body nothing
+                return record with ok no, body nothing, ended at
             end
             set k to k + 1
         end
         if digits is 0 or size is greater than web_most
-            return record with ok no, body nothing
+            return record with ok no, body nothing, ended at
         end
         set at to line_end + 2
         if size is 0
@@ -396,7 +914,7 @@ to web_chunks with b, from, used
                     return nothing
                 end
                 if line_end is at
-                    return record with ok yes, body made as bytes
+                    return record with ok yes, body made as bytes, ended at + 2
                 end
                 set at to line_end + 2
             end
@@ -408,7 +926,7 @@ to web_chunks with b, from, used
             add byte k of b to made
         end
         if byte (at + size) of b is not 13 or byte (at + size + 1) of b is not 10
-            return record with ok no, body nothing
+            return record with ok no, body nothing, ended at
         end
         set at to at + size + 2
     end
@@ -532,71 +1050,6 @@ to web_hex with code
         return code - 55
     end
     return code - 48
-end
-
-# what the handler gave, sent: its status line, headers and body
-to web_reply with client, answer
-    set status to 200
-    set body to ""
-    set kind to nothing
-    set extra to empty dictionary
-    if answer is nothing
-        set status to 204
-    else if web_is_text(answer)
-        set body to answer
-    else if web_is_collection(answer)
-        set body to answer as json
-        set kind to "application/json"
-    else
-        set status to web_field(answer, "status", 200)
-        set body to web_field(answer, "body", "")
-        set kind to web_field(answer, "type", nothing)
-        set extra to web_field(answer, "headers", empty dictionary)
-        set named to web_field(answer, "file", nothing)
-        if named is not nothing
-            try
-                set body to read bytes named
-                if kind is nothing
-                    set kind to web_type_of(named)
-                end
-            if it fails
-                set status to 404
-                set body to "There's no file called '" + named + "'"
-            end
-        end
-    end
-    if web_is_collection(body)
-        set body to body as json
-        if kind is nothing
-            set kind to "application/json"
-        end
-    end
-    set sent to body
-    if web_is_text(body)
-        set sent to body as bytes
-        if kind is nothing
-            set kind to "text/plain; charset=utf-8"
-            if length of body is greater than 0 and web_text_part(body, 1, 1) is "<"
-                set kind to "text/html; charset=utf-8"
-            end
-        end
-    end
-    if kind is nothing
-        set kind to "application/octet-stream"
-    end
-    set reason to "OK"
-    if status is in web_statuses
-        set reason to item status of web_statuses
-    end
-    set head to "HTTP/1.1 " + status + " " + reason + web_line + "Content-Type: " + kind + web_line
-    set head to head + "Content-Length: " + length of sent + web_line + "Connection: close" + web_line
-    for each name in extra
-        set head to head + name + ": " + item name of extra + web_line
-    end
-    web_send(client, (head + web_line) as bytes)
-    if length of sent is greater than 0
-        web_send(client, sent)
-    end
 end
 
 # a record's field, or `otherwise` if it has none

@@ -15,7 +15,8 @@ import { TooDeep } from "./jit.js";
 import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIONS, COMPARE_OPS, fail, equal, show, item, compare, plus, arithmetic, negate,
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
-  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP } from "./vm.js";
+  Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP, CantCopy, DEEPEST_COPY,
+  madeInside, tooDeepToCopy, workerEnded, workerResult } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -106,6 +107,12 @@ const IMPORTS = {
   caughtValue: [[], [EQ]],
   play: [[EQ, EQ, F64, I32], []], // `play note`: the note, how long, in units of so many milliseconds, and a position
   beep: [[], []], // `play a beep`
+  // `start f(x) on another core` (see startWorker in vm.js): the function, its inputs as a list, its name and a
+  // position, which give copies of the inputs, the program's variables swapped for copies while it runs; then
+  // what it gave, or the mistake it ended with, copied, the variables put back, and the worker
+  workerBegin: [[EQ, EQ, I32, I32], [EQ]],
+  workerGave: [[EQ], [EQ]],
+  workerFailed: [[], [EQ]],
 };
 
 // ---------- the module's types and runtime ----------
@@ -640,6 +647,20 @@ function declareExports(m, T, R) {
   fn("recordValue", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.record).emit("struct.get", T.record, 1).emit("local.get", 1).emit("array.get", T.items));
   fn("functionName", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 3));
   fn("functionInputs", [EQ], [I32], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 2));
+  // for a worker (see startWorker in vm.js): whether a function was made at the top of a file, so its scope is
+  // the program's, or has none; and the slots of that scope, the program's variables a function can reach
+  fn("functionAtTop", [EQ], [I32], (c, f) => {
+    const env = f.local(refNull(T.env));
+    c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 1).emit("local.tee", env).emit("ref.is_null");
+    c.emit("if", I32).emit("i32.const", 1).emit("else").emit("local.get", env).emit("struct.get", T.env, 0).emit("ref.is_null").emit("end");
+  });
+  fn("scopeSize", [EQ], [I32], (c, f) => {
+    const env = f.local(refNull(T.env));
+    c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 1).emit("local.tee", env).emit("ref.is_null");
+    c.emit("if", I32).emit("i32.const", 0).emit("else").emit("local.get", env).emit("struct.get", T.env, 1).emit("array.len").emit("end");
+  });
+  fn("scopeSlot", [EQ, I32], [EQ], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 1).emit("struct.get", T.env, 1).emit("local.get", 1).emit("array.get", T.items));
+  fn("setScopeSlot", [EQ, I32, EQ], [], (c) => c.emit("local.get", 0).emit("ref.cast", T.closure).emit("struct.get", T.closure, 1).emit("struct.get", T.env, 1).emit("local.get", 1).emit("local.get", 2).emit("array.set", T.items));
   fn("makeNum", [F64], [EQ], (c) => c.emit("local.get", 0).emit("call", R.box));
   fn("makeText", ["externref"], [EQ], (c) => c.emit("local.get", 0).emit("struct.new", T.text));
   fn("newList", [], [EQ], (c) => c.emit("i32.const", 0).emit("array.new_default", T.items).emit("i32.const", 0).emit("struct.new", T.list));
@@ -1257,6 +1278,62 @@ class WasmCompiler extends Scope {
     this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.sub").e("global.set", ctx.depth);
   }
 
+  // `start f(x) on another core`: the call, checked as call() checks it, then made on copies, in a try, so a
+  // mistake it ends with is the worker's (see startWorker in vm.js)
+  startWorker(call) {
+    if (!this.resolve(call.name)) return this.undefinedName(call.name, call.at, { call: true });
+    const { T, im, ctx } = { ...this.ctx, ctx: this.ctx };
+    const k = this.pos(call.at);
+    const f = this.temp();
+    const args = call.args.map(() => this.temp());
+    const given = this.temp();
+    const depth = this.temp(I32);
+    const made = this.temp();
+    this.load(call.name);
+    this.e("local.tee", f).e("ref.test", T.closure).e("i32.eqz");
+    this.e("if").e("local.get", f).e("i32.const", this.id(call.name)).e("i32.const", k).e("call", im.callable).e("unreachable").e("end");
+    call.args.forEach((arg, i) => {
+      this.expr(arg);
+      this.e("local.set", args[i]);
+    });
+    this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 2).e("i32.const", args.length).e("i32.ne");
+    this.e("if").e("local.get", f).e("i32.const", args.length).e("i32.const", this.id(call.name)).e("i32.const", k).e("call", im.checkInputs).e("unreachable").e("end");
+    if (args.length) {
+      this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 4).e("if");
+      args.forEach((a, i) => {
+        this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 4).e("i32.const", i).e("local.get", a);
+        this.e("i32.const", this.id(call.name)).e("i32.const", k).e("call", im.checkKind);
+      });
+      this.e("end");
+    }
+    this.e("local.get", f);
+    for (const a of args) this.e("local.get", a);
+    this.e("array.new_fixed", T.items, args.length).e("i32.const", args.length).e("struct.new", T.list);
+    this.e("i32.const", this.id(call.name)).e("i32.const", k).e("call", im.workerBegin).e("local.set", given);
+    this.tick(k);
+    this.handingOver(() => {
+      this.e("global.get", ctx.depth).e("local.set", depth).e("call", im.tryStart);
+      this.e("try");
+      this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.add").e("global.set", ctx.depth).e("global.get", ctx.depth).e("i32.const", MAX_DEPTH).e("i32.gt_s");
+      this.e("if").e("call", im.tooDeep).e("unreachable").e("end");
+      this.e("global.get", ctx.calls).e("global.get", ctx.depth).e("i32.const", 1).e("i32.shl").e("i32.const", 2).e("i32.sub").e("i32.const", k).e("array.set", T.ids);
+      this.e("global.get", ctx.calls).e("global.get", ctx.depth).e("i32.const", 1).e("i32.shl").e("i32.const", 1).e("i32.sub");
+      this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 3).e("array.set", T.ids);
+      this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 1);
+      args.forEach((_, i) => this.e("local.get", given).e("ref.cast", T.list).e("struct.get", T.list, 0).e("i32.const", i).e("array.get", T.items));
+      this.e("local.get", f).e("ref.cast", T.closure).e("struct.get", T.closure, 0).e("ref.cast", T.fn(args.length));
+      this.e("call_ref", T.fn(args.length)).note(call.name);
+      this.e("global.get", ctx.depth).e("i32.const", 1).e("i32.sub").e("global.set", ctx.depth);
+      this.e("call", im.workerGave).e("local.set", made);
+      this.e("catch_all");
+      this.e("call", im.caught).e("i32.eqz").e("if").e("rethrow", 1).e("end"); // going too deep, say: not the worker's
+      this.e("local.get", depth).e("global.set", ctx.depth);
+      this.e("call", im.workerFailed).e("local.set", made);
+      this.e("end");
+    });
+    this.e("local.get", made);
+  }
+
   expr(e) {
     const { T, R, im } = this.ctx;
     if (this.unboxed(e)) return void (this.exprNum(e), this.e("call", R.box));
@@ -1423,6 +1500,7 @@ class WasmCompiler extends Scope {
           this.e("i32.const", index).e("i32.const", this.pos(e.at)).e("call", R.newBytes);
           return;
         }
+        if (e.name === "start worker") return this.startWorker(e.args[0]);
         this.e("i32.const", index).note(e.name);
         for (const arg of e.args) this.expr(arg);
         this.e("array.new_fixed", T.items, e.args.length).e("i32.const", e.args.length).e("struct.new", T.list);
@@ -1624,7 +1702,85 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
     return list;
   }
 
+  // A copy of a value for a worker, made in the module (see workerCopy in vm.js, which this follows): lists,
+  // records, dictionaries and bytes made again; a function made at the top of a file, text, numbers and
+  // amounts as they are, as they never change
+  function workerCopy(v, depth = 0) {
+    if (v === null || typeof v === "number") return v;
+    const tag = x.tag(v);
+    if (tag === TAGS.number || tag === TAGS.text || tag === TAGS.quantity || tag === TAGS.unset) return v;
+    if (depth >= DEEPEST_COPY) throw new CantCopy(tooDeepToCopy);
+    switch (tag) {
+      case TAGS.list: {
+        const list = x.newList();
+        for (let i = 0, n = x.listLength(v); i < n; i++) x.listPush(list, workerCopy(x.listItem(v, i), depth + 1));
+        return list;
+      }
+      case TAGS.record: {
+        const record = x.makeRecord();
+        for (let i = 0, n = x.recordSize(v); i < n; i++) x.putField(record, x.recordKey(v, i), workerCopy(x.recordValue(v, i), depth + 1));
+        return record;
+      }
+      case TAGS.function:
+        if (!x.functionAtTop(v)) throw new CantCopy(madeInside(names[x.functionName(v)]));
+        return v;
+      case TAGS.dictionary:
+        return x.makeHost(new Map([...x.hostValue(v)].map(([key, value]) => [key, workerCopy(value, depth + 1)])), TAGS.dictionary);
+      default: {
+        const bytes = x.makeBytes(x.bytesLength(v));
+        for (let i = 0, n = x.bytesLength(v); i < n; i++) x.setByte(bytes, i, x.byteAt(v, i));
+        return bytes;
+      }
+    }
+  }
+  const workers = []; // for each worker running, its function and the program's variables it swapped for copies
+  const workerDone = (result) => {
+    const [f, saved] = workers.pop();
+    saved.forEach((value, i) => x.setScopeSlot(f, i, value));
+    return toWasm(workerEnded(result));
+  };
+  const WAIT_FOR = BUILTINS.findIndex((b) => b.name === "wait for");
+
   const imports = {
+    workerBegin: (f, list, name, k) => {
+      try {
+        if (!x.functionAtTop(f)) throw new CantCopy(madeInside(names[x.functionName(f)]));
+        const given = x.newList();
+        for (let i = 0, n = x.listLength(list); i < n; i++) x.listPush(given, workerCopy(x.listItem(list, i)));
+        const saved = Array.from({ length: x.scopeSize(f) }, (_, i) => x.scopeSlot(f, i));
+        const fresh = saved.map((value) => { // slot 0 is no variable's, so it holds the module's own "no value yet"
+          try {
+            return workerCopy(value);
+          } catch (err) {
+            if (!(err instanceof CantCopy)) throw err;
+            return saved[0];
+          }
+        });
+        fresh.forEach((value, i) => x.setScopeSlot(f, i, value));
+        workers.push([f, saved]);
+        return given;
+      } catch (err) {
+        if (!(err instanceof CantCopy)) throw err;
+        errors[k](err.message);
+      }
+    },
+    workerGave: (gave) => {
+      try {
+        return workerDone({ gave: workerCopy(gave) });
+      } catch (err) {
+        if (!(err instanceof CantCopy)) throw err;
+        return workerDone({ failed: x.makeText(err.message) });
+      }
+    },
+    workerFailed: () => {
+      const value = caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError));
+      try {
+        return workerDone({ failed: workerCopy(value) });
+      } catch (err) {
+        if (!(err instanceof CantCopy)) throw err;
+        return workerDone({ failed: x.makeText(err.message) });
+      }
+    },
     say: (parts) => print(toJs(parts).map((p) => show(p)).join("")),
     sayError: (parts) => printError(toJs(parts).map((p) => show(p)).join("")),
     exit: (code, k) => throwing(new Ended(exitCode(toJs(code), errors[k]))), // kept as the last thing thrown, which no `try` catches
@@ -1712,7 +1868,18 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       return catchable(caughtError) ? 1 : 0;
     },
     caughtValue: () => (caughtError.wasm !== undefined ? caughtError.wasm : toWasm(caughtValue(caughtError))),
-    builtin: (i, args, k) => toWasm(BUILTINS[i].run(toJs(args), errors[k], turtle, disk)),
+    builtin: (i, args, k) => {
+      const given = toJs(args);
+      const worker = i === WAIT_FOR ? workerResult(given[0]) : null;
+      if (worker) { // what a worker gave is kept as the module made it (see imports.workerGave)
+        if (Object.hasOwn(worker, "failed")) {
+          failing = worker.failed;
+          failWith(toJs(worker.failed), errors[k]);
+        }
+        return worker.gave;
+      }
+      return toWasm(BUILTINS[i].run(given, errors[k], turtle, disk));
+    },
     ask: (question, k) => toWasm(askFor(toJs(question), answer, errors[k])),
     read: (name, asBytes, k) => toWasm(readFile(toJs(name), asBytes === 1, disk, errors[k])),
     write: (value, name, k) => writeFile(toJs(value), toJs(name), disk, errors[k]),

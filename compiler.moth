@@ -420,7 +420,8 @@ set builtin_names to list of "uppercase", "lowercase", "split", "join", "number"
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
     "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
-    "library call", "power", "items", "rounded down", "rounded up", "rounded", "remainder", "start", "wait for", "has ended"
+    "library call", "power", "items", "rounded down", "rounded up", "rounded", "remainder", "start", "wait for", "has ended",
+    "start worker"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -811,14 +812,22 @@ to parse with tokens, reading
         return record with kind "builtin", name "items", args slice_args, at t
     end
 
-    # `start count(10)`: the call, or nothing if what follows `start` isn't one (or, for a line of its own, if
-    # anything follows it)
+    # `start count(10)`: the builtin, "start" or, `on another core`, "start worker" (DESIGN §104), and the call;
+    # or nothing if what follows `start` isn't one (or, for a line of its own, if anything follows it)
     to start_rest with whole_line
         set started to primary()
-        if kind of started is not "call" or (whole_line and not nl of peek())
+        if kind of started is not "call"
             return nothing
         end
-        return started
+        set which to "start"
+        if words_at(pos, list of "on", "another", "core")
+            set pos to pos + 3
+            set which to "start worker"
+        end
+        if whole_line and not nl of peek()
+            return nothing
+        end
+        return record with name which, call started
     end
 
     # `wait 2 seconds`, `wait n milliseconds`
@@ -1991,8 +2000,8 @@ to parse with tokens, reading
         if is_word("start") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word"
             set started to try_phrase("start", t)
             if started is not nothing
-                set start_args to list of started
-                return record with kind "do", value (record with kind "builtin", name "start", args start_args, at t), at t
+                set start_args to list of call of started
+                return record with kind "do", value (record with kind "builtin", name name of started, args start_args, at t), at t
             end
         end
         if is_word("wait") and not nl of item (pos + 1) of tokens and word_at(pos + 1, "for")
@@ -2476,8 +2485,8 @@ to parse with tokens, reading
         if is_word("start") and not nl of item (pos + 1) of tokens and type of item (pos + 1) of tokens is "word" # `set job to start count(10)`
             set started to try_phrase("start value", t)
             if started is not nothing
-                set start_args to list of started
-                return record with kind "builtin", name "start", args start_args, at t
+                set start_args to list of call of started
+                return record with kind "builtin", name name of started, args start_args, at t
             end
         end
         if is_word("wait") and not nl of item (pos + 1) of tokens and word_at(pos + 1, "for") # `set answer to wait for job`
@@ -3949,6 +3958,7 @@ end
 # ---------- JavaScript ----------
 
 set ats to empty list # every token an error can point at; a position in the code is its number here
+set js_workers to no # whether the program starts a worker, so needs $globals
 set event_names to list of "key", "click", "drag", "button", "enter", "checkbox", "choice", "slider" # in the order of EVENTS in vm.js
 set turtle_actions to list of "forward", "back", "left", "right", "up", "down", "color", "width", "to", "clear", "box", "circle", "text",
     "chart", "picture", "button", "text box", "clear text box", "checkbox", "tick", "untick", "text area", "list", "dropdown", "slider",
@@ -4184,7 +4194,11 @@ to closure_code with scope, d
     for each n from 1 to length of params of d
         add v(n, level of scope of inner) to inputs
     end
-    set head to "fn(" + quote(name of d) + ", " + quote_list(params of d) + ", function (" + joined(inputs, ", ") + ") {\n"
+    set made to "fn(" # made inside another function, which a worker can't be given
+    if level of scope is greater than 0
+        set made to "fnIn("
+    end
+    set head to made + quote(name of d) + ", " + quote_list(params of d) + ", function (" + joined(inputs, ", ") + ") {\n"
     set typed to "" # what each input says it is, if any does
     for each k in kinds of d
         if k is not -1
@@ -4304,6 +4318,16 @@ to js_expr with scope, e
     if what is "now"
         return "now(" + which of e + ")"
     end
+    if what is "builtin" and name of e is "start worker" # the call, made on copies, with the program's variables swapped for them by $globals
+        set call to item 1 of args of e
+        if resolve(scope, name of call) is nothing
+            return undefined_name(scope, name of call, at of call, yes, no)
+        end
+        set k to remember(at of call)
+        set js_workers to yes
+        set f to "callable(" + ref(scope, name of call) + ", " + quote(name of call) + ", " + k + ")"
+        return "worker(" + f + ", [" + js_list(scope, args of call) + "], " + quote(name of call) + ", " + k + ", $globals)"
+    end
     if what is "builtin"
         return "builtin(" + (slot_of(builtin_names, name of e) - 1) + ", [" + js_list(scope, args of e) + "], " + remember(at of e) + ")"
     end
@@ -4332,13 +4356,18 @@ end
 # values the JavaScript returns.
 to compile with source, files
     set ats to empty list
+    set js_workers to no
     set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     set main to function_code(nothing, empty list, parse(tokenize(source, ""), reading), 0)
     set slots to empty list
     for each slot from 1 to length of names of scope of main
         add v(slot, 0) to slots
     end
-    return record with js code of main + "\nreturn [" + joined(slots, ", ") + "];", ats ats, names names of scope of main
+    set swapping to "" # for a program that starts a worker: the program's variables, given, and others put in their place
+    if js_workers
+        set swapping to "function $globals($s) {\nconst $o = [" + joined(slots, ", ") + "];\nif ($s) [" + joined(slots, ", ") + "] = $s;\nreturn $o;\n}\n"
+    end
+    return record with js code of main + "\n" + swapping + "return [" + joined(slots, ", ") + "];", ats ats, names names of scope of main
 end
 
 # ---------- bytecode ----------
