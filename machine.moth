@@ -38096,6 +38096,11 @@ to read_undefined with scope, wanted, call, statement
     return front's undefined_message(scope, wanted, call, statement)
 end
 
+# the name a misspelled one most likely meant, of those given, or nothing if none is close
+to read_closest with wanted, candidates
+    return front's closest(wanted, candidates)
+end
+
 to compile_machine with source, file_names, file_texts, target, program_name
     return compile_allowing(source, file_names, file_texts, target, program_name, empty list)
 end

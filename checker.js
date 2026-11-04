@@ -13,16 +13,30 @@ import { Scope } from "./scope.js";
 import { Turtle, TURTLE_ACTIONS, BUILTINS, plus, arithmetic, negate, lengthOf, compare, item, addInto, checkRepeat, checkRange, itemsOf,
   callable, checkInputs, checkKinds, makeRecord, fieldOf, recordFor, removeKey, readFile, writeFile, randomWhole, everyInterval, Closure,
   Quantity, isQuantity, measureOf, unitNamed, UNITS, MEASURE_TYPES, MEASURES, exitCode, removeFile, NOW_WORDS, waitFor, fakeClock, readFolder, soundOf,
-  KINDS, closest } from "./vm.js";
+  KINDS, closest, isRecord, isDictionary, isBytes } from "./vm.js";
 
 // A stand-in value for each type. Only checks that depend on the type alone use these; a check that
 // depends on the value itself (like dividing by zero) only runs when the code has that value written out.
-const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0),
+export const SAMPLES = { number: 1, text: "a", "yes/no": true, nothing: null, list: [], record: makeRecord([], []), dictionary: new Map(), bytes: new Uint8Array(0),
   function: new Closure({ name: "f", params: [] }, null),
   // an amount of each measure: 1 m, 1 second, 1 g, 1 litre
   ...Object.fromEntries(MEASURE_TYPES.map((type, measure) => [type, new Quantity(1, UNITS.findIndex((u) => u[2] === measure && u[3] === 1))])) };
+// a sample of a type of its own, as a rule can change the one it's given (`add` puts an item in a list)
+export const sampleOf = (type) => (type === "list" ? [] : type === "record" ? makeRecord([], []) : type === "dictionary" ? new Map()
+  : type === "bytes" ? new Uint8Array(0) : SAMPLES[type]);
 // the type of what an operation on samples gave: a number, text, or an amount of some measure
 const resultType = (v) => (typeof v === "number" ? "number" : typeof v === "string" ? "text" : isQuantity(v) ? MEASURE_TYPES[measureOf(v)] : null);
+// what `a op b` gives, for an op of + - * / and a and b two of SAMPLES' types: what the same operation on
+// samples gives (2 km * 3 is a distance, 2 km / 1 km a number), or null if it fails, which a check says
+export function resultTypeOf(op, a, b) {
+  if (op === "+" && (a === "text" || b === "text")) return "text";
+  try {
+    return resultType(op === "+" ? plus(SAMPLES[a], SAMPLES[b], found) : arithmetic(op, SAMPLES[a], SAMPLES[b], found));
+  } catch (error) {
+    if (error instanceof Found) return null;
+    throw error;
+  }
+}
 // what an amount of the unit `word` (written out, as `5 km` and `in miles` have it) measures
 const unitType = (word) => MEASURE_TYPES[UNITS[unitNamed(word)][2]];
 // what an input that says what it is (`as a number`) holds, by its number in vm.js's KINDS
@@ -74,6 +88,78 @@ const found = (message) => {
   throw new Found(message);
 };
 
+// ---------- the rules (DESIGN §103) ----------
+// Each check the checker makes of values, as a rule: given what's fixed at its spot (an operator, a name, a
+// unit) and a value for each operand, it throws Found with the message running would stop with, or doesn't.
+// The checker runs each on a value of the type it worked out for each operand (SAMPLES', or the value itself
+// where it's written out); make-checker-rules.mjs runs each on every type, for moth check.
+const typeOfValue = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "yes/no" : typeof v === "string" ? "text" : typeof v === "number" ? "number"
+  : Array.isArray(v) ? "list" : isRecord(v) ? "record" : isDictionary(v) ? "dictionary" : isBytes(v) ? "bytes" : v instanceof Closure ? "function"
+    : MEASURE_TYPES[measureOf(v)]);
+const PICTURE = TURTLE_ACTIONS.indexOf("picture");
+export const RULES = {
+  setItem: (_, v) => Array.isArray(v) || isBytes(v) || item(v, 1, true, found),
+  add: ([name], current, value) => addInto(current, value, name, found),
+  count: (_, from, to) => checkRange(from, to, found),
+  each: (_, list) => itemsOf(list, found),
+  every: ([unit], interval) => typeof interval === "number" || everyInterval(interval, unit, found),
+  exit: (_, v) => exitCode(v, found),
+  remove: (_, target) => isDictionary(target) || removeKey("a", target, found),
+  compare: ([op], a, b) => compare(op, a, b, found),
+  write: (_, name) => typeof name === "string" || writeFile(null, name, null, found),
+  removeFile: (_, name) => typeof name === "string" || removeFile(name, null, found),
+  wait: ([unit], amount) => waitFor(amount, unit, fakeClock(), found),
+  setField: ([field], target) => isRecord(target) || recordFor(target, field, found),
+  note: (_, note) => soundOf(note, 1, 1000, found), // when how long isn't known: the note can still be wrong on its own
+  play: ([unit], note, time) => soundOf(note, time, unit, found),
+  picture: (_, file) => typeof file === "string" || isBytes(file) || new Turtle().act(PICTURE, [file, 0, 0, null, null], found),
+  turtle: ([action], value) => new Turtle().act(action, value, found),
+  math: ([op], a, b) => (op !== "+" ? arithmetic(op, a, b, found) : (typeof a === "number" && typeof b === "number") || plus(a, b, found)),
+  negate: (_, v) => negate(v, found),
+  field: ([field], record) => isRecord(record) || fieldOf(record, field, found),
+  length: (_, v) => lengthOf(v, found),
+  random: (_, low, high) => (typeof low === "number" && typeof high === "number") || randomWhole(low, high, Math.random, found),
+  read: ([bytes], name) => typeof name === "string" || readFile(name, bytes, null, found),
+  readFolder: (_, name) => typeof name === "string" || readFolder(name, null, found),
+  builtin: ([name], ...args) => { // only an input known to be the wrong kind is certain to fail; what the values are is left to run time
+    const builtin = BUILTINS.find((b) => b.name === name);
+    if (args.some((v, i) => !builtin.needs[i].includes(typeOfValue(v)))) builtin.run(args, found);
+  },
+  item: (_, v) => Array.isArray(v) || isBytes(v) || typeof v === "string" || isDictionary(v) || item(v, 1, false, found),
+};
+// What a rule takes in place of SAMPLES' value, where one would fail: a note, and how long it plays.
+export const FINE = { note: [{ text: "C", number: 440 }], play: [{ text: "C", number: 440 }, { number: 1 }] };
+// Other values of the types a program can write out, to try in place of SAMPLES' (see dependsOn).
+export const PROBES = { number: [0, -1, 2, 1.5, -0.5, 7, 20, 59, 61, 255, 256, 20000.5, 1e21], text: ["", "C", "C4", "H", "5", "km", "x y", "rest"],
+  "yes/no": [false] };
+
+// what a rule does with these values: the message it stops with, or "" if it doesn't
+export function outcome(name, args, values) {
+  try {
+    RULES[name](args, ...values);
+    return "";
+  } catch (err) {
+    if (err instanceof Found) return err.message;
+    throw err;
+  }
+}
+
+// The operands of rule `name` whose value, not just type, can change what it does: for each, whether another
+// value of its type (PROBES') than the one the rule is given for it (SAMPLES', or FINE's) does something else.
+// Where a value written out is one of those, moth check leaves the rule out, as it knows types, not values.
+export function dependsOn(name, args, types) {
+  const tried = (vs) => { // a value no program could give there (a unit's word that isn't one) does something else too
+    try {
+      return outcome(name, args, vs);
+    } catch {
+      return null;
+    }
+  };
+  const values = (i, v) => types.map((t, j) => (j === i ? v : FINE[name]?.[j]?.[t] ?? sampleOf(t)));
+  const usual = tried(values(-1));
+  return types.map((t, i) => (PROBES[t] ?? []).some((v) => tried(values(i, v)) !== usual));
+}
+
 // One function (or the program). Types are worked out for the whole program at once: a variable's type is
 // what every `set` of it agrees on.
 class Checker extends Scope {
@@ -99,7 +185,7 @@ class Checker extends Scope {
     if (def.gives && this.endsOpen) {
       this.typeCheck(def.at, () => {
         const wanted = all.gives.get(def)();
-        if (wanted !== "nothing" && !wanted?.endsWith(" or nothing")) found(`'${name}' must give ${def.gives}, but it can reach its end without giving anything`);
+        if (wanted !== "nothing" && !wanted?.startsWith("maybe:")) found(`'${name}' must give ${def.gives}, but it can reach its end without giving anything`);
       });
     }
   }
@@ -122,14 +208,18 @@ class Checker extends Scope {
     return this.all.types[this.all.mode].get(key);
   }
 
-  warn(at, kind, message) {
+  // `valued`: the problem rests on a value written out, not only on types, so moth check doesn't find it (see
+  // dependsOn); it's kept where JSON and the tests that compare don't see it
+  warn(at, kind, message, valued = false) {
     if (at.file && kind === "unused") return; // a file the program uses can make more than this program needs
-    this.all.warnings.push({ line: at.line, col: at.col, kind, message, ...(at.file && { file: at.file }) });
+    const warning = { line: at.line, col: at.col, kind, message, ...(at.file && { file: at.file }) };
+    if (valued) Object.defineProperty(warning, "valued", { value: true });
+    this.all.warnings.push(warning);
   }
 
   // Runs `test` once the types are known, first on what's sure, then on what the code says too: if it throws
   // the first time, this spot will fail whenever it runs; if only the second, it doesn't fit what the code says.
-  willFail(at, test) {
+  willFail(at, test, valued = false) {
     if (this.maybeSkipped) return;
     this.all.checks.push(() => {
       for (const mode of ["sure", "said"]) {
@@ -138,10 +228,42 @@ class Checker extends Scope {
           test();
         } catch (err) {
           if (!(err instanceof Found)) throw err;
-          return this.warn(at, mode === "sure" ? "fails" : "doesn't fit", err.message);
+          return this.warn(at, mode === "sure" ? "fails" : "doesn't fit", err.message, valued || err.valued);
         }
       }
     });
+  }
+
+  // Checks RULES[name] at `at`, with `args`, on the values of the expressions `operands`, once each one's type
+  // is known (or only those `needs` says)
+  rule(at, name, args, operands, needs = operands.map(() => true)) {
+    const types = operands.map((e) => this.type(e));
+    this.willFail(at, () => {
+      const known = types.map((t) => t());
+      if (known.every((t, i) => !needs[i] || this.known(t))) this.apply(name, args, operands, known);
+    });
+  }
+
+  // runs RULES[name] on a value for each operand: the value written out, or one of the type worked out for it
+  apply(name, args, operands, types) {
+    const written = operands.map((e) => this.written(e));
+    const values = types.map((t, i) => (written[i] !== undefined ? written[i] : FINE[name]?.[i]?.[base(t)] ?? sampleOf(base(t))));
+    try {
+      RULES[name](args, ...values);
+    } catch (err) {
+      if (!(err instanceof Found)) throw err;
+      const depends = dependsOn(name, args, types.map(base));
+      err.valued = written.some((w, i) => w !== undefined && depends[i]);
+      throw err;
+    }
+  }
+
+  // the value an expression has where it's written out: a number, text, yes, no or nothing, or a number with a
+  // `-` before it; undefined for any other
+  written(e) {
+    if (e.kind === "value") return e.value;
+    if (e.kind === "negate" && e.operand.kind === "value" && typeof e.operand.value === "number") return -e.operand.value;
+    return undefined;
   }
 
   // Runs `test` once the types are known, on what the code says too: if it throws, the code doesn't fit what
@@ -158,12 +280,15 @@ class Checker extends Scope {
     });
   }
 
-  // The type an input's `as`, or a `gives`, names, as written: "a number", "a dog", "a list of numbers",
-  // "a dog or nothing" (which says too little to check anything by but a `return`). `at` is where a kind it
-  // names that the program doesn't make is said to be wrong, once.
+  // The type an input's `as`, or a `gives`, names, as written: "a number", "a dog", "a list of numbers", or
+  // "a dog or nothing", which is "maybe:record:dog" and says too little to check anything by but a `return`.
+  // `at` is where a kind it names that the program doesn't make is said to be wrong, once.
   typeNamed(words, at) {
     if (words === "nothing") return "nothing";
-    if (words.endsWith(" or nothing")) return words; // checked only by fits()
+    if (words.endsWith(" or nothing")) {
+      const inner = this.typeNamed(words.slice(0, -11), at);
+      return inner === "nothing" ? inner : `maybe:${inner}`;
+    }
     const kind = KINDS.indexOf(words);
     if (kind >= 0) return KIND_TYPES[kind];
     if (words.startsWith("a list of ")) {
@@ -215,13 +340,7 @@ class Checker extends Scope {
           const [a, b] = [base(left()), base(right())];
           if (a === undefined || b === undefined) return undefined;
           if (e.op === "+" && (a === "text" || b === "text")) return "text";
-          if (!this.known(a, b)) return null;
-          try { // what the same operation on samples gives: 2 km * 3 is a distance, 2 km / 1 km a number
-            return resultType(e.op === "+" ? plus(SAMPLES[a], SAMPLES[b], found) : arithmetic(e.op, SAMPLES[a], SAMPLES[b], found));
-          } catch (error) {
-            if (error instanceof Found) return null; // it fails, which the check says
-            throw error;
-          }
+          return this.known(a, b) ? resultTypeOf(e.op, a, b) : null;
         };
       }
       case "compare":
@@ -283,7 +402,7 @@ class Checker extends Scope {
       if (define.madeKind) return `record:${define.madeKind}`;
       if (this.all.mode === "said" && define.gives) {
         const said = this.all.gives.get(define)();
-        return said?.endsWith(" or nothing") ? null : said;
+        return said?.startsWith("maybe:") ? null : said;
       }
       return this.slotType(checker.returnKey);
     };
@@ -296,7 +415,7 @@ class Checker extends Scope {
     const kind = typeof of === "string" && of.startsWith("record:") && this.all.kinds.get(of.slice(7));
     if (!kind || this.all.fieldsSet.has(name)) return null;
     if (name === "kind") return "text";
-    for (let k = kind; k; k = this.all.kinds.get(this.parentKind(k))) {
+    for (let k = kind, seen = 0; k && seen < 100; k = this.all.kinds.get(this.parentKind(k)), seen++) {
       const { define } = k;
       const i = define.params.indexOf(name);
       if (i >= 0) return define.kinds[i] < 0 ? null : this.all.mode === "said" && define.types?.[i] ? this.typeNamed(define.types[i], define.at) : KIND_TYPES[define.kinds[i]];
@@ -335,7 +454,7 @@ class Checker extends Scope {
   // whether a value of type `t` is what `wanted` (a type typeNamed made) says: yes, no, or null if it can't be known
   fits(t, wanted) {
     if (t === undefined || t === null || wanted === undefined || wanted === null) return null;
-    if (wanted.endsWith(" or nothing")) return t === "nothing" ? true : this.fits(t, this.typeNamed(wanted.slice(0, -11), { line: 0, col: 0 }));
+    if (wanted.startsWith("maybe:")) return t === "nothing" ? true : this.fits(t, wanted.slice(6));
     if (base(t) !== base(wanted)) return false;
     if (wanted.startsWith("record:")) {
       if (!t.startsWith("record:")) return null; // a record that may be one
@@ -373,8 +492,7 @@ class Checker extends Scope {
         this.expr(target);
         this.expr(s.target.index);
         this.expr(s.value);
-        const type = this.type(target);
-        this.willFail(s.target.at, () => this.known(type()) && base(type()) !== "list" && type() !== "bytes" && item(SAMPLES[base(type())], 1, true, found));
+        this.rule(s.target.at, "setItem", [], [target]);
         return;
       }
       case "add": {
@@ -392,11 +510,10 @@ class Checker extends Scope {
           // an add that will fail doesn't change the type: the program stops there
           return current === undefined || v === undefined || this.known(current, v) ? undefined : null;
         });
-        this.willFail(s.at, () => {
+        this.rule(s.at, "add", [s.name], [{ kind: "name", name: s.name, at: s.at }, s.value]);
+        this.willFail(s.at, () => { // and what the code says a list holds is all it gets
           const [current, v] = [this.slotType(key), value()];
-          if (!this.known(current, v)) return;
-          addInto(SAMPLES[base(current)], this.sample(s.value), s.name, found);
-          if (holds(current) && this.fits(v, holds(current)) === false) found(`can't add ${described(v)} to ${described(current)}`);
+          if (this.known(current, v) && holds(current) && this.fits(v, holds(current)) === false) found(`can't add ${described(v)} to ${described(current)}`);
         });
         return;
       }
@@ -414,15 +531,14 @@ class Checker extends Scope {
         return;
       case "repeat":
         this.expr(s.count);
-        if (s.count.kind === "value") this.willFail(s.at, () => checkRepeat(s.count.value, found));
+        if (s.count.kind === "value") this.willFail(s.at, () => checkRepeat(s.count.value, found), true);
         this.block(s.body);
         return;
       case "count": {
         this.expr(s.from);
         this.expr(s.to);
         this.source(s.name, () => "number");
-        const [from, to] = [this.type(s.from), this.type(s.to)];
-        this.willFail(s.at, () => this.known(from(), to()) && checkRange(this.sample(s.from), this.sample(s.to), found));
+        this.rule(s.at, "count", [], [s.from, s.to]);
         this.block(s.body);
         return;
       }
@@ -431,7 +547,7 @@ class Checker extends Scope {
         const list = this.type(s.list);
         // a list's items could be anything, unless the code says what it holds
         this.source(s.name, () => (list() === undefined ? undefined : list() === "text" ? "text" : this.all.mode === "said" ? holds(list()) : null));
-        this.willFail(s.at, () => this.known(list()) && itemsOf(SAMPLES[base(list())], found));
+        this.rule(s.at, "each", [], [s.list]);
         this.block(s.body);
         return;
       }
@@ -451,8 +567,7 @@ class Checker extends Scope {
       }
       case "every": { // how often must be a number
         this.expr(s.interval);
-        const type = this.type(s.interval);
-        this.willFail(s.at, () => this.known(type()) && type() !== "number" && everyInterval(this.sample(s.interval), s.unit, found));
+        this.rule(s.at, "every", [s.unit], [s.interval]);
         new Checker(this, s.fn.name, s.fn.params, s.fn.body, this.all);
         return;
       }
@@ -480,15 +595,13 @@ class Checker extends Scope {
       case "exit": { // the number it stops with must be a whole number from 0 to 255
         if (!s.value) return;
         this.expr(s.value);
-        const type = this.type(s.value);
-        this.willFail(s.at, () => this.known(type()) && exitCode(this.sample(s.value), found));
+        this.rule(s.at, "exit", [], [s.value]);
         return;
       }
       case "remove": { // which keys a dictionary has isn't known, so only removing from something else is certain to fail
         this.expr(s.key);
         this.expr(s.target);
-        const type = this.type(s.target);
-        this.willFail(s.at, () => this.known(type()) && type() !== "dictionary" && removeKey("a", SAMPLES[base(type())], found));
+        this.rule(s.at, "remove", [], [s.target]);
         return;
       }
       case "expect": { // whether it is so is up to the values; only comparing kinds that can't be compared is certain to fail
@@ -496,27 +609,23 @@ class Checker extends Scope {
         if (c.kind !== "compare") return this.expr(c);
         this.expr(c.left);
         this.expr(c.right);
-        const [left, right] = [this.type(c.left), this.type(c.right)];
-        if (c.op !== "is") this.willFail(s.at, () => this.known(left(), right()) && compare(c.op, this.sample(c.left), this.sample(c.right), found));
+        if (c.op !== "is") this.rule(s.at, "compare", [c.op], [c.left, c.right]);
         return;
       }
       case "write": { // whether the file can be written isn't known, so only a name that isn't text is certain to fail
         this.expr(s.value);
         this.expr(s.target);
-        const type = this.type(s.target);
-        this.willFail(s.at, () => this.known(type()) && type() !== "text" && writeFile(null, SAMPLES[base(type())], null, found));
+        this.rule(s.at, "write", [], [s.target]);
         return;
       }
       case "removeFile": { // as with `write`, only a name that isn't text is certain to fail
         this.expr(s.target);
-        const type = this.type(s.target);
-        this.willFail(s.at, () => this.known(type()) && type() !== "text" && removeFile(SAMPLES[base(type())], null, found));
+        this.rule(s.at, "removeFile", [], [s.target]);
         return;
       }
       case "wait": { // how long must be a number of 0 or more
         this.expr(s.amount);
-        const type = this.type(s.amount);
-        this.willFail(s.at, () => this.known(type()) && waitFor(this.sample(s.amount), s.unit, fakeClock(), found));
+        this.rule(s.at, "wait", [s.unit], [s.amount]);
         return;
       }
       case "try": // inside it, a mistake is caught, so nothing in it is certain to stop the program
@@ -530,8 +639,7 @@ class Checker extends Scope {
         this.expr(s.target);
         this.expr(s.value);
         if (!this.def.madeKind) this.all.fieldsSet.add(s.name); // a record's field can then be anything
-        const type = this.type(s.target);
-        this.willFail(s.at, () => this.known(type()) && base(type()) !== "record" && recordFor(SAMPLES[base(type())], s.name, found));
+        this.rule(s.at, "setField", [s.name], [s.target]);
         return;
       }
       case "call":
@@ -545,15 +653,10 @@ class Checker extends Scope {
         this.expr(s.note);
         this.expr(s.time);
         const [note, time] = [this.type(s.note), this.type(s.time)];
-        // the value written out (`"H"`, `-1`), or one of the type that can't fail
-        const written = (e, type, fine) => (e.kind === "value" ? e.value
-          : e.kind === "negate" && e.operand.kind === "value" && typeof e.operand.value === "number" ? -e.operand.value
-          : Object.hasOwn(fine, type) ? fine[type] : SAMPLES[type]);
-        this.willFail(s.at, () => {
+        this.willFail(s.at, () => { // the value written out (`"H"`, `-1`), or one of the type that can't fail (FINE)
           if (!this.known(note())) return;
-          const sound = written(s.note, base(note()), { text: "C", number: 440 });
-          if (!this.known(time())) return soundOf(sound, 1, 1000, found); // the note can still be wrong on its own
-          soundOf(sound, written(s.time, base(time()), { number: 1 }), s.unit, found);
+          if (!this.known(time())) return this.apply("note", [], [s.note], [note()]);
+          this.apply("play", [s.unit], [s.note, s.time], [note(), time()]);
         });
         return;
       }
@@ -562,16 +665,12 @@ class Checker extends Scope {
         this.expr(s.value);
         const action = TURTLE_ACTIONS.indexOf(s.action);
         if (s.action === "picture") { // whether a file is a picture isn't known: only what is neither a name nor bytes is sure to fail
-          const type = this.type(s.value.items[0]);
-          this.willFail(s.at, () => this.known(type()) && type() !== "text" && type() !== "bytes" && new Turtle().act(action, [SAMPLES[base(type())], 0, 0, null, null], found));
+          this.rule(s.at, "picture", [], [s.value.items[0]]);
           return;
         }
         if (s.value.kind === "list" && s.action !== "forward") return; // `move to`, `draw ...`: what's in the list isn't known
-        const value = this.type(s.value);
         // the width check depends on the value, so it only runs when the width is written out
-        if (s.action === "width" ? s.value.kind === "value" : true) {
-          this.willFail(s.at, () => this.known(value()) && new Turtle().act(action, this.sample(s.value), found));
-        }
+        if (s.action === "width" ? s.value.kind === "value" : true) this.rule(s.at, "turtle", [action], [s.value]);
         return;
       }
     }
@@ -628,19 +727,13 @@ class Checker extends Scope {
       case "math": {
         this.expr(e.left);
         this.expr(e.right);
-        const [left, right] = [this.type(e.left), this.type(e.right)];
-        this.willFail(e.at, () => {
-          if (!this.known(left(), right())) return;
-          if (e.op !== "+") arithmetic(e.op, this.sample(e.left), this.sample(e.right), found);
-          else if (base(left()) !== "number" || base(right()) !== "number") plus(this.sample(e.left), this.sample(e.right), found);
-        });
+        this.rule(e.at, "math", [e.op], [e.left, e.right]);
         return;
       }
       case "compare": {
         this.expr(e.left);
         this.expr(e.right);
-        const [left, right] = [this.type(e.left), this.type(e.right)];
-        if (e.op !== "is") this.willFail(e.at, () => this.known(left(), right()) && compare(e.op, this.sample(e.left), this.sample(e.right), found));
+        if (e.op !== "is") this.rule(e.at, "compare", [e.op], [e.left, e.right]);
         return;
       }
       case "and":
@@ -654,8 +747,7 @@ class Checker extends Scope {
         return this.expr(e.operand);
       case "negate": {
         this.expr(e.operand);
-        const type = this.type(e.operand);
-        this.willFail(e.at, () => this.known(type()) && negate(this.sample(e.operand), found));
+        this.rule(e.at, "negate", [], [e.operand]);
         return;
       }
       case "list":
@@ -673,7 +765,7 @@ class Checker extends Scope {
         this.willFail(e.at, () => {
           const t = type();
           if (!this.known(t)) return;
-          if (base(t) !== "record") fieldOf(SAMPLES[base(t)], e.name, found);
+          if (base(t) !== "record") this.apply("field", [e.name], [e.of], [t]);
           // but a record a kind makes has the fields the kind gives it, and only those, unless something adds one
           const fields = t.startsWith("record:") && this.fieldsOf(t.slice(7));
           if (fields && !fields.includes(e.name) && !this.all.fieldsSet.has(e.name)) fieldOf(makeRecord(fields, fields), e.name, found);
@@ -682,8 +774,7 @@ class Checker extends Scope {
       }
       case "length": {
         this.expr(e.of);
-        const type = this.type(e.of);
-        this.willFail(e.at, () => this.known(type()) && lengthOf(this.sample(e.of), found));
+        this.rule(e.at, "length", [], [e.of]);
         return;
       }
       case "ask":
@@ -694,42 +785,37 @@ class Checker extends Scope {
       case "random": { // only numbers that aren't numbers at all are certain to fail
         this.expr(e.left);
         this.expr(e.right);
-        const [low, high] = [this.type(e.left), this.type(e.right)];
-        this.willFail(e.at, () => this.known(low(), high()) && (low() !== "number" || high() !== "number") && randomWhole(this.sample(e.left), this.sample(e.right), Math.random, found));
+        this.rule(e.at, "random", [], [e.left, e.right]);
         return;
       }
       case "read": { // as with `write`, only a name that isn't text is certain to fail
         this.expr(e.of);
-        const type = this.type(e.of);
-        this.willFail(e.at, () => this.known(type()) && type() !== "text" && readFile(SAMPLES[base(type())], e.bytes, null, found));
+        this.rule(e.at, "read", [e.bytes], [e.of]);
         return;
       }
       case "readFolder": { // as with `read`, only a name that isn't text is certain to fail
         this.expr(e.of);
-        const type = this.type(e.of);
-        this.willFail(e.at, () => this.known(type()) && type() !== "text" && readFolder(SAMPLES[base(type())], null, found));
+        this.rule(e.at, "readFolder", [], [e.of]);
         return;
       }
       case "builtin": { // fails when an input is known to be the wrong kind; what the values are is left to run time
         for (const arg of e.args) this.expr(arg);
-        const builtin = BUILTINS.find((b) => b.name === e.name);
-        const types = e.args.map((arg) => this.type(arg));
-        this.willFail(e.at, () => this.known(...types.map((t) => t())) && types.some((t, i) => !builtin.needs[i].includes(base(t())))
-          && builtin.run(e.args.map((arg) => this.sample(arg)), found));
+        this.rule(e.at, "builtin", [e.name], e.args);
         return;
       }
       case "item": {
         this.expr(e.of);
         this.expr(e.index);
+        // which keys a dictionary has isn't known, so only taking an item of what's none of these is certain to fail
+        this.rule(e.at, "item", [], [e.of]);
+        // and the index is only certain when it is written out; the length of the list never is
         const type = this.type(e.of);
-        this.willFail(e.at, () => {
-          const t = base(type());
-          if (!this.known(t) || t === "dictionary") return; // which keys a dictionary has isn't known
-          if (t !== "list" && t !== "text" && t !== "bytes") return item(SAMPLES[t], 1, false, found); // can't take an item of this
-          // the index is only certain when it is written out; the length of the list never is
-          const n = e.index.kind === "value" ? e.index.value : undefined;
-          if (n !== undefined && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) item(t === "text" ? "x" : ["x"], n, false, found);
-        });
+        if (e.index.kind === "value") {
+          this.willFail(e.at, () => {
+            const [t, n] = [base(type()), e.index.value];
+            if ((t === "list" || t === "text" || t === "bytes") && !(typeof n === "number" && Number.isInteger(n) && n >= 1)) item(t === "text" ? "x" : ["x"], n, false, found);
+          }, true);
+        }
         return;
       }
     }

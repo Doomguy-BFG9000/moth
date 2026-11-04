@@ -6,7 +6,7 @@ import { run, test as testMoth, format, suggestedFix, debug, timeline, check, co
 import { Machine, BEEP, Ended } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
-import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
+import { PROGRAMS, ERRORS, SAVING, TYPED, brokenPrograms } from "./cases.js";
 import { pngCases, bmpCases, brokenPictures, handmadeBroken } from "./picture-cases.js";
 
 const ENGINES = ["jit", "wasm", "vm"];
@@ -240,6 +240,52 @@ test("the checker finds mistakes without running the program", () => {
     "2:5 fails: can't take 'name' of a number",
     "4:1 never runs: this line can never run, because 'fail' comes first",
   ]);
+});
+
+// Types (DESIGN §103): what's sure "fails", and what the code says of itself, and goes against, "doesn't fit".
+test("the checker finds what goes against what the code says it is, and what kinds and returns make sure", () => {
+  assert.deepEqual(problems(TYPED[0]), [
+    "5:5 fails: 'length of' needs a list, text, dictionary or bytes, not a number", // area returns w * h, two numbers
+    "6:5 fails: 'area' needs w to be a number, not text",
+  ]);
+  assert.deepEqual(problems(TYPED[1]), [
+    "9:15 doesn't fit: this record has no 'nmae'. Did you mean 'name'?", // pet says it's a dog, which no call checks
+    "10:5 doesn't fit: 'greet' must give nothing, not a number",
+    "13:11 fails: this record has no 'nmae'. Did you mean 'name'?", // rex is surely a dog: dog made it
+    "15:16 fails: can't use '*' on text and a number", // a dog's name is text, as each call of dog checks
+    "17:1 doesn't fit: 'greet' needs pet to be a dog, not a cat",
+    "18:11 fails: there is no function called 'spek'. Did you mean 'pet'?",
+  ]);
+  assert.deepEqual(problems(TYPED[2]), [
+    "1:1 doesn't fit: 'total_of' must give a number, but it can reach its end without giving anything",
+    "4:13 doesn't fit: 'length of' needs a list, text, dictionary or bytes, not a number", // each of xs is a number, it says
+    "6:5 doesn't fit: can't add text to a list of numbers",
+  ]);
+  assert.deepEqual(problems(TYPED[3]), [
+    "1:1 doesn't fit: there is no kind called 'dgo'",
+    "1:1 doesn't fit: there is no kind called 'cats'",
+    "1:1 doesn't fit: there is no kind called 'bird'",
+    "2:5 doesn't fit: 'f' must give a bird or nothing, not a number",
+    "4:5 fails: 'f' needs x to be a record, not a number", // what each call checks of `a dgo`
+  ]);
+  // a puppy is an animal, made from one; and a field set anywhere can be on any record
+  assert.deepEqual(problems(TYPED[4]), []);
+  assert.deepEqual(problems(TYPED[5]), [
+    "9:12 fails: 'find' needs 2 inputs but got 1", // a list in a call takes what comes after it: `list of "a", "b"`
+    "15:21 doesn't fit: can't use '+' on a list and a number", // pick says it gives a list of numbers
+  ]); // and `text or nothing` says too little to check `got * 2` by
+  assert.deepEqual(problems(TYPED[6]), []); // what a function returns, where its returns say: here, nothing sure
+  assert.deepEqual(problems(TYPED[7]), [ // (a record written out may be a point, as fields can be added to it)
+    "9:9 fails: this record has no 'z'. Did you mean 'x'?",
+    "11:9 fails: 'point' needs x to be a number, not text",
+  ]);
+  // code that says nothing of itself gets nothing that doesn't fit, on every example and working program
+  for (const source of [...Object.values(examples), ...PROGRAMS.map(([s]) => s)]) assert.ok(!check(source).some((p) => p.kind === "doesn't fit"), source);
+});
+
+test("checker-rules.moth is what make-checker-rules.mjs makes of the checker's rules as they are", async () => {
+  const { checkerRules } = await import("./make-checker-rules.mjs");
+  assert.ok(readFileSync(new URL("./checker-rules.moth", import.meta.url), "utf8") === checkerRules().made, "checker-rules.moth is behind: run node make-checker-rules.mjs");
 });
 
 test("load() hands JavaScript what a program made, and fail with's value", () => {

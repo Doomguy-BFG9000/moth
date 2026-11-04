@@ -11,7 +11,7 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
-import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
+import { PROGRAMS, ERRORS, SAVING, TYPED, brokenPrograms } from "./cases.js";
 import { FAKE_NOW } from "./vm.js";
 import { pngCases, bmpCases, brokenPictures, handmadeBroken } from "./picture-cases.js";
 import { MACHINE_CASES, machinePrograms } from "./machine-programs.js";
@@ -291,8 +291,8 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
@@ -990,19 +990,19 @@ test("moth.exe tidies code to the same bytes format() does, and --check only say
   }
 });
 
-// `moth check`: the problems checker.js finds that don't need the types it works out, in its own words and
-// its own order. Every "will fail" here is a name nothing ever sets; the checker's other ones, which come
-// from trying an operation on sample values, are left out, so what it says must be what the checker says
-// once those are taken away.
-const UNDEFINED = /has no value yet|there is no function called|has nothing called/;
+// `moth check`: the problems checker.js finds, in its own words and its own order (DESIGN §103), types and
+// all: it works them out as checker.js does, and looks up what each rule does in checker-rules.moth. What it
+// leaves out are the problems checker.js marks `valued`, which rest on a value written out, not on types.
 const checkedBy = (file, source, files = {}) => { // what `moth check file` must say
-  const problems = check(source, { files: (name) => files[name] }).filter((p) => p.kind !== "fails" || UNDEFINED.test(p.message));
+  const problems = check(source, { files: (name) => files[name] }).filter((p) => !p.valued);
   if (!problems.length) return `${file}: no problems found\n`;
   return problems.map((p) => {
     const kind = p.kind === "fails" ? "will fail" : p.kind;
     return `${p.file ?? file}:${p.line}:${p.col}: ${kind}: ${p.message}\n${excerpt(p.file ? files[p.file] : source, p)}\n`;
   }).join("");
 };
+const wrongIn = (said) => (/: (will fail|doesn't fit): /.test(said) ? 1 : 0); // what moth check ends with
+
 
 test("moth.exe finds the problems the checker finds without running the program", { skip }, () => {
   const { dir, exe } = mothExe();
@@ -1020,6 +1020,8 @@ test("moth.exe finds the problems the checker finds without running the program"
     ["tests.moth", "to test_one\n    expect 1 is 1\nend\n", 0],
     ["module.moth", `use "lib.moth" as lib\nsay lib's twice(2)\nsay lib's thrice(2)\n`, 1],
     ["plain.moth", 'use "lib.moth"\nsay twice(lib_x)\nsay thrice(1)\n', 1],
+    ["sums.moth", 'set name to "Moth"\nsay name * 2\nsay 1 / 0\nsay length of 5\nrepeat "x" times\nend\nset l to list of 1\nsay item 0 of l\n', 1],
+    ...TYPED.map((source, i) => [`typed${i}.moth`, source, 1]),
   ];
   writeFileSync(join(sub, "lib.moth"), lib);
   for (const [name, source] of cases) writeFileSync(join(sub, name), source);
@@ -1028,15 +1030,18 @@ test("moth.exe finds the problems the checker finds without running the program"
     assert.equal(said.stdout, checkedBy(name, source, { "lib.moth": lib }), name);
     assert.deepEqual([said.status, said.stderr], [status, ""], name);
   }
+  // what rests on a value written out is left to the playground's checker: dividing by zero, item 0, repeat "x" times
+  assert.equal(check(cases.find(([name]) => name === "sums.moth")[1]).filter((p) => p.valued).length, 3);
   // code that can't be read at all is one problem of its own, and a file that isn't there says so
   writeFileSync(join(sub, "wrong.moth"), "say 1 +\n");
   const wrong = checking("wrong.moth");
   assert.deepEqual([wrong.status, wrong.stdout, wrong.stderr], [1, "wrong.moth:2:1: error: expected a value but found the end of the code\n\n^\n", ""]);
   const missing = checking("nowhere.moth");
   assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "", "moth: there is no file called 'nowhere.moth'\n"]);
-  // and the same words as the checker on programs broken on purpose
+  // and the same words as the checker on working programs, and on programs broken on purpose
   let checked = 0;
-  brokenPrograms(3, 40).forEach((source, i) => {
+  const programs = [...Object.values(examples), ...PROGRAMS.map(([source]) => source), ...brokenPrograms(3, 120)];
+  programs.forEach((source, i) => {
     const name = `b${i}.moth`;
     writeFileSync(join(sub, name), source);
     let want;
@@ -1049,9 +1054,10 @@ test("moth.exe finds the problems the checker finds without running the program"
     if (/: error: /.test(want)) return; // code that can't be read: its mistake, checked above
     const said = checking(name);
     assert.equal(said.stdout, want, `${name}:\n${source}`);
+    assert.equal(said.status, wrongIn(want), `${name}:\n${source}`);
     checked++;
   });
-  assert.ok(checked > 10, `only ${checked} were checked`);
+  assert.ok(checked > 100, `only ${checked} were checked`);
 });
 
 // `moth test`: every test_ function in a file, each in a run of its own, said as test() in moth.js says it.

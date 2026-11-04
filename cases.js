@@ -630,3 +630,15 @@ export function brokenPrograms(seed, count) {
   }
   return programs;
 }
+
+// programs that say what their values are, and get it wrong in each way there is
+export const TYPED = [
+  "to area with w as a number, h as a number gives a number\n    return w * h\nend\nset a to area(2, 3)\nsay length of a\nsay area(\"x\", 3)\n",
+  "kind dog with name as text, age as a number\n    to speak with me gives text\n        return me's name + \" says woof\"\n    end\nend\nkind cat with name\nend\nto greet with pet as a dog gives nothing\n    say pet's nmae\n    return 5\nend\nset rex to dog(\"Rex\", 3)\nsay rex's nmae\nsay rex's age * 2\nsay rex's name * 2\ngreet(rex)\ngreet(cat(\"Tom\"))\nsay rex's spek()\nsay rex's speak()\n",
+  "to total_of with xs as a list of numbers gives a number\n    set sum to 0\n    for each x in xs\n        add length of x to sum\n    end\n    add \"a\" to xs\nend\nsay total_of(list of 1, 2)\n",
+  "to f with x as a dgo, ys as a list of cats gives a bird or nothing\n    return 1\nend\nsay f(1, 2)\n",
+  "kind animal with name\n    to speak with me\n        return \"...\"\n    end\nend\nkind puppy with name from animal(name)\nend\nto hello with a as an animal\n    say a's name\nend\nhello(puppy(\"p\"))\nset p to puppy(\"x\")\nsay p's nme\nset p's nme to 1\n",
+  "to find with names as a list of text, wanted as text gives text or nothing\n    for each n in names\n        if n is wanted\n            return n\n        end\n    end\n    return nothing\nend\nset got to find(list of \"a\", \"b\")\nsay got * 2\nto pick with xs as a list of lists of numbers gives a list of numbers\n    return item 1 of xs\nend\nsay length of pick(list of (list of 1))\nsay pick(list of 1) + 1\n",
+  "to double with n\n    return n * 2\nend\nsay length of double(4)\nto maybe with n\n    if n is 1\n        return 5\n    end\nend\nsay length of maybe(4)\nto loop_back with n\n    return loop_back(n - 1) + 1\nend\nsay loop_back(3) * \"x\"\n",
+  "kind point with x as a number, y as a number\nend\nto far with p as a point gives yes or no\n    return p's x * p's x + p's y * p's y is greater than 100\nend\nset q to point(3, 4)\nsay far(q)\nsay far(record with x 1, y 2)\nsay q's z\nsay q's x + \"a\"\nsay far(point(\"a\", 1))\n",
+];
