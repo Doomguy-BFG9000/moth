@@ -1,6 +1,6 @@
-# Talking to other programs over a network, as Python's socket module does, on Windows and Linux: connections
-# out and in (TCP), and messages (UDP), with IPv4 addresses or names. A program `moth build` makes can use it,
-# built with --allow-libraries.
+# Talking to other programs over a network, as Python's socket and ssl modules do, on Windows and Linux:
+# connections out and in (TCP), secure ones (TLS), and messages (UDP), with IPv4 or IPv6 addresses or names. A
+# program `moth build` makes can use it, built with --allow-libraries.
 #
 #   use "sockets.moth" as net
 #   set c to net's connect("example.com", 80)
@@ -9,17 +9,27 @@
 #   say net's receive_all(c) as text
 #   net's close(c)
 #
+#   set c to net's connect_secure("example.com", 443)   # TLS, its certificate checked for that name
+#   net's secure(c, "mail.example.com")       # or a connection made secure after it began, as STARTTLS does
+#   net's trust("my-ca.pem")                  # certificates trusted besides the system's own
+#   net's secure_as_server(c, "cert.pem", "key.pem")  # a connection accept() took, as its server
+#
 #   set listener to net's listen(9000)        # this computer alone; listen_everywhere(9000) for every network
+#   set listener to net's listen_on("::", 9000)  # an address of its own: "::1", "::" for IPv6 and IPv4 both
 #   set c to net's accept(listener)           # waits for one; peer of c says who: (record with host ..., port ...)
 #   say net's receive(c, 1024) as text        # up to 1024 bytes, as soon as some come; none once it's closed
 #   net's wait_at_most(c, 5000)               # then a receive that waits longer than 5 seconds fails
 #   net's finish_sending(c)                   # no more to send: the other end's receive_all ends
+#   set waiting to net's ready(list of listener, c, d, 1000)  # those with something to take, within a second
 #
-#   set u to net's open_messages(9001)        # UDP, on a port of its own (0 for any)
+#   set u to net's open_messages(9001)        # UDP, on a port of its own (0 for any); open_messages_on("::", 9001)
 #   net's send_message(u, "127.0.0.1", 9002, "hi")
 #   set m to net's receive_message(u, 1500)   # (record with data ..., host ..., port ...)
 #
-# Each fails with a `fail with` that says why when the network does: catch it with `try`.
+# Each fails with a `fail with` that says why when the network does: catch it with `try`. Secure connections
+# use OpenSSL 3: Linux has it; on Windows its two DLLs go beside the program, libssl-3.dll and libcrypto-3.dll
+# (as Python has them in its DLLs folder) or libssl-3-x64.dll and libcrypto-3-x64.dll (as Git for Windows and
+# the Win64 OpenSSL installer have them). On Windows the certificates it trusts are the system's own.
 
 use the library "ws2_32"
     WSAStartup(a whole number, bytes) gives a whole number
@@ -34,9 +44,12 @@ use the library "ws2_32"
     "recvfrom" as win_receive_from(a pointer, bytes, a whole number, a whole number, bytes, bytes) gives a whole number
     "setsockopt" as win_option(a pointer, a whole number, a whole number, bytes, a whole number) gives a whole number
     "getsockname" as win_own_name(a pointer, bytes, bytes) gives a whole number
+    "getpeername" as win_peer_name(a pointer, bytes, bytes) gives a whole number
+    "ioctlsocket" as win_control(a pointer, a whole number, bytes) gives a whole number
     "getaddrinfo" as win_lookup(text, a pointer, bytes, bytes) gives a whole number
     "freeaddrinfo" as win_free_lookup(a pointer)
     "shutdown" as win_shutdown(a pointer, a whole number) gives a whole number
+    "WSAPoll" as win_poll(bytes, a whole number, a whole number) gives a whole number
     closesocket(a pointer) gives a whole number
 end
 use the library "c"
@@ -51,9 +64,12 @@ use the library "c"
     "recvfrom" as unix_receive_from(a whole number, bytes, a long whole number, a whole number, bytes, bytes) gives a long whole number
     "setsockopt" as unix_option(a whole number, a whole number, a whole number, bytes, a whole number) gives a whole number
     "getsockname" as unix_own_name(a whole number, bytes, bytes) gives a whole number
+    "getpeername" as unix_peer_name(a whole number, bytes, bytes) gives a whole number
+    "ioctl" as unix_control(a whole number, a long whole number, bytes) gives a whole number
     "getaddrinfo" as unix_lookup(text, a pointer, bytes, bytes) gives a whole number
     "freeaddrinfo" as unix_free_lookup(a pointer)
     "shutdown" as unix_shutdown(a whole number, a whole number) gives a whole number
+    "poll" as unix_poll(bytes, a long whole number, a whole number) gives a whole number
     "close" as unix_close(a whole number) gives a whole number
 end
 use the library "msvcrt" or "c"
@@ -61,6 +77,43 @@ use the library "msvcrt" or "c"
 end
 use the library "kernel32"
     GetTickCount() gives a whole number
+end
+use the library "libssl-3" or "libssl-3-x64" or "ssl"
+    "TLS_client_method" as tls_client_method() gives a pointer
+    "TLS_server_method" as tls_server_method() gives a pointer
+    "SSL_CTX_new" as tls_new_context(a pointer) gives a pointer
+    "SSL_CTX_free" as tls_free_context(a pointer)
+    "SSL_CTX_use_certificate_chain_file" as tls_use_chain(a pointer, text) gives a whole number
+    "SSL_CTX_use_PrivateKey_file" as tls_use_key(a pointer, text, a whole number) gives a whole number
+    "SSL_CTX_check_private_key" as tls_check_key(a pointer) gives a whole number
+    "SSL_accept" as tls_accept(a pointer) gives a whole number
+    "SSL_CTX_set_verify" as tls_set_verify(a pointer, a whole number, a pointer)
+    "SSL_CTX_set_default_verify_paths" as tls_default_places(a pointer) gives a whole number
+    "SSL_CTX_load_verify_locations" as tls_load_file(a pointer, text, a pointer) gives a whole number
+    "SSL_CTX_get_cert_store" as tls_store_of(a pointer) gives a pointer
+    "SSL_new" as tls_new(a pointer) gives a pointer
+    "SSL_set_fd" as tls_set_handle(a pointer, a whole number) gives a whole number
+    "SSL_ctrl" as tls_control(a pointer, a whole number, a long whole number, text) gives a long whole number
+    "SSL_set1_host" as tls_expect_host(a pointer, text) gives a whole number
+    "SSL_connect" as tls_connect(a pointer) gives a whole number
+    "SSL_get_verify_result" as tls_verify_result(a pointer) gives a long whole number
+    "SSL_read" as tls_read(a pointer, bytes, a whole number) gives a whole number
+    "SSL_write" as tls_write(a pointer, bytes, a whole number) gives a whole number
+    "SSL_pending" as tls_pending(a pointer) gives a whole number
+    "SSL_get_error" as tls_error(a pointer, a whole number) gives a whole number
+    "SSL_shutdown" as tls_shutdown(a pointer) gives a whole number
+    "SSL_free" as tls_free(a pointer)
+end
+use the library "libcrypto-3" or "libcrypto-3-x64" or "crypto"
+    "X509_verify_cert_error_string" as tls_why(a long whole number) gives text
+    "d2i_X509" as tls_read_certificate(a pointer, bytes, a long whole number) gives a pointer
+    "X509_STORE_add_cert" as tls_add_certificate(a pointer, a pointer) gives a whole number
+    "X509_free" as tls_free_certificate(a pointer)
+end
+use the library "crypt32"
+    "CertOpenSystemStoreW" as win_open_certificates(a pointer, wide text) gives a pointer
+    "CertEnumCertificatesInStore" as win_next_certificate(a pointer, a pointer) gives a pointer
+    "CertCloseStore" as win_close_certificates(a pointer, a whole number) gives a whole number
 end
 
 # which system it is: a library every Windows has, which no Linux has
@@ -71,6 +124,11 @@ if it fails
     set net_windows to no
 end
 set net_started to no
+set net_inet6 to 10 # AF_INET6, Linux's; Windows' is 23
+if net_windows
+    set net_inet6 to 23
+end
+set net_context to nothing # OpenSSL's, for secure connections, made with the first
 
 to net_start
     if net_windows and not net_started
@@ -81,20 +139,8 @@ end
 
 # ---------- addresses ----------
 
-# sockaddr_in: AF_INET, the port high byte first, then the 4 bytes of the address
-to net_address with host_bytes, port
-    if not (port is divisible by 1) or port is less than 0 or port is greater than 65535
-        fail with "a port is a whole number from 0 to 65535, not " + port
-    end
-    set address to 16 bytes
-    set byte 1 of address to 2
-    set byte 3 of address to (shift port right by 8) bit and 255
-    set byte 4 of address to port bit and 255
-    for each k from 1 to 4
-        set byte (4 + k) of address to item k of host_bytes
-    end
-    return address
-end
+# An address is a record with its family (4 or 6) and its raw bytes, a sockaddr, its port 0 until
+# net_with_port gives it one: 16 bytes for IPv4 (sockaddr_in), 28 for IPv6 (sockaddr_in6).
 
 # "93.184.216.34" as its 4 numbers, or nothing if it isn't one
 to net_dotted with host
@@ -121,15 +167,42 @@ to net_dotted with host
     return made
 end
 
-# a name's IPv4 address, from the system's resolver (the hosts file, then DNS): its 4 numbers
-to net_look_up with host
+# an IPv4 address of these 4 numbers
+to net_four with numbers
+    set address to 16 bytes
+    set byte 1 of address to 2
+    for each k from 1 to 4
+        set byte (4 + k) of address to item k of numbers
+    end
+    return record with family 4, raw address
+end
+
+# the address, as a copy, with this port
+to net_with_port with address, port
+    if not (port is divisible by 1) or port is less than 0 or port is greater than 65535
+        fail with "a port is a whole number from 0 to 65535, not " + port
+    end
+    set made to (length of raw of address) bytes
+    for each k from 1 to length of made
+        set byte k of made to byte k of raw of address
+    end
+    set byte 3 of made to (shift port right by 8) bit and 255
+    set byte 4 of made to port bit and 255
+    return made
+end
+
+# every address a host has, from the system's resolver (the hosts file, then DNS), IPv4 and IPv6, in the order
+# it gives them; an address written out (as "127.0.0.1" or "::1") is that one alone
+to net_addresses with host
     set dotted to net_dotted(host)
     if dotted is not nothing
-        return dotted
+        return list of net_four(dotted)
     end
     net_start()
-    set hints to 48 bytes # addrinfo: flags, family AF_INET, type SOCK_STREAM, then nothing
-    set byte 5 of hints to 2
+    set hints to 48 bytes # addrinfo: flags, family AF_UNSPEC, type SOCK_STREAM, then nothing
+    if ":" is in host
+        set byte 1 of hints to 4 # AI_NUMERICHOST: an IPv6 address, not a name
+    end
     set byte 9 of hints to 1
     set found to 8 bytes
     set failed to 0
@@ -142,20 +215,52 @@ to net_look_up with host
     if failed is not 0 or first is 0
         fail with "can't find " + host + " on the network"
     end
-    set info to 48 bytes
-    net_copy(info, first, 48)
+    set made to empty list
     set at to 25 # where ai_addr is: Linux has it before ai_canonname, Windows after
     if net_windows
         set at to 33
     end
-    set address to 16 bytes
-    net_copy(address, net_number(info, at, 8), 16)
+    set next to first
+    set info to 48 bytes
+    repeat while next is not 0
+        net_copy(info, next, 48)
+        set family to net_number(info, 5, 4)
+        set size to 0
+        if family is 2
+            set size to 16
+        else if family is net_inet6
+            set size to 28
+        end
+        if size is not 0
+            set address to size bytes
+            net_copy(address, net_number(info, at, 8), size)
+            set byte 3 of address to 0 # the port, given later
+            set byte 4 of address to 0
+            set kind to 4
+            if size is 28
+                set kind to 6
+            end
+            set known to no
+            for each other in made
+                if raw of other is address
+                    set known to yes
+                end
+            end
+            if not known
+                add (record with family kind, raw address) to made
+            end
+        end
+        set next to net_number(info, 41, 8)
+    end
     if net_windows
         win_free_lookup(first)
     else
         unix_free_lookup(first)
     end
-    return list of byte 5 of address, byte 6 of address, byte 7 of address, byte 8 of address
+    if length of made is 0
+        fail with "can't find " + host + " on the network"
+    end
+    return made
 end
 
 # a whole number from `count` bytes, the lowest first
@@ -169,65 +274,313 @@ to net_number with b, from, count
     return made
 end
 
-# a sockaddr_in's host and port, as a record
+# a whole number as `count` bytes, the lowest first, from byte `from` of b
+to net_put_number with b, from, count, n
+    set left to n
+    for each k from 0 to count - 1
+        set low to remainder of left divided by 256
+        set byte (from + k) of b to low
+        set left to (left - low) / 256
+    end
+end
+
+# a sockaddr's host and port, as a record: the host as "127.0.0.1" or "::1"
 to net_peer with address
+    set port to byte 3 of address * 256 + byte 4 of address
+    if net_number(address, 1, 2) is net_inet6
+        return record with host net_six_text(items 9 to 24 of address), port port
+    end
     set host to byte 5 of address + "." + byte 6 of address + "." + byte 7 of address + "." + byte 8 of address
-    return record with host host, port byte 3 of address * 256 + byte 4 of address
+    return record with host host, port port
+end
+
+# 16 bytes of an IPv6 address, written as RFC 5952 has it: small hex letters, no zeros before a group's
+# number, and the longest run of two or more 0 groups (the first, of two as long) as "::"; an IPv4 address
+# mapped into IPv6 as ::ffff:1.2.3.4
+to net_six_text with b
+    set groups to empty list
+    set zeros_first to 0 # how many groups are 0 from the start
+    for each k from 1 to 8
+        set group to byte (2 * k - 1) of b * 256 + byte (2 * k) of b
+        add group to groups
+        if group is 0 and zeros_first is k - 1
+            set zeros_first to k
+        end
+    end
+    if zeros_first is 5 and item 6 of groups is 65535
+        return "::ffff:" + byte 13 of b + "." + byte 14 of b + "." + byte 15 of b + "." + byte 16 of b
+    end
+    set best_at to 0
+    set best_length to 0
+    set run_at to 0
+    set run_length to 0
+    for each k from 1 to 8
+        if item k of groups is 0
+            if run_length is 0
+                set run_at to k
+            end
+            set run_length to run_length + 1
+            if run_length is greater than best_length
+                set best_at to run_at
+                set best_length to run_length
+            end
+        else
+            set run_length to 0
+        end
+    end
+    if best_length is less than 2
+        set best_at to 0
+    end
+    set made to ""
+    set after_colons to yes # nothing yet, or "::" just written: no ":" before the next group
+    set k to 1
+    repeat while k is at most 8
+        if k is best_at
+            set made to made + "::"
+            set after_colons to yes
+            set k to k + best_length
+        else
+            if not after_colons
+                set made to made + ":"
+            end
+            set made to made + net_hex(item k of groups)
+            set after_colons to no
+            set k to k + 1
+        end
+    end
+    return made
+end
+
+# a number in small hex letters, with no zeros before it
+to net_hex with n
+    set digits to "0123456789abcdef"
+    if n is 0
+        return "0"
+    end
+    set made to ""
+    set left to n
+    repeat while left is greater than 0
+        set low to remainder of left divided by 16
+        set made to item (low + 1) of digits + made
+        set left to (left - low) / 16
+    end
+    return made
+end
+
+# whether a host is an address written out, not a name
+to net_is_address with host
+    return net_dotted(host) is not nothing or ":" is in host
 end
 
 # ---------- connections ----------
 
-to net_socket with kind
+# a socket for this kind (1 a connection, 2 messages) of this family (4 or 6)
+to net_socket with kind, family
     net_start()
-    if net_windows
-        return win_socket(2, kind, 0)
+    set af to 2
+    if family is 6
+        set af to net_inet6
     end
-    set made to unix_socket(2, kind, 0)
+    if net_windows
+        set made to win_socket(af, kind, 0)
+        if made is nothing or made is 18446744073709551615
+            fail with "the system wouldn't make a socket"
+        end
+        return made
+    end
+    set made to unix_socket(af, kind, 0)
     if made is less than 0
         fail with "the system wouldn't make a socket"
     end
     return made
 end
 
+# A connection to a host, by its name or address. A host with more than one address, as "localhost" has
+# (::1 and 127.0.0.1), is tried as RFC 8305 has it: the first address, then the next every quarter of a
+# second while those before it are still trying, the first to connect kept. So an address that doesn't
+# answer, or an IPv6 one that can't be reached, costs a quarter of a second, not the time it takes to give up.
 to connect with host, port
-    set address to net_address(net_look_up(host), port)
-    set handle to net_socket(1)
-    set failed to 0
-    if net_windows
-        set failed to win_connect(handle, address, 16)
-    else
-        set failed to unix_connect(handle, address, 16)
-    end
-    if failed is not 0
+    set addresses to net_addresses(host)
+    if length of addresses is 1
+        set address to item 1 of addresses
+        set target to net_with_port(address, port)
+        set handle to net_socket(1, family of address)
+        set failed to 0
+        if net_windows
+            set failed to win_connect(handle, target, length of target)
+        else
+            set failed to unix_connect(handle, target, length of target)
+        end
+        if failed is 0
+            return record with handle handle, peer net_peer(target), family family of address, session nothing
+        end
         net_close_handle(handle)
-        fail with "can't connect to " + host + " port " + port + ": nothing answered there"
+    else
+        set made to net_race(addresses, port)
+        if made is not nothing
+            return made
+        end
     end
-    return record with handle handle, peer net_peer(address)
+    fail with "can't connect to " + host + " port " + port + ": nothing answered there"
+end
+
+# each address tried in turn, a quarter of a second apart, without waiting for those before to give up: the
+# first connected, or nothing if none would in 30 seconds
+to net_race with addresses, port
+    set trying to empty list # (record with handle, target, family), each connecting
+    set next to 1
+    set began to the clock
+    repeat while the clock - began is less than 30
+        if next is at most length of addresses
+            set address to item next of addresses
+            set next to next + 1
+            set target to net_with_port(address, port)
+            set handle to net_socket(1, family of address)
+            net_blocking(handle, no)
+            if net_windows
+                win_connect(handle, target, length of target)
+            else
+                unix_connect(handle, target, length of target)
+            end
+            add (record with handle handle, target target, family family of address) to trying
+        else if length of trying is 0
+            return nothing
+        end
+        set wait to 250
+        if next is greater than length of addresses # the last begun: as long as it takes
+            set wait to 1000
+        end
+        set done to net_writable(trying, wait)
+        set still to empty list
+        set won to nothing
+        for each t in trying
+            if won is nothing and t is in done and net_connected(handle of t)
+                set won to t
+            else if t is in done
+                net_close_handle(handle of t) # it failed
+            else
+                add t to still
+            end
+        end
+        if won is not nothing
+            for each t in still
+                net_close_handle(handle of t)
+            end
+            net_blocking(handle of won, yes)
+            return record with handle handle of won, peer net_peer(target of won), family family of won, session nothing
+        end
+        set trying to still
+    end
+    for each t in trying
+        net_close_handle(handle of t)
+    end
+    return nothing
+end
+
+# whether a socket waits for what it's asked to do (yes), or says at once that it would have to (no)
+to net_blocking with handle, waits
+    set value to 4 bytes # an int: 1 for not waiting
+    if not waits
+        set byte 1 of value to 1
+    end
+    if net_windows
+        win_control(handle, 2147772030, value) # FIONBIO
+    else
+        unix_control(handle, 21537, value) # FIONBIO
+    end
+end
+
+# those of these connecting sockets whose connecting is done, either way, within this many milliseconds
+to net_writable with trying, milliseconds
+    set size to 8
+    set wanted to 4 # POLLOUT
+    set what_came to 7
+    if net_windows
+        set size to 16
+        set wanted to 16 # POLLWRNORM
+        set what_came to 11
+    end
+    set n to length of trying
+    set table to (n * size) bytes
+    for each k from 1 to n
+        set t to item k of trying
+        set at to (k - 1) * size + 1
+        if net_windows
+            net_put_number(table, at, 8, handle of t)
+            net_put_number(table, at + 8, 2, wanted)
+        else
+            net_put_number(table, at, 4, handle of t)
+            net_put_number(table, at + 4, 2, wanted)
+        end
+    end
+    if net_windows
+        win_poll(table, n, milliseconds)
+    else
+        unix_poll(table, n, milliseconds)
+    end
+    set made to empty list
+    for each k from 1 to n
+        if net_number(table, (k - 1) * size + what_came, 2) is not 0
+            add item k of trying to made
+        end
+    end
+    return made
+end
+
+# whether a socket is connected: it has another end
+to net_connected with handle
+    set address to 128 bytes
+    set size to 4 bytes
+    set byte 1 of size to 128
+    if net_windows
+        return win_peer_name(handle, address, size) is 0
+    end
+    return unix_peer_name(handle, address, size) is 0
+end
+
+# a secure connection: connect(), then secure()
+to connect_secure with host, port
+    set c to connect(host, port)
+    try
+        secure(c, host)
+    if it fails with why
+        close(c)
+        fail with why
+    end
+    return c
 end
 
 to listen with port
-    return net_listener(list of 127, 0, 0, 1, port)
+    return net_listener(net_four(list of 127, 0, 0, 1), port, "127.0.0.1")
 end
 
 to listen_everywhere with port
-    return net_listener(list of 0, 0, 0, 0, port)
+    return net_listener(net_four(list of 0, 0, 0, 0), port, "0.0.0.0")
 end
 
-# host's 4 numbers, then the port
-to net_listener with at
-    set address to net_address(items 1 to 4 of at, item 5 of at)
-    set handle to net_socket(1)
+# a listener on an address of this computer's: "::1" (IPv6's own), "::" (every network, IPv6 and IPv4), or
+# any other address or name it has
+to listen_on with host, port
+    return net_listener(item 1 of net_addresses(host), port, host)
+end
+
+to net_listener with address, port, host
+    set handle to net_socket(1, family of address)
     net_reuse(handle)
-    if net_bind(handle, address) is not 0
+    if family of address is 6
+        net_both(handle)
+    end
+    set target to net_with_port(address, port)
+    if net_bind(handle, target) is not 0
         net_close_handle(handle)
-        fail with "can't listen on port " + item 5 of at + ": something else is using it"
+        fail with "can't listen on " + host + " port " + port + ": something else is using it, or it isn't this computer's"
     end
     if net_windows
         win_listen(handle, 64)
     else
         unix_listen(handle, 64)
     end
-    return record with handle handle, peer net_own(handle)
+    return record with handle handle, peer net_own(handle), family family of address, session nothing
 end
 
 # SO_REUSEADDR, on Linux: a port just used can be used again at once (on Windows it would let two share one)
@@ -239,18 +592,28 @@ to net_reuse with handle
     end
 end
 
+# IPV6_V6ONLY off: an IPv6 socket on "::" takes IPv4 too, as Linux has it already and Windows doesn't
+to net_both with handle
+    set zero to 4 bytes
+    if net_windows
+        win_option(handle, 41, 27, zero, 4)
+    else
+        unix_option(handle, 41, 26, zero, 4)
+    end
+end
+
 to net_bind with handle, address
     if net_windows
-        return win_bind(handle, address, 16)
+        return win_bind(handle, address, length of address)
     end
-    return unix_bind(handle, address, 16)
+    return unix_bind(handle, address, length of address)
 end
 
 # where a socket is: its own host and port, which the system picked if it was given 0
 to net_own with handle
-    set address to 16 bytes
+    set address to 128 bytes
     set size to 4 bytes
-    set byte 1 of size to 16
+    set byte 1 of size to 128
     if net_windows
         win_own_name(handle, address, size)
     else
@@ -265,19 +628,22 @@ to port_of with s
 end
 
 to accept with listener
-    set address to 16 bytes
+    set address to 128 bytes
     set size to 4 bytes
-    set byte 1 of size to 16
+    set byte 1 of size to 128
     set handle to nothing
     if net_windows
         set handle to win_accept(handle of listener, address, size)
+        if handle is 18446744073709551615
+            fail with "can't take a connection: the listener is closed"
+        end
     else
         set handle to unix_accept(handle of listener, address, size)
         if handle is less than 0
             fail with "can't take a connection: the listener is closed"
         end
     end
-    return record with handle handle, peer net_peer(address)
+    return record with handle handle, peer net_peer(address), family family of listener, session nothing
 end
 
 # what text or bytes there are, all of it
@@ -290,7 +656,9 @@ to send with connection, data
             set piece to items at to (length of block) of block
         end
         set sent to 0
-        if net_windows
+        if session of connection is not nothing
+            set sent to tls_write(session of connection, piece, length of piece)
+        else if net_windows
             set sent to win_send(handle of connection, piece, length of piece, 0)
         else
             set sent to unix_send(handle of connection, piece, length of piece, 16384) # MSG_NOSIGNAL: a mistake, not the end
@@ -306,7 +674,16 @@ end
 to receive with connection, most
     set room to most bytes
     set got to 0
-    if net_windows
+    if session of connection is not nothing
+        set got to tls_read(session of connection, room, most)
+        if got is less than 1
+            set why to tls_error(session of connection, got)
+            if why is 6 or (why is 5 and got is 0) # closed, with TLS's last word or without
+                return 0 bytes
+            end
+            fail with "can't receive: the connection broke, or nothing came in time"
+        end
+    else if net_windows
         set got to win_recv(handle of connection, room, most, 0)
     else
         set got to unix_recv(handle of connection, room, most, 0)
@@ -360,29 +737,22 @@ end
 to wait_at_most with connection, milliseconds
     if net_windows
         set value to 4 bytes # a DWORD of milliseconds
-        set left to milliseconds
-        for each k from 1 to 4
-            set byte k of value to left bit and 255
-            set left to shift left right by 8
-        end
+        net_put_number(value, 1, 4, milliseconds)
         win_option(handle of connection, 65535, 4102, value, 4) # SOL_SOCKET, SO_RCVTIMEO
     else
         set value to 16 bytes # a timeval: seconds, then microseconds
         set whole to remainder of milliseconds divided by 1000
-        set seconds to (milliseconds - whole) / 1000
-        set micros to whole * 1000
-        for each k from 1 to 8
-            set byte k of value to seconds bit and 255
-            set seconds to shift seconds right by 8
-            set byte (8 + k) of value to micros bit and 255
-            set micros to shift micros right by 8
-        end
+        net_put_number(value, 1, 8, (milliseconds - whole) / 1000)
+        net_put_number(value, 9, 8, whole * 1000)
         unix_option(handle of connection, 1, 20, value, 16)
     end
 end
 
 # says there's no more to send, so the other end's receive_all ends, while this end can still receive
 to finish_sending with connection
+    if session of connection is not nothing
+        tls_shutdown(session of connection) # TLS's last word
+    end
     if net_windows
         win_shutdown(handle of connection, 1) # SD_SEND
     else
@@ -391,6 +761,11 @@ to finish_sending with connection
 end
 
 to close with connection
+    if session of connection is not nothing
+        tls_shutdown(session of connection)
+        tls_free(session of connection)
+        set session of connection to nothing
+    end
     net_close_handle(handle of connection)
 end
 
@@ -402,27 +777,230 @@ to net_close_handle with handle
     end
 end
 
+# ---------- many at once ----------
+
+# Those of these listeners, connections and sockets for messages that have something to take now: a connection
+# waiting to be accepted, bytes or a message to receive, or an end (a receive that gives no bytes, or fails).
+# It waits for one up to this many milliseconds (0 not at all; nothing for as long as it takes), and gives
+# them in the order they were given, none if the time ran out.
+to ready with sockets, milliseconds
+    set waiting to -1
+    if milliseconds is not nothing
+        set waiting to milliseconds rounded down
+    end
+    set made to empty list
+    for each s in sockets # bytes a secure connection has already read
+        if session of s is not nothing and tls_pending(session of s) is greater than 0
+            add s to made
+        end
+    end
+    if length of made is greater than 0
+        return made
+    end
+    set n to length of sockets
+    if n is 0
+        return made
+    end
+    set size to 8 # pollfd: Linux's an int, the events and what came; Windows' the SOCKET, 8 bytes
+    set wanted to 1 # POLLIN
+    if net_windows
+        set size to 16
+        set wanted to 256 # POLLRDNORM
+    end
+    set table to (n * size) bytes
+    for each k from 1 to n
+        set at to (k - 1) * size + 1
+        set s to item k of sockets
+        if net_windows
+            net_put_number(table, at, 8, handle of s)
+            net_put_number(table, at + 8, 2, wanted)
+        else
+            net_put_number(table, at, 4, handle of s)
+            net_put_number(table, at + 4, 2, wanted)
+        end
+    end
+    set got to 0
+    if net_windows
+        set got to win_poll(table, n, waiting)
+    else
+        set got to unix_poll(table, n, waiting)
+    end
+    if got is less than 0
+        fail with "can't wait for these: one isn't open"
+    end
+    set what_came to 7 # revents: after Linux's fd and events, and Windows' SOCKET and events
+    if net_windows
+        set what_came to 11
+    end
+    for each k from 1 to n
+        if net_number(table, (k - 1) * size + what_came, 2) is not 0
+            add item k of sockets to made
+        end
+    end
+    return made
+end
+
+# ---------- secure connections ----------
+
+# a file of certificates (PEM) to trust besides the system's own, for the secure connections made after
+to trust with file
+    if tls_load_file(net_secure_context(), file, nothing) is not 1
+        fail with "can't trust the certificates in " + file + ": it isn't there, or isn't PEM"
+    end
+end
+
+# OpenSSL's context for secure connections, made once: certificates checked against the system's own, and trust()'s
+to net_secure_context
+    if net_context is not nothing
+        return net_context
+    end
+    set made to nothing
+    try
+        set made to tls_new_context(tls_client_method())
+    if it fails
+        fail with "secure connections need OpenSSL 3, and it isn't here: on Windows, put libssl-3.dll and libcrypto-3.dll beside the program"
+    end
+    tls_set_verify(made, 1, nothing) # SSL_VERIFY_PEER
+    if net_windows
+        net_windows_roots(made)
+    else
+        tls_default_places(made)
+    end
+    set net_context to made
+    return made
+end
+
+# the certificates Windows trusts, from its ROOT store, given to OpenSSL's
+to net_windows_roots with context
+    set store to tls_store_of(context)
+    set roots to win_open_certificates(nothing, "ROOT")
+    if roots is nothing # (a C pointer of 0 is nothing)
+        return nothing
+    end
+    set one to win_next_certificate(roots, nothing)
+    set fields to 24 bytes # CERT_CONTEXT: how it's encoded, the bytes, how many
+    set at to 8 bytes
+    repeat while one is not nothing
+        net_copy(fields, one, 24)
+        net_put_number(at, 1, 8, net_number(fields, 9, 8))
+        set decoded to tls_read_certificate(nothing, at, net_number(fields, 17, 4))
+        if decoded is not nothing
+            tls_add_certificate(store, decoded)
+            tls_free_certificate(decoded)
+        end
+        set one to win_next_certificate(roots, one)
+    end
+    win_close_certificates(roots, 0)
+end
+
+# makes a connection secure: TLS over it, the other end's certificate checked against those trusted, and for
+# this host's name (or address); what's sent and received after that is secure
+to secure with connection, host
+    if session of connection is not nothing
+        fail with "this connection is secure already"
+    end
+    set session to tls_new(net_secure_context())
+    tls_set_handle(session, handle of connection)
+    if not net_is_address(host)
+        tls_control(session, 55, 0, host) # SSL_CTRL_SET_TLSEXT_HOSTNAME: the name it asked for, for a server with many
+    end
+    tls_expect_host(session, host)
+    if tls_connect(session) is not 1
+        set checked to tls_verify_result(session)
+        tls_free(session)
+        if checked is not 0
+            fail with "can't connect securely to " + host + ": " + tls_why(checked)
+        end
+        fail with "can't connect securely to " + host + ": it didn't agree on TLS"
+    end
+    set session of connection to session
+    return connection
+end
+
+# makes a connection accept() took secure, as its server: TLS over it, with this certificate (and the chain
+# after it) and its key, each in a PEM file
+to secure_as_server with connection, certificate, key
+    if session of connection is not nothing
+        fail with "this connection is secure already"
+    end
+    set context to nothing
+    try
+        set context to tls_new_context(tls_server_method())
+    if it fails
+        fail with "secure connections need OpenSSL 3, and it isn't here: on Windows, put libssl-3.dll and libcrypto-3.dll beside the program"
+    end
+    if tls_use_chain(context, certificate) is not 1
+        tls_free_context(context)
+        fail with "can't use the certificate in " + certificate + ": it isn't there, or isn't one in PEM"
+    end
+    if tls_use_key(context, key, 1) is not 1 or tls_check_key(context) is not 1
+        tls_free_context(context)
+        fail with "can't use the key in " + key + ": it isn't there, isn't one in PEM, or isn't the certificate's"
+    end
+    set session to tls_new(context)
+    tls_free_context(context) # the session keeps it as long as it needs it
+    tls_set_handle(session, handle of connection)
+    if tls_accept(session) is not 1
+        tls_free(session)
+        fail with "can't make this connection secure: the other end didn't agree on TLS"
+    end
+    set session of connection to session
+    return connection
+end
+
 # ---------- messages ----------
 
-# a socket for UDP messages, on this port of every network (0 for any the system picks)
+# a socket for UDP messages, on this port of every network (0 for any the system picks), IPv4
 to open_messages with port
-    set handle to net_socket(2)
+    return net_messages(net_four(list of 0, 0, 0, 0), port, "0.0.0.0")
+end
+
+# a socket for UDP messages on an address of its own, as "::" for IPv6 and IPv4 both
+to open_messages_on with host, port
+    return net_messages(item 1 of net_addresses(host), port, host)
+end
+
+to net_messages with address, port, host
+    set handle to net_socket(2, family of address)
     net_reuse(handle)
-    if net_bind(handle, net_address((list of 0, 0, 0, 0), port)) is not 0
-        net_close_handle(handle)
-        fail with "can't use port " + port + " for messages: something else is using it"
+    if family of address is 6
+        net_both(handle)
     end
-    return record with handle handle, peer net_own(handle)
+    if net_bind(handle, net_with_port(address, port)) is not 0
+        net_close_handle(handle)
+        fail with "can't use " + host + " port " + port + " for messages: something else is using it"
+    end
+    return record with handle handle, peer net_own(handle), family family of address, session nothing
 end
 
 to send_message with s, host, port, data
     set block to data as bytes
-    set address to net_address(net_look_up(host), port)
+    set chosen to nothing
+    for each address in net_addresses(host) # one of the socket's own family, or IPv4 mapped into IPv6
+        if chosen is nothing and family of address is family of s
+            set chosen to net_with_port(address, port)
+        end
+    end
+    if chosen is nothing and family of s is 6
+        set four to net_addresses(host)
+        set chosen to 28 bytes
+        net_put_number(chosen, 1, 2, net_inet6)
+        set byte 3 of chosen to (shift port right by 8) bit and 255
+        set byte 4 of chosen to port bit and 255
+        set byte 19 of chosen to 255
+        set byte 20 of chosen to 255
+        for each k from 1 to 4
+            set byte (20 + k) of chosen to byte (4 + k) of raw of item 1 of four
+        end
+    end
+    if chosen is nothing
+        fail with "can't send a message to " + host + " from an IPv4 socket: it has only IPv6 addresses"
+    end
     set sent to 0
     if net_windows
-        set sent to win_send_to(handle of s, block, length of block, 0, address, 16)
+        set sent to win_send_to(handle of s, block, length of block, 0, chosen, length of chosen)
     else
-        set sent to unix_send_to(handle of s, block, length of block, 0, address, 16)
+        set sent to unix_send_to(handle of s, block, length of block, 0, chosen, length of chosen)
     end
     if sent is not length of block
         fail with "can't send a message to " + host + " port " + port
@@ -432,9 +1010,9 @@ end
 # the next message, of up to `most` bytes: its data, and the host and port it came from
 to receive_message with s, most
     set room to most bytes
-    set address to 16 bytes
+    set address to 128 bytes
     set size to 4 bytes
-    set byte 1 of size to 16
+    set byte 1 of size to 128
     set got to 0
     if net_windows
         set got to win_receive_from(handle of s, room, most, 0, address, size)

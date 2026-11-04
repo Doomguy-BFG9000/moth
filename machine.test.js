@@ -7,7 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import https from "node:https";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
@@ -1603,6 +1603,89 @@ net's close(wide)`);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\n127.0.0.1\nhello moth\nsecond line\nlast, without an end\nnothing\nHELLO BACK é\nping é\n127.0.0.1\nyes\ncan't receive a message: nothing came in time, or it was bigger than 100 bytes\ncan't connect to 127.0.0.1 port 1: nothing answered there\ncan't find no-such-host.invalid on the network\na port is a whole number from 0 to 65535, not 70000\n300000\nyes\n", "", 0]);
 });
 
+// tools/sockets.moth over IPv6: a listener on ::1 and a connection to it, one on :: that takes IPv4 too, and
+// ready(): nothing yet, a connection waiting on the second of two listeners, bytes to receive, and an end; and a
+// name with two addresses, the one that answers found soon
+const HAS_IPV6 = Object.values(networkInterfaces()).flat().some((i) => i.address === "::1");
+test("tools/sockets.moth listens and connects over IPv6, and says which of many have something", { skip: skip || (!HAS_IPV6 && "this computer has no ::1") }, () => {
+  const ran = libraryRun(String.raw`use "sockets.moth" as net
+
+# IPv6, this computer's own address
+set six to net's listen_on("::1", 0)
+say host of peer of six
+to six_client with port
+    set mine to net's connect("::1", port)
+    net's send(mine, "over six")
+    net's finish_sending(mine)
+    set back to net's receive_all(mine) as text
+    net's close(mine)
+    return back
+end
+set job to start six_client(net's port_of(six))
+set c to net's accept(six)
+say host of peer of c
+say net's receive_all(c) as text
+net's send(c, "six back")
+net's close(c)
+say wait for job
+net's close(six)
+
+# "::": IPv6 and IPv4 both
+set both to net's listen_on("::", 0)
+to four_client with port
+    set mine to net's connect("127.0.0.1", port)
+    net's send(mine, "four")
+    net's close(mine)
+    return "sent"
+end
+set job to start four_client(net's port_of(both))
+set c to net's accept(both)
+say host of peer of c
+say net's receive_all(c) as text
+net's close(c)
+say wait for job
+net's close(both)
+
+# many at once
+set l1 to net's listen(0)
+set l2 to net's listen(0)
+say length of net's ready((list of l1, l2), 50)
+to knock with port
+    set mine to net's connect("127.0.0.1", port)
+    net's send(mine, "knock")
+    return mine
+end
+set job to start knock(net's port_of(l2))
+set c2 to wait for job
+set got to net's ready((list of l1, l2), 5000)
+say length of got
+say net's port_of(item 1 of got) is net's port_of(l2)
+set s to net's accept(l2)
+say length of net's ready((list of s), 5000)
+say net's receive(s, 100) as text
+net's close(c2)
+say length of net's ready((list of s), 5000)
+say length of net's receive(s, 100)
+net's close(s)
+
+# a name with two addresses, ::1 first on Windows, its IPv4 one listening: the second tried a quarter of a
+# second after the first, not after the first gives up
+to timed_client with port
+    set began to the clock
+    set mine to net's connect("localhost", port)
+    set took to the clock - began
+    net's close(mine)
+    return took
+end
+set l3 to net's listen(0)
+set job to start timed_client(net's port_of(l3))
+set s to net's accept(l3)
+say host of peer of s
+say (wait for job) is less than 1.5
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["::1\n::1\nover six\nsix back\n::ffff:127.0.0.1\nfour\nsent\n0\n1\nyes\n1\nknock\n1\n0\n127.0.0.1\nyes\n", "", 0]);
+});
+
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;
 // more parts than items; none; a part that fails, which says what its copy said; and no files left behind
 test("tools/cores.moth does a list's items on every core at once, in copies of the program", { skip }, () => {
@@ -1869,6 +1952,140 @@ say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries", "--all
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// tools/sockets.moth's secure connections, with OpenSSL as server.moth's HTTPS test has it: a task of the
+// program's connects to it by name, not trusting the certificate, then trusting it, by name and by address; a
+// connection made secure after it began, as STARTTLS does, and one for the wrong name; a secure connection's
+// bytes OpenSSL has already read count as ready; and each mistake
+test("tools/sockets.moth makes connections secure, as client and server, through OpenSSL", { skip: httpsSkip }, () => {
+  for (const set of SSL_SETS) {
+    const dir = mkdtempSync(join(tmpdir(), "moth-tls-"));
+    try {
+      const made = spawnSync(OPENSSL, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem"),
+        "-days", "2", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost"], { encoding: "utf8" });
+      assert.equal(made.status, 0, made.stderr);
+      if (set) for (const n of set.names) writeFileSync(join(dir, n), readFileSync(join(set.dir, n)));
+      const exe = executable(dir, "p");
+      writeFileSync(exe, machine(String.raw`use "sockets.moth" as net
+
+# secure: not trusted yet, then trusted, by name and by address
+set tl to net's listen(0)
+to secure_client with host, port
+    try
+        set mine to net's connect_secure(host, port)
+        net's send(mine, "hello securely é")
+        set back to net's receive_line(mine)
+        net's close(mine)
+        return back
+    if it fails with why
+        return why
+    end
+end
+to serve_one with listener
+    set mine to net's accept(listener)
+    try
+        net's secure_as_server(mine, "cert.pem", "key.pem")
+        set heard to net's receive(mine, 100) as text
+        net's send(mine, uppercase of heard + "\n")
+        net's close(mine)
+        return heard
+    if it fails with why
+        net's close(mine)
+        return why
+    end
+end
+set job to start secure_client("localhost", net's port_of(tl))
+say serve_one(tl)
+say wait for job
+net's trust("cert.pem")
+for each host in list of "localhost", "127.0.0.1"
+    set job to start secure_client(host, net's port_of(tl))
+    say serve_one(tl)
+    say wait for job
+end
+
+# made secure after it began, as STARTTLS does; the wrong name
+to upgrading_client with port, name
+    set mine to net's connect("127.0.0.1", port)
+    net's send(mine, "STARTTLS\n")
+    set first to net's receive_line(mine)
+    try
+        net's secure(mine, name)
+    if it fails with why
+        net's close(mine)
+        return first + ", then " + why
+    end
+    net's send(mine, "now secret\n")
+    set back to net's receive_line(mine)
+    net's close(mine)
+    return first + ", then " + back
+end
+for each name in list of "localhost", "wrong.example"
+    set job to start upgrading_client(net's port_of(tl), name)
+    set c to net's accept(tl)
+    say net's receive_line(c)
+    net's send(c, "220 go ahead\n")
+    try
+        net's secure_as_server(c, "cert.pem", "key.pem")
+        say net's receive_line(c)
+        set ready_now to net's ready((list of c), 0)
+        net's send(c, "250 secret kept\n")
+    if it fails with why
+        say why
+    end
+    net's close(c)
+    say wait for job
+end
+net's close(tl)
+
+# a secure connection's bytes it has already read count as ready
+set tl to net's listen(0)
+to two_lines with port
+    set mine to net's connect_secure("localhost", port)
+    net's send(mine, "one\ntwo\n")
+    set reply to net's receive_line(mine)
+    net's close(mine)
+    return reply
+end
+set job to start two_lines(net's port_of(tl))
+set c to net's accept(tl)
+net's secure_as_server(c, "cert.pem", "key.pem")
+say net's receive_line(c)
+say length of net's ready((list of c), 0)
+say net's receive_line(c)
+net's send(c, "done\n")
+say wait for job
+net's close(c)
+net's close(tl)
+
+# mistakes
+try
+    net's trust("nowhere.pem")
+if it fails with why
+    say why
+end
+set tl to net's listen(0)
+try
+    net's secure_as_server(net's connect("127.0.0.1", net's port_of(tl)), "nowhere.pem", "key.pem")
+if it fails with why
+    say why
+end
+net's close(tl)
+try
+    net's listen_on("::1", 70000)
+if it fails with why
+    say why
+end
+say "done"
+`, { target, name: "p.moth", allow: ["--allow-libraries", "--allow-read"], files: { "sockets.moth": readFileSync(new URL("./tools/sockets.moth", import.meta.url), "utf8") } }));
+      if (target === "linux") chmodSync(exe, 0o755);
+      const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", timeout: 60000 });
+      assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["can't make this connection secure: the other end didn't agree on TLS\ncan't connect securely to localhost: self-signed certificate\nhello securely é\nHELLO SECURELY É\nhello securely é\nHELLO SECURELY É\nSTARTTLS\nnow secret\n220 go ahead, then 250 secret kept\nSTARTTLS\ncan't make this connection secure: the other end didn't agree on TLS\n220 go ahead, then can't connect securely to wrong.example: hostname mismatch\none\n1\ntwo\ndone\ncan't trust the certificates in nowhere.pem: it isn't there, or isn't PEM\ncan't use the certificate in nowhere.pem: it isn't there, or isn't one in PEM\na port is a whole number from 0 to 65535, not 70000\ndone\n", "", 0], set?.dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
 
 // tools/windows.moth, Windows' own controls for a program of Moth's: a window, hidden here, that drives itself
 // from a timer, sending its controls what a click or typing sends them, and pressing its menu's keys with Ctrl

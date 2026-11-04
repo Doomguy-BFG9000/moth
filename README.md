@@ -338,8 +338,8 @@ bytes and dictionaries:
   on every engine, the playground's too, and test themselves.
 - [`server.moth`](tools/server.moth) answers with HTTPS too:
   `serve_secure(443, answer, "cert.pem", "key.pem")`, through OpenSSL 3
-  (Linux's own; on Windows, an MSVC build's two DLLs beside the program,
-  such as Python's), and reads bodies sent in chunks.
+  (Linux's own; on Windows, its two DLLs beside the program, such as
+  Python's or Git's), and reads bodies sent in chunks.
 - [`cores.moth`](tools/cores.moth) does a list's items on every core at once,
   as Python's multiprocessing does: `cores's each_at_once(work, items)`, in
   copies of the program, each a process of its own, after a
@@ -348,7 +348,12 @@ bytes and dictionaries:
   `socket` does: `connect("example.com", 80)`, `listen(9000)` and `accept`,
   `send`, `receive`, `receive_line`, `receive_all`, `finish_sending`,
   `wait_at_most` a time, and UDP messages, on Windows' and Linux's own
-  sockets. With tasks, one program can talk to many at once.
+  sockets, over IPv4 and IPv6 (`listen_on("::", 9000)`). Connections can be
+  secure, as Python's `ssl` makes them: `connect_secure("example.com", 443)`
+  checks the certificate against the system's own, `secure(c, host)` makes
+  one secure after it began (STARTTLS), and `secure_as_server` is the other
+  end. `ready(sockets, ms)` says which of many have something to take, as
+  `select` does; with tasks, too, one program can talk to many at once.
 - [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`

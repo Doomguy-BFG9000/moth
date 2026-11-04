@@ -3148,7 +3148,7 @@ hold them to agreeing.
 - **With tasks.** A library's function lets the turn go while it waits
   (§62), so a task can wait in `receive` while the program goes on, and a
   server can give each connection a task of its own.
-- **Not added.** TLS for sockets: see §73 for HTTPS. IPv6, and `select`.
+- **Not added then.** TLS for sockets, IPv6, and `select`: §82 and §83.
 - **Tested.** In machine code on Windows and Linux: a task of the program's
   own connecting to it by name, lines with `\r\n` and without an end, a reply
   after `finish_sending`, a message and where it came from, waiting too long
@@ -3170,10 +3170,10 @@ hold them to agreeing.
 - **Where OpenSSL is.** Linux has libssl.so.3. Windows has none of its own:
   an MSVC build's libssl-3.dll and libcrypto-3.dll (Python's, in its DLLs
   folder) or libssl-3-x64.dll and libcrypto-3-x64.dll (the Win64 OpenSSL
-  installer's) go beside the program. Git for Windows' own, built with
-  MinGW, load but fail in a program of Moth's: its random numbers can't be
-  seeded there, and then it crashes, though the same calls work from
-  Python; that's not yet understood.
+  installer's) go beside the program, or Git for Windows' own, from its
+  mingw64 folder: those, built with MinGW, once failed in a program of
+  Moth's (no randomness to seed them, then a crash), until a library's own
+  libraries were found in System32 too (below; §81).
 - **A library beside the program** now finds what it needs from System32
   too: the second place a name is looked for was LoadLibraryExW with
   LOAD_LIBRARY_SEARCH_APPLICATION_DIR, which looks for the library's own
@@ -3394,9 +3394,74 @@ hold them to agreeing.
   task's first line one call deep after another task's isn't counted as a
   call of its own.
 - **Also.** server.moth's HTTPS test runs with Git's OpenSSL too, built
-  with MinGW, when it's there: before §73's change to where a library's own
-  libraries are looked for, it found no randomness in a Moth program
-  ("entropy source strength too weak").
+  with MinGW, when it's there. It was thought not to work in a Moth program
+  ("entropy source strength too weak", then a crash), but built again with
+  each commit's compiler, the same program fails only before §73's change
+  to where a library's own libraries are looked for: a program built before
+  it was what failed.
 - **Tested.** Through moth.exe: a mistake, then the profile up to it; an
   app driven by two keys, with its handler's two calls and lines and the
   wait; on Windows and Linux.
+
+## 82. Secure connections
+
+- **Why.** Python's `ssl` wraps a socket in TLS: HTTPS by hand, mail
+  (STARTTLS), databases, anything on the internet that isn't plain. Moth's
+  sockets (§72) were plain, and only server.moth spoke TLS (§73).
+- **What it does.** `connect_secure(host, port)` connects, then `secure`s
+  the connection; `secure(connection, host)` makes one secure after it
+  began, as STARTTLS does; `secure_as_server(connection, certificate, key)`
+  is the other end, for a connection `accept` took. After that `send`,
+  `receive` and the rest go through TLS, `finish_sending` sends TLS's last
+  word, and `close` ends it. All through OpenSSL 3 by `use the library`,
+  found where server.moth finds it.
+- **What's checked.** The other end's certificate, against those the
+  system trusts, and that it's for the host asked for, a name (also sent
+  with SNI, for a server with many) or an address (SSL_set1_host takes
+  either). Linux's are OpenSSL's default places; on Windows, OpenSSL has
+  none of its own, so the certificates in Windows' ROOT store are read with
+  crypt32 (each one's DER bytes, through d2i_X509) into OpenSSL's store.
+  `trust(file)` adds a PEM file's, as for a certificate of one's own. A
+  failure says why, as OpenSSL does: "self-signed certificate", "hostname
+  mismatch".
+- **The context** is made once, at the first secure connection (or
+  `trust`), so the system's certificates are read once.
+- **C's nothing.** A library function giving a pointer of 0 gives
+  `nothing`, not 0: the loop through Windows' certificates waited for a 0
+  that never came, and read from address 0.
+- **Tested.** In machine code, with the HTTPS test's certificate and
+  OpenSSL (on Windows, Python's and Git's): a task of the program's
+  connecting to it, not trusting the certificate, then trusting it, by name
+  and by address; a connection made secure after a line in the clear; one
+  for the wrong name; and each mistake. By hand, example.com, on Windows
+  and Linux.
+
+## 83. IPv6, many at once, and addresses raced
+
+- **Why.** Python's `socket` takes IPv6 addresses and names that have them,
+  and `select` waits on many sockets at once, so one thread can serve many.
+- **IPv6.** A name's addresses come from getaddrinfo for both families now,
+  each as the sockaddr it gave (so an address's scope comes too), and an
+  address written out, as "::1", is read by it with AI_NUMERICHOST.
+  `listen_on(host, port)` listens on any address: "::1", or "::", which
+  takes IPv4 too (IPV6_V6ONLY off, as Linux has it already and Windows
+  doesn't). A peer's IPv6 address is written as RFC 5952 has it, with an
+  IPv4 one mapped into it as `::ffff:127.0.0.1`. `open_messages_on` is UDP's.
+- **Raced.** On Windows "localhost" is ::1, then 127.0.0.1, and a refused
+  connection on ::1 takes two seconds, so connecting to a server listening
+  on 127.0.0.1 alone took two seconds longer. A host with more than one
+  address is tried as RFC 8305 has it now: each address a quarter of a
+  second after the one before, without waiting for those to give up, the
+  first connected kept and the rest closed. Each try is a socket that
+  doesn't wait (FIONBIO), polled for being writable; it's connected if it
+  has another end (getpeername), and waits again once it's kept.
+- **ready(sockets, milliseconds)** gives those of a list of listeners,
+  connections and sockets for messages that have something to take now, in
+  the order given: through WSAPoll on Windows and poll on Linux, whose
+  tables differ (an 8-byte SOCKET first on Windows). A secure connection
+  whose bytes OpenSSL has read already is ready without asking.
+- **Tested.** In machine code on Windows and Linux: a connection over ::1,
+  one in IPv4 to "::", `ready` with nothing, with a connection waiting on
+  the second of two listeners, bytes to receive, and an end; and
+  "localhost" found within a second and a half.
+
