@@ -1,0 +1,20 @@
+# Moth in Helix (DESIGN §108): put this in your languages.toml (~/.config/helix/languages.toml, or
+# %AppData%\helix\languages.toml on Windows), and queries/moth/highlights.scm in runtime/queries/moth/ beside
+# it; then `hx --grammar fetch` and `hx --grammar build` build the colours' grammar. See editors/README.md.
+
+[[language]]
+name = "moth"
+scope = "source.moth"
+file-types = ["moth"]
+roots = ["moth.packages"]
+comment-token = "#"
+indent = { tab-width = 4, unit = "    " }
+language-servers = ["moth"]
+
+[language-server.moth]
+command = "moth"
+args = ["lsp"]
+
+[[grammar]]
+name = "moth"
+source = { git = "https://github.com/samyyy2423/moth", rev = "GRAMMAR_COMMIT", subpath = "editors/tree-sitter-moth" }

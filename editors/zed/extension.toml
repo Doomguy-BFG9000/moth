@@ -1,0 +1,17 @@
+id = "moth"
+name = "Moth"
+version = "0.1.0"
+schema_version = 1
+authors = ["Samyak Pudke"]
+description = "Moth, the language that reads like plain English: colours, and moth lsp's problems, outline, definitions, hovers, completion and tidying"
+repository = "https://github.com/samyyy2423/moth"
+
+# the colours' grammar, editors/tree-sitter-moth, at a commit of Moth's that has it
+[grammars.moth]
+repository = "https://github.com/samyyy2423/moth"
+commit = "GRAMMAR_COMMIT"
+path = "editors/tree-sitter-moth"
+
+[language_servers.moth]
+name = "moth lsp"
+languages = ["Moth"]
