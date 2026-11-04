@@ -1,4 +1,4 @@
-// The VS Code extension (editors/vscode, DESIGN §61 and §104): its colours, run through a small TextMate
+// The VS Code extension (editors/vscode, DESIGN §61 and §108): its colours, run through a small TextMate
 // tokenizer; its indenting; the extension itself, against a stand-in for VS Code's API, with and without a
 // stand-in for moth lsp; and the .vsix it's packed in.
 import { test } from "node:test";
@@ -428,6 +428,53 @@ test("without moth, or with moth.languageServer off, the extension does without 
     assert.deepEqual((await seen.providers.definition.provideDefinition(document, new Position(3, 2))).range.start, new Position(0, 3));
     assert.equal(await seen.providers.hover.provideHover(document, new Position(3, 2)), null);
     assert.deepEqual(seen.messages, []); // nothing in the way: what happened is in the Moth output
+  }
+});
+
+// ---------- Neovim, Helix and Zed (DESIGN §108) ----------
+
+test("tree-sitter's grammar has VS Code's words, and Neovim's, Helix's and Zed's colours and indenting are VS Code's", () => {
+  const keyword = /^\(\?i\)\\b\(\?:(.*)\)\\b$/.exec(grammar.repository.keyword.match)[1].split("|");
+  const source = readFileSync(here("editors/tree-sitter-moth/grammar.js"), "utf8");
+  assert.deepEqual(eval(`[${/const WORDS = \[([\s\S]*?)\];/.exec(source)[1]}]`), keyword);
+  assert.deepEqual(eval(`[${/const CONSTANTS = \[([\s\S]*?)\];/.exec(source)[1]}]`), ["yes", "no", "nothing"]);
+  // and the parser made from it (src/, which `tree-sitter generate` makes) has them, in any case
+  const made = JSON.parse(readFileSync(here("editors/tree-sitter-moth/src/grammar.json"), "utf8"));
+  assert.deepEqual([made.rules.keyword.value.split("|").sort(), made.rules.keyword.flags], [[...keyword].sort(), "i"]);
+  assert.deepEqual(made.externals.map((e) => e.name), ["string_content", "_error_sentinel"]); // src/scanner.c's, in its order
+
+  // Neovim's and Zed's colours are the grammar's own; Helix's are those with its names for four of them
+  const query = readFileSync(here("editors/tree-sitter-moth/queries/highlights.scm"), "utf8");
+  assert.equal(readFileSync(here("editors/neovim/queries/moth/highlights.scm"), "utf8"), query);
+  assert.equal(readFileSync(here("editors/zed/languages/moth/highlights.scm"), "utf8"), query);
+  const after = (text) => text.slice(text.indexOf("\n\n")); // what's after the comment at the top
+  const helixNames = { "@string.escape": "@constant.character.escape", "@number": "@constant.numeric", "@function.call": "@function", "@property": "@variable.other.member" };
+  assert.equal(after(readFileSync(here("editors/helix/queries/moth/highlights.scm"), "utf8")),
+    after(query).replace(/@[a-z.]+/g, (name) => helixNames[name] ?? name));
+
+  // Zed indents by VS Code's patterns, and Neovim by the same words
+  const rules = JSON.parse(readFileSync(here("editors/vscode/language-configuration.json"), "utf8")).indentationRules;
+  const zed = readFileSync(here("editors/zed/languages/moth/config.toml"), "utf8");
+  assert.equal(JSON.parse(/^increase_indent_pattern = (".*")$/m.exec(zed)[1]), rules.increaseIndentPattern);
+  assert.equal(JSON.parse(/^decrease_indent_pattern = (".*")$/m.exec(zed)[1]), rules.decreaseIndentPattern);
+  const words = (pattern) => /\(\?:([^)]*)\)/.exec(pattern)[1];
+  const lua = readFileSync(here("editors/neovim/lua/moth.lua"), "utf8");
+  assert.equal(/local opens = vim\.regex\(\[\[\\v\\C\^\\s\*\(([^)]*)\)/.exec(lua)[1], words(rules.increaseIndentPattern));
+  assert.equal(/local closes = vim\.regex\(\[\[\\v\\C\^\\s\*\(([^)]*)\)/.exec(lua)[1], words(rules.decreaseIndentPattern));
+});
+
+// Zed and Helix build the grammar from a commit of this repository: the same one, which has the grammar as it
+// is here (where git has that commit: a shallow clone, as CI's, may not)
+const grammarCommit = /^commit = "([0-9a-f]{40})"$/m.exec(readFileSync(here("editors/zed/extension.toml"), "utf8"))?.[1];
+const hasCommit = grammarCommit && spawnSync("git", ["cat-file", "-e", `${grammarCommit}^{commit}`], { cwd: new URL(".", import.meta.url) }).status === 0;
+test("Zed and Helix build the grammar as it is here", () => {
+  assert.ok(grammarCommit, "editors/zed/extension.toml names no commit");
+  assert.match(readFileSync(here("editors/helix/languages.toml"), "utf8"), new RegExp(`rev = "${grammarCommit}", subpath = "editors/tree-sitter-moth"`));
+});
+test("the grammar at that commit is the grammar here", { skip: hasCommit ? false : "git here doesn't have the commit" }, () => {
+  for (const file of ["grammar.js", "src/scanner.c", "src/parser.c", "src/grammar.json"]) {
+    const then = spawnSync("git", ["show", `${grammarCommit}:editors/tree-sitter-moth/${file}`], { cwd: new URL(".", import.meta.url), encoding: "utf8", maxBuffer: 1 << 26 });
+    assert.ok(then.stdout === readFileSync(here(`editors/tree-sitter-moth/${file}`), "utf8"), `${file} has changed since ${grammarCommit}: commit it, and name the commit in editors/zed/extension.toml and editors/helix/languages.toml`);
   }
 });
 

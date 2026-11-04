@@ -1,0 +1,12 @@
+{
+  "name": "tree-sitter-moth",
+  "version": "1.11.0",
+  "description": "Moth, the language that reads like plain English, for tree-sitter",
+  "private": true,
+  "type": "commonjs",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samyyy2423/moth"
+  }
+}
