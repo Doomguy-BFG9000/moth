@@ -5,25 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moth · a programming language that reads like English</title>
   <meta name="description" content="Moth is a small programming language with no symbols to learn. Write programs in plain words, draw pictures and make games, right in your browser.">
+  <meta name="theme-color" content="#070a13">
   <link rel="icon" href="docs/moth.svg" type="image/svg+xml">
   <style>
     :root {
       color-scheme: dark;
-      --night: #070a13; --bg: #0b1020; --panel: #0e1427; --raised: #151d35; --border: #212a46; --line: #1a2240;
-      --text: #ece5d6; --soft: #c8c1b3; --dim: #8e96b0; --faint: #5b6482;
-      --amber: #f4b54a; --amber-hi: #ffc96b; --ember: #e8952e;
+      --night: #070a13; --bg: #0b1020; --panel: #0e1427; --raised: #151d35; --border: #212a46; --line: #1a2240; --edge: #2a3458;
+      --text: #ece5d6; --soft: #c8c1b3; --dim: #8e96b0; --faint: #6a7392;
+      --amber: #f4b54a; --amber-hi: #ffc96b; --ember: #e8952e; --bad: #ff9d8a;
+      --gold: linear-gradient(#ffc96b, #f2ac3a); --gold-lit: linear-gradient(#ffd383, #f6b54a); --ink: #1c1405;
       --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
       --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
       --accent: var(--amber);
+      /* one type scale and one spacing scale for the whole page */
+      --text-xs: 12px; --text-s: 13.5px; --text-m: 16px; --text-l: 18.5px;
+      --h3: 20px; --h2: clamp(30px, 3.4vw, 40px); --h1: clamp(42px, 6.4vw, 76px);
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 72px; --space-9: 104px;
+      --radius-s: 8px; --radius-m: 14px; --radius-l: 18px;
     }
-    html { scroll-behavior: smooth; }
-    body { margin: 0; background: var(--night); color: var(--text); font: 15px/1.6 var(--sans); }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--night); color: var(--text); font: var(--text-m)/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
     [hidden] { display: none !important; }
     a { color: inherit; }
     ::selection { background: #f4b54a40; }
     code, pre, textarea { font-feature-settings: "liga" 0, "calt" 0 !important; } /* show symbols as typed: a font shorthand would turn ligatures back on */
     :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    * { scrollbar-width: thin; scrollbar-color: #2a3458 transparent; }
+    .icon { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .skip { position: absolute; z-index: 10; top: -80px; left: var(--space-3); padding: 10px 16px; border-radius: var(--radius-s); background: var(--amber); color: var(--ink); font-weight: 600; text-decoration: none; }
+    .skip:focus { top: var(--space-3); }
 
     /* the moth, drawn once in the markup for each place it appears */
     .moth .fore { fill: url(#wing-fore); } .moth .hind { fill: url(#wing-hind); }
@@ -31,180 +43,307 @@
     .moth .feelers { fill: none; stroke: #ffe7b5; stroke-width: 1.6; stroke-linecap: round; }
 
     /* ---------- the front page ---------- */
-    .intro { position: relative; overflow: hidden; isolation: isolate; background:
-      radial-gradient(56rem 34rem at 84% -8%, #f4b54a30, transparent 62%),
-      radial-gradient(44rem 32rem at -6% 104%, #6f5cff12, transparent 60%),
-      linear-gradient(#070a13, #0a0f1e 70%, #0b1020); }
-    .intro::after { content: ""; position: absolute; inset: auto 0 0; height: 1px; background: linear-gradient(90deg, transparent, #f4b54a55, transparent); }
-    .wrap { max-width: 1140px; margin: 0 auto; padding: 0 28px; }
-    .nav { display: flex; align-items: center; gap: 26px; padding-top: 22px; padding-bottom: 22px; }
-    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; text-decoration: none; font: 600 23px/1 var(--serif); letter-spacing: 0.01em; }
-    .brand svg { width: 32px; height: 32px; filter: drop-shadow(0 0 10px #ffb84d70); }
-    .nav a:not(.brand) { color: var(--dim); text-decoration: none; font-size: 14.5px; }
-    .nav a:not(.brand):hover { color: var(--text); }
+    .front { position: relative; overflow: hidden; isolation: isolate; background:
+      radial-gradient(60rem 36rem at 86% -10%, #f4b54a2e, transparent 62%),
+      radial-gradient(48rem 36rem at -8% 46%, #6f5cff0e, transparent 60%),
+      linear-gradient(#070a13, #0a0f1e 40%, #0b1020); }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 32px; }
+    .nav { display: flex; align-items: center; gap: var(--space-1); padding-top: 20px; padding-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; text-decoration: none; font: 600 24px/1 var(--serif); letter-spacing: 0.01em; }
+    .brand svg { width: 34px; height: 34px; filter: drop-shadow(0 0 10px #ffb84d70); }
+    .nav a:not(.brand) { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px; color: var(--dim); font-size: 14.5px; text-decoration: none; transition: color 0.15s, background-color 0.15s, border-color 0.15s; }
+    .nav a:not(.brand):hover { color: var(--text); background: #ffffff0b; }
+    .nav a.outlined { margin-left: var(--space-2); border: 1px solid var(--edge); color: var(--text); }
+    .nav a.outlined:hover { border-color: #f4b54a88; background: #f4b54a12; }
+    .nav .icon { width: 16px; height: 16px; fill: currentColor; stroke: none; }
 
     /* a lamp in the corner, and a moth that can't stay away from it */
-    .lamp { position: absolute; z-index: -1; top: 86px; right: 9%; width: 12px; height: 12px; border-radius: 50%; background: #fff4d6;
-      box-shadow: 0 0 24px 10px #ffd58a, 0 0 110px 54px #f4b54a3d, 0 0 320px 170px #f4b54a14; }
-    .flyer { position: absolute; z-index: -1; top: 64px; right: calc(9% + 54px); width: 46px; height: 46px; animation: drift 11s ease-in-out infinite; filter: drop-shadow(0 0 12px #ffb84d66); }
+    .lamp { position: absolute; z-index: -1; top: 92px; right: 9%; width: 12px; height: 12px; border-radius: 50%; background: #fff4d6;
+      box-shadow: 0 0 24px 10px #ffd58a, 0 0 110px 54px #f4b54a3d, 0 0 320px 170px #f4b54a14; animation: glow 5s ease-in-out infinite alternate; }
+    .flyer { position: absolute; z-index: -1; top: 70px; right: calc(9% + 54px); width: 46px; height: 46px; animation: drift 11s ease-in-out infinite; filter: drop-shadow(0 0 12px #ffb84d66); }
     .flyer .wings { transform-box: view-box; transform-origin: 32px 30px; animation: flap 0.19s ease-in-out infinite alternate; }
     @keyframes flap { to { transform: scaleX(0.42); } }
+    @keyframes glow { to { opacity: 0.86; } }
     @keyframes drift {
       0%, 100% { transform: translate(0, 0) rotate(-10deg); }
       22% { transform: translate(-46px, 22px) rotate(8deg); }
       48% { transform: translate(-12px, 58px) rotate(24deg); }
       74% { transform: translate(34px, 26px) rotate(-4deg); }
     }
-    @media (prefers-reduced-motion: reduce) { .flyer, .flyer .wings { animation: none; } html { scroll-behavior: auto; } }
 
-    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-top: 40px; padding-bottom: 76px; }
-    .hero h1 { margin: 0 0 22px; font: 500 clamp(42px, 6.2vw, 72px)/1.02 var(--serif); letter-spacing: -0.015em; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 64px; align-items: center; padding-top: 48px; padding-bottom: var(--space-9); }
+    .pill { display: inline-flex; align-items: center; gap: 10px; margin-bottom: var(--space-5); padding: 5px 14px 5px 5px; border: 1px solid #f4b54a3a; border-radius: 999px; background: #f4b54a0d;
+      color: var(--soft); font-size: var(--text-s); text-decoration: none; transition: border-color 0.15s, background-color 0.15s; }
+    .pill:hover { border-color: #f4b54a88; background: #f4b54a17; }
+    .pill b { padding: 3px 9px; border-radius: 999px; background: var(--gold); color: var(--ink); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .pill span { color: var(--amber); }
+    .hero h1 { margin: 0 0 var(--space-5); font: 500 var(--h1)/1.02 var(--serif); letter-spacing: -0.02em; text-wrap: balance; }
     .hero h1 em { color: var(--amber); text-shadow: 0 0 34px #ffb84d59; }
-    .lede { max-width: 33em; margin: 0 0 30px; color: var(--soft); font-size: 18.5px; line-height: 1.6; }
+    .lede { max-width: 32em; margin: 0 0 var(--space-6); color: var(--soft); font-size: var(--text-l); line-height: 1.6; text-wrap: pretty; }
     .lede code { color: var(--amber-hi); font: 0.9em var(--mono); }
-    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, background 0.15s; }
-    .btn.primary { color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); box-shadow: 0 10px 34px -10px #f4b54acc, inset 0 1px #fff1cc; }
-    .btn.primary:hover { transform: translateY(-1px); box-shadow: 0 14px 40px -10px #f4b54aee, inset 0 1px #fff1cc; }
-    .btn.ghost { color: var(--text); border: 1px solid #333d60; }
-    .btn.ghost:hover { border-color: #f4b54a88; background: #f4b54a0d; }
-    .install { margin: 22px 0 0; color: var(--faint); font: 13.5px var(--mono); }
-    .install span { color: var(--dim); }
-    .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 26px 0 0; padding: 0; list-style: none; color: var(--dim); font-size: 13.5px; }
-    .facts li::before { content: "✦ "; color: var(--amber); }
+    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+    .btn { display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 24px; border: 1px solid transparent; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none; cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, background-color 0.15s, border-color 0.15s; }
+    .btn.primary { color: var(--ink); background: var(--gold); box-shadow: 0 10px 34px -10px #f4b54acc, inset 0 1px #fff1cc; }
+    .btn.primary:hover { transform: translateY(-1px); background: var(--gold-lit); box-shadow: 0 14px 40px -10px #f4b54aee, inset 0 1px #fff1cc; }
+    .btn.ghost { color: var(--text); border-color: #333d60; background: #ffffff05; }
+    .btn.ghost:hover { border-color: #f4b54a88; background: #f4b54a0f; }
+    .install { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-5) 0 0; font-size: var(--text-s); }
+    .install code { padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-s); background: #070b17; color: var(--soft); font: 13px var(--mono); }
+    .install code span { color: var(--faint); user-select: none; }
+    .install a { color: var(--dim); text-underline-offset: 3px; text-decoration-color: #8e96b066; }
+    .install a:hover { color: var(--amber); text-decoration-color: currentColor; }
+    .facts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-6) 0 0; padding: 0; list-style: none; }
+    .facts li { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: #0d1326aa; color: var(--dim); font-size: 13px; }
+    .facts li::before { content: "✦"; margin-right: 6px; color: var(--amber); font-size: 11px; }
 
-    .card { overflow: hidden; border: 1px solid #28315280; border-radius: 16px; background: linear-gradient(#111830, #0c1225);
-      box-shadow: 0 40px 90px -40px #000, inset 0 1px #ffffff0a, 0 0 70px -24px #f4b54a3a; }
-    .card-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--faint); font: 12.5px var(--mono); }
-    .card-head i { width: 9px; height: 9px; border-radius: 50%; background: #2a3354; }
+    .card { margin: 0; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--radius-l); background: linear-gradient(#111830, #0b1123);
+      box-shadow: 0 50px 100px -50px #000, inset 0 1px #ffffff0d, 0 0 80px -28px #f4b54a44; }
+    .card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); color: var(--faint); font: 12.5px var(--mono); }
+    .card-head i { width: 10px; height: 10px; border-radius: 50%; background: #262f50; }
     .card-head i:first-child { background: #f4b54a99; }
-    .card-head button { margin-left: auto; padding: 4px 12px; border: 1px solid #f4b54a66; border-radius: 999px; color: var(--amber); background: none; font: 600 12px var(--sans); cursor: pointer; }
-    .card-head button:hover { background: #f4b54a1a; }
-    .card pre { margin: 0; padding: 18px 20px; overflow: auto; font: 14.5px/1.75 var(--mono); white-space: pre; }
-    .card .said { border-top: 1px dashed #2a3354; color: #f1e6cf; background: #090e1b; }
-    .card .said::before { content: "it says"; display: block; margin-bottom: 4px; color: var(--faint); font: 600 10.5px var(--sans); letter-spacing: 0.12em; text-transform: uppercase; }
+    .card-head span { margin-left: 6px; }
+    .card-head button { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 6px 14px; border: 0; border-radius: 999px; color: var(--ink); background: var(--gold);
+      font: 600 12.5px/1 var(--sans); cursor: pointer; box-shadow: inset 0 1px #fff1cc; transition: background-color 0.15s; }
+    .card-head button:hover { background: var(--gold-lit); }
+    .card-head button .icon { width: 11px; height: 11px; fill: currentColor; stroke: none; }
+    .card pre { margin: 0; padding: 20px 22px; overflow: auto; font: 14.5px/1.75 var(--mono); white-space: pre; }
+    .card .said { border-top: 1px dashed #2a3354; color: #f1e6cf; background: #080c19; }
+    .card .said::before { content: "it says"; display: block; margin-bottom: 4px; color: var(--faint); font: 600 10.5px var(--sans); letter-spacing: 0.14em; text-transform: uppercase; }
 
-    .section { padding-top: 26px; padding-bottom: 64px; }
-    .section h2 { margin: 0 0 6px; font: 500 34px/1.2 var(--serif); }
-    .section > p { margin: 0 0 26px; color: var(--dim); }
-    .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    .feature { padding: 22px 22px 20px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(#0f1529cc, #0b1122cc); }
-    .feature h3 { margin: 0 0 8px; font: 500 21px/1.25 var(--serif); color: var(--text); }
-    .feature h3::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 10px 3px 0; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px 2px #f4b54a88; }
-    .feature p { margin: 0; color: var(--dim); font-size: 14.5px; }
-    .feature code { color: var(--amber-hi); font: 0.92em var(--mono); white-space: nowrap; }
-    .feature pre { margin: 12px 0 0; padding: 10px 12px; overflow: auto; border-radius: 8px; background: #080c18; color: #ff9d8a; font: 12.5px/1.55 var(--mono); }
-    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 16px; }
-    .shot { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; color: inherit; background: #0b1020; font: inherit; text-align: left; cursor: pointer; transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s; }
-    .shot:hover { transform: translateY(-3px); border-color: #f4b54a88; box-shadow: 0 0 34px -12px #f4b54a77; }
-    .shot img { display: block; width: 100%; aspect-ratio: 1; box-sizing: border-box; padding: 14px; object-fit: contain; background: radial-gradient(circle at 50% 40%, #151d38, #090d19 75%); }
-    .shot b { display: block; padding: 11px 14px 0; font: 500 17px/1.2 var(--serif); }
-    .shot small { display: block; padding: 2px 14px 13px; color: var(--dim); font-size: 12.5px; }
-    .down { display: block; width: max-content; margin: 0 auto; padding-bottom: 26px; color: var(--faint); font-size: 13px; text-decoration: none; }
+    .section { padding-top: var(--space-8); padding-bottom: var(--space-8); }
+    .section-head { max-width: 40em; margin-bottom: var(--space-6); }
+    .eyebrow { margin: 0 0 var(--space-3); color: var(--amber); font: 600 var(--text-xs)/1 var(--sans); letter-spacing: 0.16em; text-transform: uppercase; }
+    .section h2 { margin: 0 0 var(--space-2); font: 500 var(--h2)/1.15 var(--serif); letter-spacing: -0.01em; }
+    .section-head p:not(.eyebrow) { margin: 0; color: var(--dim); font-size: 17px; }
+    .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .feature { padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-m); background: linear-gradient(#0f1529d9, #0b1122d9); transition: border-color 0.2s, background-color 0.2s; }
+    .feature:hover { border-color: #2e3860; }
+    .feature h3 { display: flex; align-items: center; gap: 12px; margin: 0 0 var(--space-2); font: 500 var(--h3)/1.25 var(--serif); color: var(--text); }
+    .feature h3::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px 2px #f4b54a88; }
+    .feature p { margin: 0; color: var(--dim); font-size: 15px; line-height: 1.6; }
+    .feature code { color: var(--amber-hi); font: 0.9em var(--mono); white-space: nowrap; }
+    .feature pre { margin: var(--space-3) 0 0; padding: 10px 12px; overflow: auto; border: 1px solid #ff9d8a22; border-radius: var(--radius-s); background: #080c18; color: var(--bad); font: 12.5px/1.55 var(--mono); }
+    .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .shot { display: block; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-m); color: inherit; background: #0b1020; font: inherit; text-align: left; cursor: pointer;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
+    .shot:hover { transform: translateY(-3px); border-color: #f4b54a88; box-shadow: 0 0 40px -14px #f4b54a77; }
+    .shot img { display: block; width: 100%; aspect-ratio: 16 / 10; padding: 16px; object-fit: contain; background: radial-gradient(circle at 50% 40%, #151d38, #090d19 75%); border-bottom: 1px solid var(--line); }
+    .shot b { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; font: 500 19px/1.2 var(--serif); }
+    .shot b::after { content: "Open ↗"; content: "Open ↗" / ""; color: var(--faint); font: 600 12px var(--sans); letter-spacing: 0.02em; transition: color 0.2s; }
+    .shot:hover b::after { color: var(--amber); }
+    .shot small { display: block; padding: 4px 18px 16px; color: var(--dim); font-size: 13.5px; }
+    .down { display: flex; align-items: center; gap: var(--space-4); max-width: 1096px; margin: 0 auto; padding: 0 32px var(--space-6); color: var(--faint); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; }
+    .down::before, .down::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--edge)); }
+    .down::after { background: linear-gradient(90deg, var(--edge), transparent); }
     .down:hover { color: var(--amber); }
 
-    /* ---------- the playground ---------- */
-    .playground { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; height: 100dvh; background: var(--bg); }
-    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
-    .logo { display: flex; align-items: center; gap: 10px; margin-right: 12px; }
-    .logo svg { width: 24px; height: 24px; filter: drop-shadow(0 0 6px #ffb84d66); }
-    .logo h1 { margin: 0; font: 600 19px/1 var(--serif); letter-spacing: 0.01em; }
-    .logo p { margin: 0; color: var(--faint); font-size: 12.5px; }
-    .spacer { flex: 1; }
-    #compiled { max-width: 160px; } #example { max-width: 190px; }
-    button, select { font: inherit; font-size: 13px; color: var(--text); background: var(--raised); border: 1px solid #2a3456; border-radius: 8px; padding: 5px 12px; cursor: pointer; }
-    button:hover:not(:disabled), select:hover { background: #1c2543; border-color: #3a4670; }
-    button:disabled { opacity: 0.4; cursor: default; }
-    select option { background: var(--panel); }
-    #run { color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); border-color: #f2ac3a; font-weight: 700; box-shadow: 0 4px 16px -6px #f4b54aaa; }
-    #run:hover { background: linear-gradient(#ffd383, #f6b54a); }
-    #debug { color: var(--amber); background: transparent; border-color: #f4b54a77; font-weight: 600; }
-    #debug:hover { background: #f4b54a17; }
-    .toggle { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 13px; cursor: pointer; }
-    .toolbar a { color: var(--dim); font-size: 13px; text-decoration: none; }
-    .toolbar a:hover { color: var(--amber); }
+    /* after the playground: where to go next, and the footer */
+    .outro { border-top: 1px solid var(--border); background: linear-gradient(#0b1020, var(--night) 60%); }
+    .paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .path { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-m); background: linear-gradient(#0f1529, #0b1122); text-decoration: none;
+      transition: border-color 0.2s, transform 0.2s; }
+    .path:hover { transform: translateY(-2px); border-color: #f4b54a88; }
+    .path b { font: 500 var(--h3)/1.25 var(--serif); }
+    .path span { flex: 1; color: var(--dim); font-size: 15px; }
+    .path code { color: var(--amber-hi); font: 0.9em var(--mono); }
+    .path i { color: var(--amber); font: 600 14px var(--sans); font-style: normal; }
+    .foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); padding-top: var(--space-6); padding-bottom: var(--space-7); border-top: 1px solid var(--line); color: var(--faint); font-size: var(--text-s); }
+    .foot .brand { margin-right: 0; font-size: 19px; color: var(--text); }
+    .foot .brand svg { width: 26px; height: 26px; }
+    .foot p { margin: 0 auto 0 0; }
+    .foot nav { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+    .foot nav a { color: var(--dim); text-decoration: none; }
+    .foot nav a:hover { color: var(--amber); }
 
-    /* the two panes */
+    /* ---------- the playground ---------- */
+    .playground { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; height: 100dvh; background: var(--bg); border-top: 1px solid var(--border); }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; background: linear-gradient(#111830, #0e1427); border-bottom: 1px solid var(--border); }
+    .logo { display: flex; align-items: center; gap: 9px; margin-right: 6px; padding: 4px 6px 4px 2px; border-radius: var(--radius-s); color: var(--text); font: 600 20px/1 var(--serif); letter-spacing: 0.01em; text-decoration: none; }
+    .logo svg { width: 26px; height: 26px; filter: drop-shadow(0 0 6px #ffb84d66); }
+    .tools { display: flex; align-items: center; gap: 6px; }
+    .tools + .tools { margin-left: 4px; padding-left: 14px; border-left: 1px solid var(--border); }
+    .spacer { flex: 1; }
+    .links { display: flex; gap: 4px; }
+    .links a { padding: 6px 10px; border-radius: var(--radius-s); color: var(--dim); font-size: 13px; text-decoration: none; }
+    .links a:hover { color: var(--amber); background: #ffffff08; }
+    .playground button, .playground select { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; color: var(--text); background-color: var(--raised); border: 1px solid #2a3456; border-radius: var(--radius-s);
+      font: 500 13px/1 var(--sans); cursor: pointer; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s; }
+    .playground button:hover:not(:disabled), .playground select:hover { background-color: #1c2543; border-color: #3a4670; }
+    .playground button:disabled { opacity: 0.4; cursor: default; }
+    .playground select { appearance: none; padding-right: 30px; text-overflow: ellipsis; white-space: nowrap;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238e96b0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 11px center; }
+    .playground select option { background: var(--panel); color: var(--text); }
+    #example { max-width: 210px; font-weight: 600; }
+    #compiled { max-width: 210px; }
+    #run { color: var(--ink); background: var(--gold); border-color: #f2ac3a; font-weight: 700; box-shadow: 0 4px 16px -6px #f4b54aaa, inset 0 1px #fff1cc; }
+    #run:hover { background: var(--gold-lit); }
+    #run .icon, #stop .icon { fill: currentColor; stroke: none; }
+    #debug { color: var(--amber); background: #f4b54a0a; border-color: #f4b54a66; font-weight: 600; }
+    #debug:hover { background: #f4b54a1c; border-color: #f4b54aaa; }
+    #stop:not(:disabled) { color: #ffb4a8; border-color: #ff8a7a66; background-color: #ff8a7a12; }
+    .toggle { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; font-weight: 500; cursor: pointer; }
+
+    /* the two panes, each with a head */
     .workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-height: 0; }
     .pane { display: flex; flex-direction: column; min-height: 0; }
-    .pane + .pane { overflow: auto; border-left: 1px solid var(--border); background: #0a0f1d; }
-    .title { padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .pane + .pane { border-left: 1px solid var(--border); background: #0a0f1d; }
+    .pane-head { display: flex; flex: none; align-items: center; gap: 10px; min-height: 44px; padding: 5px 10px 5px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+      color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .pane-head .toggle { margin-left: auto; letter-spacing: normal; text-transform: none; }
+    .side-body { flex: 1; min-height: 0; overflow: auto; }
+    .title { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 9px 16px 7px; background: #0a0f1d; border-bottom: 1px solid var(--line);
+      color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    .title::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--edge); }
+    #drawing-view .title::before, #output-title::before { background: var(--amber); box-shadow: 0 0 6px #f4b54a99; }
 
     /* editor: line numbers, plus a coloured copy of the code under a see-through textarea */
     .editor { display: flex; flex: 1; min-height: 0; }
-    .gutter { margin: 0; padding: 12px 10px 12px 14px; min-width: 2ch; overflow: hidden; color: #39436a; text-align: right; user-select: none; }
+    .gutter { margin: 0; padding: 14px 12px 14px 16px; min-width: 2ch; overflow: hidden; border-right: 1px solid var(--line); background: #0a0e1c; color: #424c74; text-align: right; user-select: none; }
     .code { position: relative; flex: 1; }
-    .code textarea, .code pre { position: absolute; inset: 0; box-sizing: border-box; margin: 0; padding: 12px 12px 12px 4px; border: 0; overflow: auto; white-space: pre; tab-size: 4; }
+    .code textarea, .code pre { position: absolute; inset: 0; margin: 0; padding: 14px 16px 14px 14px; border: 0; overflow: auto; white-space: pre; tab-size: 4; }
     .code textarea { color: transparent; background: transparent; caret-color: var(--amber); resize: none; outline: none; }
+    .code textarea:focus-visible { box-shadow: inset 0 0 0 1px #f4b54a44; }
     .code textarea::selection { background: #f4b54a38; }
     .code pre { pointer-events: none; }
     .gutter, .code textarea, .code pre, #lines { font: 14px/1.6 var(--mono); }
-    .k { color: #f4b54a; } .s { color: #a3d9a0; } .n { color: #8cc6ff; } .c { color: #646e90; font-style: italic; }
+    .k { color: #f4b54a; } .s { color: #a3d9a0; } .n { color: #8cc6ff; } .c { color: #6a7496; font-style: italic; }
     .squiggle { text-decoration: underline wavy; text-decoration-skip-ink: none; text-underline-offset: 4px; }
     .squiggle.bad { text-decoration-color: #ff6b5e; } .squiggle.meh { text-decoration-color: #d9b44a; }
     #problems { margin: 0; padding: 6px 0; list-style: none; }
-    #problems button { display: block; width: 100%; padding: 3px 14px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
-    #problems button:hover { background: var(--raised); }
-    #problems .bad { color: #ff9d8a; } #problems .meh { color: #e8c98a; }
-    #problems li { display: flex; align-items: center; gap: 8px; padding-right: 14px; }
-    #problems li > button:first-child { flex: 1; }
-    button.fix { flex: none; padding: 2px 10px; border-radius: 999px; color: #1c1405; background: linear-gradient(#ffc96b, #f2ac3a); border-color: #f2ac3a; font: 600 12px var(--sans); white-space: nowrap; }
-    button.fix:hover:not(:disabled) { background: linear-gradient(#ffd383, #f6b54a); }
-    #output button.fix { margin: 6px 0 2px; }
+    #problems li { display: flex; align-items: center; gap: 8px; padding-right: 16px; }
+    #problems li > button:first-child { flex: 1; display: block; height: auto; padding: 5px 16px; border: 0; border-radius: 0; background: none; text-align: left; font: 13px/1.5 var(--mono); }
+    #problems li > button:first-child:hover { background: var(--raised); }
+    #problems .bad { color: var(--bad); } #problems .meh { color: #e8c98a; }
+    .playground button.fix { flex: none; height: 26px; padding: 0 12px; border-radius: 999px; color: var(--ink); background: var(--gold); border-color: #f2ac3a; font: 600 12px/1 var(--sans); white-space: nowrap; }
+    .playground button.fix:hover:not(:disabled) { background: var(--gold-lit); border-color: #f6b54a; }
+    #output button.fix { margin: 8px 0 2px; }
 
     /* the code while debugging: numbered lines, the next one lit */
-    #lines { position: relative; flex: 1; margin: 0; padding: 12px 12px 12px 48px; overflow: auto; }
-    #lines li { min-height: 1.6em; padding-left: 6px; white-space: pre; border-left: 2px solid transparent; }
-    #lines li::marker { color: #39436a; }
+    #lines { position: relative; flex: 1; margin: 0; padding: 14px 12px 14px 52px; overflow: auto; }
+    #lines li { min-height: 1.6em; padding-left: 8px; white-space: pre; border-left: 2px solid transparent; }
+    #lines li::marker { color: #424c74; }
     #lines li.current { background: #f4b54a1c; border-left-color: var(--amber); }
 
     /* right pane */
-    .side pre { margin: 0; padding: 10px 14px; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-    #output { min-height: 3em; color: #f1e6cf; }
-    .answer { display: flex; align-items: center; gap: 8px; margin: 6px 14px 10px; font: 13px/1.5 var(--mono); }
+    .side pre { margin: 0; padding: 12px 16px; font: 13px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    #output { min-height: 3.5em; color: #f1e6cf; }
+    body:not(.app) #output:empty::before { content: "What the program says shows here."; color: var(--faint); }
+    .answer { display: flex; align-items: center; gap: 8px; margin: 4px 16px 14px; padding: 10px; border: 1px solid #f4b54a33; border-radius: var(--radius-s); background: #f4b54a0a; font: 13px/1.5 var(--mono); }
+    .answer > span { color: var(--amber-hi); }
     .answer.drawing { flex-direction: column; align-items: flex-start; }
-    .pad { width: 220px; height: 220px; background: #080c18; border: 1px solid #2a3456; border-radius: 8px; touch-action: none; cursor: crosshair; }
-    .answer input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #2a3456; border-radius: 8px; padding: 4px 9px; }
-    #output.error, #output .error-output { color: #ff9d8a; }
-    #canvas { display: block; width: min(100% - 28px, 440px); aspect-ratio: 1; margin: 14px auto; background: radial-gradient(circle at 50% 45%, #10172d, #080c18 75%); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 0 46px -20px #f4b54a55; touch-action: none; }
+    .answer.drawing div { display: flex; gap: 8px; }
+    .playground .answer button:not([type="button"]) { color: var(--ink); background: var(--gold); border-color: #f2ac3a; font-weight: 600; }
+    .playground .answer button:not([type="button"]):hover { background: var(--gold-lit); }
+    .pad { width: 220px; height: 220px; background: #080c18; border: 1px solid #2a3456; border-radius: var(--radius-s); touch-action: none; cursor: crosshair; }
+    .answer input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; color: var(--text); background: var(--bg); border: 1px solid #2a3456; border-radius: var(--radius-s); font: inherit; }
+    .answer input:focus { border-color: var(--amber); outline: none; box-shadow: 0 0 0 3px #f4b54a33; }
+    #output.error, #output .error-output { color: var(--bad); }
+    #canvas { display: block; width: min(100% - 32px, 440px); aspect-ratio: 1; margin: 16px auto; background: radial-gradient(circle at 50% 45%, #10172d, #080c18 75%); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 0 46px -20px #f4b54a55; touch-action: none; }
     #canvas:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
     #bytecode { color: #9aa1ba; }
     #files { margin: 0; padding: 6px 0; list-style: none; font: 13px/1.5 var(--mono); }
-    #files li { display: flex; align-items: center; gap: 8px; padding: 2px 14px; }
+    #files li { display: flex; align-items: center; gap: 8px; padding: 3px 16px; }
     #files li span { flex: 1; overflow-wrap: anywhere; } #files small { color: var(--faint); }
-    #files button { padding: 1px 9px; font-size: 12px; }
+    .playground #files button { height: 26px; padding: 0 10px; font-size: 12px; }
     .playground.dropping { outline: 2px dashed var(--amber); outline-offset: -6px; }
 
     /* status bar: quiet normally, lamp-lit while debugging */
-    .status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 28px; padding: 3px 14px; background: var(--panel); border-top: 1px solid var(--border); color: var(--dim); font-size: 12.5px; }
+    .status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 34px; padding: 4px 16px; background: var(--panel); border-top: 1px solid var(--border); color: var(--dim); font-size: 12.5px; }
     .status.debugging { color: #ffe3a6; background: linear-gradient(90deg, #2b1f08, #1a1608); border-top-color: #f4b54a55; }
-    .status button { padding: 1px 10px; font-size: 12px; }
-    .status.debugging button { color: #ffe3a6; background: #f4b54a1f; border-color: #f4b54a55; }
+    .playground .status button { height: 26px; padding: 0 10px; font-size: 12px; gap: 5px; }
+    .playground .status.debugging button { color: #ffe3a6; background-color: #f4b54a1f; border-color: #f4b54a55; }
+    .playground .status.debugging button:hover:not(:disabled) { background-color: #f4b54a33; }
+    .status .icon { width: 13px; height: 13px; }
     #timeline { flex: 1; min-width: 120px; accent-color: var(--amber); }
+    #position { font-variant-numeric: tabular-nums; }
     .hint { margin-left: auto; color: var(--faint); }
 
-    @media (max-width: 880px) {
-      .hero { grid-template-columns: 1fr; gap: 36px; padding-top: 16px; }
-      .features { grid-template-columns: 1fr; }
-      .card pre { font-size: 13px; }
+    @media (max-width: 1180px) {
+      .links { display: none; }
+      #example { max-width: 170px; }
+      .toolbar > .toggle > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    }
+    @media (max-width: 960px) {
+      .hero { grid-template-columns: minmax(0, 1fr); gap: 48px; padding-top: 24px; padding-bottom: var(--space-8); }
+      .features, .gallery, .paths { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .features .feature:last-child { grid-column: 1 / -1; }
+      .paths .path:last-child { grid-column: 1 / -1; }
       .nav a:not(.brand):not(.go) { display: none; }
-      .lamp { right: 14%; } .flyer { right: calc(14% + 40px); }
+      .lamp { right: 12%; } .flyer { right: calc(12% + 40px); }
     }
     @media (max-width: 800px) {
       .playground { height: auto; }
-      .workspace { grid-template-columns: 1fr; }
-      .pane:first-child { height: 55vh; }
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      .pane:first-child { height: 58vh; height: 58svh; min-height: 320px; }
       .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
+      .side-body { overflow: visible; }
+      .title { position: static; }
+      .status.debugging { position: sticky; bottom: 0; z-index: 2; }
     }
-    @media (min-width: 881px) and (max-width: 1100px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 640px) {
+      .wrap { padding: 0 20px; }
+      .nav { gap: 0; }
+      .nav a:not(.brand) { padding: 8px 10px; font-size: 14px; }
+      .nav a.outlined { margin-left: var(--space-1); }
+      .brand { font-size: 22px; } .brand svg { width: 30px; height: 30px; }
+      .lamp { top: 76px; right: 8%; } .flyer { top: 54px; right: calc(8% + 26px); width: 36px; height: 36px; }
+      .hero { padding-top: 16px; gap: 40px; }
+      .lede { font-size: 17px; }
+      .btn { flex: 1 1 auto; justify-content: center; }
+      .facts { gap: 6px; margin-top: var(--space-5); }
+      .facts li { padding: 3px 10px; font-size: 12.5px; }
+      .card pre { padding: 16px; font-size: 13px; }
+      .section { padding-top: var(--space-7); padding-bottom: var(--space-7); }
+      .features, .paths { grid-template-columns: minmax(0, 1fr); }
+      .gallery { gap: var(--space-3); }
+      .shot img { padding: 10px; }
+      .shot b { padding: 12px 12px 0; font-size: 17px; }
+      .shot b::after { display: none; }
+      .shot small { padding: 2px 12px 12px; font-size: 12.5px; }
+      .down { padding: 0 20px var(--space-5); }
+      .foot { flex-direction: column; align-items: flex-start; }
+
+      /* the toolbar as a grid: the examples, then the buttons three to a row, then the engine */
+      .toolbar { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 10px 12px; }
+      .logo { grid-column: span 2; margin: 0; }
+      #example { grid-column: span 4; max-width: none; width: 100%; }
+      .tools { display: contents; }
+      .tools button { grid-column: span 2; justify-content: center; }
+      .toolbar > .toggle { grid-column: 1 / -1; }
+      .toolbar > .toggle > span { position: static; width: auto; height: auto; clip-path: none; }
+      .toolbar > .toggle select { flex: 1; }
+      .spacer { display: none; }
+      .pane-head { padding-left: 12px; }
+      .status { padding: 6px 12px; }
+      #timeline { order: 1; flex-basis: 100%; }
+      #position { order: 2; }
+      #status { order: 3; }
+      .hint { order: 4; }
+    }
+    @media (pointer: coarse) {
+      .playground button, .playground select { height: 40px; }
+      .playground .status button { height: 36px; padding: 0 14px; }
+      .playground button.fix, .playground #files button { height: 34px; }
+      .answer input { height: 40px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .lamp, .flyer, .flyer .wings { animation: none; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
+      .btn.primary:hover, .shot:hover, .path:hover { transform: none; }
+    }
     /* a program made into a page of its own (moth build --web): only what it says and draws */
-    body.app .intro, body.app .toolbar, body.app .workspace > .pane:first-child, body.app #debug-panel, body.app #problems-view,
+    body.app .skip, body.app .front, body.app .outro, body.app .toolbar, body.app .workspace > .pane:first-child, body.app .pane-head, body.app #debug-panel, body.app #problems-view,
     body.app #files-view, body.app #bytecode-view, body.app .status { display: none !important; }
-    body.app .workspace { grid-template-columns: 1fr; }
+    body.app .playground { border-top: 0; }
+    body.app .workspace { grid-template-columns: minmax(0, 1fr); }
     body.app .pane + .pane { border-left: 0; }
   </style>
 </head>
 <body>
+  <a class="skip" href="#playground">Skip to the playground</a>
   <svg width="0" height="0" aria-hidden="true" style="position: absolute">
     <defs>
       <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
@@ -216,10 +355,21 @@
         <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
         <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
       </symbol>
+      <!-- the toolbar's icons, 16 by 16 -->
+      <symbol id="i-run" viewBox="0 0 16 16"><path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.2-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5z"/></symbol>
+      <symbol id="i-debug" viewBox="0 0 16 16"><path d="M3 3v10M7 3.6v8.8a.5.5 0 0 0 .8.4l5.6-4.4a.5.5 0 0 0 0-.8L7.8 3.2a.5.5 0 0 0-.8.4z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.6"/></symbol>
+      <symbol id="i-share" viewBox="0 0 16 16"><path d="M8 10V2.5M5 5.5l3-3 3 3M3.5 9v3.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V9"/></symbol>
+      <symbol id="i-tidy" viewBox="0 0 16 16"><path d="M2.5 3.5h11M6.5 6.5h7M6.5 9.5h7M2.5 12.5h11"/></symbol>
+      <symbol id="i-files" viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+      <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+      <symbol id="i-step" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
+      <symbol id="i-end" viewBox="0 0 16 16"><path d="m3.5 3.5 4.5 4.5-4.5 4.5M11.5 3.5v9"/></symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
     </defs>
   </svg>
 
-  <header class="intro">
+  <div class="front">
     <div class="lamp" aria-hidden="true"></div>
     <svg class="flyer moth" viewBox="0 0 64 64" aria-hidden="true">
       <g class="wings">
@@ -231,43 +381,49 @@
       <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
     </svg>
 
-    <nav class="nav wrap" aria-label="Moth">
-      <a class="brand" href="#"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
-      <a class="go" href="#playground">Playground</a>
-      <a href="learn.html">Learn</a>
-      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
-      <a href="https://github.com/samyyy2423/moth/blob/main/DESIGN.md">How it's built</a>
-      <a class="go" href="https://github.com/samyyy2423/moth">GitHub ↗</a>
-    </nav>
+    <header class="intro">
+      <nav class="nav wrap" aria-label="Moth">
+        <a class="brand" href="#"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+        <a class="go" href="#playground">Playground</a>
+        <a class="go" href="learn.html">Learn</a>
+        <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+        <a href="https://github.com/samyyy2423/moth/blob/main/DESIGN.md">How it's built</a>
+        <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+      </nav>
 
-    <div class="hero wrap">
-      <div>
-        <h1>Programs that read like <em>English</em>.</h1>
-        <p class="lede">Moth is a small programming language with no symbols to learn. You write <code>say</code>, <code>if</code> and
-          <code>repeat</code>, draw pictures, make games, and when something goes wrong, it tells you in plain words.</p>
-        <div class="cta">
-          <a class="btn primary" href="#playground">Try it now <span aria-hidden="true">↓</span></a>
-          <a class="btn ghost" href="https://github.com/samyyy2423/moth">See the code</a>
+      <div class="hero wrap">
+        <div>
+          <a class="pill" href="learn.html"><b>Learn</b>Moth in eleven short lessons <span aria-hidden="true">→</span></a>
+          <h1>Programs that read like <em>English</em>.</h1>
+          <p class="lede">Moth is a small programming language with no symbols to learn. You write <code>say</code>, <code>if</code> and
+            <code>repeat</code>, draw pictures, make games, and when something goes wrong, it tells you in plain words.</p>
+          <div class="cta">
+            <a class="btn primary" href="#playground">Try it now <span aria-hidden="true">↓</span></a>
+            <a class="btn ghost" href="https://github.com/samyyy2423/moth">See the code</a>
+          </div>
+          <p class="install"><code><span>$ </span>moth build hello.moth</code><a href="https://github.com/samyyy2423/moth/releases">Get Moth for Windows or Linux</a></p>
+          <ul class="facts">
+            <li>runs in your browser</li>
+            <li>engines that agree</li>
+            <li>runs without JavaScript too</li>
+            <li>a compiler written in Moth</li>
+            <li>no dependencies</li>
+          </ul>
         </div>
-        <p class="install"><span>$</span> moth build hello.moth &nbsp;<a href="https://github.com/samyyy2423/moth/releases">get moth</a></p>
-        <ul class="facts">
-          <li>runs in your browser</li>
-          <li>engines that agree</li>
-          <li>runs without JavaScript too</li>
-          <li>a compiler written in Moth</li>
-          <li>no dependencies</li>
-        </ul>
+        <figure class="card">
+          <div class="card-head"><i></i><i></i><i></i><span>welcome.moth</span><button id="try-sample" type="button"><svg class="icon" aria-hidden="true"><use href="#i-run"/></svg>Run it</button></div>
+          <pre id="sample" aria-label="An example Moth program"></pre>
+          <pre id="sample-said" class="said" aria-label="What it says"></pre>
+        </figure>
       </div>
-      <figure class="card" style="margin: 0">
-        <div class="card-head"><i></i><i></i><i></i> welcome.moth <button id="try-sample" type="button">Run it ▸</button></div>
-        <pre id="sample" aria-label="An example Moth program"></pre>
-        <pre id="sample-said" class="said" aria-label="What it says"></pre>
-      </figure>
-    </div>
+    </header>
 
     <section class="section wrap" aria-labelledby="what">
-      <h2 id="what">What it can do</h2>
-      <p>Everything below runs in the playground underneath, with nothing to install.</p>
+      <div class="section-head">
+        <p class="eyebrow">Why Moth</p>
+        <h2 id="what">What it can do</h2>
+        <p>Everything below runs in the playground underneath, with nothing to install.</p>
+      </div>
       <div class="features">
         <div class="feature"><h3>Words, not symbols</h3><p><code>if age is at least 18</code>, not <code>if (age &gt;= 18) {</code>. Lists, records and dictionaries are written the way you'd say them.</p></div>
         <div class="feature"><h3>Mistakes in plain words</h3><p>It points at the exact spot, and guesses what you meant.</p><pre>line 2: 'totl' has no value yet.
@@ -283,8 +439,11 @@ Did you mean 'total'?</pre></div>
     </section>
 
     <section class="section wrap" aria-labelledby="made">
-      <h2 id="made">Made with Moth</h2>
-      <p>Click one to open it in the playground.</p>
+      <div class="section-head">
+        <p class="eyebrow">Gallery</p>
+        <h2 id="made">Made with Moth</h2>
+        <p>Click one to open it in the playground.</p>
+      </div>
       <div class="gallery" id="gallery">
         <button class="shot" type="button" data-example="Snake"><img src="docs/snake.svg" alt="" loading="lazy"><b>Snake</b><small>a game: arrow keys and a timer</small></button>
         <button class="shot" type="button" data-example="Paint"><img src="docs/paint.svg" alt="" loading="lazy"><b>Paint</b><small>drag to draw, click a colour</small></button>
@@ -295,46 +454,40 @@ Did you mean 'total'?</pre></div>
       </div>
     </section>
     <a class="down" href="#playground">The playground ↓</a>
-  </header>
+  </div>
 
   <section class="playground" id="playground" aria-label="Playground">
   <div class="toolbar">
-    <div class="logo">
-      <svg class="moth" aria-hidden="true"><use href="#moth"/></svg>
-      <h1>Moth</h1>
-    </div>
+    <a class="logo" href="#" title="Back to the top"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
     <select id="example" aria-label="Example"></select>
-    <button id="run" type="button" title="Ctrl+Enter">▶ Run</button>
-    <button id="debug" type="button" title="Go through the program a step at a time, backwards too">⏯ Debug</button>
-    <button id="stop" type="button" disabled>■ Stop</button>
-    <button id="share" type="button">⤴ Share</button>
-    <button id="tidy" type="button" title="Indents, spaces and blank lines, the one way Moth writes them">✎ Tidy</button>
-    <button id="add-files" type="button" title="Files a program can read by name, like pictures for draw picture: pick them here, or drop them on the playground">🗀 Files</button>
-    <input id="file-picker" type="file" multiple hidden>
-    <label class="toggle">Engine
-      <select id="engine" title="All three run the same program the same way, at different speeds">
+    <div class="tools" role="group" aria-label="Run">
+      <button id="run" type="button" title="Ctrl+Enter"><svg class="icon" aria-hidden="true"><use href="#i-run"/></svg>Run</button>
+      <button id="debug" type="button" title="Go through the program a step at a time, backwards too"><svg class="icon" aria-hidden="true"><use href="#i-debug"/></svg>Debug</button>
+      <button id="stop" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-stop"/></svg>Stop</button>
+    </div>
+    <div class="tools" role="group" aria-label="Code">
+      <button id="share" type="button" title="Copy a link with the code in it"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg>Share</button>
+      <button id="tidy" type="button" title="Indents, spaces and blank lines, the one way Moth writes them"><svg class="icon" aria-hidden="true"><use href="#i-tidy"/></svg>Tidy</button>
+      <button id="add-files" type="button" title="Files a program can read by name, like pictures for draw picture: pick them here, or drop them on the playground"><svg class="icon" aria-hidden="true"><use href="#i-files"/></svg>Files</button>
+      <input id="file-picker" type="file" multiple hidden>
+    </div>
+    <label class="toggle"><span>Engine</span>
+      <select id="engine" aria-label="Engine" title="All three run the same program the same way, at different speeds">
         <option value="jit">JIT (JavaScript)</option>
         <option value="wasm">WebAssembly</option>
         <option value="vm">VM (bytecode)</option>
       </select>
     </label>
-    <label class="toggle">Compiled
-      <select id="compiled">
-        <option value="">hidden</option>
-        <option value="bytecode">bytecode (VM)</option>
-        <option value="js">JavaScript (JIT)</option>
-        <option value="moth">JavaScript (compiler written in Moth)</option>
-        <option value="wasm">WebAssembly</option>
-      </select>
-    </label>
     <span class="spacer"></span>
-    <a href="#">↑ Home</a>
-    <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
+    <nav class="links" aria-label="Pages">
+      <a href="learn.html">Learn</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub ↗</a>
+    </nav>
   </div>
 
   <main class="workspace">
     <section class="pane" aria-label="Code">
-      <div class="title">Code</div>
+      <div class="pane-head">Code</div>
       <div class="editor" id="editor">
         <pre class="gutter" id="gutter" aria-hidden="true"></pre>
         <div class="code">
@@ -346,38 +499,51 @@ Did you mean 'total'?</pre></div>
     </section>
 
     <section class="pane side" aria-label="Results">
-      <div id="drawing-view" hidden>
-        <div class="title">Drawing</div>
-        <canvas id="canvas" width="500" height="500" tabindex="0" role="img" aria-label="What the program drew; an app takes keys and clicks here"></canvas>
+      <div class="pane-head">Results
+        <label class="toggle"><span>Compiled</span>
+          <select id="compiled" aria-label="Compiled">
+            <option value="">hidden</option>
+            <option value="bytecode">bytecode (VM)</option>
+            <option value="js">JavaScript (JIT)</option>
+            <option value="moth">JavaScript (compiler written in Moth)</option>
+            <option value="wasm">WebAssembly</option>
+          </select>
+        </label>
       </div>
-      <div id="debug-panel" hidden>
-        <div class="title">Variables</div>
-        <pre id="variables"></pre>
-      </div>
-      <div id="problems-view" hidden>
-        <div class="title">Problems · found without running</div>
-        <ul id="problems"></ul>
-      </div>
-      <div id="files-view" hidden>
-        <div class="title">Files · a program reads them by name</div>
-        <ul id="files"></ul>
-      </div>
-      <div>
-        <div class="title">Output</div>
-        <pre id="output" aria-live="polite"></pre>
-      </div>
-      <div id="bytecode-view" hidden>
-        <div class="title" id="compiled-title"></div>
-        <pre id="bytecode"></pre>
+      <div class="side-body">
+        <div id="drawing-view" hidden>
+          <div class="title">Drawing</div>
+          <canvas id="canvas" width="500" height="500" tabindex="0" role="img" aria-label="What the program drew; an app takes keys and clicks here"></canvas>
+        </div>
+        <div id="debug-panel" hidden>
+          <div class="title">Variables</div>
+          <pre id="variables"></pre>
+        </div>
+        <div id="problems-view" hidden>
+          <div class="title">Problems · found without running</div>
+          <ul id="problems"></ul>
+        </div>
+        <div id="files-view" hidden>
+          <div class="title">Files · a program reads them by name</div>
+          <ul id="files"></ul>
+        </div>
+        <div>
+          <div class="title" id="output-title">Output</div>
+          <pre id="output" aria-live="polite"></pre>
+        </div>
+        <div id="bytecode-view" hidden>
+          <div class="title" id="compiled-title"></div>
+          <pre id="bytecode"></pre>
+        </div>
       </div>
     </section>
   </main>
 
   <footer class="status" id="statusbar">
     <span id="debug-controls" hidden style="display: contents">
-      <button id="back" type="button">◀ Back</button>
-      <button id="step" type="button">Step ▶</button>
-      <button id="end" type="button">End ⏭</button>
+      <button id="back" type="button"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>Back</button>
+      <button id="step" type="button">Step<svg class="icon" aria-hidden="true"><use href="#i-step"/></svg></button>
+      <button id="end" type="button">End<svg class="icon" aria-hidden="true"><use href="#i-end"/></svg></button>
       <input id="timeline" type="range" min="0" value="0" aria-label="Move through the run">
       <span id="position"></span>
     </span>
@@ -385,6 +551,31 @@ Did you mean 'total'?</pre></div>
     <span class="hint" id="hint">Ctrl+Enter runs · Debug goes backwards too</span>
   </footer>
   </section>
+
+  <div class="outro">
+    <section class="section wrap" aria-labelledby="next">
+      <div class="section-head">
+        <p class="eyebrow">Keep going</p>
+        <h2 id="next">Where next</h2>
+      </div>
+      <div class="paths">
+        <a class="path" href="learn.html"><b>Learn Moth</b><span>Eleven short lessons, each with a program to run and change, right here in your browser.</span><i>Start the lessons →</i></a>
+        <a class="path" href="https://github.com/samyyy2423/moth/releases"><b>Get Moth</b><span>For Windows and Linux. <code>moth build</code> turns your program into one of its own.</span><i>Download →</i></a>
+        <a class="path" href="https://github.com/samyyy2423/moth/blob/main/docs/guestbook.md"><b>Build a web app</b><span>A guestbook with a database, in Moth, from start to finish.</span><i>Read the guide →</i></a>
+      </div>
+    </section>
+    <footer class="foot wrap">
+      <a class="brand" href="#"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <p>Open source under the Apache License 2.0</p>
+      <nav aria-label="More about Moth">
+        <a href="learn.html">Learn</a>
+        <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+        <a href="https://github.com/samyyy2423/moth/blob/main/DESIGN.md">How it's built</a>
+        <a href="https://github.com/samyyy2423/moth/blob/main/CONTRIBUTING.md">Help with Moth</a>
+        <a href="https://github.com/samyyy2423/moth">GitHub</a>
+      </nav>
+    </footer>
+  </div>
 
   <script type="module">
     import examples from "./examples.js";
