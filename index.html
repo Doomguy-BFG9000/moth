@@ -41,7 +41,7 @@
       --accent: var(--amber);
       /* one type scale and one spacing scale for the whole page */
       --text-xs: 12px; --text-s: 13.5px; --text-m: 16px; --text-l: 18.5px;
-      --h3: 20px; --h2: clamp(30px, 3.4vw, 40px); --h1: clamp(42px, 6.4vw, 76px);
+      --h3: 20px; --h2: clamp(30px, 3.4vw, 40px); --h1: clamp(44px, 7vw, 88px);
       --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 72px; --space-9: 104px;
       --radius-s: 8px; --radius-m: 14px; --radius-l: 18px;
     }
@@ -65,10 +65,10 @@
 
     /* ---------- the front page ---------- */
     .front { position: relative; overflow: hidden; isolation: isolate; background:
-      radial-gradient(56rem 34rem at 86% -8%, #f4b54a30, transparent 62%),
-      radial-gradient(36rem 26rem at 72% 18%, #ff7a2f1c, transparent 64%),
-      radial-gradient(50rem 36rem at -10% 40%, #ff7a2f12, transparent 62%),
-      radial-gradient(44rem 30rem at 110% 78%, #f4b54a0e, transparent 62%),
+      radial-gradient(60rem 34rem at 50% -6%, #f4b54a26, transparent 64%),
+      radial-gradient(40rem 28rem at 50% 14%, #ff7a2f18, transparent 66%),
+      radial-gradient(50rem 36rem at -10% 52%, #ff7a2f0e, transparent 62%),
+      radial-gradient(44rem 30rem at 110% 74%, #f4b54a0c, transparent 62%),
       linear-gradient(#0c0a08, #0f0b08 40%, #120e0a); }
     /* a little film grain, and the edges a shade darker, as by lamplight */
     .front::before, .outro::before { content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none; opacity: 0.07; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
@@ -83,49 +83,52 @@
     .nav a.outlined:hover { border-color: #f4b54a88; background: #f4b54a12; }
     .nav .icon { width: 16px; height: 16px; fill: currentColor; stroke: none; }
 
-    /* a lamp in the corner, and a moth that can't stay away from it */
-    .lamp { position: absolute; z-index: -1; top: 92px; right: 9%; width: 12px; height: 12px; border-radius: 50%; background: #fff4d6;
-      box-shadow: 0 0 24px 10px #ffc46b, 0 0 110px 54px #ff9a3d40, 0 0 320px 170px #ff7a2f17; animation: glow 5s ease-in-out infinite alternate; }
-    .flight { position: absolute; z-index: -1; top: 70px; right: calc(9% + 54px); width: 46px; height: 46px; }
-    .flyer { display: block; width: 100%; height: 100%; animation: drift 11s ease-in-out infinite; filter: drop-shadow(0 0 12px #ffb84d66); }
+    /* The top of the page: a lantern hanging over the middle on a long cord, swaying a little, its light on
+       the headline; and a moth that can't stay away from it (site-motion.js has it circle the lantern) */
+    .hero { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; padding-top: 214px; padding-bottom: var(--space-9); text-align: center; }
+    .halo { position: absolute; z-index: -4; top: -130px; left: 0; right: 0; width: min(1200px, 150vw); height: 840px; margin: 0 auto; pointer-events: none;
+      background: radial-gradient(closest-side at 50% 30%, #ffb3474d, #ff8a3d1f 40%, #ff7a2f0a 62%, transparent 82%); animation: breathe 6s ease-in-out infinite alternate; }
+    .lantern { position: absolute; z-index: -2; top: 14px; left: 50%; width: 86px; margin-left: -43px; }
+    .lantern .sway { position: relative; transform-origin: 50% -170px; animation: sway 7s ease-in-out infinite alternate; filter: drop-shadow(0 0 18px #ff9a3daa) drop-shadow(0 0 60px #ff7a2f66); }
+    .lantern .sway::before { content: ""; position: absolute; bottom: calc(100% - 4px); left: 50%; width: 1.5px; height: 170px; margin-left: -0.75px; background: linear-gradient(#8a5c3400, #8a5c34); }
+    .lantern svg { display: block; width: 100%; height: auto; }
+    .lantern .flame { transform-box: fill-box; transform-origin: 50% 85%; animation: flicker 2.4s ease-in-out infinite; }
+    .flight { position: absolute; z-index: -1; top: 89px; left: 50%; width: 42px; height: 42px; margin: -21px 0 0 -21px; transform: translate(118px, -6px); }
+    .flyer { display: block; width: 100%; height: 100%; animation: drift 9s ease-in-out infinite; filter: drop-shadow(0 0 12px #ffb84d77); }
+    html.moving .flyer { animation: none; }
     .flyer .wings { transform-box: view-box; transform-origin: 32px 30px; animation: flap 0.19s ease-in-out infinite alternate; }
     @keyframes flap { to { transform: scaleX(0.42); } }
     @keyframes glow { to { opacity: 0.86; } }
+    @keyframes breathe { to { opacity: 0.78; } }
+    @keyframes sway { from { transform: rotate(-2.2deg); } to { transform: rotate(2.2deg); } }
+    @keyframes flicker { 0%, 100% { transform: scale(1, 1); opacity: 1; } 30% { transform: scale(0.93, 1.07); } 55% { transform: scale(1.05, 0.95); opacity: 0.88; } 80% { transform: scale(0.97, 1.04); } }
     @keyframes drift {
-      0%, 100% { transform: translate(0, 0) rotate(-10deg); }
-      22% { transform: translate(-46px, 22px) rotate(8deg); }
-      48% { transform: translate(-12px, 58px) rotate(24deg); }
-      74% { transform: translate(34px, 26px) rotate(-4deg); }
+      0%, 100% { transform: translate(0, 0) rotate(-8deg); }
+      30% { transform: translate(-14px, 10px) rotate(6deg); }
+      62% { transform: translate(8px, 18px) rotate(14deg); }
     }
-
-    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 64px; align-items: center; padding-top: 48px; padding-bottom: var(--space-9); }
-    .pill { display: inline-flex; align-items: center; gap: 10px; margin-bottom: var(--space-5); padding: 5px 14px 5px 5px; border: 1px solid #f4b54a3a; border-radius: 999px; background: #f4b54a0d;
-      color: var(--soft); font-size: var(--text-s); text-decoration: none; transition: border-color 0.15s, background-color 0.15s; }
-    .pill:hover { border-color: #f4b54a88; background: #f4b54a17; }
-    .pill b { padding: 3px 9px; border-radius: 999px; background: var(--gold); color: var(--ink); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
-    .pill span { color: var(--amber); }
-    .hero h1 { margin: 0 0 var(--space-5); font: 500 var(--h1)/1.02 var(--serif); letter-spacing: -0.02em; text-wrap: balance; }
+    .hero h1 { max-width: 11em; margin: 0 0 var(--space-5); font: 500 var(--h1)/1.02 var(--serif); letter-spacing: -0.02em; text-wrap: balance; }
     .hero h1 em { color: var(--amber); filter: drop-shadow(0 0 26px #ff8a3d55); }
     .hero h1 em:not(:has(.word)), .hero h1 em .word { background: var(--flame); -webkit-background-clip: text; background-clip: text; color: transparent; padding-right: 0.08em; margin-right: -0.07em; }
-    .lede { max-width: 32em; margin: 0 0 var(--space-6); color: var(--soft); font-size: var(--text-l); line-height: 1.6; text-wrap: pretty; }
+    .lede { max-width: 34em; margin: 0 0 var(--space-6); color: var(--soft); font-size: var(--text-l); line-height: 1.6; text-wrap: pretty; }
     .lede code { color: var(--amber-hi); font: 0.9em var(--mono); }
-    .cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+    .cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); }
     .btn { display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 24px; border: 1px solid transparent; border-radius: 999px; font: 600 15px/1 var(--sans); text-decoration: none; cursor: pointer;
       transition: transform 0.15s, box-shadow 0.15s, background-color 0.15s, border-color 0.15s; }
     .btn.primary { color: var(--ink); background: var(--gold); box-shadow: 0 10px 34px -10px #ff7a2fcc, inset 0 1px #fff1cc; }
     .btn.primary:hover { transform: translateY(-1px); background: var(--gold-lit); box-shadow: 0 16px 44px -10px #ff7a2fee, inset 0 1px #fff1cc; }
     .btn.ghost { color: var(--text); border-color: #4a3826; background: #ffffff05; }
     .btn.ghost:hover { border-color: #f4b54a88; background: #f4b54a0f; }
-    .install { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin: var(--space-5) 0 0; font-size: var(--text-s); }
+    .install { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-2) var(--space-4); margin: var(--space-5) 0 0; font-size: var(--text-s); }
     .install code { padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-s); background: #0a0806; color: var(--soft); font: 13px var(--mono); }
     .install code span { color: var(--faint); user-select: none; }
     .install a { color: var(--dim); text-underline-offset: 3px; text-decoration-color: #b3a58f66; }
     .install a:hover { color: var(--amber); text-decoration-color: currentColor; }
-    .facts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-6) 0 0; padding: 0; list-style: none; }
+    .facts { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); max-width: 44em; margin: var(--space-6) 0 0; padding: 0; list-style: none; }
     .facts li { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: #15100baa; color: var(--dim); font-size: 13px; }
     .facts li::before { content: "✦"; margin-right: 6px; color: var(--amber); font-size: 11px; }
 
-    .card { margin: 0; overflow: hidden; border: 1px solid #ffd27a2e; border-radius: var(--radius-l); background: linear-gradient(180deg, #241a11d9, #110d09e6); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
+    .card { width: min(100%, 940px); margin: var(--space-7) 0 0; overflow: hidden; text-align: left; border: 1px solid #ffd27a2e; border-radius: var(--radius-l); background: linear-gradient(180deg, #241a11d9, #110d09e6); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
       box-shadow: 0 50px 100px -50px #000, inset 0 1px #ffe2b014, 0 0 90px -26px #ff7a2f4d; }
     .card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); color: var(--faint); font: 12.5px var(--mono); }
     .card-head i { width: 10px; height: 10px; border-radius: 50%; background: #3a2c1e; }
@@ -136,7 +139,8 @@
     .card-head button:hover { background: var(--gold-lit); }
     .card-head button .icon { width: 11px; height: 11px; fill: currentColor; stroke: none; }
     .card pre { margin: 0; padding: 20px 22px; overflow: auto; font: 14.5px/1.75 var(--mono); white-space: pre; }
-    .card .said { border-top: 1px dashed #3d2f20; color: #f1e6cf; background: #0b0907; }
+    .card-body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+    .card .said { border-left: 1px dashed #3d2f20; color: #f1e6cf; background: #0b0907; }
     .card .said::before { content: "it says"; display: block; margin-bottom: 4px; color: var(--faint); font: 600 10.5px var(--sans); letter-spacing: 0.14em; text-transform: uppercase; }
 
     .section { padding-top: var(--space-8); padding-bottom: var(--space-8); }
@@ -199,7 +203,7 @@
     .lit::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.3s;
       background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), #ff9a4d1f, transparent 65%); }
     .lit:hover::after { opacity: 1; }
-    html.motion .intro, html.motion .lamp, html.motion .flight { visibility: hidden; }
+    html.motion .intro { visibility: hidden; }
     html.has-cursor .front, html.has-cursor .front *, html.has-cursor .outro, html.has-cursor .outro * { cursor: none !important; }
 
     /* ---------- the playground ---------- */
@@ -312,12 +316,11 @@
       .toolbar > .toggle > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     }
     @media (max-width: 960px) {
-      .hero { grid-template-columns: minmax(0, 1fr); gap: 48px; padding-top: 24px; padding-bottom: var(--space-8); }
+      .hero { padding-top: 204px; padding-bottom: var(--space-8); }
       .features, .gallery, .paths { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .features .feature:last-child { grid-column: 1 / -1; }
       .paths .path:last-child { grid-column: 1 / -1; }
       .nav a:not(.brand):not(.go) { display: none; }
-      .lamp { right: 12%; } .flight { right: calc(12% + 40px); }
     }
     @media (max-width: 800px) {
       .playground { height: auto; }
@@ -334,8 +337,14 @@
       .nav a:not(.brand) { padding: 8px 10px; font-size: 14px; }
       .nav a.outlined { margin-left: var(--space-1); }
       .brand { font-size: 22px; } .brand svg { width: 30px; height: 30px; }
-      .lamp { top: 76px; right: 8%; } .flight { top: 54px; right: calc(8% + 26px); width: 36px; height: 36px; }
-      .hero { padding-top: 16px; gap: 40px; }
+      .lantern { top: 10px; width: 58px; margin-left: -29px; }
+      .lantern .sway { transform-origin: 50% -34px; }
+      .lantern .sway::before { height: 34px; } /* below the nav, not through its links */
+      .flight { top: 61px; width: 34px; height: 34px; margin: -17px 0 0 -17px; transform: translate(80px, -6px); }
+      .hero { padding-top: 150px; }
+      .card { margin-top: var(--space-7); }
+      .card-body { grid-template-columns: minmax(0, 1fr); }
+      .card .said { border-left: 0; border-top: 1px dashed #3d2f20; }
       .lede { font-size: 17px; }
       .btn { flex: 1 1 auto; justify-content: center; }
       .facts { gap: 6px; margin-top: var(--space-5); }
@@ -376,7 +385,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      .lamp, .flyer, .flyer .wings { animation: none; }
+      .lantern .sway, .lantern .flame, .halo, .flyer, .flyer .wings { animation: none; }
       *, *::before, *::after { transition-duration: 0.01ms !important; }
       .btn.primary:hover, .shot:hover, .path:hover { transform: none; }
     }
@@ -416,19 +425,6 @@
   </svg>
 
   <div class="front">
-    <div class="lamp" aria-hidden="true"></div>
-    <div class="flight" aria-hidden="true">
-    <svg class="flyer moth" viewBox="0 0 64 64">
-      <g class="wings">
-        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
-        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
-        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
-      </g>
-      <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
-      <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
-    </svg>
-    </div>
-
     <header class="intro">
       <nav class="nav wrap" aria-label="Moth">
         <a class="brand" href="#"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
@@ -440,28 +436,58 @@
       </nav>
 
       <div class="hero wrap">
-        <div>
-          <a class="pill" href="learn.html"><b>Learn</b>Moth in eleven short lessons <span aria-hidden="true">→</span></a>
-          <h1>Programs that read like <span class="nobr"><em>English</em>.</span></h1>
-          <p class="lede">Moth is a small programming language with no symbols to learn. You write <code>say</code>, <code>if</code> and
-            <code>repeat</code>, draw pictures, make games, and when something goes wrong, it tells you in plain words.</p>
-          <div class="cta">
-            <a class="btn primary" href="#playground">Try it now <span aria-hidden="true">↓</span></a>
-            <a class="btn ghost" href="https://github.com/samyyy2423/moth">See the code</a>
-          </div>
-          <p class="install"><code><span>$ </span>moth build hello.moth</code><a href="https://github.com/samyyy2423/moth/releases">Get Moth for Windows or Linux</a></p>
-          <ul class="facts">
-            <li>runs in your browser</li>
-            <li>engines that agree</li>
-            <li>runs without JavaScript too</li>
-            <li>a compiler written in Moth</li>
-            <li>no dependencies</li>
-          </ul>
+        <div class="halo" aria-hidden="true"></div>
+        <div class="lantern" aria-hidden="true"><div class="sway">
+          <svg viewBox="0 0 80 150">
+            <defs>
+              <radialGradient id="lantern-glass" cx="50%" cy="55%" r="65%"><stop offset="0" stop-color="#fff7e0"/><stop offset="0.35" stop-color="#ffd98a"/><stop offset="0.75" stop-color="#ff9a3d"/><stop offset="1" stop-color="#c8561a"/></radialGradient>
+              <linearGradient id="lantern-metal" x1="0" x2="1"><stop offset="0" stop-color="#2e1d0f"/><stop offset="0.5" stop-color="#8a5c34"/><stop offset="1" stop-color="#24160b"/></linearGradient>
+              <radialGradient id="lantern-flame" cx="50%" cy="65%" r="55%"><stop offset="0" stop-color="#ffffff"/><stop offset="0.45" stop-color="#fff2bf"/><stop offset="1" stop-color="#ffc260" stop-opacity="0"/></radialGradient>
+            </defs>
+            <path d="M33 14v-4a7 7 0 0 1 14 0v4" fill="none" stroke="url(#lantern-metal)" stroke-width="2.6"/>
+            <path d="M18 26 40 13l22 13z" fill="url(#lantern-metal)"/>
+            <rect x="17" y="25" width="46" height="6" rx="2" fill="url(#lantern-metal)"/>
+            <path d="M21 31h38l-4 78H25z" fill="url(#lantern-glass)"/>
+            <ellipse class="flame" cx="40" cy="74" rx="8" ry="15" fill="url(#lantern-flame)"/>
+            <path d="M33 31l-1.5 78M47 31l1.5 78" stroke="#2a1a0c" stroke-opacity="0.5" stroke-width="2"/>
+            <path d="M21 31h38l-4 78H25z" fill="none" stroke="url(#lantern-metal)" stroke-width="2.6" stroke-linejoin="round"/>
+            <rect x="21" y="109" width="38" height="7" rx="2" fill="url(#lantern-metal)"/>
+            <path d="M29 116h22l-4 9H33z" fill="url(#lantern-metal)"/>
+          </svg>
+        </div></div>
+        <div class="flight" aria-hidden="true">
+          <svg class="flyer moth" viewBox="0 0 64 64">
+            <g class="wings">
+              <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+              <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+              <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+            </g>
+            <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+            <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+          </svg>
         </div>
+
+        <h1>Programs that read like <span class="nobr"><em>English</em>.</span></h1>
+        <p class="lede">Moth is a small programming language with no symbols to learn. You write <code>say</code>, <code>if</code> and
+          <code>repeat</code>, draw pictures, make games, and when something goes wrong, it tells you in plain words.</p>
+        <div class="cta">
+          <a class="btn primary" href="#playground">Try it now <span aria-hidden="true">↓</span></a>
+          <a class="btn ghost" href="learn.html">Learn Moth</a>
+        </div>
+        <p class="install"><code><span>$ </span>moth build hello.moth</code><a href="https://github.com/samyyy2423/moth/releases">Get Moth for Windows or Linux</a></p>
+        <ul class="facts">
+          <li>runs in your browser</li>
+          <li>engines that agree</li>
+          <li>runs without JavaScript too</li>
+          <li>a compiler written in Moth</li>
+          <li>no dependencies</li>
+        </ul>
         <figure class="card">
           <div class="card-head"><i></i><i></i><i></i><span>welcome.moth</span><button id="try-sample" type="button"><svg class="icon" aria-hidden="true"><use href="#i-run"/></svg>Run it</button></div>
-          <pre id="sample" aria-label="An example Moth program"></pre>
-          <pre id="sample-said" class="said" aria-label="What it says"></pre>
+          <div class="card-body">
+            <pre id="sample" aria-label="An example Moth program"></pre>
+            <pre id="sample-said" class="said" aria-label="What it says"></pre>
+          </div>
         </figure>
       </div>
     </header>
