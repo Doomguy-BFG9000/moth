@@ -577,7 +577,10 @@ draw   = "draw box at" x "," y "size" w "by" h | "draw circle at" x "," y "size"
 
 The turtle starts in the middle of a 500 by 500 picture, facing up, its pen down, blue (`#4f8ff7`) and 2
 wide; x goes right and y up, from -250 to 250. A colour is a CSS colour: a name, `#` and hex digits, `rgb()`, `rgba()`,
-`hsl()` or `hsla()`. Section 12 has the rest.
+`hsl()` or `hsla()`. `draw picture` takes a file's name, or its bytes, when what follows it is text, a
+number, a word that couldn't carry a value on, or a bracket with a space before it; `draw picture at 0, 0`
+draws the text a variable called `picture` holds, and `draw picture(x) at 0, 0` what a call to `picture`
+gives. Section 12 has the rest.
 
 ### 6.17 Calls as statements
 
