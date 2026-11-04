@@ -1268,7 +1268,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("of");
       return { kind: "length", of: unary(), at: t };
     }
-    if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
+    if (word("ask")) {
+      // `ask for 64 bytes`: what follows `for` is `64 bytes`, the builtin that makes bytes, with the count in it
+      if (word("for")) {
+        const count = additive();
+        if (count.kind !== "builtin" || count.name !== "bytes") fail(count.at, "say how many bytes, as in 'ask for 64 bytes'");
+        return { kind: "builtin", name: "input bytes", args: count.args, at: t };
+      }
+      return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
+    }
     if (word("read")) { // `read "notes.txt"`, `read bytes "photo.png"`: `of` is the file's name
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "folder")) { // `read the folder "tests"`
         pos += 2;

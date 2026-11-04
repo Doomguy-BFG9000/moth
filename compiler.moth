@@ -2464,6 +2464,13 @@ to parse with tokens, reading
             return record with kind "length", subject unary(), at t
         end
         if word("ask") # `ask "How old are you? "`
+            if word("for") # `ask for 64 bytes`: what follows is `64 bytes`, the builtin that makes bytes, with the count in it
+                set ask_count to additive()
+                if kind of ask_count is not "builtin" or name of ask_count is not "bytes"
+                    fail with problem(at of ask_count, "say how many bytes, as in 'ask for 64 bytes'")
+                end
+                return record with kind "builtin", name "input bytes", args args of ask_count, at t
+            end
             return record with kind "ask", question additive(), at t
         end
         if word("read") # `read "notes.txt"`, `read bytes "photo.png"`, `read table "sales.csv"`
