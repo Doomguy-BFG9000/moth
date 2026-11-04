@@ -3505,3 +3505,21 @@ hold them to agreeing.
   and file as it was. On Windows (with Python's and Git's OpenSSL) and
   Linux.
 
+
+## 85. A task's thread, gone back to its own start
+
+- **What went wrong.** On Linux, a program that uses libraries starts each
+  task's thread with pthread_create (so the C library has its own for that
+  thread), and the thread goes back to where pthread began it when the
+  task is done. Where that is was kept in the task's slot, and read after
+  the task had said it was done and let go of the turn. By then the slot
+  could be the next task's, and on one core it was: the thread went back on
+  the next task's stack, and the program crashed, or the C library said
+  "free(): invalid pointer". Secure connections' test (§82), which starts a
+  task for each connection, did it on every run on one core.
+- **Now** the thread takes where it goes back to onto its own stack before
+  it says it's done. Windows' threads end with ExitThread, which needs
+  nothing of the slot, and a thread made with clone waits for the last one
+  to have gone, so neither did.
+- **Tested.** The secure connections' test runs on one core too, with
+  taskset, where Linux has it.

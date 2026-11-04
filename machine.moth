@@ -28294,6 +28294,12 @@ to emit_threads with a, target
     shifti(a, "shl", rax, 3)
     alu(a, "add", rcx, rax)
     movsd_store(a, mem(rcx, -8), xmm0)
+    if not windows # where a pthread goes back to, on this thread's own stack: once the task is done, its slot
+        # can be the next task's before this thread has left (and on one core, it is)
+        load(a, rax, mem(rbx, thr_pret))
+        push_r(a, rax)
+        push_r(a, rax)
+    end
     storei(a, mem(rbx, thr_saved), 0)
     storei(a, mem(rbx, thr_state), 2)
     if windows
@@ -28315,7 +28321,8 @@ to emit_threads with a, target
         call_import(a, "imp_ExitThread")
     else
         set raw_thread to new_label(a)
-        load(a, rax, mem(rbx, thr_pret))
+        pop_r(a, rax)
+        pop_r(a, rax)
         test_rr(a, rax, rax)
         jcc(a, cc_e, raw_thread)
         mov_rr(a, rsp, rax) # a pthread: back to its start, which ends it

@@ -2079,8 +2079,13 @@ end
 say "done"
 `, { target, name: "p.moth", allow: ["--allow-libraries", "--allow-read"], files: { "sockets.moth": readFileSync(new URL("./tools/sockets.moth", import.meta.url), "utf8") } }));
       if (target === "linux") chmodSync(exe, 0o755);
-      const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", timeout: 60000 });
-      assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["can't make this connection secure: the other end didn't agree on TLS\ncan't connect securely to localhost: self-signed certificate\nhello securely é\nHELLO SECURELY É\nhello securely é\nHELLO SECURELY É\nSTARTTLS\nnow secret\n220 go ahead, then 250 secret kept\nSTARTTLS\ncan't make this connection secure: the other end didn't agree on TLS\n220 go ahead, then can't connect securely to wrong.example: hostname mismatch\none\n1\ntwo\ndone\ncan't trust the certificates in nowhere.pem: it isn't there, or isn't PEM\ncan't use the certificate in nowhere.pem: it isn't there, or isn't one in PEM\na port is a whole number from 0 to 65535, not 70000\ndone\n", "", 0], set?.dir);
+      // on Linux, on one core too, where a task's thread once went back to the next task's stack (DESIGN §85)
+      const runs = [[exe, []]];
+      if (target === "linux" && spawnSync("taskset", ["-c", "0", "true"]).status === 0) runs.push(["taskset", ["-c", "0", "./p"]]);
+      for (const [command, args] of runs) {
+        const ran = spawnSync(command, args, { cwd: dir, encoding: "utf8", input: "", timeout: 60000 });
+        assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["can't make this connection secure: the other end didn't agree on TLS\ncan't connect securely to localhost: self-signed certificate\nhello securely é\nHELLO SECURELY É\nhello securely é\nHELLO SECURELY É\nSTARTTLS\nnow secret\n220 go ahead, then 250 secret kept\nSTARTTLS\ncan't make this connection secure: the other end didn't agree on TLS\n220 go ahead, then can't connect securely to wrong.example: hostname mismatch\none\n1\ntwo\ndone\ncan't trust the certificates in nowhere.pem: it isn't there, or isn't PEM\ncan't use the certificate in nowhere.pem: it isn't there, or isn't one in PEM\na port is a whole number from 0 to 65535, not 70000\ndone\n", "", 0], `${set?.dir ?? ""} ${command}`);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
