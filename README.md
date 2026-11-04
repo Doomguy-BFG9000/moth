@@ -19,7 +19,7 @@ Written from scratch in JavaScript, with no dependencies.</p>
 <a href="https://github.com/samyyy2423/moth/actions/workflows/test.yml"><img src="https://github.com/samyyy2423/moth/actions/workflows/test.yml/badge.svg" alt="tests"></a>
 <a href="https://github.com/samyyy2423/moth/releases/latest"><img src="https://img.shields.io/github/v/release/samyyy2423/moth?color=4f8ff7" alt="latest release"></a>
 <img src="https://img.shields.io/badge/dependencies-none-2ea043" alt="no dependencies">
-<a href="LICENSE"><img src="https://img.shields.io/github/license/samyyy2423/moth?color=6e7681" alt="MIT license"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/samyyy2423/moth?color=6e7681" alt="Apache 2.0 license"></a>
 </p>
 
 <img src="docs/handwriting.gif" width="760" alt="Drawing digits in the playground: a 2, a 7 and a 5, and a neural network written in Moth reads each one">
@@ -1553,4 +1553,4 @@ python -m http.server        # then open http://localhost:8000 for the playgroun
 
 <br>
 
-<p align="center"><sub>MIT licensed · made by <a href="https://github.com/samyyy2423">Samyak Pudke</a> · the letters a Linux window draws are DejaVu's (<a href="LICENSE-DejaVu">licence</a>)</sub></p>
+<p align="center"><sub>Apache 2.0 licensed (<a href="LICENSE">LICENSE</a>, <a href="NOTICE">NOTICE</a>) · made by <a href="https://github.com/samyyy2423">Samyak Pudke</a> · the letters a Linux window draws are DejaVu's (<a href="LICENSE-DejaVu">licence</a>)</sub></p>

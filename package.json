@@ -4,7 +4,7 @@
   "description": "A programming language that reads like plain English",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "test": "node --test",
     "bench": "node bench.js",

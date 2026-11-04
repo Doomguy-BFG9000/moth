@@ -4,7 +4,7 @@
   "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, and Run, Debug and Build",
   "version": "0.1.0",
   "publisher": "samyyy2423",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/samyyy2423/moth"
