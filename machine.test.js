@@ -1604,15 +1604,17 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
 
 // tools/arrays.moth (DESIGN §103): its own tests, in machine code, where machine code's own loops do the work and
 // must give what Moth gives to the last bit
-test("arrays.moth passes its own tests in machine code, where machine code's own loops do the work", { skip }, () => {
+test("arrays.moth and ai.moth pass their own tests in machine code, where machine code's own loops do the work", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "arrays");
   mkdirSync(sub);
-  for (const name of ["arrays.moth", "arrays.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  for (const name of ["arrays.moth", "arrays.test.moth", "ai.moth", "ai.test.moth", "http.moth", "sockets.moth", "system.moth", "zip.moth"]) {
+    writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  }
   writeFileSync(join(sub, "math.moth"), readFileSync(new URL("./math.moth", import.meta.url), "utf8"));
-  const ran = spawnSync(exe, ["test", "arrays.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  const ran = spawnSync(exe, ["test", "arrays.test.moth", "ai.test.moth", "--allow-libraries"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "9 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "12 passed");
 });
 
 // Moth's own library, which needs no --allow-libraries and isn't a library the program loads, and a list of
@@ -1900,6 +1902,228 @@ Python: ModuleNotFoundError: No module named 'no_such_module_here'
 'call' needs a Python object (as import_module gives), not a number
 ${numpy}`, "", 0]);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// tools/ai.moth (DESIGN §106), against a server of the test's own that answers as Anthropic's Messages API and
+// OpenAI's chat completions and embeddings do: plain and streamed answers (server-sent events, in chunks),
+// tools, JSON, embeddings, and the APIs' mistakes. The keys are made up, and only ever in the environment.
+async function aiMock() {
+  const seen = [];
+  const vocabulary = ["moth", "night", "bee", "day", "fly"];
+  const embedding = (text) => vocabulary.map((w) => text.toLowerCase().split(w).length - 1);
+  const lastUser = (messages) => [...messages].reverse().find((m) => m.role === "user" || m.role === "tool");
+  const pieces = (text) => text.match(/.{1,5}/gsu);
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const sent = body ? JSON.parse(body) : {};
+      seen.push({ url: req.url, headers: req.headers, body: sent });
+      const json = (status, value) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(value));
+      };
+      const events = (list, openai) => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        for (const [name, data] of list) res.write(openai ? `data: ${JSON.stringify(data)}\n\n` : `event: ${name}\ndata: ${JSON.stringify(data)}\r\n\r\n`);
+        if (openai) res.write("data: [DONE]\n\n");
+        res.end();
+      };
+      if (req.url === "/v1/messages") {
+        if (req.headers["x-api-key"] !== "test-key-not-real" || req.headers["anthropic-version"] !== "2026-10-21")
+          return json(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
+        const last = lastUser(sent.messages);
+        const result = Array.isArray(last.content) && last.content.find((b) => b.type === "tool_result");
+        let content;
+        let stop = "end_turn";
+        if (sent.tools && !result) {
+          content = [{ type: "text", text: "Let me check." }, { type: "tool_use", id: "toolu_1", name: sent.tools[0].name, input: { city: "Paris" } }];
+          stop = "tool_use";
+        } else if (result) content = [{ type: "text", text: `The tool said: ${result.content}${result.is_error ? " (an error)" : ""}` }];
+        else if (sent.output_config?.format) content = [{ type: "text", text: '{"name": "Luna moth", "wingspan": 114}' }];
+        else content = [{ type: "text", text: `You said: ${typeof last.content === "string" ? last.content : last.content[0].text}${sent.system ? ` [${sent.system}]` : ""}` }];
+        if (!sent.stream) return json(200, { id: "msg_1", type: "message", role: "assistant", model: sent.model, content, stop_reason: stop, usage: { input_tokens: 11, output_tokens: 7 } });
+        const list = [["message_start", { type: "message_start", message: { id: "msg_1", model: sent.model, content: [], usage: { input_tokens: 11, output_tokens: 1 } } }]];
+        content.forEach((block, index) => {
+          if (block.type === "text") {
+            list.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } }]);
+            for (const piece of pieces(block.text)) list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "text_delta", text: piece } }]);
+          } else {
+            list.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } }]);
+            const written = JSON.stringify(block.input);
+            list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: written.slice(0, 4) } }]);
+            list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: written.slice(4) } }]);
+          }
+          list.push(["content_block_stop", { type: "content_block_stop", index }]);
+        });
+        list.push(["ping", { type: "ping" }], ["message_delta", { type: "message_delta", delta: { stop_reason: stop }, usage: { output_tokens: 7 } }], ["message_stop", { type: "message_stop" }]);
+        return events(list, false);
+      }
+      if (req.url === "/v1/chat/completions" || req.url === "/v1/embeddings") {
+        if (req.headers.authorization !== "Bearer test-openai-key") return json(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error" } });
+        if (req.url === "/v1/embeddings") return json(200, { data: sent.input.map((t, index) => ({ index, embedding: embedding(t) })).reverse(), model: sent.model });
+        const last = lastUser(sent.messages);
+        const system = sent.messages[0].role === "system" ? ` [${sent.messages[0].content}]` : "";
+        let message;
+        let finish = "stop";
+        if (sent.tools && last.role !== "tool") {
+          message = { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: sent.tools[0].function.name, arguments: '{"city": "Paris"}' } }] };
+          finish = "tool_calls";
+        } else if (last.role === "tool") message = { role: "assistant", content: `The tool said: ${last.content}` };
+        else if (sent.response_format) message = { role: "assistant", content: '{"name": "Luna moth", "wingspan": 114}' };
+        else message = { role: "assistant", content: `You said: ${last.content}${system}` };
+        if (!sent.stream) return json(200, { model: sent.model, choices: [{ index: 0, message, finish_reason: finish }], usage: { prompt_tokens: 5, completion_tokens: 3 } });
+        const list = [];
+        if (message.content) for (const piece of pieces(message.content)) list.push(["", { choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] }]);
+        if (message.tool_calls) {
+          const call = message.tool_calls[0];
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: call.id, type: "function", function: { name: call.function.name, arguments: "" } }] } }] }]);
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: call.function.arguments.slice(0, 6) } }] } }] }]);
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: call.function.arguments.slice(6) } }] } }] }]);
+        }
+        list.push(["", { choices: [{ index: 0, delta: {}, finish_reason: finish }] }], ["", { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }]);
+        return events(list, true);
+      }
+      json(404, { error: { message: "no such page" } });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, seen, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+const AI_PROGRAM = `use "ai.moth" as ai
+use "system.moth" as system
+set base to system's environment("MOCK_BASE")
+set claude to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base)
+say claude
+say ai's answer(claude, "Name a moth.")
+set reply to ai's chat(claude, (list of (record with role "user", content "Hi")), dictionary where "system" is "Be brief.")
+say reply's text " | " reply's stop_reason " | " reply's usage's input_tokens " " reply's usage's output_tokens " | " reply's model
+set pieces to empty list
+to keep_piece with piece
+    add piece to pieces
+end
+set streamed to ai's stream(claude, "Write a haiku.", keep_piece)
+say length of pieces " pieces: " join pieces with "|"
+say streamed's text " | " streamed's stop_reason " | " streamed's usage's output_tokens
+to weather_in with input
+    return "sunny in " + item "city" of input
+end
+set weather to ai's tool("get_weather", "The weather in a city", (dictionary where "type" is "object", "properties" is (dictionary where "city" is dictionary where "type" is "string")), weather_in)
+say ai's chat_with_tools(claude, "Is it sunny in Paris?", list of weather)'s text
+to broken with input
+    fail with "no weather today"
+end
+say ai's chat_with_tools(claude, "Is it sunny in Paris?", list of ai's tool("get_weather", "The weather", empty dictionary, broken))'s text
+set first_turn to ai's stream(claude, "Is it sunny?", keep_piece, dictionary where "tools" is list of weather)
+say first_turn's stop_reason " " first_turn's tool_calls
+say ai's answer_json(claude, "A moth", dictionary where "type" is "object")
+set gpt to ai's openai("gpt-test", dictionary where "base_url" is base + "/v1")
+say gpt " " ai's answer(gpt, "Hello there", "Be kind.")
+set pieces to empty list
+set streamed to ai's stream(gpt, "Stream this", keep_piece)
+say join pieces with "|"
+say streamed's text " | " streamed's stop_reason " | " streamed's usage's input_tokens
+say ai's chat_with_tools(gpt, "Is it sunny in Paris?", list of weather)'s text
+set gpt_turn to ai's stream(gpt, "Is it sunny?", keep_piece, dictionary where "tools" is list of weather)
+say gpt_turn's stop_reason " " gpt_turn's tool_calls
+say ai's answer_json(gpt, "A moth", dictionary where "type" is "object")
+set texts to list of "moths fly at night", "bees fly by day", "a moth at night, a moth"
+set embedded to ai's embed(gpt, texts)
+say embedded
+set index to ai's vectors()
+ai's add_vector(index, texts, embedded)
+for each found in ai's search(index, ai's embed(gpt, "night moth"), 2)
+    say found's key " " found's score with 3 decimals
+end
+set wrong to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base, "key_variable" is "WRONG_KEY")
+for each attempt in list of 1, 2
+    try
+        if attempt is 1
+            ai's answer(wrong, "x")
+        else
+            ai's stream(wrong, "x", keep_piece)
+        end
+    if it fails with why
+        say why
+    end
+end
+try
+    ai's answer(ai's anthropic("claude-opus-5-5", dictionary where "key_variable" is "NO_SUCH_KEY_HERE"), "x")
+if it fails with why
+    say why
+end
+try
+    ai's embed(claude, "x")
+if it fails with why
+    say why
+end
+`;
+
+test("tools/ai.moth talks to Anthropic's and OpenAI's APIs: answers, streams, tools, JSON and embeddings", { skip }, async () => {
+  const { server, seen, base } = await aiMock();
+  const dir = mkdtempSync(join(tmpdir(), "moth-ai-"));
+  try {
+    const files = {};
+    for (const name of ["ai.moth", "http.moth", "sockets.moth", "system.moth", "zip.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(AI_PROGRAM, { target, name: "p.moth", files, allow: ["--allow-libraries", "--allow-net"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const env = { ...process.env, MOCK_BASE: base, ANTHROPIC_API_KEY: "test-key-not-real", OPENAI_API_KEY: "test-openai-key", WRONG_KEY: "nope" };
+    delete env.NO_SUCH_KEY_HERE;
+    const ran = await new Promise((resolve, reject) => {
+      const child = spawn(exe, [], { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"] });
+      let [stdout, stderr] = ["", ""];
+      child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+      child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+      const timer = setTimeout(() => child.kill(), 120_000);
+      child.on("error", reject);
+      child.on("close", (status) => {
+        clearTimeout(timer);
+        resolve({ stdout, stderr, status });
+      });
+    });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`an Anthropic client (claude-opus-5-5)
+You said: Name a moth.
+You said: Hi [Be brief.] | end_turn | 11 7 | claude-opus-5-5
+5 pieces: You s|aid: |Write| a ha|iku.
+You said: Write a haiku. | end_turn | 7
+The tool said: sunny in Paris
+The tool said: no weather today (an error)
+tool_use [(record with id "toolu_1", name "get_weather", input (dictionary where "city" is "Paris"))]
+(dictionary where "name" is "Luna moth", "wingspan" is 114)
+an OpenAI client (gpt-test) You said: Hello there [Be kind.]
+You s|aid: |Strea|m thi|s
+You said: Stream this | stop | 5
+The tool said: sunny in Paris
+tool_calls [(record with id "call_1", name "get_weather", input (dictionary where "city" is "Paris"))]
+(dictionary where "name" is "Luna moth", "wingspan" is 114)
+[[1, 1, 0, 0, 1], [0, 0, 1, 1, 1], [2, 1, 0, 0, 0]]
+a moth at night, a moth 0.949
+moths fly at night 0.816
+Anthropic said 401: authentication_error: invalid x-api-key
+Anthropic said 401: authentication_error: invalid x-api-key
+set NO_SUCH_KEY_HERE to your API key for Anthropic
+Anthropic's API has no embeddings: use openai_compatible() with a server that has them, as Voyage AI, OpenAI or Ollama
+`, "", 0]);
+    // what was sent: the first request as the Messages API wants it (no fallbacks to a server that isn't
+    // Anthropic's), a stream's tools streamed eagerly, and a tool's result sent back after the model's turn
+    const first = seen[0];
+    assert.deepEqual([first.url, first.headers["content-type"], first.body], ["/v1/messages", "application/json",
+      { model: "claude-opus-5-5", max_tokens: 16000, messages: [{ role: "user", content: "Name a moth." }] }]);
+    const streamedTools = seen.find((s) => s.body.stream && s.body.tools && s.url === "/v1/messages");
+    assert.deepEqual([streamedTools.body.max_tokens, streamedTools.body.tools[0].eager_input_streaming, streamedTools.headers.accept], [64000, true, "text/event-stream"]);
+    const toolRound = seen.find((s) => s.url === "/v1/messages" && s.body.messages.length === 3);
+    assert.deepEqual(toolRound.body.messages.map((m) => m.role), ["user", "assistant", "user"]);
+    assert.deepEqual(toolRound.body.messages[2].content, [{ type: "tool_result", tool_use_id: "toolu_1", content: "sunny in Paris" }]);
+    const openaiRound = seen.find((s) => s.url === "/v1/chat/completions" && s.body.messages.some((m) => m.role === "tool"));
+    assert.deepEqual(openaiRound.body.messages.at(-1), { role: "tool", tool_call_id: "call_1", content: "sunny in Paris" });
+    assert.ok(seen.every((s) => !JSON.stringify(s.body).includes("test-key-not-real")), "no key in a request's body");
+  } finally {
+    server.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

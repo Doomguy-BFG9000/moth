@@ -1,0 +1,870 @@
+# Talking to large language models: Anthropic's Messages API, and any API that speaks OpenAI's (OpenAI's own,
+# and local servers such as Ollama, LM Studio and vLLM). Messages and a system prompt, answers streamed as
+# they're written, tools the model can use, answers in JSON of a shape you give, embeddings, and a small
+# search of vectors by cosine similarity, on arrays.moth.
+#
+#   use "ai.moth" as ai
+#   set claude to ai's anthropic("claude-opus-5-5")     # its key from ANTHROPIC_API_KEY
+#   say ai's answer(claude, "Name three moths.")
+#   set reply to ai's chat(claude, (list of (record with role "user", content "Hi")), dictionary where "system" is "Be brief.")
+#   say reply's text " " reply's stop_reason " " reply's usage's output_tokens
+#   to shown_as_written with piece
+#       say piece                                       # each piece of the answer as it comes
+#   end
+#   ai's stream(claude, "Write a haiku.", shown_as_written)
+#   set weather to ai's tool("get_weather", "The weather in a city", dictionary where "type" is "object",
+#       "properties" is (dictionary where "city" is dictionary where "type" is "string"), function with input gives "sunny")
+#   say ai's chat_with_tools(claude, "Is it sunny in Paris?", list of weather)'s text
+#   say ai's answer_json(claude, "A moth's name and wingspan in mm", dictionary where "type" is "object",
+#       "properties" is (dictionary where "name" is (dictionary where "type" is "string"), "wingspan" is
+#       (dictionary where "type" is "number")))
+#   set local to ai's openai_compatible("http://localhost:11434/v1", "nomic-embed-text")   # Ollama, no key
+#   set vectors to ai's embed(local, list of "moths fly at night", "bees fly by day")   # an array, a row each
+#
+# openai(model) is OpenAI's own, its key from OPENAI_API_KEY. Options, a dictionary: system, max_tokens,
+# effort (Anthropic's output_config.effort), temperature (OpenAI's), and for a client base_url and
+# key_variable. A reply is a record: text, stop_reason, tool_calls (each a record of id, name and input),
+# usage (input_tokens and output_tokens), and message, the model's turn to add to a conversation. On Claude
+# Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5, a request the model declines is run again on another model
+# (Anthropic's server-side fallbacks); "fallbacks" is no in a client's options to turn that off. Keys are only
+# read from the environment, never kept in a value or shown. A program that uses it is built with
+# --allow-libraries and --allow-net. The API's mistakes are a `fail with` that says what it said.
+
+use "http.moth" as ai_http
+use "sockets.moth" as ai_net
+use "system.moth" as ai_system
+use "arrays.moth" as ai_arrays
+use "math.moth" as ai_math
+
+set ai_anthropic_version to "2026-10-21"
+set ai_line_end to (list of 13, 10) as bytes as text
+# the models whose refusals Anthropic's servers can hand to another model ("fallbacks": "default")
+set ai_fallback_models to list of "claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"
+
+kind ai_client with provider, model, base_url, key_variable, max_tokens, effort, fallbacks
+    to shown with self
+        return "an " + self's provider + " client (" + self's model + ")"
+    end
+end
+
+# ---------- clients ----------
+
+to anthropic with model or "claude-opus-5-5", options or nothing
+    set chosen to ai_options(options)
+    set made to ai_client("Anthropic", model, ai_option(chosen, "base_url", "https://api.anthropic.com"),
+        ai_option(chosen, "key_variable", "ANTHROPIC_API_KEY"), ai_option(chosen, "max_tokens", nothing),
+        ai_option(chosen, "effort", nothing), ai_option(chosen, "fallbacks", yes))
+    set kind of made to "ai client"
+    return made
+end
+
+to openai with model, options or nothing
+    set chosen to ai_options(options)
+    return openai_compatible(ai_option(chosen, "base_url", "https://api.openai.com/v1"), model, ai_option(chosen, "key_variable", "OPENAI_API_KEY"))
+end
+
+# any server that speaks OpenAI's API, at base_url (as "http://localhost:11434/v1"); with no key_variable, no key
+to openai_compatible with base_url, model, key_variable or nothing
+    set made to ai_client("OpenAI", model, base_url, key_variable, nothing, nothing, no)
+    set kind of made to "ai client"
+    return made
+end
+
+to ai_options with options
+    if options is nothing
+        return empty dictionary
+    end
+    return options
+end
+
+to ai_option with options, name, otherwise
+    if name is in options
+        return item name of options
+    end
+    return otherwise
+end
+
+to ai_need_client with client, what
+    try
+        if kind of client is "ai client"
+            return client
+        end
+    if it fails
+    end
+    fail with "'" + what + "' needs a client, as anthropic() or openai() makes"
+end
+
+# the key, from the environment, or nothing for a server that needs none
+to ai_key with client
+    if client's key_variable is nothing
+        return nothing
+    end
+    set key to ai_system's environment(client's key_variable)
+    if key is nothing or key is ""
+        fail with "set " + client's key_variable + " to your API key for " + client's provider
+    end
+    return key
+end
+
+to ai_headers with client, streaming
+    set made to dictionary where "content-type" is "application/json"
+    set key to ai_key(client)
+    if client's provider is "Anthropic"
+        set item "anthropic-version" of made to ai_anthropic_version
+        if key is not nothing
+            set item "x-api-key" of made to key
+        end
+        if ai_wants_fallbacks(client)
+            set item "anthropic-beta" of made to "server-side-fallback-2026-07-01"
+        end
+    else if key is not nothing
+        set item "authorization" of made to "Bearer " + key
+    end
+    if streaming
+        set item "accept" of made to "text/event-stream"
+    end
+    return made
+end
+
+to ai_wants_fallbacks with client
+    return client's provider is "Anthropic" and client's fallbacks is yes and client's model is in ai_fallback_models and client's base_url is "https://api.anthropic.com"
+end
+
+# ---------- requests ----------
+
+# the messages: text alone is one message from the user; records and dictionaries as they are
+to ai_messages with messages
+    if ai_arrays's arrays_is_text(messages)
+        return list of (dictionary where "role" is "user", "content" is messages)
+    end
+    set made to empty list
+    for each m in messages
+        add m to made
+    end
+    return made
+end
+
+# what's sent: the model, the messages and the options, as the provider has them
+to ai_body with client, messages, options, streaming
+    set chosen to ai_options(options)
+    set body to dictionary where "model" is client's model
+    set sent to ai_messages(messages)
+    if client's provider is "Anthropic"
+        set most to client's max_tokens
+        if most is nothing
+            set most to 16000
+            if streaming
+                set most to 64000
+            end
+        end
+        set item "max_tokens" of body to ai_option(chosen, "max_tokens", most)
+        if "system" is in chosen
+            set item "system" of body to item "system" of chosen
+        end
+        set item "messages" of body to sent
+        set output to empty dictionary
+        set effort to ai_option(chosen, "effort", client's effort)
+        if effort is not nothing
+            set item "effort" of output to effort
+        end
+        if "schema" is in chosen
+            set item "format" of output to dictionary where "type" is "json_schema", "schema" is item "schema" of chosen
+        end
+        if length of keys of output is greater than 0
+            set item "output_config" of body to output
+        end
+        if "tools" is in chosen
+            set described to empty list
+            for each t in item "tools" of chosen
+                set one to dictionary where "name" is t's name, "description" is t's description, "input_schema" is t's parameters
+                if streaming
+                    set item "eager_input_streaming" of one to yes
+                end
+                add one to described
+            end
+            set item "tools" of body to described
+        end
+        if ai_wants_fallbacks(client)
+            set item "fallbacks" of body to "default"
+        end
+    else
+        set all to empty list
+        if "system" is in chosen
+            add (dictionary where "role" is "system", "content" is item "system" of chosen) to all
+        end
+        for each m in sent
+            add m to all
+        end
+        set item "messages" of body to all
+        if "max_tokens" is in chosen
+            set item "max_tokens" of body to item "max_tokens" of chosen
+        end
+        if "temperature" is in chosen
+            set item "temperature" of body to item "temperature" of chosen
+        end
+        if "schema" is in chosen
+            set item "response_format" of body to dictionary where "type" is "json_schema", "json_schema" is (dictionary where "name" is "answer", "schema" is item "schema" of chosen)
+        end
+        if "tools" is in chosen
+            set described to empty list
+            for each t in item "tools" of chosen
+                add (dictionary where "type" is "function", "function" is (dictionary where "name" is t's name, "description" is t's description, "parameters" is t's parameters)) to described
+            end
+            set item "tools" of body to described
+        end
+        if streaming
+            set item "stream_options" of body to dictionary where "include_usage" is yes
+        end
+    end
+    if streaming
+        set item "stream" of body to yes
+    end
+    return body
+end
+
+to ai_url with client
+    if client's provider is "Anthropic"
+        return client's base_url + "/v1/messages"
+    end
+    return client's base_url + "/chat/completions"
+end
+
+# a mistake for an answer of 400 and up, with what the API said
+to ai_refused with client, status, text
+    set said to text
+    try
+        set parsed to json from text
+        set problem to item "error" of parsed
+        if ai_arrays's arrays_is_text(problem)
+            set said to problem
+        else
+            set said to item "message" of problem
+            if "type" is in problem and item "type" of problem is not nothing
+                set said to item "type" of problem + ": " + said
+            end
+        end
+    if it fails
+    end
+    fail with client's provider + " said " + status + ": " + said
+end
+
+to ai_post with client, url, body
+    set r to ai_http's request("POST", url, body as json, ai_headers(client, no))
+    if r's status is at least 400
+        ai_refused(client, r's status, r's text)
+    end
+    return json from r's text
+end
+
+# ---------- chatting ----------
+
+# the model's answer to a conversation (or to text, one message from the user), as a reply
+to chat with client, messages, options or nothing
+    set client to ai_need_client(client, "chat")
+    set answered to ai_post(client, ai_url(client), ai_body(client, messages, options, no))
+    return ai_reply(client, answered)
+end
+
+# just the text of the model's answer to a prompt
+to answer with client, prompt, system or nothing
+    set options to empty dictionary
+    if system is not nothing
+        set item "system" of options to system
+    end
+    return chat(client, prompt, options)'s text
+end
+
+# the reply for what the API answered
+to ai_reply with client, answered
+    set text to ""
+    set calls to empty list
+    set usage to record with input_tokens 0, output_tokens 0
+    if client's provider is "Anthropic"
+        for each block in item "content" of answered
+            if item "type" of block is "text"
+                add item "text" of block to text
+            else if item "type" of block is "tool_use"
+                add (record with id item "id" of block, name item "name" of block, input item "input" of block) to calls
+            end
+        end
+        if "usage" is in answered and item "usage" of answered is not nothing
+            set used to item "usage" of answered
+            set usage to record with input_tokens ai_option(used, "input_tokens", 0), output_tokens ai_option(used, "output_tokens", 0)
+        end
+        set message to dictionary where "role" is "assistant", "content" is item "content" of answered
+        return record with text text, stop_reason item "stop_reason" of answered, tool_calls calls, usage usage, message message, model ai_option(answered, "model", client's model)
+    end
+    set choice to item 1 of item "choices" of answered
+    set message to item "message" of choice
+    if "content" is in message and item "content" of message is not nothing
+        set text to item "content" of message
+    end
+    if "tool_calls" is in message and item "tool_calls" of message is not nothing
+        for each call in item "tool_calls" of message
+            set called to item "function" of call
+            add (record with id item "id" of call, name item "name" of called, input ai_json_or_text(item "arguments" of called)) to calls
+        end
+    end
+    if "usage" is in answered and item "usage" of answered is not nothing
+        set used to item "usage" of answered
+        set usage to record with input_tokens ai_option(used, "prompt_tokens", 0), output_tokens ai_option(used, "completion_tokens", 0)
+    end
+    return record with text text, stop_reason ai_option(choice, "finish_reason", nothing), tool_calls calls, usage usage, message message, model ai_option(answered, "model", client's model)
+end
+
+to ai_json_or_text with written
+    try
+        return json from written
+    if it fails
+        return written
+    end
+end
+
+# The model's answer, given to on_text a piece at a time as it's written (server-sent events), then the
+# whole reply, as chat gives it
+to stream with client, messages, on_text, options or nothing
+    set client to ai_need_client(client, "stream")
+    set state to record with client client, on_text on_text, blocks empty list, text "", stop_reason nothing,
+        input_tokens 0, output_tokens 0, calls empty list, model client's model, problem nothing
+    ai_events(client, ai_url(client), ai_body(client, messages, options, yes), state)
+    if state's problem is not nothing
+        fail with client's provider + " said: " + state's problem
+    end
+    return ai_streamed_reply(state)
+end
+
+# what each event says, kept in state, and each piece of text given to on_text
+to ai_take_event with state, event, data
+    if data is "[DONE]" or data is ""
+        return nothing
+    end
+    set said to json from data
+    if state's client's provider is "Anthropic"
+        set type to ai_option(said, "type", event)
+        if type is "message_start"
+            set message to item "message" of said
+            set state's model to ai_option(message, "model", state's model)
+            if "usage" is in message
+                set state's input_tokens to ai_option(item "usage" of message, "input_tokens", 0)
+            end
+        else if type is "content_block_start"
+            set block to item "content_block" of said
+            if item "type" of block is "tool_use"
+                set item "input" of block to ""
+            end
+            set blocks to state's blocks
+            add block to blocks
+        else if type is "content_block_delta"
+            set block to item (item "index" of said + 1) of state's blocks
+            set delta to item "delta" of said
+            set kind_of_delta to item "type" of delta
+            if kind_of_delta is "text_delta"
+                set item "text" of block to item "text" of block + item "text" of delta
+                set state's text to state's text + item "text" of delta
+                ai_give_text(state, item "text" of delta)
+            else if kind_of_delta is "input_json_delta"
+                set item "input" of block to item "input" of block + item "partial_json" of delta
+            else if kind_of_delta is "thinking_delta"
+                set item "thinking" of block to ai_option(block, "thinking", "") + item "thinking" of delta
+            else if kind_of_delta is "signature_delta"
+                set item "signature" of block to item "signature" of delta
+            end
+        else if type is "content_block_stop"
+            set block to item (item "index" of said + 1) of state's blocks
+            if item "type" of block is "tool_use"
+                set written to item "input" of block
+                if written is ""
+                    set written to "\{}"
+                end
+                set item "input" of block to ai_json_or_text(written)
+            end
+        else if type is "message_delta"
+            set state's stop_reason to ai_option(item "delta" of said, "stop_reason", state's stop_reason)
+            if "usage" is in said
+                set state's output_tokens to ai_option(item "usage" of said, "output_tokens", state's output_tokens)
+            end
+        else if type is "error"
+            set state's problem to ai_option(item "error" of said, "type", "error") + ": " + ai_option(item "error" of said, "message", "")
+        end
+        return nothing
+    end
+    if "usage" is in said and item "usage" of said is not nothing
+        set state's input_tokens to ai_option(item "usage" of said, "prompt_tokens", 0)
+        set state's output_tokens to ai_option(item "usage" of said, "completion_tokens", 0)
+    end
+    if "choices" is not in said or length of item "choices" of said is 0
+        return nothing
+    end
+    set choice to item 1 of item "choices" of said
+    if "finish_reason" is in choice and item "finish_reason" of choice is not nothing
+        set state's stop_reason to item "finish_reason" of choice
+    end
+    set delta to ai_option(choice, "delta", empty dictionary)
+    if "content" is in delta and item "content" of delta is not nothing and item "content" of delta is not ""
+        set state's text to state's text + item "content" of delta
+        ai_give_text(state, item "content" of delta)
+    end
+    if "tool_calls" is in delta and item "tool_calls" of delta is not nothing
+        for each part in item "tool_calls" of delta
+            set place to ai_option(part, "index", 0) + 1
+            set calls to state's calls
+            repeat while length of calls is less than place
+                add (dictionary where "id" is "", "type" is "function", "function" is (dictionary where "name" is "", "arguments" is "")) to calls
+            end
+            set call to item place of calls
+            if "id" is in part and item "id" of part is not nothing
+                set item "id" of call to item "id" of part
+            end
+            if "function" is in part
+                set given to item "function" of part
+                set called to item "function" of call
+                if "name" is in given and item "name" of given is not nothing
+                    set item "name" of called to item "name" of called + item "name" of given
+                end
+                if "arguments" is in given and item "arguments" of given is not nothing
+                    set item "arguments" of called to item "arguments" of called + item "arguments" of given
+                end
+            end
+        end
+    end
+end
+
+to ai_give_text with state, piece
+    set given_to to state's on_text
+    given_to(piece)
+end
+
+to ai_streamed_reply with state
+    set usage to record with input_tokens state's input_tokens, output_tokens state's output_tokens
+    set calls to empty list
+    if state's client's provider is "Anthropic"
+        for each block in state's blocks
+            if item "type" of block is "tool_use"
+                add (record with id item "id" of block, name item "name" of block, input item "input" of block) to calls
+            end
+        end
+        set message to dictionary where "role" is "assistant", "content" is state's blocks
+        return record with text state's text, stop_reason state's stop_reason, tool_calls calls, usage usage, message message, model state's model
+    end
+    set message to dictionary where "role" is "assistant", "content" is state's text
+    if length of state's calls is greater than 0
+        set item "tool_calls" of message to state's calls
+        for each call in state's calls
+            set called to item "function" of call
+            add (record with id item "id" of call, name item "name" of called, input ai_json_or_text(item "arguments" of called)) to calls
+        end
+    end
+    return record with text state's text, stop_reason state's stop_reason, tool_calls calls, usage usage, message message, model state's model
+end
+
+# A POST whose answer comes as server-sent events, read as they come: each event's name and data given to
+# ai_take_event as soon as its blank line has come, through a body sent in chunks or not
+to ai_events with client, url, body, state
+    set parts to ai_http's http_parts(url)
+    set data to (body as json) as bytes
+    set lines to list of "POST " + parts's path + " HTTP/1.1"
+    set host_line to parts's host
+    if parts's port is not parts's default
+        set host_line to host_line + ":" + parts's port
+    end
+    set given to dictionary where "host" is host_line, "user-agent" is "Moth", "accept-encoding" is "identity",
+        "connection" is "close", "content-length" is "" + length of data
+    set own to ai_headers(client, yes)
+    for each name in own
+        set item name of given to item name of own
+    end
+    for each name in given
+        add ai_http's http_header_name(name) + ": " + item name of given to lines
+    end
+    set c to nothing
+    if parts's scheme is "https"
+        set c to ai_net's connect_secure(parts's host, parts's port)
+    else
+        set c to ai_net's connect(parts's host, parts's port)
+    end
+    try
+        ai_net's wait_at_most(c, 600000)
+        ai_net's send(c, (join lines with ai_line_end) + ai_line_end + ai_line_end)
+        ai_net's send(c, data)
+        set reading to record with raw empty list, spot 1, head nothing, status 0, chunked no, left -1, events empty list, done no,
+            failed empty list
+        repeat while not reading's done
+            set got to ai_net's receive(c, 16384)
+            if length of got is 0
+                set reading's done to yes
+            else
+                for each b in got
+                    set raw to reading's raw
+                    add b to raw
+                end
+            end
+            ai_read(reading, state)
+        end
+        if reading's head is nothing
+            fail with client's provider + " didn't answer in HTTP"
+        end
+        if reading's status is at least 400
+            ai_refused(client, reading's status, (reading's failed as bytes) as text)
+        end
+        ai_close(c)
+    if it fails with why
+        ai_close(c)
+        fail with why
+    end
+end
+
+to ai_close with c
+    try
+        ai_net's close(c)
+    if it fails
+    end
+end
+
+# what's come so far: the head, then the body's bytes, its chunks taken apart, into events
+to ai_read with reading, state
+    set raw to reading's raw
+    if reading's head is nothing
+        set ends to ai_find(raw, reading's spot, list of 13, 10, 13, 10)
+        if ends is 0
+            return nothing
+        end
+        set head to ((items 1 to ends - 1 of raw) as bytes) as text
+        set reading's head to head
+        set first to item 1 of split head by ai_line_end
+        set reading's status to number of item 2 of split first by " "
+        set reading's chunked to position of "chunked" in lowercase of head is greater than 0
+        set reading's spot to ends + 4
+    end
+    repeat while yes
+        if reading's chunked and reading's left is -2 # a chunk's line end, still to come
+            if length of raw - reading's spot + 1 is less than 2
+                return nothing
+            end
+            set reading's spot to reading's spot + 2
+            set reading's left to -1
+        else if reading's chunked
+            if reading's left is -1 # a chunk's size, in hex, on a line of its own
+                set line_end to ai_find(raw, reading's spot, list of 13, 10)
+                if line_end is 0
+                    return nothing
+                end
+                set size_text to ((items reading's spot to line_end - 1 of raw) as bytes) as text
+                set reading's left to ai_hex(item 1 of split size_text by ";")
+                set reading's spot to line_end + 2
+                if reading's left is 0
+                    set reading's done to yes
+                    return nothing
+                end
+            end
+            set have to length of raw - reading's spot + 1
+            if have is 0
+                return nothing
+            end
+            set taking to reading's left
+            if have is less than taking
+                set taking to have
+            end
+            ai_feed(reading, items reading's spot to reading's spot + taking - 1 of raw, state)
+            set reading's spot to reading's spot + taking
+            set reading's left to reading's left - taking
+            if reading's left is 0
+                if length of raw - reading's spot + 1 is less than 2
+                    set reading's left to -2 # its line end still to come
+                    return nothing
+                end
+                set reading's spot to reading's spot + 2
+                set reading's left to -1
+            end
+        else
+            if reading's spot is at most length of raw
+                ai_feed(reading, items reading's spot to length of raw of raw, state)
+                set reading's spot to length of raw + 1
+            end
+            return nothing
+        end
+    end
+end
+
+# bytes of the body, onto the events: each ends at a blank line; or, after a mistake, onto what it says
+to ai_feed with reading, given, state
+    if reading's status is at least 400
+        set failed to reading's failed
+        for each b in given
+            add b to failed
+        end
+        return nothing
+    end
+    set events to reading's events
+    for each b in given
+        if b is not 13
+            add b to events
+        end
+    end
+    repeat while yes
+        set ends to ai_find(events, 1, list of 10, 10)
+        if ends is 0
+            return nothing
+        end
+        set block to ((items 1 to ends - 1 of events) as bytes) as text
+        set rest to empty list
+        for each b in items ends + 2 to length of events of events
+            add b to rest
+        end
+        set events to rest
+        set reading's events to rest
+        set name to ""
+        set data to empty list
+        for each line in split block by "\n"
+            if ai_starts(line, "event:")
+                set name to ai_after(line, 6)
+            else if ai_starts(line, "data:")
+                add ai_after(line, 5) to data
+            end
+        end
+        if length of data is greater than 0
+            ai_take_event(state, name, join data with "\n")
+        end
+    end
+end
+
+to ai_starts with line, start
+    return length of line is at least length of start and items 1 to length of start of line is start
+end
+
+# what's after the first n characters, and the one space after them, if there is one
+to ai_after with line, n
+    if length of line is n
+        return ""
+    end
+    set rest to items n + 1 to length of line of line
+    if item 1 of rest is " "
+        if length of rest is 1
+            return ""
+        end
+        return items 2 to length of rest of rest
+    end
+    return rest
+end
+
+# where `wanted` (a list of bytes) starts in xs, from `start`, or 0
+to ai_find with xs, start, wanted
+    set n to length of wanted
+    set k to start
+    repeat while k + n - 1 is at most length of xs
+        if item k of xs is item 1 of wanted
+            set fits to yes
+            for each j from 2 to n
+                if fits and item (k + j - 1) of xs is not item j of wanted
+                    set fits to no
+                end
+            end
+            if fits
+                return k
+            end
+        end
+        add 1 to k
+    end
+    return 0
+end
+
+to ai_hex with words
+    set made to 0
+    for each c in lowercase of words
+        set at to position of c in "0123456789abcdef"
+        if at is greater than 0
+            set made to made * 16 + at - 1
+        end
+    end
+    return made
+end
+
+# ---------- tools ----------
+
+# a tool the model can use: its name, what it does, the JSON Schema of what it takes, and a Moth function
+# given that (a dictionary) that gives back text, or anything JSON can say
+to tool with name, description, parameters, run
+    return record with name name, description description, parameters parameters, run run
+end
+
+# A conversation in which the model uses the tools as it likes: each use run, and what it gave sent back,
+# until it answers (at most `rounds` times, 20 if the options don't say): the last reply
+to chat_with_tools with client, messages, tools, options or nothing
+    set client to ai_need_client(client, "chat_with_tools")
+    set chosen to empty dictionary
+    for each name in ai_options(options)
+        set item name of chosen to item name of ai_options(options)
+    end
+    set item "tools" of chosen to tools
+    set rounds to ai_option(chosen, "rounds", 20)
+    set conversation to ai_messages(messages)
+    repeat rounds times
+        set reply to chat(client, conversation, chosen)
+        if length of reply's tool_calls is 0 or reply's stop_reason is "refusal" or reply's stop_reason is "max_tokens"
+            return reply
+        end
+        add reply's message to conversation
+        set results to empty list
+        for each call in reply's tool_calls
+            set outcome to ai_use_tool(tools, call)
+            if client's provider is "Anthropic"
+                set result to dictionary where "type" is "tool_result", "tool_use_id" is call's id, "content" is outcome's text
+                if outcome's failed
+                    set item "is_error" of result to yes
+                end
+                add result to results
+            else
+                add (dictionary where "role" is "tool", "tool_call_id" is call's id, "content" is outcome's text) to conversation
+            end
+        end
+        if client's provider is "Anthropic"
+            add (dictionary where "role" is "user", "content" is results) to conversation
+        end
+    end
+    fail with "the model was still using tools after " + rounds + " rounds"
+end
+
+# a tool's use: what it gave as text, and whether it failed
+to ai_use_tool with tools, call
+    for each t in tools
+        if t's name is call's name
+            if ai_arrays's arrays_is_text(call's input)
+                return record with text "the input wasn't valid JSON: " + call's input, failed yes
+            end
+            try
+                set runner to t's run
+                set given to runner(call's input)
+                if ai_arrays's arrays_is_text(given)
+                    return record with text given, failed no
+                end
+                return record with text given as json, failed no
+            if it fails with why
+                return record with text "" + why, failed yes
+            end
+        end
+    end
+    return record with text "there's no tool called '" + call's name + "'", failed yes
+end
+
+# ---------- JSON ----------
+
+# the model's answer to a prompt as JSON of the shape a JSON Schema gives (structured outputs), read: a
+# dictionary, list, number, text, yes or no
+to answer_json with client, prompt, schema, options or nothing
+    set chosen to empty dictionary
+    for each name in ai_options(options)
+        set item name of chosen to item name of ai_options(options)
+    end
+    set item "schema" of chosen to schema
+    set reply to chat(client, prompt, chosen)
+    try
+        return json from reply's text
+    if it fails
+        fail with "the model's answer wasn't JSON: " + reply's text
+    end
+end
+
+# ---------- embeddings and searching them ----------
+
+# each text's embedding, from a server that speaks OpenAI's API (OpenAI, Ollama, LM Studio, vLLM, Voyage
+# AI): an array with a row for each. Anthropic's API has none.
+to embed with client, texts
+    set client to ai_need_client(client, "embed")
+    if client's provider is "Anthropic"
+        fail with "Anthropic's API has no embeddings: use openai_compatible() with a server that has them, as Voyage AI, OpenAI or Ollama"
+    end
+    if ai_arrays's arrays_is_text(texts)
+        set texts to list of texts
+    end
+    set answered to ai_post(client, client's base_url + "/embeddings", dictionary where "model" is client's model, "input" is texts)
+    set rows to empty list
+    for each k from 1 to length of texts
+        add nothing to rows
+    end
+    set k to 0
+    for each one in item "data" of answered
+        add 1 to k
+        set item (ai_option(one, "index", k - 1) + 1) of rows to item "embedding" of one
+    end
+    return ai_arrays's array(rows)
+end
+
+# how alike two vectors are: their dot product over their lengths, from -1 to 1
+to cosine with a, b
+    set a to ai_arrays's flatten(ai_arrays's array(a))
+    set b to ai_arrays's flatten(ai_arrays's array(b))
+    set lengths to ai_length(a) * ai_length(b)
+    if lengths is 0
+        return 0
+    end
+    return ai_arrays's dot(a, b) / lengths
+end
+
+to ai_length with v
+    return ai_math's sqrt(ai_arrays's dot(v, v))
+end
+
+kind ai_vectors with labels, rows, width
+    to shown with self
+        return "vectors (" + length of self's labels + ")"
+    end
+end
+
+# vectors to search, each kept with a key (text, a number, or anything)
+to vectors
+    return ai_vectors(empty list, empty list, 0)
+end
+
+# a vector, of numbers or an array of one axis, added with its key; or an array of rows, each with a key from
+# a list of them
+to add_vector with index, key, vector
+    set v to ai_arrays's array(vector)
+    if length of v's shape is 2
+        for each k from 1 to item 1 of v's shape
+            add_vector(index, item k of key, ai_arrays's row(v, k))
+        end
+        return nothing
+    end
+    if index's width is 0
+        set index's width to ai_arrays's size(v)
+    end
+    if ai_arrays's size(v) is not index's width
+        fail with "'add_vector' needs vectors of " + index's width + " numbers, not " + ai_arrays's size(v)
+    end
+    set norm to ai_length(v)
+    if norm is 0
+        fail with "'add_vector' can't search by a vector of zeros"
+    end
+    set labels to index's labels
+    add key to labels
+    set rows to index's rows
+    for each x in ai_arrays's numbers_of(v)
+        add x / norm to rows
+    end
+end
+
+# the k vectors most like the query (a vector, or an array of one row, as embed gives for one text), by cosine
+# similarity, most alike first: each a record of key and score
+to search with index, query, k or 5
+    set q to ai_arrays's flatten(ai_arrays's array(query))
+    if length of index's labels is 0
+        return empty list
+    end
+    if ai_arrays's size(q) is not index's width
+        fail with "'search' needs a vector of " + index's width + " numbers, not " + ai_arrays's size(q)
+    end
+    set norm to ai_length(q)
+    if norm is 0
+        fail with "'search' can't search by a vector of zeros"
+    end
+    set all to ai_arrays's shaped(index's rows, list of length of index's labels, index's width)
+    set scores to ai_arrays's numbers_of(ai_arrays's divided_by(ai_arrays's matmul(all, q), norm))
+    set found to empty list
+    for each place from 1 to length of scores
+        add (record with key item place of index's labels, score item place of scores) to found
+    end
+    set ordered to found in reverse order by score
+    if k is less than length of ordered
+        return items 1 to k of ordered
+    end
+    return ordered
+end

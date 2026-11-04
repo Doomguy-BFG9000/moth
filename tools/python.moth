@@ -171,11 +171,11 @@ to python_candidates with path
         return list of path
     end
     set made to empty list
-    for each version from 14 to 8 by -1
+    for each minor from 14 to 8 by -1
         if python_windows
-            add path + "\\python3" + version + ".dll" to made
+            add path + "\\python3" + minor + ".dll" to made
         else
-            add path + "/libpython3." + version + ".so.1.0" to made
+            add path + "/libpython3." + minor + ".so.1.0" to made
         end
     end
     return made
@@ -196,8 +196,8 @@ to python_everywhere
         end
         return made
     end
-    for each version from 14 to 8 by -1
-        add "libpython3." + version + ".so.1.0" to made
+    for each minor from 14 to 8 by -1
+        add "libpython3." + minor + ".so.1.0" to made
     end
     return made
 end
