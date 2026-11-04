@@ -1,0 +1,927 @@
+# Charts written to files, as matplotlib's savefig makes them: bars, lines, and one bar split into its parts,
+# as SVG (sharp at any size, for pages and documents; each mark says its value when the mouse is on it) or
+# as PNG, from labels and numbers. In Moth alone, so it works everywhere.
+#
+#   use "charts.moth" as charts
+#   set months to list of "Jan", "Feb", "Mar", "Apr"
+#   set sales to charts's bar_chart("Sales by month", months, list of 120, 95, 140, 160)
+#   charts's save(sales, "sales.svg")                     # or "sales.png", by the name's end
+#   set both to dictionary where "2025" is (list of 120, 95, 140, 160), "2026" is (list of 130, 120, 150, 180)
+#   charts's save(charts's line_chart("Sales", months, both), "sales-lines.png")   # a line for each
+#   charts's save(charts's parts_chart("Where it went", (list of "Rent", "Food", "Fun"), list of 50, 30, 20), "budget.png")
+#
+# A dictionary of lists is a series for each key, up to 8, each its own colour in a fixed order, with a
+# legend; a line chart names its lines at their ends too, up to 4. sized(chart, width, height) is the same
+# chart another size (720 by 440 to begin with); svg_of and png_of give the file's text and bytes.
+
+use "images.moth" as chart_images
+use "base64.moth" as chart_b64
+use "math.moth" as chart_math
+
+# DejaVu Sans at 13 pixels and DejaVu Sans Bold at 16, its letters from space to ~, as tools/glyph-tables.py
+# makes them (see LICENSE-DejaVu)
+set chart_font_13 to list of "TUYNDQRfACAAAAABAAAEAAAAACEAAEABAAkFCQAAACIAAIABAAkGCRsAACMAAMACAAoLCjYAACQAAAACAAkIC3IAACUAAAADAAkM",
+    "CZ4AACYAAIACAAkKCdQAACcAAAABAAkECQEBACgAAEABAAsFDBMBACkAAEABAAsFDDcBACoAAMABAAkHCVsBACsAAMACAAkLCX8B",
+    "ACwAAAABAAIEA7UBAC0AAEABAAQFBLsBAC4AAAABAAIEAscBAC8AAAABAAkFC8sBADAAAAACAAkICewBADEAAAACAAkICRACADIA",
+    "AAACAAkICTQCADMAAAACAAkICVgCADQAAAACAAkICXwCADUAAAACAAkICaACADYAAAACAAkICcQCADcAAAACAAkICegCADgAAAAC",
+    "AAkICQwDADkAAAACAAkICTADADoAAAABAAcEB1QDADsAAAABAAcECGIDADwAAMACAAgLCHIDAD0AAMACAAYLBqIDAD4AAMACAAgL",
+    "CMYDAD8AAMABAAkHCfYDAEAAAEADAAkNCxoEAEEAAEACAAkJCWcEAEIAAEACAAkJCZQEAEMAAEACAAkJCcEEAEQAAIACAAkKCe4E",
+    "AEUAAAACAAkICRsFAEYAAMABAAkHCT8FAEcAAIACAAkKCWMFAEgAAIACAAkKCZAFAEkAAAABAAkECb0FAEoAAAAB/wkFDM8FAEsA",
+    "AEACAAkJCfMFAEwAAMABAAkICSAGAE0AAMACAAkLCUQGAE4AAIACAAkKCXoGAE8AAIACAAkKCacGAFAAAAACAAkICdQGAFEAAIAC",
+    "AAkKC/gGAFIAAEACAAkJCS8HAFMAAAACAAkICVwHAFQAAAAC/wkJCYAHAFUAAIACAAkKCa0HAFYAAEACAAkJCdoHAFcAAEADAAkN",
+    "CQcIAFgAAEACAAkJCUYIAFkAAAAC/wkJCXMIAFoAAEACAAkJCaAIAFsAAEABAAoFDM0IAFwAAAABAAkFC/EIAF0AAEABAAoFDBIJ",
+    "AF4AAMACAAkLCTYJAF8AAMAB/wAIA2wJAGAAAMABAAoHCngJAGEAAAACAAcIB6AJAGIAAAACAAsIC7wJAGMAAMABAAcHB+gJAGQA",
+    "AAACAAsICwQKAGUAAAACAAcIBzAKAGYAAEABAAsFC0wKAGcAAAACAAcICm0KAGgAAAACAAsIC5UKAGkAAAABAAoECsEKAGoAAAAB",
+    "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"
+set chart_font_16 to list of "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",
+    "MP8JMP8JMP8JMP8JAAAAAAAAAAAAMP8JMP8JQP8GgL8A0B4AAAAAADCYAAAAAHL9vwAAEMb/rxUAIPr/awEAAED/LAAAAAAg+v9r",
+    "AQAAABDG/68VAAAAAHL9vwAAAAAAMJgAAAAAAAAAAED/////vwBA/////78AAAAAAAAAAAAAAAAAAABA/////78AQP////+/AAAA",
+    "AAAAAAAAAAAAAAAAQFsBAAAAAED/rgQAAAAAg/3vOAAAAAAw6f9tAAAAAAD4vwAAADDp/20AAIP97zgAAED/rgQAAABAWwEAAAAA",
+    "AAAAAAAAADDZ3hkA0P//zwCgFcH/AgAAoP8DAAD13wAAUP8+AADh7wMAAPSfAAAAAAAAAAD0jwAAAPSPAAAA9I8AAAAAcezeOQAA",
+    "AEC+FDH5BwAA9AcAAEB/ABCeEOqtX/cDcB+gT+Nf4QmwC/EKoF+wDNAJ8whwX5AN0Aj0CIBfsAvAC/EKoF/hB3AeoE/jb8oBEI4Q",
+    "+q3fGAAA9QYAAAAAAABQrhQgxgMAAACB7N9aAAAAAPz/AgAAACD//wgAAABw//8NAAAA0P/6TwAAAPO/9Z8AAAD5b+HvAAAA/h+g",
+    "/wUAUP8LUP8KAKD/////HwDx/////28A9q8AAPTPAPtPAADQ/wKA///fOgCA////7wKA/wex/weA/wdw/wiA/wex/wWA////nwCA",
+    "////3wOA/wdg/wyA/wcA/x+A/wdg/w6A/////wiA///vbAAAINjunQMA5f///wsw/48SYwmw/wkAAADx/wIAAADy/wAAAADy/wAA",
+    "AADx/wIAAACw/wkAAAAw/48CYgkA9f///wsAINnunQSA///OOQAAgP////8IAID/B2H+fwCA/wcA9e8BgP8HAND/BID/BwCw/waA",
+    "/wcAsP8GgP8HAND/BID/BwD17wGA/wdh/n8AgP////8IAID//845AACA////nwCA////nwCA/wcAAACA/wcAAACA/wcAAACA////",
+    "TwCA////TwCA/wcAAACA/wcAAACA/wcAAACA////zwCA////zwCA////nwCA////nwCA/wcAAACA/wcAAACA/wcAAACA////TwCA",
+    "////TwCA/wcAAACA/wcAAACA/wcAAACA/wcAAACA/wcAAAAAIMj+zSgAAOX///+PADD/nwJCeQCw/wkAAAAA8f8CAAAAAPL/AAAA",
+    "AADy/wCw/+8A8f8CsP/vALD/CQDQ7wAw/48C4e8AAPX////vAAAg2e69JwCA/wcA8e8AgP8HAPHvAID/BwDx7wCA/wcA8e8AgP8H",
+    "APHvAID/////7wCA/////+8AgP8HAPHvAID/BwDx7wCA/wcA8e8AgP8HAPHvAID/BwDx7wCA/weA/weA/weA/weA/weA/weA/weA",
+    "/weA/weA/weA/weA/wcA+H8AAPh/AAD4fwAA+H8AAPh/AAD4fwAA+H8AAPh/AAD4fwAA+H8AAPh/AAD5bwBA/j8A/v8LAO58AACA",
+    "/wcA+s8BgP8HoP8cAID/B/rPAQCA/6f/HAAAgP/+zwEAAID//x4AAACA//9/AAAAgP/7/wcAAID/V/9/AACA/wf1/wcAgP8HUP9v",
+    "AID/BwD2/waA/wcAAID/BwAAgP8HAACA/wcAAID/BwAAgP8HAACA/wcAAID/BwAAgP8HAACA/wcAAID////PgP///8+A/38AAPn/",
+    "B4D/3wAQ/v8HgP//BGD//weA//4KwO//B4D/+C/zj/8HgP/Fj/lr/weA/2Xf/mX/B4D/Ff7vYP8HgP8F+Y9g/weA/wXzL2D/B4D/",
+    "BQAAYP8HgP8FAABg/weA/y8A4O8AgP+fAODvAID//wLg7wCA//8K4O8AgP/5L+DvAID/xa/g7wCA/0X/4+8AgP8F++rvAID/BfT/",
+    "7wCA/wWw/+8AgP8FMP/vAID/BQD67wAAMNrvfAEAAPf///8tAED/XiH53wDA/wcA0P8G8f8BAHD/CvPvAABQ/wvz7wAAUP8L8f8B",
+    "AHD/CsD/BwDQ/wZA/14g+d8AAPf///8tAAAw2u98AQCA///vOgCA/////wSA/weR/wyA/wcg/x+A/wcg/x+A/weR/wyA/////wSA",
+    "///vSwCA/wcAAACA/wcAAACA/wcAAACA/wcAAAAAMNrvjAEAAPf///89AED/XiH53wDA/wcA0P8G8f8BAHD/CvLvAABQ/wvz7wAA",
+    "UP8L8f8BAHD/CcD/BwDQ/wVQ/14g+c8AAPf///8tAAAw2v/PAQAAAABg/wcAAAAAAPdvAID//986AID////vAoD/B8L/B4D/B4D/",
+    "B4D/B8L/A4D///9dAID///89AID/B/fvAYD/B7D/B4D/B0D/DYD/BwD9X4D/BwD2zwCi/d5aADD///+fAKD/FTGJAMDvAAAAALD/",
+    "awIAAFD//+8ZAADV///PAAAAY/v/AwAAAKD/BaBIAtP/A7D///+/AEDI/s4HAP7/////DP7/////DAAQ/w8AAAAQ/w8AAAAQ/w8A",
+    "AAAQ/w8AAAAQ/w8AAAAQ/w8AAAAQ/w8AAAAQ/w8AAAAQ/w8AAAAQ/w8AAID/BwD3jwCA/wcA948AgP8HAPePAID/BwD3jwCA/wcA",
+    "948AgP8HAPePAID/BwD3jwCA/wgA+I8AYP8KAPpvACD/TkH+LwAA+P///wgAAFDr71sAAPtPAADQ/wL2nwAA9M8A8e8AAPlvAKD/",
+    "BQD+HwBQ/wpA/woAAP4fkP8FAAD5b+DvAAAA87/1nwAAAND/+08AAABw//8NAAAAIP//CAAAAAD8/wIAAPZ/ALD/BgD8H/O/AOD/",
+    "CRD/DODvAPP/DUD/CbD/Avb7H4D/BXD/BvrHX7D/AkD/Cf2Tj+DfABD/Le9Qz/OvAAD8f78g//d/AAD4348A/f0/AAD1/08A+v8O",
+    "AADx/x8A9v8LAADQ/w0A8/8IAPPfAQD5jwCA/wlA/w0AAP1P0f8DAADz3/qPAAAAgP//DQAAABD9/wMAAAAg/v8GAAAAsP//LgAA",
+    "APa/978AABD+LsD/BQCg/wcg/h4A9c8AAPevAMD/BwDQ/wYw/y4A988AAPivIP4/AADR/7X/CAAAQP/+3wAAAAD5/z8AAAAA4f8J",
+    "AAAAALD/BAAAAACw/wQAAAAAsP8EAAAAALD/BAAAAACw/wQAAPH/////C/H/////CwAAAPb/BAAAMP9/AAAA0f8LAAAA+98BAACA",
+    "/z8AAAD0/wYAACD+nwAAAMD/DAAAAPT/////DfT/////DZD//wSQ//8EkP8AAJD/AACQ/wAAkP8AAJD/AACQ/wAAkP8AAJD/AACQ",
+    "/wAAkP8AAJD//wSQ//8E3QAA+AMA8wgA0A0AkC8AQH8AAM4AAPkCAPUGAOELAKAfAFBvABCv4P/vAOD/7wAAsO8AALDvAACw7wAA",
+    "sO8AALDvAACw7wAAsO8AALDvAACw7wAAsO8A4P/vAOD/7wAAALHvBAAAABD7/k4AAADBr2H+BAAQ7AUAsl8AAAAAAAAAAAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/////sV8AABDsAgAAwQwAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAID//60CAID///8eAAAAEPdvACDZ//+PAND///+PAPS/AvWPAPS/",
+    "IfyPANH///+PADDrvvePAKD/AgAAAKD/AgAAAKD/AgAAAKD/tu4aAKD////PAKD/LML/BqD/BED/CqD/AzD/C6D/BED/CqD/LML/",
+    "BqD////PAKD/tu4aAACj/Y0BQP///wbQ/xhhBfPPAAAA9K8AAADzzwAAAND/GGEFQP///wYAo/2NAQAAALD/AgAAALD/AgAAALD/",
+    "AgDWzrj/AmD/////AuD/Ffb/AvO/AND/AvSvALD/AvO/AND/AuD/Ffb/AmD/////AgDW37j/AgCj/q4DAED///8+ANDfA+PPAPP/",
+    "////APT/////AfOvAAAAAND/FjGYAED///+vAACj/b4XAADE/i8Q/v8vQP8JAPr//w36//8NQP8IAED/CABA/wgAQP8IAED/CABA",
+    "/wgAQP8IAADWzrj/AmD/////AuD/Ffb/AvPPAND/AvSvALD/AvO/AND/AuD/Ffb/AmD/////AgDW38j/ATA5EfXvADD///9vAAC1",
+    "/q0DAKD/AgAAAKD/AgAAAKD/AgAAAKD/tu4aAKD///+vAKD/LOL/AKD/BbD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/",
+    "AqD/AqD/AgAAAKD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AgD6LwD6LwAAAAD6LwD6LwD6LwD6LwD6LwD6LwD6LwD6LwD6LyD9",
+    "D/j/CfidAaD/AgAAAKD/AgAAAKD/AgAAAKD/AuPvA6D/Mv4tAKD/5d8CAKD//i0AAKD//woAAKD/+68AAKD/sv8JAKD/EvyPAKD/",
+    "AsH/B6D/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/tu4Y2L4DAKD////v//8NAKD/G/X/F/tPAKD/BPHvAPZv",
+    "AKD/AvDPAPZvAKD/AvDPAPZvAKD/AvDPAPZvAKD/AvDPAPZvAKD/AvDPAPZvAKD/tu4aAKD///+vAKD/LOL/AKD/BbD/AqD/AqD/",
+    "AqD/AqD/AqD/AqD/AqD/AqD/AqD/AqD/AgCj/q4DAED///9PAND/FfXfAPO/ALD/A/SvAKD/BPO/ALD/A9D/FfXfAFD///9fAACj",
+    "/q4DAKD/tu4aAKD////PAKD/LML/BqD/BED/CqD/AzD/C6D/BED/CqD/LML/BqD////PAKD/tu4aAKD/AgAAAKD/AgAAAKD/AgAA",
+    "AADWzrj/AmD/////AuD/Ffb/AvO/AND/AvSvALD/AvO/AND/AuD/Ffb/AmD/////AgDW37j/AgAAALD/AgAAALD/AgAAALD/AqD/",
+    "gt6g//rfoP89AKD/BQCg/wIAoP8CAKD/AgCg/wIAoP8CACDq31oA0P///wPyjyC1A+C/RgEAQP3/vwEAIHT/CbAlMP8L8P///wcw",
+    "2e98AGD/BgBg/wYA/P//T/z//09g/wYAYP8GAGD/BgBg/wYAUP8JACD//x8A1v8fsP8BsP8BsP8BsP8BsP8BsP8BsP8BsP8BsP8B",
+    "wP8BsP8B4P8BkP8X+P8BQP////8BANbOx/8B+D8AwO8B858A8p8AwO8A908AYP8E/Q0AEP85/wcAAPqO/wIAAPT/vwAAAND/XwAA",
+    "AID/DgAA9W8A/QqQ/wLxryD/DtDfAMDfUP8v8Z8AgP+Sr2/1XwBA/9U/r/kfABD/+gve/AwAAPz/CPv/CAAA+P8E9/8FAAD0/wH0",
+    "/wEA9L8A9o8AgP8m/gwAAPy+7wIAAOL/bwAAAJD/DgAAAPT/nwAAEP2t/wQAoP8U/R4A9o8A878A+T8AwO8A8p8A8o8AsO8A9y8A",
+    "UP8F/AsAAP0r/wUAAPef7wAAAOH/jwAAAJD/LwAAADD/CwAAADD/BQAAYP/fAAAAYO8rAAAA8f///wjx////CAAA4+8DACD+PgAA",
+    "0v8EABD9XwAAwf8GAAD0////CPT///8IAABg/G8AAADz/28AAAD3fwEAAAD4LwAAAAD4HwAAAAD6HwAAADD+DgAAAP/vBgAAAP//",
+    "CAAAACD9DwAAAAD5HwAAAAD4LwAAAAD3bwAAAAD0/28AAABg/W8AAM8AAM8AAM8AAM8AAM8AAM8AAM8AAM8AAM8AAM8AAM8AAM8A",
+    "AM8AAM8AAM8AAM8AAP+dAQAAAP//CQAAACD+DQAAAAD7DwAAAAD6DwAAAAD6HwAAAAD4fwEAAADC/28AAADT/28AAAD5bwEAAAD6",
+    "DwAAAAD7DwAAACD9DgAAAP//CgAAAP+uAQAAAAAAAAAAAADF30kRpgBA/////78AQDogx94ZABAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "AA=="
+
+# the colours: what charts are drawn on, text, lines under the marks, and the series' own, in this order
+set chart_surface to "#fcfcfb"
+set chart_ink to "#0b0b0b"
+set chart_soft_ink to "#52514e"
+set chart_grid to "#e1e0d9"
+set chart_series to list of "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"
+set chart_fonts to nothing
+
+# ---------- making charts ----------
+
+# the values as series: a list of numbers is one, a dictionary of lists one for each key
+to series_of with title, labels, values
+    set made to empty list
+    set names to nothing
+    try
+        set names to keys of values
+    if it fails
+        set names to nothing
+    end
+    if names is nothing
+        add (record with name title, values values) to made
+    else
+        for each name in names
+            add (record with name name, values item name of values) to made
+        end
+    end
+    if length of made is greater than 8
+        fail with "a chart shows at most 8 series: put the rest together in one called Other"
+    end
+    for each one in made
+        if length of values of one is not length of labels
+            fail with "'" + name of one + "' has " + length of values of one + " numbers for " + length of labels + " labels"
+        end
+    end
+    return made
+end
+
+to new_chart with kind_of_it, title, labels, values, height
+    if length of labels is 0
+        fail with "a chart needs at least one label, and a number for it"
+    end
+    return record with kind kind_of_it, title title, labels labels, series series_of(title, labels, values), width 720, height height
+end
+
+to bar_chart with title, labels, values
+    return new_chart("bars", title, labels, values, 440)
+end
+
+to line_chart with title, labels, values
+    return new_chart("lines", title, labels, values, 440)
+end
+
+# one whole split into its parts, a segment each, as wide as its share
+to parts_chart with title, labels, values
+    set made to new_chart("parts", title, labels, values, 200)
+    if length of series of made is not 1
+        fail with "a parts chart splits one whole: give it a list of numbers"
+    end
+    set whole to 0
+    for each v in values
+        if v is less than 0
+            fail with "a parts chart's parts are 0 or more, not " + v
+        end
+        set whole to whole + v
+    end
+    if whole is 0
+        fail with "a parts chart's parts add up to more than 0"
+    end
+    return made
+end
+
+to sized with chart, width, height
+    return record with kind kind of chart, title title of chart, labels labels of chart, series series of chart, width width, height height
+end
+
+# the chart written to a file: .svg or .png, by the name's end
+to save with chart, path
+    set lowered to lowercase of path
+    set n to length of lowered
+    if n is greater than 4 and items (n - 3) to n of lowered is ".svg"
+        write svg_of(chart) to path
+    else if n is greater than 4 and items (n - 3) to n of lowered is ".png"
+        write png_of(chart) to path
+    else
+        fail with "a chart is saved as .svg or .png, not '" + path + "'"
+    end
+end
+
+# ---------- letters ----------
+
+# DejaVu's letters, read once: each one's advance, where its ink is, and the ink, 4 bits a pixel
+to fonts
+    if chart_fonts is nothing
+        set chart_fonts to record with small font_of(chart_font_13), big font_of(chart_font_16)
+    end
+    return chart_fonts
+end
+
+to font_of with lines
+    set data to chart_b64's bytes_of_base64(join lines with "")
+    set count to byte 6 of data + byte 7 of data * 256
+    set glyphs to empty dictionary
+    for each k from 0 to count - 1
+        set at to 8 + k * 12
+        set up to byte (at + 6) of data
+        if up is at least 128
+            set up to up - 256
+        end
+        set left_side to byte (at + 5) of data
+        if left_side is at least 128
+            set left_side to left_side - 256
+        end
+        set code to byte at of data + byte (at + 1) of data * 256
+        set item code of glyphs to record with advance (byte (at + 3) of data + byte (at + 4) of data * 256) / 64, left left_side, up up, wide byte (at + 7) of data, high byte (at + 8) of data, start byte (at + 9) of data + byte (at + 10) of data * 256 + byte (at + 11) of data * 65536
+    end
+    return record with glyphs glyphs, ink data, ink_at 7 + count * 12, ascent byte 4 of data
+end
+
+to glyph_of with font, c
+    set code to (c as bytes)
+    set n to 63
+    if length of code is 1
+        set n to byte 1 of code
+    end
+    if not (n is in glyphs of font)
+        set n to 63
+    end
+    return item n of glyphs of font
+end
+
+to font_for with size
+    if size is greater than 14
+        return big of fonts()
+    end
+    return small of fonts()
+end
+
+# how wide text is, in pixels, at a size
+to width_of with words, size
+    set font to font_for(size)
+    set total_width to 0
+    for each c in words
+        set total_width to total_width + advance of glyph_of(font, c)
+    end
+    return total_width
+end
+
+# ---------- numbers on an axis ----------
+
+# a step for about 5 lines between lo and hi: 1, 2 or 5 times a power of 10
+to nice_step with lo, hi
+    set raw to (hi - lo) / 5
+    set p to 1
+    repeat while p * 10 is at most raw
+        set p to p * 10
+    end
+    repeat while p is greater than raw
+        set p to p / 10
+    end
+    for each m in list of 1, 2, 5, 10
+        if m * p is at least raw
+            return m * p
+        end
+    end
+    return 10 * p
+end
+
+# a number as an axis says it: in full under 10,000 (with commas), else 10K, 1.5M
+to axis_text with v, compact
+    if compact
+        set size_of_it to v
+        if size_of_it is less than 0
+            set size_of_it to 0 - size_of_it
+        end
+        if size_of_it is at least 1000000000
+            return "" + v / 1000000000 + "B"
+        else if size_of_it is at least 1000000
+            return "" + v / 1000000 + "M"
+        else if size_of_it is at least 1000
+            return "" + v / 1000 + "K"
+        end
+        return "" + v
+    end
+    return with_commas(v)
+end
+
+to with_commas with v
+    set written to "" + v
+    set sign to ""
+    if item 1 of written is "-"
+        set sign to "-"
+        set written to items 2 to (length of written) of written
+    end
+    set dot to position of "." in written
+    set whole_part to written
+    set rest to ""
+    if dot is greater than 0
+        set whole_part to items 1 to (dot - 1) of written
+        set rest to items dot to (length of written) of written
+    end
+    set made to ""
+    set k to length of whole_part
+    set counted to 0
+    repeat while k is at least 1
+        if counted is 3
+            set made to "," + made
+            set counted to 0
+        end
+        set made to item k of whole_part + made
+        set counted to counted + 1
+        set k to k - 1
+    end
+    return sign + made + rest
+end
+
+# ---------- laying out: shapes and text, for SVG and PNG alike ----------
+
+to shape_rect with x, y, w, h, colour, rounding, tip
+    return record with kind "rect", x x, y y, w w, h h, colour colour, rounding rounding, tip tip
+end
+
+to shape_line with x1, y1, x2, y2, colour
+    return record with kind "line", x1 x1, y1 y1, x2 x2, y2 y2, colour colour
+end
+
+to shape_text with x, y, words, size, colour, anchor
+    return record with kind "text", x x, y y, words words, size size, colour colour, anchor anchor
+end
+
+# the chart as shapes, each a record: rect, line (a hairline), path (a 2-pixel line through points), dot, text
+to shapes_of with chart
+    set made to empty list
+    set w to width of chart
+    set h to height of chart
+    add shape_text(16, 30, title of chart, 16, chart_ink, "start") to made
+    set top_edge to 52
+    set many to length of series of chart is greater than 1 or kind of chart is "parts"
+    if many # a legend: a square of each colour and its name, in a row
+        set x to 16
+        set names to empty list
+        if kind of chart is "parts"
+            set names to labels of chart
+        else
+            for each one in series of chart
+                add name of one to names
+            end
+        end
+        for each k from 1 to length of names
+            add shape_rect(x, top_edge - 10, 12, 12, item k of chart_series, "all", nothing) to made
+            add shape_text(x + 18, top_edge, "" + item k of names, 13, chart_soft_ink, "start") to made
+            set x to x + 18 + width_of("" + item k of names, 13) + 20
+        end
+        set top_edge to top_edge + 28
+    end
+    if kind of chart is "parts"
+        return parts_shapes(chart, made, top_edge)
+    end
+    # the axis: from 0 or below to the largest, in nice steps
+    set lo to 0
+    set hi to 0
+    for each one in series of chart
+        for each v in values of one
+            if v is less than lo
+                set lo to v
+            end
+            if v is greater than hi
+                set hi to v
+            end
+        end
+    end
+    if hi is lo
+        set hi to lo + 1
+    end
+    set step to nice_step(lo, hi)
+    set axis_lo to ((lo / step) rounded down) * step
+    set axis_hi to ((hi / step) rounded up) * step
+    set compact to axis_hi is at least 10000 or axis_lo is at most -10000
+    set ticks to empty list
+    set t to axis_lo
+    repeat while t is at most axis_hi + step / 1000
+        add t to ticks
+        set t to t + step
+    end
+    set widest to 0
+    for each tick in ticks
+        set tw to width_of(axis_text(tick, compact), 13)
+        if tw is greater than widest
+            set widest to tw
+        end
+    end
+    set left_edge to 16 + widest + 10
+    set right_edge to w - 16
+    if kind of chart is "lines" and length of series of chart is at most 4 and many # room for each line's name at its end
+        set widest_name to 0
+        for each one in series of chart
+            set nw to width_of("" + name of one, 13)
+            if nw is greater than widest_name
+                set widest_name to nw
+            end
+        end
+        set right_edge to w - 16 - widest_name - 12
+    end
+    set bottom_edge to h - 36
+    set plot to record with left left_edge, right right_edge, top top_edge, bottom bottom_edge, lo axis_lo, hi axis_hi
+    for each tick in ticks
+        set ty to y_of(plot, tick)
+        add shape_line(left_edge, ty, right_edge, ty, chart_grid) to made
+        add shape_text(left_edge - 8, ty + 4, axis_text(tick, compact), 13, chart_soft_ink, "end") to made
+    end
+    # the labels under it, every one that fits
+    set n to length of labels of chart
+    set band to (right_edge - left_edge) / n
+    set widest_label to 0
+    for each label in labels of chart
+        set lw to width_of("" + label, 13)
+        if lw is greater than widest_label
+            set widest_label to lw
+        end
+    end
+    set every_nth to 1
+    repeat while every_nth * band is less than widest_label + 8
+        set every_nth to every_nth + 1
+    end
+    for each k from 0 to n - 1
+        if remainder of k divided by every_nth is 0
+            add shape_text(left_edge + band * (k + 0.5), bottom_edge + 22, "" + item (k + 1) of labels of chart, 13, chart_soft_ink, "middle") to made
+        end
+    end
+    if kind of chart is "bars"
+        return bar_shapes(chart, made, plot, band)
+    end
+    return line_shapes(chart, made, plot, band, many)
+end
+
+to y_of with plot, v
+    return bottom of plot - (v - lo of plot) / (hi of plot - lo of plot) * (bottom of plot - top of plot)
+end
+
+# a bar for each series in each label's band, side by side, 2 pixels apart, at most 24 wide, from 0
+to bar_shapes with chart, made, plot, band
+    set s to length of series of chart
+    set thick to (band * 0.8 - 2 * (s - 1)) / s
+    if thick is greater than 24
+        set thick to 24
+    end
+    if thick is less than 1
+        set thick to 1
+    end
+    set group to s * thick + 2 * (s - 1)
+    set base to y_of(plot, 0)
+    for each k from 0 to length of labels of chart - 1
+        set x to left of plot + band * k + (band - group) / 2
+        for each j from 1 to s
+            set one to item j of series of chart
+            set v to item (k + 1) of values of one
+            set vy to y_of(plot, v)
+            set tip to "" + item (k + 1) of labels of chart + ": " + with_commas(v)
+            if s is greater than 1
+                set tip to name of one + ", " + tip
+            end
+            if v is at least 0
+                add shape_rect(x, vy, thick, base - vy, item j of chart_series, "top", tip) to made
+            else
+                add shape_rect(x, base, thick, vy - base, item j of chart_series, "bottom", tip) to made
+            end
+            set x to x + thick + 2
+        end
+    end
+    return made
+end
+
+# a 2-pixel line for each series through its labels' bands, a dot at its end, and its name there too
+to line_shapes with chart, made, plot, band, many
+    set ends to empty list
+    set j to 0
+    for each one in series of chart
+        set j to j + 1
+        set points to empty list
+        for each k from 0 to length of values of one - 1
+            add list of left of plot + band * (k + 0.5), y_of(plot, item (k + 1) of values of one) to points
+        end
+        add (record with kind "path", points points, colour item j of chart_series) to made
+        set last_point to item (length of points) of points
+        set tip to "" + item (length of labels of chart) of labels of chart + ": " + with_commas(item (length of values of one) of values of one)
+        if many
+            set tip to name of one + ", " + tip
+        end
+        add (record with kind "dot", x item 1 of last_point, y item 2 of last_point, colour item j of chart_series, tip tip) to made
+        add (record with name "" + name of one, x item 1 of last_point + 10, y item 2 of last_point + 4) to ends
+    end
+    if many and length of series of chart is at most 4 # names at the ends, kept 14 apart
+        set ends to ends in order by y
+        for each k from 2 to length of ends
+            set before to item (k - 1) of ends
+            set here to item k of ends
+            if y of here - y of before is less than 14
+                set y of here to y of before + 14
+            end
+        end
+        for each e in ends
+            add shape_text(x of e, y of e, name of e, 13, chart_soft_ink, "start") to made
+        end
+    end
+    return made
+end
+
+# one bar across, 40 high, a segment for each part as wide as its share, 2 pixels apart, its share under it
+to parts_shapes with chart, made, top_edge
+    set values to values of item 1 of series of chart
+    set whole to 0
+    for each v in values
+        set whole to whole + v
+    end
+    set left_edge to 16
+    set full to width of chart - 32
+    set x to left_edge
+    set y to top_edge + 8
+    for each k from 1 to length of values
+        set v to item k of values
+        set part_width to full * v / whole
+        set shown_width to part_width
+        if k is less than length of values
+            set shown_width to part_width - 2
+        end
+        set share to (v / whole * 100) rounded
+        if shown_width is greater than 0
+            add shape_rect(x, y, shown_width, 40, item k of chart_series, "none", "" + item k of labels of chart + ": " + with_commas(v) + " (" + share + "%)") to made
+        end
+        if part_width is at least width_of(share + "%", 13) + 4
+            add shape_text(x, y + 60, share + "%", 13, chart_soft_ink, "start") to made
+        end
+        set x to x + part_width
+    end
+    return made
+end
+
+# ---------- SVG ----------
+
+to svg_number with v
+    return "" + (((v * 100) rounded) / 100)
+end
+
+to svg_escaped with words
+    set made to ""
+    for each c in "" + words
+        if c is "&"
+            set made to made + "&amp;"
+        else if c is "<"
+            set made to made + "&lt;"
+        else if c is ">"
+            set made to made + "&gt;"
+        else if c is "\""
+            set made to made + "&quot;"
+        else
+            set made to made + c
+        end
+    end
+    return made
+end
+
+# a bar's outline: square at its base, its other end's corners rounded 4 pixels
+to bar_path with s
+    set r to 4
+    if r is greater than w of s / 2
+        set r to w of s / 2
+    end
+    if r is greater than h of s
+        set r to h of s
+    end
+    set x to x of s
+    set y to y of s
+    set x2 to x + w of s
+    set y2 to y + h of s
+    if rounding of s is "top"
+        return "M" + svg_number(x) + " " + svg_number(y2) + "V" + svg_number(y + r) + "Q" + svg_number(x) + " " + svg_number(y) + " " + svg_number(x + r) + " " + svg_number(y) + "H" + svg_number(x2 - r) + "Q" + svg_number(x2) + " " + svg_number(y) + " " + svg_number(x2) + " " + svg_number(y + r) + "V" + svg_number(y2) + "Z"
+    end
+    return "M" + svg_number(x) + " " + svg_number(y) + "V" + svg_number(y2 - r) + "Q" + svg_number(x) + " " + svg_number(y2) + " " + svg_number(x + r) + " " + svg_number(y2) + "H" + svg_number(x2 - r) + "Q" + svg_number(x2) + " " + svg_number(y2) + " " + svg_number(x2) + " " + svg_number(y2 - r) + "V" + svg_number(y) + "Z"
+end
+
+to svg_tip with tip
+    if tip is nothing
+        return ""
+    end
+    return "<title>" + svg_escaped(tip) + "</title>"
+end
+
+to svg_of with chart
+    set w to width of chart
+    set h to height of chart
+    set parts to list of "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + w + "\" height=\"" + h + "\" viewBox=\"0 0 " + w + " " + h + "\" font-family=\"DejaVu Sans, Verdana, sans-serif\">"
+    add "<title>" + svg_escaped(title of chart) + "</title>" to parts
+    add "<rect width=\"" + w + "\" height=\"" + h + "\" fill=\"" + chart_surface + "\"/>" to parts
+    for each s in shapes_of(chart)
+        set what to kind of s
+        if what is "rect" and (rounding of s is "top" or rounding of s is "bottom")
+            add "<path d=\"" + bar_path(s) + "\" fill=\"" + colour of s + "\">" + svg_tip(tip of s) + "</path>" to parts
+        else if what is "rect"
+            set corner to "0"
+            if rounding of s is "all"
+                set corner to "2"
+            end
+            add "<rect x=\"" + svg_number(x of s) + "\" y=\"" + svg_number(y of s) + "\" width=\"" + svg_number(w of s) + "\" height=\"" + svg_number(h of s) + "\" rx=\"" + corner + "\" fill=\"" + colour of s + "\">" + svg_tip(tip of s) + "</rect>" to parts
+        else if what is "line"
+            add "<line x1=\"" + svg_number(x1 of s) + "\" y1=\"" + svg_number(y1 of s) + "\" x2=\"" + svg_number(x2 of s) + "\" y2=\"" + svg_number(y2 of s) + "\" stroke=\"" + colour of s + "\" stroke-width=\"1\" shape-rendering=\"crispEdges\"/>" to parts
+        else if what is "path"
+            set written to empty list
+            for each p in points of s
+                add svg_number(item 1 of p) + "," + svg_number(item 2 of p) to written
+            end
+            add "<polyline points=\"" + (join written with " ") + "\" fill=\"none\" stroke=\"" + colour of s + "\" stroke-width=\"2\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>" to parts
+        else if what is "dot"
+            add "<circle cx=\"" + svg_number(x of s) + "\" cy=\"" + svg_number(y of s) + "\" r=\"5\" fill=\"" + colour of s + "\" stroke=\"" + chart_surface + "\" stroke-width=\"2\">" + svg_tip(tip of s) + "</circle>" to parts
+        else
+            set weight to ""
+            if size of s is greater than 14
+                set weight to " font-weight=\"bold\""
+            end
+            add "<text x=\"" + svg_number(x of s) + "\" y=\"" + svg_number(y of s) + "\" font-size=\"" + size of s + "\"" + weight + " fill=\"" + colour of s + "\" text-anchor=\"" + anchor of s + "\">" + svg_escaped(words of s) + "</text>" to parts
+        end
+    end
+    add "</svg>" to parts
+    return (join parts with "\n") + "\n"
+end
+
+# ---------- PNG ----------
+
+to colour_numbers with hex_text
+    set digits to "0123456789abcdef"
+    set made to empty list
+    for each k from 0 to 2
+        set high to (position of (item (2 + k * 2) of hex_text) in digits) - 1
+        set low to (position of (item (3 + k * 2) of hex_text) in digits) - 1
+        add high * 16 + low to made
+    end
+    return made
+end
+
+# a pixel's colour moved toward `colour` by `amount`, from 0 (none) to 1 (all of it)
+to blend with canvas, x, y, colour, amount
+    if x is less than 0 or y is less than 0 or x is at least width of canvas or y is at least height of canvas or amount is at most 0
+        return nothing
+    end
+    set kept to pixels of canvas
+    set at to (y * width of canvas + x) * 4
+    if amount is at least 1
+        set byte (at + 1) of kept to item 1 of colour
+        set byte (at + 2) of kept to item 2 of colour
+        set byte (at + 3) of kept to item 3 of colour
+        return nothing
+    end
+    for each c from 1 to 3
+        set old to byte (at + c) of kept
+        set byte (at + c) of kept to (old + (item c of colour - old) * amount) rounded
+    end
+end
+
+to clamped with v
+    if v is less than 0
+        return 0
+    end
+    if v is greater than 1
+        return 1
+    end
+    return v
+end
+
+# how much of the pixel at px, py a rect covers, its rounded corners smoothed
+to rect_cover with s, px, py, r
+    set cx to px + 0.5
+    set cy to py + 0.5
+    set across to clamped(cx - x of s + 0.5) * clamped(x of s + w of s - cx + 0.5)
+    set down to clamped(cy - y of s + 0.5) * clamped(y of s + h of s - cy + 0.5)
+    set covered to across * down
+    if r is 0 or covered is 0
+        return covered
+    end
+    set rounded_top to rounding of s is "top" or rounding of s is "all"
+    set rounded_bottom to rounding of s is "bottom" or rounding of s is "all"
+    set corner_x to nothing
+    if cx is less than x of s + r
+        set corner_x to x of s + r
+    else if cx is greater than x of s + w of s - r
+        set corner_x to x of s + w of s - r
+    end
+    set corner_y to nothing
+    if rounded_top and cy is less than y of s + r
+        set corner_y to y of s + r
+    else if rounded_bottom and cy is greater than y of s + h of s - r
+        set corner_y to y of s + h of s - r
+    end
+    if corner_x is nothing or corner_y is nothing
+        return covered
+    end
+    set d to chart_math's sqrt((cx - corner_x) * (cx - corner_x) + (cy - corner_y) * (cy - corner_y))
+    return covered * clamped(r + 0.5 - d)
+end
+
+to draw_rect with canvas, s
+    set r to 0
+    if rounding of s is "top" or rounding of s is "bottom"
+        set r to 4
+    else if rounding of s is "all"
+        set r to 2
+    end
+    if r is greater than w of s / 2
+        set r to w of s / 2
+    end
+    if r is greater than h of s
+        set r to h of s
+    end
+    set colour to colour_numbers(colour of s)
+    for each py from ((y of s) rounded down) to ((y of s + h of s) rounded up)
+        for each px from ((x of s) rounded down) to ((x of s + w of s) rounded up)
+            blend(canvas, px, py, colour, rect_cover(s, px, py, r))
+        end
+    end
+end
+
+# how far a point is from the segment from a to b
+to distance_to_segment with px, py, ax, ay, bx, by
+    set dx to bx - ax
+    set dy to by - ay
+    set along to 0
+    set length_squared to dx * dx + dy * dy
+    if length_squared is greater than 0
+        set along to clamped(((px - ax) * dx + (py - ay) * dy) / length_squared)
+    end
+    set nx to ax + along * dx - px
+    set ny to ay + along * dy - py
+    return chart_math's sqrt(nx * nx + ny * ny)
+end
+
+to draw_path with canvas, s
+    set colour to colour_numbers(colour of s)
+    set points to points of s
+    set covered to empty dictionary # each pixel drawn once, at the most any segment covers it
+    for each k from 1 to length of points - 1
+        set a to item k of points
+        set b to item (k + 1) of points
+        set x_from to (minimum_of(item 1 of a, item 1 of b) - 2) rounded down
+        set x_to to (maximum_of(item 1 of a, item 1 of b) + 2) rounded up
+        set y_from to (minimum_of(item 2 of a, item 2 of b) - 2) rounded down
+        set y_to to (maximum_of(item 2 of a, item 2 of b) + 2) rounded up
+        for each py from y_from to y_to
+            for each px from x_from to x_to
+                set amount to clamped(1.5 - distance_to_segment(px + 0.5, py + 0.5, item 1 of a, item 2 of a, item 1 of b, item 2 of b))
+                if amount is greater than 0
+                    set key to py * 100000 + px
+                    if not (key is in covered) or item key of covered is less than amount
+                        set item key of covered to amount
+                    end
+                end
+            end
+        end
+    end
+    for each key in covered
+        set py to (key / 100000) rounded down
+        blend(canvas, key - py * 100000, py, colour, item key of covered)
+    end
+end
+
+to minimum_of with a, b
+    if a is less than b
+        return a
+    end
+    return b
+end
+
+to maximum_of with a, b
+    if a is greater than b
+        return a
+    end
+    return b
+end
+
+to draw_disc with canvas, cx, cy, r, colour
+    for each py from ((cy - r - 1) rounded down) to ((cy + r + 1) rounded up)
+        for each px from ((cx - r - 1) rounded down) to ((cx + r + 1) rounded up)
+            set d to chart_math's sqrt((px + 0.5 - cx) * (px + 0.5 - cx) + (py + 0.5 - cy) * (py + 0.5 - cy))
+            blend(canvas, px, py, colour, clamped(r + 0.5 - d))
+        end
+    end
+end
+
+to draw_text with canvas, s
+    set font to font_for(size of s)
+    set colour to colour_numbers(colour of s)
+    set pen_x to x of s
+    if anchor of s is "end"
+        set pen_x to pen_x - width_of(words of s, size of s)
+    else if anchor of s is "middle"
+        set pen_x to pen_x - width_of(words of s, size of s) / 2
+    end
+    set ink to ink of font
+    for each c in "" + words of s
+        set g to glyph_of(font, c)
+        set gx to (pen_x + left of g) rounded
+        set gy to ((y of s) rounded) - up of g
+        set row_bytes to ((wide of g + 1) / 2) rounded down
+        for each row from 0 to high of g - 1
+            for each column from 0 to wide of g - 1
+                set held to byte (ink_at of font + start of g + row * row_bytes + ((column / 2) rounded down) + 1) of ink
+                set level to held bit and 15
+                if remainder of column divided by 2 is 1
+                    set level to shift held right by 4
+                end
+                if level is greater than 0
+                    blend(canvas, gx + column, gy + row, colour, level / 15)
+                end
+            end
+        end
+        set pen_x to pen_x + advance of g
+    end
+end
+
+to png_of with chart
+    set canvas to chart_images's new_image(width of chart, height of chart, colour_numbers(chart_surface))
+    for each s in shapes_of(chart)
+        set what to kind of s
+        if what is "rect"
+            draw_rect(canvas, s)
+        else if what is "line" # a hairline, across or down, on whole pixels
+            set colour to colour_numbers(colour of s)
+            if y1 of s is y2 of s
+                set py to (y1 of s) rounded down
+                for each px from ((x1 of s) rounded) to ((x2 of s) rounded)
+                    blend(canvas, px, py, colour, 1)
+                end
+            else
+                set px to (x1 of s) rounded down
+                for each py from ((y1 of s) rounded) to ((y2 of s) rounded)
+                    blend(canvas, px, py, colour, 1)
+                end
+            end
+        else if what is "path"
+            draw_path(canvas, s)
+        else if what is "dot"
+            draw_disc(canvas, x of s, y of s, 6, colour_numbers(chart_surface))
+            draw_disc(canvas, x of s, y of s, 4, colour_numbers(colour of s))
+        else
+            draw_text(canvas, s)
+        end
+    end
+    return chart_images's png_of(canvas)
+end

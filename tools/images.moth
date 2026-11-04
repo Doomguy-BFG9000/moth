@@ -1,0 +1,1206 @@
+# Pictures from PNG and JPEG files, and back, as Pillow's Image has them, in Moth alone. An image is a record
+# with its width, its height, and its pixels: bytes, 4 for each pixel (red, green, blue, and how opaque, each
+# 0 to 255), row by row from the top left.
+#
+#   use "images.moth" as images
+#   set photo to images's read_image("cat.jpg")            # a PNG or a JPEG, by what the file holds
+#   say width of photo " by " height of photo
+#   say images's pixel(photo, 0, 0)                         # [255, 128, 0, 255]: red, green, blue, opacity
+#   images's set_pixel(photo, 0, 0, list of 0, 0, 0, 255)
+#   write images's png_of(photo) to "cat.png"
+#   write images's jpeg_of(images's resized(photo, 100, 75), 85) to "small.jpg"   # quality from 1 to 100
+#   set blank to images's new_image(64, 64, list of 255, 255, 255, 255)
+#
+# It reads PNG of every kind (grey, colour, a palette, with or without opacity, 1 to 16 bits, interlaced) and
+# JPEG as cameras and most programs write it (baseline, grey or colour, any sampling); a progressive JPEG,
+# as some web pages hold, is a mistake that says so. image_from(bytes) reads what a file held; cropped,
+# resized (each pixel the nearest one's), flipped (left to right) and grey make new images. Pixels count
+# from 0, as Pillow's do.
+
+use "zip.moth" as zip
+
+# the JPEG standard's Huffman values for AC numbers, and C(u)/2 times cos((2x + 1)u pi / 16) for x, u from 0 to 7
+set ac_luma_values to list of 1, 2, 3, 0, 4, 17, 5, 18, 33, 49, 65, 6, 19, 81, 97, 7, 34, 113, 20, 50, 129, 145, 161, 8,
+    35, 66, 177, 193, 21, 82, 209, 240, 36, 51, 98, 114, 130, 9, 10, 22, 23, 24, 25, 26, 37, 38, 39, 40,
+    41, 42, 52, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84, 85, 86, 87, 88, 89,
+    90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120, 121, 122, 131, 132, 133, 134, 135, 136, 137,
+    138, 146, 147, 148, 149, 150, 151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182,
+    183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 225, 226,
+    227, 228, 229, 230, 231, 232, 233, 234, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250
+set ac_chroma_values to list of 0, 1, 2, 3, 17, 4, 5, 33, 49, 6, 18, 65, 81, 7, 97, 113, 19, 34, 50, 129, 8, 20, 66, 145,
+    161, 177, 193, 9, 35, 51, 82, 240, 21, 98, 114, 209, 10, 22, 36, 52, 225, 37, 241, 23, 24, 25, 26, 38,
+    39, 40, 41, 42, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84, 85, 86, 87, 88,
+    89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120, 121, 122, 130, 131, 132, 133, 134, 135,
+    136, 137, 138, 146, 147, 148, 149, 150, 151, 152, 153, 154, 162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180,
+    181, 182, 183, 184, 185, 186, 194, 195, 196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218,
+    226, 227, 228, 229, 230, 231, 232, 233, 234, 242, 243, 244, 245, 246, 247, 248, 249, 250
+set cosine_table to list of 0.353553390593274, 0.490392640201615, 0.461939766255643, 0.415734806151273, 0.353553390593274, 0.277785116509801, 0.191341716182545, 0.097545161008064,
+    0.353553390593274, 0.415734806151273, 0.191341716182545, -0.097545161008064, -0.353553390593274, -0.490392640201615, -0.461939766255643, -0.277785116509801,
+    0.353553390593274, 0.277785116509801, -0.191341716182545, -0.490392640201615, -0.353553390593274, 0.097545161008064, 0.461939766255643, 0.415734806151273,
+    0.353553390593274, 0.097545161008064, -0.461939766255643, -0.277785116509801, 0.353553390593274, 0.415734806151273, -0.191341716182545, -0.490392640201615,
+    0.353553390593274, -0.097545161008064, -0.461939766255643, 0.277785116509801, 0.353553390593274, -0.415734806151273, -0.191341716182545, 0.490392640201615,
+    0.353553390593274, -0.277785116509801, -0.191341716182545, 0.490392640201615, -0.353553390593273, -0.097545161008064, 0.461939766255643, -0.415734806151273,
+    0.353553390593274, -0.415734806151273, 0.191341716182545, 0.097545161008064, -0.353553390593274, 0.490392640201615, -0.461939766255643, 0.277785116509801,
+    0.353553390593274, -0.490392640201615, 0.461939766255643, -0.415734806151273, 0.353553390593273, -0.277785116509801, 0.191341716182545, -0.097545161008064
+
+# where each of a block's 64 numbers comes from, in the order JPEG keeps them (from 0)
+set zigzag to list of 0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,
+    7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60,
+    61, 54, 47, 55, 62, 63
+# the JPEG standard's tables for quality 50 (its Annex K), row by row
+set luma_steps to list of 16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+    14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87,
+    103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99
+set chroma_steps to list of 17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99,
+    47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99, 99, 99
+set dc_luma_counts to list of 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0
+set dc_chroma_counts to list of 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0
+set dc_values to list of 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+set ac_luma_counts to list of 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125
+set ac_chroma_counts to list of 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119
+set powers_of_two to list of 1
+repeat 24 times
+    add item (length of powers_of_two) of powers_of_two * 2 to powers_of_two
+end
+
+to two_to with n
+    return item (n + 1) of powers_of_two
+end
+
+# ---------- images ----------
+
+to whole_size with n, what
+    if not (n is divisible by 1) or n is less than 1
+        fail with "an image's " + what + " is a whole number of 1 or more, not " + n
+    end
+end
+
+# an image of one colour (a list of red, green, blue and, if it's given, opacity), or clear, with nothing
+to new_image with width, height, colour
+    whole_size(width, "width")
+    whole_size(height, "height")
+    set size to width * height * 4
+    set made to size bytes
+    if colour is not nothing
+        set paint to colour_of(colour)
+        for each k from 0 to width * height - 1
+            for each c from 1 to 4
+                set byte (k * 4 + c) of made to item c of paint
+            end
+        end
+    end
+    return record with width width, height height, pixels made
+end
+
+# a colour as 4 numbers, opaque if it gave 3
+to colour_of with colour
+    if length of colour is 3
+        return list of item 1 of colour, item 2 of colour, item 3 of colour, 255
+    end
+    if length of colour is not 4
+        fail with "a colour is a list of 3 or 4 numbers from 0 to 255: red, green, blue and opacity"
+    end
+    return colour
+end
+
+to place_of with image, x, y
+    if x is less than 0 or y is less than 0 or x is at least width of image or y is at least height of image or not (x is divisible by 1) or not (y is divisible by 1)
+        fail with "there's no pixel " + x + ", " + y + " in an image " + width of image + " by " + height of image
+    end
+    return (y * width of image + x) * 4
+end
+
+# the pixel at x, y, from 0 at the top left: red, green, blue and opacity
+to pixel with image, x, y
+    set at to place_of(image, x, y)
+    set kept to pixels of image
+    return list of byte (at + 1) of kept, byte (at + 2) of kept, byte (at + 3) of kept, byte (at + 4) of kept
+end
+
+to set_pixel with image, x, y, colour
+    set at to place_of(image, x, y)
+    set paint to colour_of(colour)
+    set kept to pixels of image
+    for each c from 1 to 4
+        set byte (at + c) of kept to item c of paint
+    end
+end
+
+# the part from x, y, so wide and high
+to cropped with image, x, y, width, height
+    set made to new_image(width, height, nothing)
+    place_of(image, x, y)
+    place_of(image, x + width - 1, y + height - 1)
+    set from to pixels of image
+    set into to pixels of made
+    for each row from 0 to height - 1
+        set source_at to ((y + row) * width of image + x) * 4
+        set target_at to row * width * 4
+        for each k from 1 to width * 4
+            set byte (target_at + k) of into to byte (source_at + k) of from
+        end
+    end
+    return made
+end
+
+# so wide and high, each pixel the nearest one of the image's
+to resized with image, width, height
+    set made to new_image(width, height, nothing)
+    set from to pixels of image
+    set into to pixels of made
+    for each row from 0 to height - 1
+        set source_row to ((row + 0.5) * height of image / height) rounded down
+        for each column from 0 to width - 1
+            set source_column to ((column + 0.5) * width of image / width) rounded down
+            set source_at to (source_row * width of image + source_column) * 4
+            set target_at to (row * width + column) * 4
+            for each c from 1 to 4
+                set byte (target_at + c) of into to byte (source_at + c) of from
+            end
+        end
+    end
+    return made
+end
+
+# left to right, as in a mirror
+to flipped with image
+    set made to new_image(width of image, height of image, nothing)
+    set from to pixels of image
+    set into to pixels of made
+    for each row from 0 to height of image - 1
+        for each column from 0 to width of image - 1
+            set source_at to (row * width of image + column) * 4
+            set target_at to (row * width of image + width of image - 1 - column) * 4
+            for each c from 1 to 4
+                set byte (target_at + c) of into to byte (source_at + c) of from
+            end
+        end
+    end
+    return made
+end
+
+# grey, each pixel as bright as it looks (0.299 red, 0.587 green, 0.114 blue), its opacity kept
+to grey with image
+    set made to new_image(width of image, height of image, nothing)
+    set from to pixels of image
+    set into to pixels of made
+    for each k from 0 to width of image * height of image - 1
+        set at to k * 4
+        set level to (0.299 * byte (at + 1) of from + 0.587 * byte (at + 2) of from + 0.114 * byte (at + 3) of from) rounded
+        set byte (at + 1) of into to level
+        set byte (at + 2) of into to level
+        set byte (at + 3) of into to level
+        set byte (at + 4) of into to byte (at + 4) of from
+    end
+    return made
+end
+
+# ---------- reading ----------
+
+to read_image with path
+    return image_from(read bytes path)
+end
+
+# a PNG's or a JPEG's bytes, as an image
+to image_from with data
+    if length of data is at least 8 and byte 1 of data is 137 and byte 2 of data is 80 and byte 3 of data is 78 and byte 4 of data is 71
+        return png_image(data)
+    end
+    if length of data is at least 3 and byte 1 of data is 255 and byte 2 of data is 216
+        return jpeg_image(data)
+    end
+    fail with "that isn't a PNG or a JPEG"
+end
+
+to read_four with data, at
+    return byte at of data * 16777216 + byte (at + 1) of data * 65536 + byte (at + 2) of data * 256 + byte (at + 3) of data
+end
+
+to read_two with data, at
+    return byte at of data * 256 + byte (at + 1) of data
+end
+
+to cut_out with data, from, upto
+    set made to empty list
+    for each k from from to upto
+        add byte k of data to made
+    end
+    return made
+end
+
+# ---------- PNG ----------
+
+to png_image with data
+    set at to 9
+    set header to nothing
+    set palette to nothing
+    set see_through to nothing
+    set packed to empty list
+    repeat while at + 7 is at most length of data
+        set size to read_four(data, at)
+        set name to (cut_out(data, at + 4, at + 7) as bytes) as text
+        set start to at + 8
+        if start + size - 1 is greater than length of data
+            fail with "the PNG is cut short"
+        end
+        if name is "IHDR"
+            set header to record with width read_four(data, start), height read_four(data, start + 4), depth byte (start + 8) of data, colours byte (start + 9) of data, interlaced byte (start + 12) of data
+        else if name is "PLTE"
+            set palette to cut_out(data, start, start + size - 1)
+        else if name is "tRNS"
+            set see_through to cut_out(data, start, start + size - 1)
+        else if name is "IDAT"
+            for each k from start to start + size - 1
+                add byte k of data to packed
+            end
+        else if name is "IEND"
+            set at to length of data
+        end
+        set at to start + size + 4
+    end
+    if header is nothing
+        fail with "the PNG has no header"
+    end
+    set colours to colours of header
+    set depth to depth of header
+    set channels to 0
+    if colours is 0 or colours is 3
+        set channels to 1
+    else if colours is 2
+        set channels to 3
+    else if colours is 4
+        set channels to 2
+    else if colours is 6
+        set channels to 4
+    else
+        fail with "the PNG's colour type " + colours + " isn't one there is"
+    end
+    if colours is 3 and palette is nothing
+        fail with "the PNG has a palette's colours but no palette"
+    end
+    if length of packed is less than 3
+        fail with "the PNG has no pixels"
+    end
+    set raw to zip's inflate(items 3 to (length of packed) of (packed as bytes))
+    set made to new_image(width of header, height of header, nothing)
+    set png to record with raw raw, at 1, depth depth, channels channels, colours colours, palette palette, see_through see_through, image made
+    if interlaced of header is 1
+        for each pass in list of (list of 0, 0, 8, 8), (list of 4, 0, 8, 8), (list of 0, 4, 4, 8), (list of 2, 0, 4, 4), (list of 0, 2, 2, 4), (list of 1, 0, 2, 2), (list of 0, 1, 1, 2)
+            png_pass(png, item 1 of pass, item 2 of pass, item 3 of pass, item 4 of pass)
+        end
+    else
+        png_pass(png, 0, 0, 1, 1)
+    end
+    return made
+end
+
+# one of the image's passes (all of it, if it isn't interlaced): its pixels from x0, y0, every dx and dy
+to png_pass with png, x0, y0, dx, dy
+    set image to image of png
+    set pass_width to ((width of image - x0 + dx - 1) / dx) rounded down
+    set pass_height to ((height of image - y0 + dy - 1) / dy) rounded down
+    if pass_width is less than 1 or pass_height is less than 1
+        return nothing
+    end
+    set bits to channels of png * depth of png
+    set stride to ((pass_width * bits + 7) / 8) rounded down
+    set step to (bits / 8) rounded down
+    if step is less than 1
+        set step to 1
+    end
+    set rows to unfiltered(png, pass_height, stride, step)
+    set into to pixels of image
+    for each row from 0 to pass_height - 1
+        set row_start to row * stride
+        for each column from 0 to pass_width - 1
+            set colour to png_colour(png, rows, row_start, column)
+            set target_at to (((y0 + row * dy) * width of image) + x0 + column * dx) * 4
+            for each c from 1 to 4
+                set byte (target_at + c) of into to item c of colour
+            end
+        end
+    end
+end
+
+# the rows of a pass, each filter undone, one after another without their filter bytes
+to unfiltered with png, pass_height, stride, step
+    set raw to raw of png
+    set made to (pass_height * stride) bytes
+    set at to at of png
+    for each row from 0 to pass_height - 1
+        if at + stride is greater than length of raw
+            fail with "the PNG's pixels are cut short"
+        end
+        set filter to byte at of raw
+        set at to at + 1
+        set here to row * stride
+        set above to here - stride
+        for each k from 1 to stride
+            set value to byte (at + k - 1) of raw
+            set left_one to 0
+            if k is greater than step
+                set left_one to byte (here + k - step) of made
+            end
+            set up_one to 0
+            set corner to 0
+            if row is greater than 0
+                set up_one to byte (above + k) of made
+                if k is greater than step
+                    set corner to byte (above + k - step) of made
+                end
+            end
+            if filter is 1
+                set value to value + left_one
+            else if filter is 2
+                set value to value + up_one
+            else if filter is 3
+                set value to value + ((left_one + up_one) / 2) rounded down
+            else if filter is 4
+                set value to value + paeth(left_one, up_one, corner)
+            else if filter is not 0
+                fail with "the PNG has a row filtered a way there isn't: " + filter
+            end
+            set byte (here + k) of made to remainder of value divided by 256
+        end
+        set at to at + stride
+    end
+    set at of png to at
+    return made
+end
+
+to paeth with a, b, c
+    set p to a + b - c
+    set pa to p - a
+    if pa is less than 0
+        set pa to 0 - pa
+    end
+    set pb to p - b
+    if pb is less than 0
+        set pb to 0 - pb
+    end
+    set pc to p - c
+    if pc is less than 0
+        set pc to 0 - pc
+    end
+    if pa is at most pb and pa is at most pc
+        return a
+    end
+    if pb is at most pc
+        return b
+    end
+    return c
+end
+
+# the index-th sample of a row, at its own depth: 1, 2, 4, 8 or 16 bits (16 bits gives its top 8)
+to sample_of with rows, row_start, index, depth
+    if depth is 8
+        return byte (row_start + index + 1) of rows
+    end
+    if depth is 16
+        return byte (row_start + 2 * index + 1) of rows
+    end
+    set per_byte to 8 / depth
+    set holding to byte (row_start + ((index / per_byte) rounded down) + 1) of rows
+    set moved to 8 - depth * ((remainder of index divided by per_byte) + 1)
+    return (shift holding right by moved) bit and (two_to(depth) - 1)
+end
+
+# a sample at full depth, for comparing with tRNS's: 16 bits whole
+to full_sample with rows, row_start, index, depth
+    if depth is 16
+        return byte (row_start + 2 * index + 1) of rows * 256 + byte (row_start + 2 * index + 2) of rows
+    end
+    return sample_of(rows, row_start, index, depth)
+end
+
+# a grey sample from 0 to 255, at any depth
+to grey_level with rows, row_start, index, depth
+    set level to sample_of(rows, row_start, index, depth)
+    if depth is less than 8
+        return (level * 255 / (two_to(depth) - 1)) rounded
+    end
+    return level
+end
+
+# a pixel of a row as red, green, blue and opacity
+to png_colour with png, rows, row_start, column
+    set depth to depth of png
+    set colours to colours of png
+    set see_through to see_through of png
+    if colours is 3
+        set index to sample_of(rows, row_start, column, depth)
+        set palette to palette of png
+        if index * 3 + 3 is greater than length of palette
+            fail with "the PNG's palette has no colour " + index
+        end
+        set opacity to 255
+        if see_through is not nothing and index is less than length of see_through
+            set opacity to item (index + 1) of see_through
+        end
+        return list of item (index * 3 + 1) of palette, item (index * 3 + 2) of palette, item (index * 3 + 3) of palette, opacity
+    end
+    if colours is 0
+        set level to grey_level(rows, row_start, column, depth)
+        set opacity to 255
+        if see_through is not nothing and length of see_through is at least 2
+            if full_sample(rows, row_start, column, depth) is item 1 of see_through * 256 + item 2 of see_through
+                set opacity to 0
+            end
+        end
+        return list of level, level, level, opacity
+    end
+    if colours is 4
+        set level to sample_of(rows, row_start, column * 2, depth)
+        return list of level, level, level, sample_of(rows, row_start, column * 2 + 1, depth)
+    end
+    if colours is 2
+        set red to sample_of(rows, row_start, column * 3, depth)
+        set green to sample_of(rows, row_start, column * 3 + 1, depth)
+        set blue to sample_of(rows, row_start, column * 3 + 2, depth)
+        set opacity to 255
+        if see_through is not nothing and length of see_through is at least 6
+            if full_sample(rows, row_start, column * 3, depth) is item 1 of see_through * 256 + item 2 of see_through and full_sample(rows, row_start, column * 3 + 1, depth) is item 3 of see_through * 256 + item 4 of see_through and full_sample(rows, row_start, column * 3 + 2, depth) is item 5 of see_through * 256 + item 6 of see_through
+                set opacity to 0
+            end
+        end
+        return list of red, green, blue, opacity
+    end
+    return list of sample_of(rows, row_start, column * 4, depth), sample_of(rows, row_start, column * 4 + 1, depth), sample_of(rows, row_start, column * 4 + 2, depth), sample_of(rows, row_start, column * 4 + 3, depth)
+end
+
+# the image as a PNG's bytes: red, green, blue and opacity, 8 bits each, each row filtered the way that
+# leaves the first_codes numbers, as libpng picks
+to png_of with image
+    set w to width of image
+    set h to height of image
+    set from to pixels of image
+    set stride to w * 4
+    set raw to empty list
+    for each row from 0 to h - 1
+        set here to row * stride
+        set scores to list of 0, 0, 0, 0, 0 # each filter's numbers, as far as they are from 0, added up
+        for each k from 1 to stride
+            set made_values to filtered_values(from, here, stride, row, k)
+            for each f from 1 to 5
+                set value to item f of made_values
+                if value is less than 128
+                    set item f of scores to item f of scores + value
+                else
+                    set item f of scores to item f of scores + 256 - value
+                end
+            end
+        end
+        set best to 1
+        for each f from 2 to 5
+            if item f of scores is less than item best of scores
+                set best to f
+            end
+        end
+        add best - 1 to raw
+        for each k from 1 to stride
+            add item best of filtered_values(from, here, stride, row, k) to raw
+        end
+    end
+    set raw_bytes to raw as bytes
+    set squeezed to zip's deflate(raw_bytes)
+    set zlib to list of 120, 156
+    for each k from 1 to length of squeezed
+        add byte k of squeezed to zlib
+    end
+    add_four(zlib, adler32(raw_bytes))
+    set made to list of 137, 80, 78, 71, 13, 10, 26, 10
+    set header to empty list
+    add_four(header, w)
+    add_four(header, h)
+    for each value in list of 8, 6, 0, 0, 0
+        add value to header
+    end
+    add_chunk(made, "IHDR", header)
+    add_chunk(made, "IDAT", zlib)
+    add_chunk(made, "IEND", empty list)
+    return made as bytes
+end
+
+# a byte filtered each of PNG's five ways: as it is, less the one on its left, above, their average, and Paeth's
+to filtered_values with from, here, stride, row, k
+    set value to byte (here + k) of from
+    set left_one to 0
+    if k is greater than 4
+        set left_one to byte (here + k - 4) of from
+    end
+    set up_one to 0
+    set corner to 0
+    if row is greater than 0
+        set up_one to byte (here - stride + k) of from
+        if k is greater than 4
+            set corner to byte (here - stride + k - 4) of from
+        end
+    end
+    return list of value, remainder of (value - left_one) divided by 256, remainder of (value - up_one) divided by 256, remainder of (value - (((left_one + up_one) / 2) rounded down)) divided by 256, remainder of (value - paeth(left_one, up_one, corner)) divided by 256
+end
+
+to add_four with made, value
+    add (shift value right by 24) bit and 255 to made
+    add (shift value right by 16) bit and 255 to made
+    add (shift value right by 8) bit and 255 to made
+    add value bit and 255 to made
+end
+
+to add_two with made, value
+    add (shift value right by 8) bit and 255 to made
+    add value bit and 255 to made
+end
+
+# a chunk: its length, its name, what it holds, and the CRC of the name and what it holds
+to add_chunk with made, name, held
+    add_four(made, length of held)
+    set checked to empty list
+    for each c in name as bytes
+        add c to checked
+    end
+    for each value in held
+        add value to checked
+    end
+    for each value in checked
+        add value to made
+    end
+    add_four(made, zip's crc32(checked as bytes))
+end
+
+to adler32 with data
+    set a to 1
+    set b to 0
+    for each k from 1 to length of data
+        set a to remainder of (a + byte k of data) divided by 65521
+        set b to remainder of (b + a) divided by 65521
+    end
+    return b * 65536 + a
+end
+
+# ---------- JPEG: reading ----------
+
+# a Huffman table, from how many codes each length has and the values in order: for decoding, the top_codes
+# code of each length, where its values start, and its first_codes code
+to huffman_table with counts, values
+    set top_codes to empty list
+    set starts to empty list
+    set first_codes to empty list
+    set code to 0
+    set taken to 0
+    for each size from 1 to 16
+        set n to item size of counts
+        add taken to starts
+        add code to first_codes
+        if n is 0
+            add -1 to top_codes
+        else
+            add code + n - 1 to top_codes
+        end
+        set code to (code + n) * 2
+        set taken to taken + n
+    end
+    set codes to empty list # for encoding: each value's code and its length, by the value
+    repeat 256 times
+        add nothing to codes
+    end
+    set code to 0
+    set taken to 0
+    for each size from 1 to 16
+        for each k from 1 to item size of counts
+            set item (item (taken + k) of values + 1) of codes to list of code, size
+            set code to code + 1
+        end
+        set taken to taken + item size of counts
+        set code to code * 2
+    end
+    return record with top_codes top_codes, starts starts, first_codes first_codes, values values, codes codes
+end
+
+to new_bit_reader with data, at
+    return record with data data, at at, holding 0, left 0, marker no
+end
+
+to next_bit with reader
+    if left of reader is 0
+        set data to data of reader
+        set at to at of reader
+        set holding to 0
+        if not marker of reader and at is at most length of data
+            set holding to byte at of data
+            if holding is 255
+                if at + 1 is at most length of data and byte (at + 1) of data is 0
+                    set at of reader to at + 2
+                else # a marker: what's left of the data is 0s, as decoders take it
+                    set marker of reader to yes
+                    set holding to 0
+                end
+            else
+                set at of reader to at + 1
+            end
+        end
+        set holding of reader to holding
+        set left of reader to 8
+    end
+    set left of reader to left of reader - 1
+    return (shift holding of reader right by left of reader) bit and 1
+end
+
+to decoded_symbol with reader, table
+    set code to 0
+    for each size from 1 to 16
+        set code to code * 2 + next_bit(reader)
+        if code is at most item size of top_codes of table
+            return item (item size of starts of table + code - item size of first_codes of table + 1) of values of table
+        end
+    end
+    fail with "the JPEG has a code its tables don't have"
+end
+
+# `size` bits, as a number below 0 too, as JPEG keeps one
+to received with reader, size
+    if size is 0
+        return 0
+    end
+    set value to 0
+    repeat size times
+        set value to value * 2 + next_bit(reader)
+    end
+    if value is less than two_to(size - 1)
+        return value - two_to(size) + 1
+    end
+    return value
+end
+
+to jpeg_image with data
+    set steps to empty dictionary
+    set dc_tables to empty dictionary
+    set ac_tables to empty dictionary
+    set frame to nothing
+    set restarts to 0
+    set made to nothing
+    set at to 3
+    repeat while at + 1 is at most length of data
+        if byte at of data is not 255
+            fail with "the JPEG is damaged: no marker where one should be"
+        end
+        set marker to byte (at + 1) of data
+        if marker is 255
+            set at to at + 1
+        else if marker is 216 or marker is 1 or (marker is at least 208 and marker is at most 215)
+            set at to at + 2
+        else if marker is 217
+            set at to length of data + 1
+        else
+            set size to read_two(data, at + 2)
+            set start to at + 4
+            set ending to at + 2 + size
+            if marker is 192 or marker is 193
+                set frame to record with height read_two(data, start + 1), width read_two(data, start + 3), parts empty list
+                set count to byte (start + 5) of data
+                set parts to parts of frame
+                for each k from 0 to count - 1
+                    set place to start + 6 + k * 3
+                    add (record with id byte place of data, across (shift byte (place + 1) of data right by 4), down byte (place + 1) of data bit and 15, steps byte (place + 2) of data) to parts
+                end
+            else if marker is 194 or marker is 202
+                fail with "a progressive JPEG isn't read yet: save it as a baseline one"
+            else if marker is at least 195 and marker is at most 207 and marker is not 196 and marker is not 200 and marker is not 204
+                fail with "a JPEG of that kind (arithmetic or lossless) isn't read yet"
+            else if marker is 196
+                set place to start
+                repeat while place is less than ending
+                    set which to byte place of data
+                    set counts to cut_out(data, place + 1, place + 16)
+                    set value_count to 0
+                    for each n in counts
+                        set value_count to value_count + n
+                    end
+                    set values to cut_out(data, place + 17, place + 16 + value_count)
+                    if which is at least 16
+                        set item (which bit and 15) of ac_tables to huffman_table(counts, values)
+                    else
+                        set item which of dc_tables to huffman_table(counts, values)
+                    end
+                    set place to place + 17 + value_count
+                end
+            else if marker is 219
+                set place to start
+                repeat while place is less than ending
+                    set which to byte place of data
+                    set wide to shift which right by 4
+                    set table to empty list
+                    repeat 64 times
+                        add 0 to table
+                    end
+                    for each k from 0 to 63
+                        if wide is 0
+                            set item (item (k + 1) of zigzag + 1) of table to byte (place + 1 + k) of data
+                        else
+                            set item (item (k + 1) of zigzag + 1) of table to read_two(data, place + 1 + 2 * k)
+                        end
+                    end
+                    set item (which bit and 15) of steps to table
+                    set place to place + 65 + 64 * wide
+                end
+            else if marker is 221
+                set restarts to read_two(data, start)
+            else if marker is 218
+                if frame is nothing
+                    fail with "the JPEG has its pixels before its size"
+                end
+                set chosen to byte start of data
+                if chosen is not length of parts of frame
+                    fail with "a JPEG with its colours in separate scans isn't read yet"
+                end
+                for each k from 0 to chosen - 1
+                    set id to byte (start + 1 + k * 2) of data
+                    set tables_byte to byte (start + 2 + k * 2) of data
+                    for each part in parts of frame
+                        if id of part is id
+                            set dc_table of part to item (shift tables_byte right by 4) of dc_tables
+                            set ac_table of part to item (tables_byte bit and 15) of ac_tables
+                        end
+                    end
+                end
+                set scanned to jpeg_scan(data, ending, frame, steps, restarts)
+                set made to jpeg_colours(frame, scanned)
+                set ending to at of scanned
+            end
+            set at to ending
+        end
+    end
+    if made is nothing
+        fail with "the JPEG has no pixels"
+    end
+    return made
+end
+
+# the scan's blocks, each undone into 8 by 8 pixels of its part's plane; gives the planes and where it ended
+to jpeg_scan with data, start, frame, steps, restarts
+    set parts to parts of frame
+    set most_across to 1
+    set most_down to 1
+    for each part in parts
+        if across of part is greater than most_across
+            set most_across to across of part
+        end
+        if down of part is greater than most_down
+            set most_down to down of part
+        end
+    end
+    if length of parts is 1 # one part alone: a block at a time, whatever its sampling
+        set most_across to 1
+        set most_down to 1
+        set only to item 1 of parts
+        set across of only to 1
+        set down of only to 1
+    end
+    set units_across to ((width of frame + 8 * most_across - 1) / (8 * most_across)) rounded down
+    set units_down to ((height of frame + 8 * most_down - 1) / (8 * most_down)) rounded down
+    for each part in parts
+        set plane_width of part to units_across * across of part * 8
+        set plane_height of part to units_down * down of part * 8
+        set plane of part to (plane_width of part * plane_height of part) bytes
+        set before of part to 0
+        if not (steps of part is in steps)
+            fail with "the JPEG has no table for one of its colours' steps"
+        end
+        set step_table of part to item (steps of part) of steps
+    end
+    set reader to new_bit_reader(data, start)
+    set done to 0
+    for each unit_down from 0 to units_down - 1
+        for each unit_across from 0 to units_across - 1
+            if restarts is greater than 0 and done is greater than 0 and remainder of done divided by restarts is 0
+                jpeg_restart(reader, parts)
+            end
+            for each part in parts
+                for each block_down from 0 to down of part - 1
+                    for each block_across from 0 to across of part - 1
+                        set samples to jpeg_block(reader, part)
+                        set left_edge to (unit_across * across of part + block_across) * 8
+                        set top_edge to (unit_down * down of part + block_down) * 8
+                        set kept to plane of part
+                        for each y from 0 to 7
+                            set target_at to (top_edge + y) * plane_width of part + left_edge
+                            for each x from 1 to 8
+                                set byte (target_at + x) of kept to item (y * 8 + x) of samples
+                            end
+                        end
+                    end
+                end
+            end
+            set done to done + 1
+        end
+    end
+    set ended to at of reader
+    repeat while ended + 1 is at most length of data and not (byte ended of data is 255 and byte (ended + 1) of data is not 0 and (byte (ended + 1) of data is less than 208 or byte (ended + 1) of data is greater than 215))
+        set ended to ended + 1
+    end
+    return record with at ended, most_across most_across, most_down most_down
+end
+
+# at a restart marker: the bits begin again at a whole byte, after the marker, and each part's DC from 0
+to jpeg_restart with reader, parts
+    set data to data of reader
+    set at to at of reader
+    repeat while at + 1 is at most length of data and not (byte at of data is 255 and byte (at + 1) of data is at least 208 and byte (at + 1) of data is at most 215)
+        set at to at + 1
+    end
+    set at of reader to at + 2
+    set left of reader to 0
+    set marker of reader to no
+    for each part in parts
+        set before of part to 0
+    end
+end
+
+# one block: its numbers read and scaled back, then turned back into 64 pixels' levels
+to jpeg_block with reader, part
+    set table to step_table of part
+    set numbers to list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    set size to decoded_symbol(reader, dc_table of part)
+    set before of part to before of part + received(reader, size)
+    set item 1 of numbers to before of part * item 1 of table
+    set k to 1
+    repeat while k is less than 64
+        set run_size to decoded_symbol(reader, ac_table of part)
+        set run to shift run_size right by 4
+        set size to run_size bit and 15
+        if size is 0
+            if run is 15
+                set k to k + 16
+            else
+                set k to 64
+            end
+        else
+            set k to k + run
+            if k is greater than 63
+                fail with "the JPEG has a block with too many numbers"
+            end
+            set natural to item (k + 1) of zigzag + 1
+            set item natural of numbers to received(reader, size) * item natural of table
+            set k to k + 1
+        end
+    end
+    return inverse_dct(numbers)
+end
+
+# 64 numbers of a block, in rows of 8 by frequency, back into 64 levels from 0 to 255
+to inverse_dct with numbers
+    set half to empty list
+    for each v from 0 to 7
+        for each x from 0 to 7
+            set sum to 0
+            for each u from 0 to 7
+                set f to item (v * 8 + u + 1) of numbers
+                if f is not 0
+                    set sum to sum + item (x * 8 + u + 1) of cosine_table * f
+                end
+            end
+            add sum to half
+        end
+    end
+    set made to empty list
+    for each y from 0 to 7
+        for each x from 0 to 7
+            set sum to 128
+            for each v from 0 to 7
+                set sum to sum + item (y * 8 + v + 1) of cosine_table * item (v * 8 + x + 1) of half
+            end
+            set level to sum rounded
+            if level is less than 0
+                set level to 0
+            else if level is greater than 255
+                set level to 255
+            end
+            add level to made
+        end
+    end
+    return made
+end
+
+# the parts' planes as the image's pixels: grey, or YCbCr turned into red, green and blue
+to jpeg_colours with frame, scanned
+    set width to width of frame
+    set height to height of frame
+    set made to new_image(width, height, nothing)
+    set into to pixels of made
+    set parts to parts of frame
+    for each y from 0 to height - 1
+        for each x from 0 to width - 1
+            set levels to empty list
+            for each part in parts
+                set px to (x * across of part / most_across of scanned) rounded down
+                set py to (y * down of part / most_down of scanned) rounded down
+                add byte (py * plane_width of part + px + 1) of plane of part to levels
+            end
+            set at to (y * width + x) * 4
+            if length of levels is 1
+                set red to item 1 of levels
+                set green to red
+                set blue to red
+            else
+                set luma to item 1 of levels
+                set blue_part to item 2 of levels - 128
+                set red_part to item 3 of levels - 128
+                set red to level_of(luma + 1.402 * red_part)
+                set green to level_of(luma - 0.344136 * blue_part - 0.714136 * red_part)
+                set blue to level_of(luma + 1.772 * blue_part)
+            end
+            set byte (at + 1) of into to red
+            set byte (at + 2) of into to green
+            set byte (at + 3) of into to blue
+            set byte (at + 4) of into to 255
+        end
+    end
+    return made
+end
+
+to level_of with value
+    set level to value rounded
+    if level is less than 0
+        return 0
+    end
+    if level is greater than 255
+        return 255
+    end
+    return level
+end
+
+# ---------- JPEG: writing ----------
+
+# the standard table at a quality from 1 to 100, as libjpeg scales it
+to scaled_steps with table, quality
+    set scale to 200 - quality * 2
+    if quality is less than 50
+        set scale to (5000 / quality) rounded down
+    end
+    set made to empty list
+    for each step in table
+        set value to ((step * scale + 50) / 100) rounded down
+        if value is less than 1
+            set value to 1
+        else if value is greater than 255
+            set value to 255
+        end
+        add value to made
+    end
+    return made
+end
+
+to new_bit_writer
+    return record with made empty list, holding 0, used 0
+end
+
+to put_bits with writer, value, size
+    for each k from 1 to size
+        set bit to (shift value right by (size - k)) bit and 1
+        set holding of writer to holding of writer * 2 + bit
+        set used of writer to used of writer + 1
+        if used of writer is 8
+            set made to made of writer
+            add holding of writer to made
+            if holding of writer is 255
+                add 0 to made
+            end
+            set holding of writer to 0
+            set used of writer to 0
+        end
+    end
+end
+
+to put_code with writer, table, value
+    set code to item (value + 1) of codes of table
+    put_bits(writer, item 1 of code, item 2 of code)
+end
+
+# how many bits a number's size needs, as JPEG counts them
+to size_of with value
+    set left to value
+    if left is less than 0
+        set left to 0 - left
+    end
+    set size to 0
+    repeat while left is greater than 0
+        set left to (left / 2) rounded down
+        set size to size + 1
+    end
+    return size
+end
+
+# a number as JPEG writes it after its size: below 0, its bits turned over
+to put_number with writer, value, size
+    if value is less than 0
+        put_bits(writer, value + two_to(size) - 1, size)
+    else
+        put_bits(writer, value, size)
+    end
+end
+
+# 64 levels of a block, made into numbers by frequency, scaled down, and written; gives the DC for the next
+to jpeg_put_block with writer, levels, steps, dc_table, ac_table, before
+    set half to empty list
+    for each y from 0 to 7
+        for each u from 0 to 7
+            set sum to 0
+            for each x from 0 to 7
+                set sum to sum + item (x * 8 + u + 1) of cosine_table * (item (y * 8 + x + 1) of levels - 128)
+            end
+            add sum to half
+        end
+    end
+    set numbers to empty list
+    for each v from 0 to 7
+        for each u from 0 to 7
+            set sum to 0
+            for each y from 0 to 7
+                set sum to sum + item (y * 8 + v + 1) of cosine_table * item (y * 8 + u + 1) of half
+            end
+            add (sum / item (v * 8 + u + 1) of steps) rounded to numbers
+        end
+    end
+    set dc to item 1 of numbers
+    set difference to dc - before
+    set size to size_of(difference)
+    put_code(writer, dc_table, size)
+    put_number(writer, difference, size)
+    set run to 0
+    for each k from 1 to 63
+        set value to item (item (k + 1) of zigzag + 1) of numbers
+        if value is 0
+            set run to run + 1
+        else
+            repeat while run is greater than 15
+                put_code(writer, ac_table, 240)
+                set run to run - 16
+            end
+            set size to size_of(value)
+            put_code(writer, ac_table, run * 16 + size)
+            put_number(writer, value, size)
+            set run to 0
+        end
+    end
+    if run is greater than 0
+        put_code(writer, ac_table, 0)
+    end
+    return dc
+end
+
+# the image as a JPEG's bytes, at a quality from 1 to 100 (75 is usual): colour, its blue and red parts
+# kept at half the width and height, as cameras keep them; opacity isn't kept, as JPEG has none
+to jpeg_of with image, quality
+    if not (quality is divisible by 1) or quality is less than 1 or quality is greater than 100
+        fail with "a JPEG's quality is a whole number from 1 to 100, not " + quality
+    end
+    set luma_table to scaled_steps(luma_steps, quality)
+    set chroma_table to scaled_steps(chroma_steps, quality)
+    set dc_luma to huffman_table(dc_luma_counts, dc_values)
+    set dc_chroma to huffman_table(dc_chroma_counts, dc_values)
+    set ac_luma to huffman_table(ac_luma_counts, ac_luma_values)
+    set ac_chroma to huffman_table(ac_chroma_counts, ac_chroma_values)
+    set w to width of image
+    set h to height of image
+    set from to pixels of image
+    set writer to new_bit_writer()
+    set before_y to 0
+    set before_blue to 0
+    set before_red to 0
+    set units_down to ((h + 15) / 16) rounded down
+    set units_across to ((w + 15) / 16) rounded down
+    for each unit_down from 0 to units_down - 1
+        for each unit_across from 0 to units_across - 1
+            set lumas to empty list
+            set blues to empty list
+            set reds to empty list
+            for each y from 0 to 15
+                for each x from 0 to 15
+                    set px to unit_across * 16 + x
+                    set py to unit_down * 16 + y
+                    if px is at least w
+                        set px to w - 1
+                    end
+                    if py is at least h
+                        set py to h - 1
+                    end
+                    set at to (py * w + px) * 4
+                    set red to byte (at + 1) of from
+                    set green to byte (at + 2) of from
+                    set blue to byte (at + 3) of from
+                    add 0.299 * red + 0.587 * green + 0.114 * blue to lumas
+                    add 128 - 0.168736 * red - 0.331264 * green + 0.5 * blue to blues
+                    add 128 + 0.5 * red - 0.418688 * green - 0.081312 * blue to reds
+                end
+            end
+            for each block in list of (list of 0, 0), (list of 8, 0), (list of 0, 8), (list of 8, 8)
+                set levels to empty list
+                for each y from 0 to 7
+                    for each x from 0 to 7
+                        add item ((item 2 of block + y) * 16 + item 1 of block + x + 1) of lumas to levels
+                    end
+                end
+                set before_y to jpeg_put_block(writer, levels, luma_table, dc_luma, ac_luma, before_y)
+            end
+            set before_blue to jpeg_put_block(writer, halved(blues), chroma_table, dc_chroma, ac_chroma, before_blue)
+            set before_red to jpeg_put_block(writer, halved(reds), chroma_table, dc_chroma, ac_chroma, before_red)
+        end
+    end
+    if used of writer is greater than 0 # the last byte filled with 1s
+        put_bits(writer, two_to(8 - used of writer) - 1, 8 - used of writer)
+    end
+    set made to list of 255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0
+    add 255 to made
+    add 219 to made
+    add_two(made, 132)
+    add 0 to made
+    for each k from 1 to 64
+        add item (item k of zigzag + 1) of luma_table to made
+    end
+    add 1 to made
+    for each k from 1 to 64
+        add item (item k of zigzag + 1) of chroma_table to made
+    end
+    for each value in list of 255, 192, 0, 17, 8
+        add value to made
+    end
+    add_two(made, h)
+    add_two(made, w)
+    for each value in list of 3, 1, 34, 0, 2, 17, 1, 3, 17, 1
+        add value to made
+    end
+    add 255 to made
+    add 196 to made
+    add_two(made, 418)
+    for each table in list of (list of 0, dc_luma_counts, dc_values), (list of 16, ac_luma_counts, ac_luma_values), (list of 1, dc_chroma_counts, dc_values), (list of 17, ac_chroma_counts, ac_chroma_values)
+        add item 1 of table to made
+        for each value in item 2 of table
+            add value to made
+        end
+        for each value in item 3 of table
+            add value to made
+        end
+    end
+    for each value in list of 255, 218, 0, 12, 3, 1, 0, 2, 17, 3, 17, 0, 63, 0
+        add value to made
+    end
+    for each value in made of writer
+        add value to made
+    end
+    add 255 to made
+    add 217 to made
+    return made as bytes
+end
+
+# a 16 by 16 block's levels averaged in fours, into 8 by 8
+to halved with levels
+    set made to empty list
+    for each y from 0 to 7
+        for each x from 0 to 7
+            set at to y * 32 + x * 2 + 1
+            add (item at of levels + item (at + 1) of levels + item (at + 16) of levels + item (at + 17) of levels) / 4 to made
+        end
+    end
+    return made
+end

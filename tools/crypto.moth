@@ -1,0 +1,319 @@
+# Encryption, as Python's cryptography has it with AESGCM: AES with a 128, 192 or 256-bit key, in GCM, which
+# hides a message and proves it wasn't changed. In Moth alone, so it works everywhere.
+#
+#   use "crypto.moth" as crypto
+#   set key to crypto's new_key()                          # 32 random bytes: keep them secret
+#   set sealed to crypto's encrypt(key, "meet at noon")    # a fresh nonce, the message hidden, and its tag
+#   say crypto's decrypt(key, sealed) as text              # a mistake if the key is wrong or a byte changed
+#   set salt to crypto's new_salt()                        # 16 random bytes, kept with what the key locks
+#   set key to crypto's key_from_password("correct horse", salt, 200000)   # PBKDF2 with SHA-256
+#
+# aes_gcm_encrypt(key, nonce, message, extra) and aes_gcm_decrypt(key, nonce, sealed, extra) are GCM itself, as
+# NIST SP 800-38D has it: a 12-byte nonce, never used twice with one key, and `extra`, text or bytes that are
+# checked but not hidden (or nothing). A message and a key are text or bytes; what comes back is bytes.
+# new_key, new_salt and encrypt take the system's own randomness, so they work in a program moth build makes.
+
+use "secrets.moth" as crypto_secrets
+use "hash.moth" as crypto_hash
+
+# FIPS 197's S-box, and each byte times 2 in AES's field
+set aes_box to list of 99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118, 202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192,
+    183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21, 4, 199, 35, 195, 24, 150, 5, 154, 7, 18, 128, 226, 235, 39, 178, 117,
+    9, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132, 83, 209, 0, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207,
+    208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 2, 127, 80, 60, 159, 168, 81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210,
+    205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115, 96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219,
+    224, 50, 58, 10, 73, 6, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121, 231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 8,
+    186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138, 112, 62, 181, 102, 72, 3, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158,
+    225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223, 140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22
+set aes_twice to list of 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62,
+    64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 110, 112, 114, 116, 118, 120, 122, 124, 126,
+    128, 130, 132, 134, 136, 138, 140, 142, 144, 146, 148, 150, 152, 154, 156, 158, 160, 162, 164, 166, 168, 170, 172, 174, 176, 178, 180, 182, 184, 186, 188, 190,
+    192, 194, 196, 198, 200, 202, 204, 206, 208, 210, 212, 214, 216, 218, 220, 222, 224, 226, 228, 230, 232, 234, 236, 238, 240, 242, 244, 246, 248, 250, 252, 254,
+    27, 25, 31, 29, 19, 17, 23, 21, 11, 9, 15, 13, 3, 1, 7, 5, 59, 57, 63, 61, 51, 49, 55, 53, 43, 41, 47, 45, 35, 33, 39, 37,
+    91, 89, 95, 93, 83, 81, 87, 85, 75, 73, 79, 77, 67, 65, 71, 69, 123, 121, 127, 125, 115, 113, 119, 117, 107, 105, 111, 109, 99, 97, 103, 101,
+    155, 153, 159, 157, 147, 145, 151, 149, 139, 137, 143, 141, 131, 129, 135, 133, 187, 185, 191, 189, 179, 177, 183, 181, 171, 169, 175, 173, 163, 161, 167, 165,
+    219, 217, 223, 221, 211, 209, 215, 213, 203, 201, 207, 205, 195, 193, 199, 197, 251, 249, 255, 253, 243, 241, 247, 245, 235, 233, 239, 237, 227, 225, 231, 229
+
+# ---------- AES ----------
+
+to as_bytes_of with data
+    if data is nothing
+        return empty list as bytes
+    end
+    return data as bytes
+end
+
+# the key's round keys, one after another, 16 bytes each, as FIPS 197 makes them
+to aes_round_keys with key
+    set key_bytes to as_bytes_of(key)
+    set size to length of key_bytes
+    if size is not 16 and size is not 24 and size is not 32
+        fail with "an AES key is 16, 24 or 32 bytes, not " + size
+    end
+    set words_in_key to size / 4
+    set rounds to words_in_key + 6
+    set schedule to empty list
+    for each k from 1 to size
+        add byte k of key_bytes to schedule
+    end
+    set round_constant to 1
+    for each w from words_in_key to 4 * (rounds + 1) - 1
+        set last_word to list of item (w * 4 - 3) of schedule, item (w * 4 - 2) of schedule, item (w * 4 - 1) of schedule, item (w * 4) of schedule
+        if remainder of w divided by words_in_key is 0
+            set last_word to list of item (item 2 of last_word + 1) of aes_box, item (item 3 of last_word + 1) of aes_box, item (item 4 of last_word + 1) of aes_box, item (item 1 of last_word + 1) of aes_box
+            set item 1 of last_word to item 1 of last_word bit xor round_constant
+            set round_constant to item (round_constant + 1) of aes_twice
+        else if words_in_key is greater than 6 and remainder of w divided by words_in_key is 4
+            for each j from 1 to 4
+                set item j of last_word to item (item j of last_word + 1) of aes_box
+            end
+        end
+        for each j from 1 to 4
+            add item ((w - words_in_key) * 4 + j) of schedule bit xor item j of last_word to schedule
+        end
+    end
+    return record with schedule schedule, rounds rounds
+end
+
+# one 16-byte block, as a list of numbers, encrypted with the round keys
+to aes_block with expanded, block
+    set schedule to schedule of expanded
+    set rounds to rounds of expanded
+    set state to empty list
+    for each k from 1 to 16
+        add item k of block bit xor item k of schedule to state
+    end
+    for each r from 1 to rounds
+        set moved to empty list
+        for each column from 0 to 3
+            for each row from 0 to 3
+                add item (item (row + 4 * (remainder of (column + row) divided by 4) + 1) of state + 1) of aes_box to moved
+            end
+        end
+        if r is less than rounds
+            set mixed to empty list
+            for each column from 0 to 3
+                set a0 to item (column * 4 + 1) of moved
+                set a1 to item (column * 4 + 2) of moved
+                set a2 to item (column * 4 + 3) of moved
+                set a3 to item (column * 4 + 4) of moved
+                set d0 to item (a0 + 1) of aes_twice
+                set d1 to item (a1 + 1) of aes_twice
+                set d2 to item (a2 + 1) of aes_twice
+                set d3 to item (a3 + 1) of aes_twice
+                add d0 bit xor (d1 bit xor a1) bit xor a2 bit xor a3 to mixed
+                add a0 bit xor d1 bit xor (d2 bit xor a2) bit xor a3 to mixed
+                add a0 bit xor a1 bit xor d2 bit xor (d3 bit xor a3) to mixed
+                add (d0 bit xor a0) bit xor a1 bit xor a2 bit xor d3 to mixed
+            end
+            set moved to mixed
+        end
+        set state to empty list
+        for each k from 1 to 16
+            add item k of moved bit xor item (r * 16 + k) of schedule to state
+        end
+    end
+    return state
+end
+
+# ---------- GCM ----------
+
+# 16 bytes from `at` (1, 17, ...) as four 32-bit numbers, the bytes past the end 0s
+to words_at with data, at
+    set made to empty list
+    for each w from 0 to 3
+        set value to 0
+        for each j from 0 to 3
+            set place to at + w * 4 + j
+            set b to 0
+            if place is at most length of data
+                set b to item place of data
+            end
+            set value to value * 256 + b
+        end
+        add value to made
+    end
+    return made
+end
+
+# x times h in GCM's field of 2^128 numbers, each four 32-bit numbers, as SP 800-38D multiplies them
+to field_times with x, h
+    set z1 to 0
+    set z2 to 0
+    set z3 to 0
+    set z4 to 0
+    set v1 to item 1 of h
+    set v2 to item 2 of h
+    set v3 to item 3 of h
+    set v4 to item 4 of h
+    for each w from 1 to 4
+        set word to item w of x
+        for each place_in_word from 0 to 31
+            if (shift word right by (31 - place_in_word)) bit and 1 is 1
+                set z1 to z1 bit xor v1
+                set z2 to z2 bit xor v2
+                set z3 to z3 bit xor v3
+                set z4 to z4 bit xor v4
+            end
+            set lowest to v4 bit and 1
+            set v4 to (shift v4 right by 1) + (v3 bit and 1) * 2147483648
+            set v3 to (shift v3 right by 1) + (v2 bit and 1) * 2147483648
+            set v2 to (shift v2 right by 1) + (v1 bit and 1) * 2147483648
+            set v1 to shift v1 right by 1
+            if lowest is 1
+                set v1 to v1 bit xor 3774873600
+            end
+        end
+    end
+    return list of z1, z2, z3, z4
+end
+
+# GHASH of what's checked and the hidden message, each padded to 16 bytes, then both lengths in bits
+to ghash with h, extra, hidden
+    set y to list of 0, 0, 0, 0
+    for each part in list of extra, hidden
+        set at to 1
+        repeat while at is at most length of part
+            set block to words_at(part, at)
+            set y to field_times((list of item 1 of y bit xor item 1 of block, item 2 of y bit xor item 2 of block, item 3 of y bit xor item 3 of block, item 4 of y bit xor item 4 of block), h)
+            set at to at + 16
+        end
+    end
+    set extra_bits to length of extra * 8
+    set hidden_bits to length of hidden * 8
+    set lengths to list of (extra_bits / 4294967296) rounded down, remainder of extra_bits divided by 4294967296, (hidden_bits / 4294967296) rounded down, remainder of hidden_bits divided by 4294967296
+    return field_times((list of item 1 of y bit xor item 1 of lengths, item 2 of y bit xor item 2 of lengths, item 3 of y bit xor item 3 of lengths, item 4 of y bit xor item 4 of lengths), h)
+end
+
+to numbers_of with data
+    set made to empty list
+    for each k from 1 to length of data
+        add byte k of data to made
+    end
+    return made
+end
+
+# the nonce and a counter, as GCM's counter block
+to counter_block with nonce, count
+    set made to empty list
+    for each b in nonce
+        add b to made
+    end
+    add (shift count right by 24) bit and 255 to made
+    add (shift count right by 16) bit and 255 to made
+    add (shift count right by 8) bit and 255 to made
+    add count bit and 255 to made
+    return made
+end
+
+# the message turned over with the key's stream, from counter 2: so the same both ways
+to counter_mode with expanded, nonce, message
+    set made to empty list
+    set count to 2
+    set at to 1
+    repeat while at is at most length of message
+        set stream to aes_block(expanded, counter_block(nonce, count))
+        for each k from 0 to 15
+            if at + k is at most length of message
+                add item (at + k) of message bit xor item (k + 1) of stream to made
+            end
+        end
+        set at to at + 16
+        set count to count + 1
+    end
+    return made
+end
+
+to gcm_setup with key, nonce
+    set expanded to aes_round_keys(key)
+    set nonce_numbers to numbers_of(as_bytes_of(nonce))
+    if length of nonce_numbers is not 12
+        fail with "a GCM nonce is 12 bytes, not " + length of nonce_numbers
+    end
+    set h to words_at(aes_block(expanded, list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 1)
+    return record with expanded expanded, nonce nonce_numbers, h h
+end
+
+# the tag: GHASH, turned over with the key's first counter block
+to gcm_tag with setup, extra, hidden
+    set s to ghash(h of setup, extra, hidden)
+    set first to aes_block(expanded of setup, counter_block(nonce of setup, 1))
+    set made to empty list
+    for each w from 0 to 3
+        for each j from 0 to 3
+            add ((shift item (w + 1) of s right by (24 - j * 8)) bit and 255) bit xor item (w * 4 + j + 1) of first to made
+        end
+    end
+    return made
+end
+
+# the message hidden, then its 16-byte tag, as bytes
+to aes_gcm_encrypt with key, nonce, message, extra
+    set setup to gcm_setup(key, nonce)
+    set hidden to counter_mode(expanded of setup, nonce of setup, numbers_of(as_bytes_of(message)))
+    set tag to gcm_tag(setup, numbers_of(as_bytes_of(extra)), hidden)
+    for each b in tag
+        add b to hidden
+    end
+    return hidden as bytes
+end
+
+# the message again, if the tag shows nothing was changed; a mistake if anything was
+to aes_gcm_decrypt with key, nonce, sealed, extra
+    set setup to gcm_setup(key, nonce)
+    set all to numbers_of(as_bytes_of(sealed))
+    if length of all is less than 16
+        fail with "that's too short to be a message GCM sealed: it has no tag"
+    end
+    set hidden to empty list
+    for each k from 1 to length of all - 16
+        add item k of all to hidden
+    end
+    set given_tag to empty list
+    for each k from length of all - 15 to length of all
+        add item k of all to given_tag
+    end
+    set tag to gcm_tag(setup, numbers_of(as_bytes_of(extra)), hidden)
+    if not crypto_secrets's same_secret(tag as bytes, given_tag as bytes)
+        fail with "the message was changed, or the key is wrong"
+    end
+    return counter_mode(expanded of setup, nonce of setup, hidden) as bytes
+end
+
+# ---------- what most programs use ----------
+
+# a new 256-bit key, from the system's own randomness
+to new_key
+    return crypto_secrets's random_bytes(32)
+end
+
+# a new salt for key_from_password, kept beside what it locks
+to new_salt
+    return crypto_secrets's random_bytes(16)
+end
+
+# the message hidden with a fresh 12-byte nonce, which goes first, so decrypt needs only the key
+to encrypt with key, message
+    set nonce to crypto_secrets's random_bytes(12)
+    set sealed to aes_gcm_encrypt(key, nonce, message, nothing)
+    set made to numbers_of(nonce)
+    for each k from 1 to length of sealed
+        add byte k of sealed to made
+    end
+    return made as bytes
+end
+
+to decrypt with key, sealed
+    set all to as_bytes_of(sealed)
+    if length of all is less than 28
+        fail with "that's too short to be something encrypt made"
+    end
+    set nonce to (items 1 to 12 of numbers_of(all)) as bytes
+    set rest to (items 13 to (length of all) of numbers_of(all)) as bytes
+    return aes_gcm_decrypt(key, nonce, rest, nothing)
+end
+
+# a 256-bit key from a password: PBKDF2 with SHA-256, `rounds` times over (more is slower to guess)
+to key_from_password with password, salt, rounds or 200000
+    return crypto_hash's bytes_of_hex(crypto_hash's pbkdf2("sha256", password, salt, rounds, 32))
+end

@@ -1,0 +1,92 @@
+# charts.moth's tests, which moth.test.js runs on every engine
+
+use "charts.moth" as charts
+use "images.moth" as images
+
+to test_axis_numbers
+    expect charts's nice_step(0, 250) is 50
+    expect charts's nice_step(0, 7) is 2
+    expect charts's nice_step(-12000, 40000) is 20000
+    expect charts's nice_step(0, 0.9) is 0.2
+    expect charts's axis_text(1500, no) is "1,500"
+    expect charts's axis_text(-2500.5, no) is "-2,500.5"
+    expect charts's axis_text(20000, yes) is "20K"
+    expect charts's axis_text(2500000, yes) is "2.5M"
+    expect charts's axis_text(0, yes) is "0"
+end
+
+to count_of with words, inside
+    set n to 0
+    for each piece in split inside by words
+        set n to n + 1
+    end
+    return n - 1
+end
+
+to test_svg
+    set months to list of "Jan", "Feb", "Mar"
+    set one to charts's svg_of(charts's bar_chart("Sales & costs", months, list of 120, 95, 140))
+    expect "<title>Sales &amp; costs</title>" is in one
+    expect count_of("<path d=", one) is 3
+    expect "<title>Feb: 95</title>" is in one
+    expect ">150</text>" is in one
+    expect not ("<rect x=\"16\" y=\"42\"" is in one)
+    set both to dictionary where "2025" is (list of 1, 2, 3), "2026" is (list of 3, 2, 1)
+    set lines to charts's svg_of(charts's line_chart("Two", months, both))
+    expect count_of("<polyline", lines) is 2
+    expect count_of("<circle", lines) is 2
+    expect "#2a78d6" is in lines and "#eb6834" is in lines
+    expect ">2026</text>" is in lines
+    set parts to charts's svg_of(charts's parts_chart("Split", (list of "A", "B"), list of 3, 1))
+    expect "<title>A: 3 (75%)</title>" is in parts
+    expect ">25%</text>" is in parts
+end
+
+to test_png
+    set chart to charts's sized(charts's bar_chart("Up", (list of "a", "b"), list of 1, 2), 160, 120)
+    set drawn to images's image_from(charts's png_of(chart))
+    expect width of drawn is 160
+    expect height of drawn is 120
+    expect images's pixel(drawn, 2, 110) is list of 252, 252, 251, 255
+    set found_blue to no
+    for each y from 40 to 100
+        for each x from 30 to 150
+            if images's pixel(drawn, x, y) is list of 42, 120, 214, 255
+                set found_blue to yes
+            end
+        end
+    end
+    expect found_blue
+end
+
+to mistake_of with which
+    set caught to nothing
+    try
+        if which is 1
+            set many to empty dictionary
+            for each k from 1 to 9
+                set item ("s" + k) of many to list of k
+            end
+            charts's bar_chart("Too many", (list of "x"), many)
+        else if which is 2
+            charts's bar_chart("Short", (list of "a", "b"), list of 1)
+        else if which is 3
+            charts's parts_chart("Below", (list of "a", "b"), list of 3, -1)
+        else if which is 4
+            charts's save(charts's bar_chart("Gif", (list of "a"), list of 1), "chart.gif")
+        else
+            charts's bar_chart("None", empty list, empty list)
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of(1) is "a chart shows at most 8 series: put the rest together in one called Other"
+    expect mistake_of(2) is "'Short' has 1 numbers for 2 labels"
+    expect mistake_of(3) is "a parts chart's parts are 0 or more, not -1"
+    expect mistake_of(4) is "a chart is saved as .svg or .png, not 'chart.gif'"
+    expect mistake_of(5) is "a chart needs at least one label, and a number for it"
+end

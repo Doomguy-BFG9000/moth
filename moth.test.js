@@ -1074,6 +1074,9 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
         "test_comparing", "test_mistakes", "test_more", "test_more_mistakes"]],
       ["fractions.test.moth", ["test_making", "test_sums", "test_comparing_and_rounding", "test_mistakes"]],
       ["sets.test.moth", ["test_making_and_finding", "test_combining", "test_showing"]],
+      ["images.test.moth", ["test_reading_png", "test_reading_jpeg", "test_round_trips", "test_editing", "test_mistakes"]],
+      ["crypto.test.moth", ["test_known_answers", "test_round_trips", "test_mistakes"]],
+      ["charts.test.moth", ["test_axis_numbers", "test_svg", "test_png", "test_mistakes"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",
         "test_writing", "test_mistakes"]],
       ["zip.test.moth", ["test_checks", "test_reading_what_zlib_makes", "test_round_trips", "test_archives", "test_mistakes"]]]) {

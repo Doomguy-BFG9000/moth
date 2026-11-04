@@ -378,6 +378,19 @@ bytes and dictionaries:
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`
   read, and it reads what they make.
+- [`images.moth`](tools/images.moth) reads and writes pictures, as Pillow
+  does: PNG of every kind and baseline JPEG, each pixel's red, green, blue and
+  opacity, `png_of`, `jpeg_of(image, 85)`, and `cropped`, `resized`,
+  `flipped` and `grey`, checked against Pillow pixel by pixel;
+  [`charts.moth`](tools/charts.moth) saves bar charts, line charts and a bar
+  split into parts as SVG or PNG (`charts's save(chart, "sales.png")`), with
+  a legend, clean axis numbers and colours that stay apart for colour-blind
+  eyes.
+- [`crypto.moth`](tools/crypto.moth) encrypts, as Python's `cryptography`
+  does with AESGCM: AES-128, 192 or 256 in GCM, so a changed byte or a wrong
+  key is found out; `encrypt(key, message)` with a fresh nonce each time,
+  `new_key()`, and `key_from_password` through PBKDF2, matching Python's
+  `cryptography` on every case tried.
 - [`xml.moth`](tools/xml.moth) reads XML into records, each element's name,
   attributes and what's inside it, finds elements by name, and writes them
   back, in Moth alone, read the same as Python's ElementTree reads it.

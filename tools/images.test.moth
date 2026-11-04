@@ -1,0 +1,132 @@
+# images.moth's tests, which moth.test.js runs on every engine: PNGs and a JPEG that Pillow made, and what
+# Pillow reads in each
+
+use "images.moth" as images
+use "base64.moth" as b64
+
+to test_reading_png
+    # rgba
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADCAYAAABbNsX4AAAAN0lEQVR4nC3IMRHAIBAAsAwV8yIq4mdm8IAXbFRYHXyvHFsu0G9qUg/9pS7NIhCD2P7zRC4SOT6giguS+WfpoAAAAABJRU5ErkJggg=="))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("AAAAZDwAAP94AAD/tAAAZPAAAP8AWgD/PFoo/3haUGS0Wnj/8Fqg/wC0AP88tFBkeLSg/7S08P/wtEBk")
+    # rgb
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADCAIAAADUVFKvAAAAG0lEQVR4nGNkYGCwQUIsDFEMDAwacATnB0AQAEhgA2YH8tNBAAAAAElFTkSuQmCC"))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("AAAA/zwAAP94AAD/tAAA//AAAP8AWgD/PFoo/3haUP+0Wnj/8Fqg/wC0AP88tFD/eLSg/7S08P/wtED/")
+    # grey
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADCAAAAAB+XZokAAAAGklEQVR4nGNkEBISEmI0FRMXE2cxlZaW/gcADJkCYj/B6JYAAAAASUVORK5CYII="))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("AAAA/xISEv8kJCT/NjY2/0hISP81NTX/S0tL/2JiYv94eHj/j4+P/2pqav+FhYX/oKCg/7u7u/+5ubn/")
+    # one bit
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADAQAAAABzTfhVAAAADklEQVR4nGNgYNBg2AEAATYA4d7965gAAAAASUVORK5CYII="))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA//////8AAAD///////////8AAAD/////////////////")
+    # palette
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADAgMAAAAmWC1rAAAADFBMVEW0tJu0Wngehx54AABKz93sAAAAAnRSTlP/AOW3MEoAAAARSURBVHicY/h/gGGpA8MCBgASugNFTZoQDgAAAABJRU5ErkJggg=="))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("eAAA/3gAAP94AAD/eAAA/3gAAP8ehx7/Hoce/7RaeAC0WngAtFp4AB6HHv8ehx7/tLSb/7S0m/+0tJv/")
+    # sixteen bits
+    set made to images's image_from(b64's bytes_of_base64("iVBORw0KGgoAAAANSUhEUgAAAAUAAAADEAAAAAAuzUZnAAAAHklEQVR4nGNkYGAQgkBGBlMGMQZxEGZhMGWQBsN/ABWsAmIg8bHcAAAAAElFTkSuQmCC"))
+    expect width of made is 5
+    expect height of made is 3
+    expect pixels of made is b64's bytes_of_base64("AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/AAAA/wAAAP8AAAD/")
+end
+
+# a JPEG Pillow made, read within 4 of what Pillow reads in it, as the two round their sums their own ways
+to test_reading_jpeg
+    set made to images's image_from(b64's bytes_of_base64("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAAQABADAREAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDc8EfFU/J/pJ/76r8xzDJ99D+VOEcg+HQ9f8EfFb7n+kn86+Ix+T76H9QcI5B8Oh8EeCPiqPk/0kf99V/RePyffQ+K4RyH4dD2DwR8VR8n+kj/AL6r4nH5Pvof1DwjkPw6H//Z"))
+    set wanted to b64's bytes_of_base64("KMhm/zLIZf89yWb/SMll/1DIZv9ayGX/Z8lm/27IZP94yGX/gshl/4zIZP+YyGT/oMhl/6rIZv+2yGT/vshl/yfAZf8vwGP/O8Bj/0XBY/9PwGT/WcBk/2PBY/9twWP/d8Bk/4DBY/+LwWP/lcFi/5/BY/+pwGX/s8Bk/73BY/8ot2X/MLhk/zy4ZP9GuGP/T7hk/1m4ZP9kuGP/bbhj/3i4ZP+BuGT/jLhj/5a4Yv+fuGT/qbhl/7S4ZP+9uGT/KLBm/zGxZv88sGX/RrBl/1CwZv9asGX/Z7Fm/26xZP94sGX/gLBk/4yxZP+WsWT/oLBl/6qwZv+2sGT/vrBl/yeoZf8xqGT/Pahk/0eoY/9PqGT/Walk/2WoY/9tqWP/d6lk/4GpY/+NqGP/l6hi/5+pZP+pqGX/tqll/72pZP8on2X/MKBl/zygZP9GoGP/UKBl/1qgZP9moGX/bqBj/3igZP+BoGT/jKBj/5agY/+goGT/qqBl/7WfY/++oGT/KZdm/zGXZf8+mGX/SJhl/1CYZv9amGX/Zphl/3CYZP95l2X/gZhk/42XY/+Xl2P/n5hk/6mXZf+1l2P/v5dk/yiRZv8xkGT/PJJl/0iRZP9PkGX/WZFk/2aRZP9tkWP/d5Fk/4GRZP+LkWP/l5Bi/5+RZP+pkWX/tZBk/72RZP8oiGP/MYdk/z2HZP9Hh2T/T4dk/1mHY/9lh2T/bYdk/3mHZP+Bh2P/jYdj/5eHY/+fh2P/qYdk/7WHZf++hmP/J4Bk/zCAY/87gGP/RYBi/0+AY/9ZgGX/ZoBj/22AZP93gGP/gIFi/4uAYv+VgGP/n4Bk/6mAZP+2gGT/vYBj/yl4Zf8weGT/PXhk/0d4Y/9PeWX/WXhm/2V4ZP9teWX/eXhk/4B4Y/+NeGP/l3hk/595Zv+reGX/tXhl/794ZP8ocGT/MXBl/zxwY/9GcGT/UHBl/1pwZP9lb2T/bnBj/3hwZf+CcGT/jHBk/5ZwY/+gcGT/qnBl/7VvZf++cGT/J2hk/y9oYv87aGP/RWhi/09oZP9ZaGX/ZWdi/21oZP93aGP/gGdi/41oYv+XZ2P/n2hl/6loZP+1Z2P/vWhj/ylgY/8xYWX/PWBi/0dgZP9PYWX/WWFk/2VgZP9tYWP/eWBk/4FhZP+NYGP/l2Bj/59hZP+rYGX/tWBl/79gZP8oWGT/MVll/zxYY/9GWGT/UFhl/1pYZf9mWGX/blhk/3hYZf+CWGT/jVdk/5dYY/+gWGT/qlhm/7ZYZv++WGX/J1Bi/y9QY/87UGP/RVBi/01QY/9XUGL/Y1Bj/21QZP93UGP/f1Bi/4tQYv+VUGP/nk9k/6hPY/+1T2T/vVBj/w==")
+    expect width of made is 16
+    expect height of made is 16
+    expect largest_difference(pixels of made, wanted) is at most 4
+end
+
+to largest_difference with got, wanted
+    set most to 0
+    for each k from 1 to length of wanted
+        set d to byte k of got - byte k of wanted
+        if d is less than 0
+            set d to 0 - d
+        end
+        if d is greater than most
+            set most to d
+        end
+    end
+    return most
+end
+
+# an image made here, written as a PNG and read back the same, and as a JPEG and read back close to it
+to test_round_trips
+    set made to images's new_image(7, 5, list of 0, 0, 0)
+    for each y from 0 to 4
+        for each x from 0 to 6
+            images's set_pixel(made, x, y, list of x * 30, y * 50, 200 - x * y * 5, 255 - x * 20)
+        end
+    end
+    set back to images's image_from(images's png_of(made))
+    expect pixels of back is pixels of made
+    set smooth to images's new_image(24, 20, nothing)
+    for each y from 0 to 19
+        for each x from 0 to 23
+            images's set_pixel(smooth, x, y, list of 50 + x * 5, 180 - y * 4, 90 + x + y)
+        end
+    end
+    set squeezed to images's jpeg_of(smooth, 95)
+    expect byte 1 of squeezed is 255
+    expect byte 2 of squeezed is 216
+    set opened to images's image_from(squeezed)
+    expect width of opened is 24
+    expect height of opened is 20
+    expect largest_difference(pixels of opened, pixels of smooth) is at most 10
+end
+
+to test_editing
+    set made to images's new_image(4, 2, list of 10, 20, 30, 255)
+    expect images's pixel(made, 3, 1) is list of 10, 20, 30, 255
+    images's set_pixel(made, 0, 0, list of 255, 0, 0)
+    images's set_pixel(made, 3, 0, list of 0, 0, 255, 128)
+    expect images's pixel(made, 0, 0) is list of 255, 0, 0, 255
+    expect images's pixel(images's flipped(made), 3, 0) is list of 255, 0, 0, 255
+    expect images's pixel(images's flipped(made), 0, 0) is list of 0, 0, 255, 128
+    set part to images's cropped(made, 2, 0, 2, 1)
+    expect width of part is 2
+    expect images's pixel(part, 1, 0) is list of 0, 0, 255, 128
+    set bigger to images's resized(made, 8, 4)
+    expect images's pixel(bigger, 1, 1) is list of 255, 0, 0, 255
+    expect images's pixel(bigger, 7, 3) is list of 10, 20, 30, 255
+    expect images's pixel(images's grey(made), 0, 0) is list of 76, 76, 76, 255
+    expect images's pixel(images's new_image(1, 1, nothing), 0, 0) is list of 0, 0, 0, 0
+end
+
+to mistake_of with which
+    set caught to nothing
+    try
+        if which is 1
+            images's image_from("hello" as bytes)
+        else if which is 2
+            images's pixel(images's new_image(2, 2, nothing), 2, 0)
+        else if which is 3
+            images's jpeg_of(images's new_image(2, 2, nothing), 0)
+        else if which is 4
+            images's new_image(0, 5, nothing)
+        else
+            images's image_from(b64's bytes_of_base64("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wgARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUAQEAAAAAAAAAAAAAAAAAAAAC/9oADAMBAAIQAxAAAAGIDH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAn//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/An//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IX//2gAMAwEAAgADAAAAEAf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q=="))
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of(1) is "that isn't a PNG or a JPEG"
+    expect mistake_of(2) is "there's no pixel 2, 0 in an image 2 by 2"
+    expect mistake_of(3) is "a JPEG's quality is a whole number from 1 to 100, not 0"
+    expect mistake_of(4) is "an image's width is a whole number of 1 or more, not 0"
+    expect mistake_of(5) is "a progressive JPEG isn't read yet: save it as a baseline one"
+end

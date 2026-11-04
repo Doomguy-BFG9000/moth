@@ -1391,7 +1391,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth", "log.moth", "zones.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "crypto.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth", "log.moth", "zones.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1585,20 +1585,21 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, sets.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, sets.moth, images.moth, crypto.moth, charts.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
-    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth", "sets.moth", "sets.test.moth"]) {
+    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth", "sets.moth", "sets.test.moth", "images.moth", "images.test.moth", "crypto.moth", "crypto.test.moth", "charts.moth", "charts.test.moth",
+    "secrets.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth", "images.test.moth", "crypto.test.moth", "charts.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "81 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
@@ -1819,6 +1820,25 @@ say (wait for job) is less than 1.5
 // tools/secrets.moth: the system's random bytes, two draws of which differ, and as many as asked for; tokens in
 // hex and for addresses; numbers below n, each seen often in 600; a choice, a shuffle, secrets compared; and
 // each mistake
+// tools/crypto.moth (DESIGN §100): encrypt and decrypt with a key from the system's randomness, a fresh nonce
+// each time, a wrong key found out, and a key from a password
+test("tools/crypto.moth encrypts with AES-GCM and a fresh nonce, and finds out a wrong key", { skip }, () => {
+  const ran = libraryRun(`use "crypto.moth" as crypto
+set key to crypto's new_key()
+say length of key
+set sealed to crypto's encrypt(key, "meet at noon é")
+say length of sealed
+say crypto's decrypt(key, sealed) as text
+say crypto's encrypt(key, "same") is crypto's encrypt(key, "same")
+try
+    crypto's decrypt(crypto's new_key(), sealed)
+if it fails with why
+    say why
+end
+say length of crypto's key_from_password("pw", crypto's new_salt(), 10)`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["32\n43\nmeet at noon é\nno\nthe message was changed, or the key is wrong\n32\n", "", 0]);
+});
+
 test("tools/secrets.moth gives random bytes, tokens and numbers no one can guess, on Windows and Linux", { skip }, () => {
   const ran = libraryRun(String.raw`use "secrets.moth" as secrets
 set a to secrets's random_bytes(16)

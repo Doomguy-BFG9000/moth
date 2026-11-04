@@ -3996,3 +3996,53 @@ hold them to agreeing.
   and on Linux, in WSL, the menu entry and uninstall.sh. A real certificate
   wasn't at hand, so signtool itself is untried on Moth's programs.
 
+## 100. Pictures, encryption and charts
+
+- **Why.** Python has Pillow for pictures, `cryptography` for encrypting, and
+  matplotlib for charts saved to files; Moth had a picture drawn in a window,
+  hashes, and a chart in the playground.
+- **images.moth.** An image is a record with its width, height and pixels, 4
+  bytes each. PNG is read chunk by chunk, its IDAT inflated by zip.moth, each
+  row's filter undone (Paeth's too), at any depth from 1 to 16 bits, grey,
+  colour, a palette with tRNS's opacity, and Adam7's seven passes; written as
+  8-bit RGBA, each row filtered the way whose numbers come out smallest, as
+  libpng picks. JPEG is read as baseline Huffman (SOF0 and SOF1): DQT, DHT,
+  restart markers, any sampling, each block's numbers scaled back and turned
+  into pixels by a separable inverse DCT from a table of cosines, each part
+  enlarged to the image's size by its nearest sample; progressive, arithmetic
+  and lossless JPEGs say they aren't read yet. It's written as baseline JPEG
+  4:2:0, with the standard's tables scaled as libjpeg scales them.
+- **Tested against Pillow.** PNGs of every kind, made by Pillow, the same
+  pixel for pixel; an interlaced one made by hand, the same; JPEGs from Pillow
+  at 4:2:0, 4:2:2 and 4:4:4, grey, and of a size that isn't 8's, within 4 of
+  what Pillow reads in them (it enlarges colour smoothly, this nearest); a
+  JPEG written here, read by Pillow, 45.7 dB from what it was; crops, flips
+  and grey the same as Pillow's; and machine code the same bytes as the
+  JavaScript engine for all of them.
+- **crypto.moth.** AES from FIPS 197, bytes as lists of numbers, with its
+  S-box and doubling table written out; GCM from SP 800-38D, its GHASH on
+  four 32-bit numbers, and its counter mode from 2. `decrypt` checks the tag
+  with secrets.moth's `same_secret`, so how long it takes says nothing.
+  `encrypt` puts a fresh 12-byte nonce from the system before what it seals;
+  new_key, new_salt and encrypt need a program moth build made, as the system's
+  randomness is through C. Tested: 36 cases from Python's cryptography (all
+  three key sizes, messages of 0 to 40 bytes, with and without extra bytes)
+  on every engine and in machine code, GCM's own first two, a byte changed,
+  the wrong key and the wrong extra found out.
+- **charts.moth.** A chart is laid out once, as shapes and text, then written
+  as SVG (each mark's value in a `<title>`, so it shows under the mouse) or
+  drawn into an image: rectangles with their data end rounded and smoothed,
+  2-pixel lines by their distance from each pixel, dots with a ring, and
+  DejaVu Sans's letters at 13 and its bold at 16, 4 bits of ink a pixel,
+  in glyph-tables.py's format. Its look follows a data-visualisation method:
+  a categorical palette checked for colour-blind readers, used in a fixed
+  order and never cycled (a ninth series is a mistake that says to make an
+  Other); bars at most 24 wide, 2 pixels apart; 1-pixel gridlines; text in
+  text colours, not series colours; a legend for two series or more, and a
+  line's name at its end too for up to four; axis numbers in nice steps,
+  with commas, or 10K and 2.5M once they reach 10,000; and, for one whole
+  split in parts, a segmented bar, not a pie.
+- **Tested.** Axis steps and their text, an SVG's marks, titles and escaped
+  text, a PNG's background and bar colour where they should be, each
+  mistake, on every engine and in machine code; and the PNGs looked at.
+

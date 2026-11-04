@@ -1,0 +1,62 @@
+# crypto.moth's tests, which moth.test.js runs on every engine, against Python's cryptography
+
+use "crypto.moth" as crypto
+use "hash.moth" as hash
+
+to test_known_answers
+    # the GCM spec's first two: an empty message, then 16 zero bytes, with a zero key and nonce
+    expect hash's hex_of(crypto's aes_gcm_encrypt((list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) as bytes, (list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) as bytes, empty list as bytes, nothing)) is "58e2fccefa7e3061367f1d57a4e7455a"
+    expect hash's hex_of(crypto's aes_gcm_encrypt((list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) as bytes, (list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) as bytes, (list of 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) as bytes, nothing)) is "0388dace60b6a392f328c2b971b2fe78ab6e47d42cec13bdf53a67b21257bddf"
+    set key to (list of 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31) as bytes
+    set nonce to (list of 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111) as bytes
+    set sealed to crypto's aes_gcm_encrypt(key, nonce, "The quick brown fox jumps over the lazy dog", "header")
+    expect hash's hex_of(sealed) is "1c73bb46089c3ffd55423d9ab51204dd24ad7e2ae1199e02d4f1c33e9ed1853cfc8c60ac2d68e224999c1f68ed6b6c9e967cc9aad5ee0f75575a7c"
+    expect crypto's aes_gcm_decrypt(key, nonce, sealed, "header") as text is "The quick brown fox jumps over the lazy dog"
+    expect hash's hex_of(crypto's key_from_password("password", "salt", 1000)) is "632c2812e46d4604102ba7618e9d6d7d2f8128f6266b4a03264d2a0460b7dcb3"
+end
+
+to test_round_trips
+    set key to "a key of 16 byte"
+    set nonce to "twelve bytes"
+    for each message in list of "", "a", "meet at noon é", "a message longer than one block, and longer than two of them"
+        set sealed to crypto's aes_gcm_encrypt(key, nonce, message, nothing)
+        expect length of sealed is length of (message as bytes) + 16
+        expect crypto's aes_gcm_decrypt(key, nonce, sealed, nothing) as text is message
+    end
+end
+
+to mistake_of with which
+    set caught to nothing
+    set key to "a key of 16 byte"
+    set nonce to "twelve bytes"
+    try
+        if which is 1
+            set sealed to crypto's aes_gcm_encrypt(key, nonce, "secret", "extra")
+            set changed to empty list
+            for each k from 1 to length of sealed
+                add byte k of sealed to changed
+            end
+            set item 3 of changed to (item 3 of changed + 1) bit and 255
+            crypto's aes_gcm_decrypt(key, nonce, changed as bytes, "extra")
+        else if which is 2
+            crypto's aes_gcm_decrypt(key, nonce, crypto's aes_gcm_encrypt(key, nonce, "secret", "extra"), "other")
+        else if which is 3
+            crypto's aes_gcm_encrypt("short key", nonce, "secret", nothing)
+        else if which is 4
+            crypto's aes_gcm_encrypt(key, "short", "secret", nothing)
+        else
+            crypto's aes_gcm_decrypt(key, nonce, "too short", nothing)
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of(1) is "the message was changed, or the key is wrong"
+    expect mistake_of(2) is "the message was changed, or the key is wrong"
+    expect mistake_of(3) is "an AES key is 16, 24 or 32 bytes, not 9"
+    expect mistake_of(4) is "a GCM nonce is 12 bytes, not 5"
+    expect mistake_of(5) is "that's too short to be a message GCM sealed: it has no tag"
+end
