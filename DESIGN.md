@@ -4293,3 +4293,188 @@ hold them to agreeing.
   `--allow` flags protect against and don't: a library or a program the
   program starts can do anything, a flag allows all of what it names, and
   there are no limits on memory or time.
+
+## 107. A web server for many people at once
+
+- **Why.** server.moth answered one request at a time, start to finish: it
+  read until a request was whole, answered, and closed the connection. One
+  client that stopped halfway held up everyone until it went away, nothing
+  limited how long a request could take or how big its headers grew, and each
+  request paid for a new connection. That's a server for one person.
+- **One thread, many connections.** The server now waits, with poll (WSAPoll
+  on Windows), for whichever of its connections has something to say, and on
+  non-blocking sockets reads what has come and writes what the connection
+  will take. A connection is a record: its stage (agreeing on TLS, reading, or
+  writing), what has come, where its headers end, its answer and how much of
+  it has gone, and when it's out of time. A round is one wait, of at most 50
+  ms so time limits are kept, then each connection that can go on. A whole
+  request is given to the handler as before, so a handler is written as it was.
+- **Keep-alive.** HTTP/1.1 keeps a connection open for the next request
+  unless it says `Connection: close`; HTTP/1.0 only if it asks. Requests sent
+  together (pipelined) are answered in the order they came. `set_most_requests`
+  closes one after so many (1,000), and `set_keep_alive(no)` after each.
+- **Limits.** A request has `set_timeout` (30 s) to arrive once its first
+  byte has come and a kept connection `set_idle_timeout` (5 s) to begin the
+  next: one that goes over is answered 408 and closed, or just closed if it
+  had begun nothing. Bigger than `set_most_bytes` (16 MB) is 413, headers over
+  64 KB 431, and a request line, length or chunk that can't be read 400, as
+  are two Content-Lengths that differ. Only `set_most_connections` (1,024) are
+  held at once; the rest wait in the system's queue (512 deep).
+- **Nothing looked through twice.** Looking for the end of the headers starts
+  where the last look stopped, and a body in chunks is read on from the last
+  chunk read, so a request that comes a byte at a time costs what one that
+  comes at once does; before, each byte that came meant looking through all of
+  it again. The headers are read once, into a dictionary that says the body's
+  length, whether it's in chunks and whether to keep the connection.
+- **Writing.** A write that the connection won't take now (its room is full,
+  as with an answer of megabytes to a client that reads slowly) waits for poll
+  to say it will, where before it was taken for a connection gone, cutting
+  the answer short. A connection that's really gone says so to poll (POLLHUP,
+  POLLERR), which closes it.
+- **40 ms.** The first version answered 4,500 requests a second, each 40 ms
+  late: the headers and the body went in two writes, and the second waited,
+  by Nagle's algorithm, for the client to say it had the first, which the
+  client put off for 40 ms. A text answer now goes in one write, and every
+  connection has TCP_NODELAY, for an answer in bytes, which is still two.
+- **A mistake in the server** while it sees to one connection closes that
+  connection, says why to the error output, and the rest go on. stop_serving()
+  stops reading and sends what's being sent before serve() returns.
+- **What it gave.** tools/load-test.mjs builds a site with server.moth and
+  asks it from Node on raw sockets: `steady` is 200 connections each asking
+  again as soon as it's answered (on one connection if the server keeps it,
+  a new one each time if not), `burst` 200 connections at once, `slow` 200
+  requests while 50 connections sit with half a request sent, and `heavy` 200
+  connections asking for a page that takes about 1 ms of work. Linux, 4 cores,
+  5 s each, the client on the same machine:
+
+  |            | before (1.11.0)              | now                          |
+  |------------|------------------------------|------------------------------|
+  | steady     | 10,506/s, slowest 7.7 s      | 84,748/s, 99% within 7.4 ms  |
+  | burst      | typical 1,018 ms             | typical 8.1 ms               |
+  | slow       | none of 200 in 10 s          | all 200, typical 27 ms       |
+  | heavy      | 377/s, slowest 14.5 s        | 664/s, slowest 634 ms        |
+
+  Before, connections waited in the queue for seconds, some until the client
+  gave up; `slow` never ended, as the first half-sent request held the server.
+  `heavy` is limited by its work on one thread; §108's workers take it to
+  4,489/s on 4.
+- **Tested.** On raw sockets, with time limits of 400 ms: three requests on
+  one connection, the last told it's the last; two sent together, then HEAD;
+  an answer of nothing (204); HTTP/1.0 with and without keep-alive; a body in
+  pieces with a pause between, and one in chunks a few bytes at a time with
+  an extension and a trailer, then another request on the same connection; an
+  answer of 3.2 MB to a client that waits half a second before reading; a
+  query with a % that isn't one; 413, 431, 400 for a request that isn't one,
+  a length that isn't, two lengths and chunks that can't be read; 408 for a
+  request too slow to arrive, and a kept connection closed when it's idle; a
+  client sending a byte at a time while another is answered first; and
+  stop_serving(). The tests from before (HTTPS, the guestbook app, http.moth's
+  and websocket.moth's) pass as they were.
+
+## 108. Workers: every core, sharing nothing
+
+- **Why.** Tasks (§62) take turns: one runs Moth at a time, so a server's
+  handlers, or a sum split into tasks, use one core however many there are.
+  cores.moth (§75) uses them all, but with copies of the program, each a
+  process, started again from the top and talking through files.
+- **Isolated workers, not shared threads.** Threads that share memory would
+  need every list, record and dictionary, and the runtime's own memory, to be
+  safe to change from two threads at once: a lock around each, or a garbage
+  collector that stops every thread to look at their memory, and a program
+  could still change a list while another thread reads it, which is a race.
+  sync.moth's lock is right only because one task runs at a time: it takes a
+  lock by seeing it free and marking it held, with nothing in between. So a
+  worker shares nothing. It has a copy of the program's variables as they were
+  when it started, and copies of its inputs; it changes them as it likes, and
+  no one else sees; what it gives back, or the mistake it ends with, is copied
+  back when it's waited for. There are no races, sync.moth keeps its promise
+  (a worker's tasks take turns among themselves, as the program's do), and
+  each worker's collector looks at its own memory alone, with nothing to stop.
+  It's what JavaScript's Web Workers, Erlang's processes and Python's
+  subinterpreters do.
+- **Plain English.** `start count(10) on another core` starts a worker and
+  gives a record of its number, `(record with worker 1)`, as `start count(10)`
+  gives a task; `wait for` and `has ended` take either, and so do sync.moth's
+  wait_for_all and wait_for_any. `on another core` is read only after a
+  `start` and its call, where nothing could follow before, so no program that
+  worked means anything new, and `on`, `another` and `core` are still names.
+- **What can be copied.** Numbers, text, yes and no, nothing, lists, records,
+  dictionaries, bytes, amounts, and functions made at the top of a file, which
+  share nothing but the program's variables, of which the worker has its own.
+  A function made inside another shares that function's variables, so it
+  can't go to a worker, nor come back from one; a value nested over 1,000
+  deep can't be copied, which a list that holds itself is. Each is a mistake
+  where it's started, or waited for; one of the program's variables that holds
+  one has no value in the worker.
+- **In machine code,** a worker is a thread of the system's (CreateThread on
+  Windows; on Linux pthread_create, or clone where the C library isn't
+  loaded) running a copy of the program's whole image: its code, its
+  read-only data, its variables and the runtime's own memory, the 256 MB stack
+  of the program's own thread left out. Every instruction reaches its data by
+  a distance from itself, so the copy's code uses the copy's data; the 8-byte
+  addresses in the data (a text's bytes, a record's field names, tables of
+  texts) are listed when the program is built, and each is moved in the copy
+  by how far the copy is from the original. So a worker has its own heap and
+  collector, its own variables, its own turn for its own tasks, and its own
+  workers, and the program and its workers run Moth at the same moment.
+- **Copying between heaps.** Both heaps are in one address space, so the
+  worker copies what it's given from the program's heap into its own while
+  the program waits, which keeps the program's collector away from what's
+  being read; after that it reads nothing of the program's. What it gives back
+  waits in its heap until `wait for` copies it into the program's. A text or a
+  field's name in the image isn't copied: the same place in the copy is that
+  far along, so `x of r` finds its field in a worker as it does in the program.
+- **Memory.** An image is made for a worker the first time its slot is used,
+  and kept, with its heap, for the next worker in that slot once the program
+  has taken the last one's answer; so a program that starts worker after
+  worker, as a server does, makes as many images as it has workers at once.
+  A server's image is about 0.8 MB, and each heap grows as the program's
+  does. 64 workers can have answers nothing has taken yet, and starting a 65th
+  is a mistake that says so. A worker ends its own tasks and workers before
+  it ends, and the program ends its workers, as it ends its tasks, before it
+  ends; `random number` goes on in each worker from where the program had got
+  to, each 2^24 numbers further along than the one numbered before it.
+- **Windows.** Written as the task threads are: the image's memory from
+  VirtualAlloc, readable, writable and runnable; the thread from CreateThread
+  with the same stack; a manual-reset event for its end, set before its state
+  says it has ended, so a program that wakes early waits again; SwitchToThread
+  while the program waits for a worker to copy what it was given; and the
+  image's own TLS index and semaphore for its tasks, made once, with the slot
+  set for each new thread. It's built and its imports checked on Linux, not
+  run there; CI runs on Linux.
+- **On the JavaScript engines** a worker runs to its end when it's started,
+  as a task does, on copies all the same: the program's variables are swapped
+  for copies while it runs and put back after, and what it gives is copied.
+  Its own tasks and workers are numbered from 1 while it runs, as in machine
+  code, and the limit of 64 is kept. So a program says the same everywhere,
+  except what only threads show (a worker that hasn't ended yet).
+- **server.moth on workers.** `set_workers(4)`, or `serve_on_workers(8080,
+  answer, 4)`, starts 4 workers (0 for one a core) on the one listening
+  socket. Each runs §107's rounds with connections of its own, taking one new
+  connection a round, so those that wake for the same one share them. A
+  handler that works for a second holds up only its own worker's connections.
+  A worker that ends with a mistake is said and another started;
+  stop_serving() stops the worker it's called on.
+- **What it gave.** Four calls of a 40,000,000-round loop, one after another
+  and then on four workers, on 4 cores: the workers took 0.27 of the time.
+  Eight 30,000,000-round loops: 2,340 ms one after another, 626 ms on eight
+  workers. 3,000 workers started and waited for one after another: 0.10 s; 64
+  at once, 34 ms. The `heavy` load test of §107: 664/s on one thread, 4,489/s
+  on four workers.
+- **Tested.** The JavaScript engines, the compiler written in Moth and machine
+  code agree on: the program's variables and a worker's inputs, which it
+  changes only for itself; functions, records, dictionaries, bytes and amounts
+  given and given back; a worker's mistake, kept for `wait for`; what can't be
+  copied, at the start and at the end; what isn't a worker; a worker's own
+  tasks and workers, numbered from 1; and the limit of 64. In machine code,
+  against the JavaScript engine: eight workers at once, each making far more
+  than it keeps; workers starting workers; the program's tasks running while
+  worker after worker, each in its predecessor's memory, starts tasks of its
+  own; 3,000 workers one after another and 64 at once; a list of 100,000
+  given and given back; what a worker says, and one never waited for; a
+  worker's mistake. And only in machine code: two workers that each wait for a
+  file the other writes, which they can do only at the same moment; `has
+  ended` on a worker still working; sync.moth's lock among a worker's tasks;
+  four workers taking far less time than four calls; and a Windows program's
+  imports. server.moth with three workers: twenty requests answered while one
+  handler works for a second and a half.

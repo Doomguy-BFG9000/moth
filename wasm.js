@@ -16,7 +16,7 @@ import { MothError, catchable, caughtValue, UNSET, Closure, Turtle, TURTLE_ACTIO
   lengthOf, addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, KINDS, numberOrder, divisible, canon, noValue, stoppedMessage, makeRecord, fieldOf,
   recordFor, failWith, BUILTINS, askFor, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, everyInterval,
   Quantity, isQuantity, isRecord, Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP, CantCopy, DEEPEST_COPY,
-  madeInside, tooDeepToCopy, workerEnded, workerResult } from "./vm.js";
+  madeInside, tooDeepToCopy, workerEnded, workerResult, workerRoom, workerTaken, enterWorker, leaveWorker } from "./vm.js";
 
 const EQ = refNull("eq"); // any Moth value
 const I32 = "i32";
@@ -1737,12 +1737,14 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
   const workerDone = (result) => {
     const [f, saved] = workers.pop();
     saved.forEach((value, i) => x.setScopeSlot(f, i, value));
+    leaveWorker();
     return toWasm(workerEnded(result));
   };
   const WAIT_FOR = BUILTINS.findIndex((b) => b.name === "wait for");
 
   const imports = {
     workerBegin: (f, list, name, k) => {
+      workerRoom(errors[k]);
       try {
         if (!x.functionAtTop(f)) throw new CantCopy(madeInside(names[x.functionName(f)]));
         const given = x.newList();
@@ -1758,6 +1760,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
         });
         fresh.forEach((value, i) => x.setScopeSlot(f, i, value));
         workers.push([f, saved]);
+        enterWorker();
         return given;
       } catch (err) {
         if (!(err instanceof CantCopy)) throw err;
@@ -1872,6 +1875,7 @@ function instantiate(module, { ats, names, messages, texts, kinds }, print, draw
       const given = toJs(args);
       const worker = i === WAIT_FOR ? workerResult(given[0]) : null;
       if (worker) { // what a worker gave is kept as the module made it (see imports.workerGave)
+        workerTaken(worker);
         if (Object.hasOwn(worker, "failed")) {
           failing = worker.failed;
           failWith(toJs(worker.failed), errors[k]);
