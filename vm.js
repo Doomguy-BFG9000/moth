@@ -791,7 +791,7 @@ export const BUILTINS = [
   { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
   { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
   { name: "has ended", needs: [["record"]], gives: "yes/no", run: ([task], error) => taskEnded(task, error) },
-  // `ask for 64 bytes` (DESIGN §104): as many bytes of the input as it has, up to that many, without waiting for a
+  // `ask for 64 bytes` (DESIGN §108): as many bytes of the input as it has, up to that many, without waiting for a
   // line's end, as a language server reads what an editor sends. Only machine code reads the input so.
   {
     name: "input bytes", needs: [["number"]], gives: "bytes",

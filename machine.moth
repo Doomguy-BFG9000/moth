@@ -29480,7 +29480,7 @@ to emit_input with a, target
         ret(a)
     end
 
-    # rt_input_bytes: `ask for 64 bytes` (DESIGN §104): xmm0 how many, as `64 bytes` takes it; what's been said
+    # rt_input_bytes: `ask for 64 bytes` (DESIGN §108): xmm0 how many, as `64 bytes` takes it; what's been said
     # shown first, then as many bytes of the input as come before it ends, up to that many, without waiting for a
     # line's end: bytes in xmm0 with rax 0; or rax 2 (rt_bytes_of's err_why). Keeps rbx and r12 to r15.
     set ib_made to new_label(a)

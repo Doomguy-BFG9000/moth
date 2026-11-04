@@ -1016,7 +1016,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   // What an input says it is, after its `as`: [its number in KINDS (vm.js), which each call checks, and
-  // what it says beyond that, as written, which only the checker reads (DESIGN §103), or null]. `a number`,
+  // what it says beyond that, as written, which only the checker reads (DESIGN §107), or null]. `a number`,
   // `text`, `yes or no`... are KINDS; `a dog` (or `an owl`) is a record a kind makes, checked as a record;
   // `a list of numbers` is a list, checked as a list.
   function inputType() {

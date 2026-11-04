@@ -242,7 +242,7 @@ test("the checker finds mistakes without running the program", () => {
   ]);
 });
 
-// Types (DESIGN §103): what's sure "fails", and what the code says of itself, and goes against, "doesn't fit".
+// Types (DESIGN §107): what's sure "fails", and what the code says of itself, and goes against, "doesn't fit".
 test("the checker finds what goes against what the code says it is, and what kinds and returns make sure", () => {
   assert.deepEqual(problems(TYPED[0]), [
     "5:5 fails: 'length of' needs a list, text, dictionary or bytes, not a number", // area returns w * h, two numbers

@@ -1035,7 +1035,7 @@ to cli_tidy_all with cli_paths, cli_checking
 end
 
 # ---------- problems, found without running it ----------
-# `moth check` finds what checker.js finds, in the same words and the same order (DESIGN §103): a name
+# `moth check` finds what checker.js finds, in the same words and the same order (DESIGN §107): a name
 # nothing ever sets; a line that can never run; a name set or made and never used; and what the types say.
 # It works the types out as checker.js does, twice: from what's sure ("will fail"), then with what the code
 # says of itself that no run checks too ("doesn't fit"). Where checker.js runs one of vm.js's checks on a
@@ -2405,7 +2405,7 @@ to cli_check_file with cli_path
 end
 
 # ---------- the language server ----------
-# `moth lsp` (DESIGN §104): what moth knows of a program, for any editor, over the Language Server Protocol
+# `moth lsp` (DESIGN §108): what moth knows of a program, for any editor, over the Language Server Protocol
 # on the input and the output: the problems moth check finds, as you type; tidying, as moth tidy does; each
 # function, kind and variable a file makes, for its outline; where a name is made, in the file or one it
 # uses; what a name is, when the pointer is on it; and the names that could come next. Each message is
