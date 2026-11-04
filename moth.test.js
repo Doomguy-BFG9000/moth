@@ -1071,7 +1071,8 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       ["stats.test.moth", ["test_middles", "test_spread", "test_two_sets", "test_mistakes"]],
       ["sync.test.moth", ["test_lock", "test_semaphore", "test_holding", "test_flag", "test_queue", "test_tasks"]],
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
-        "test_comparing", "test_mistakes"]],
+        "test_comparing", "test_mistakes", "test_more", "test_more_mistakes"]],
+      ["fractions.test.moth", ["test_making", "test_sums", "test_comparing_and_rounding", "test_mistakes"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",
         "test_writing", "test_mistakes"]],
       ["zip.test.moth", ["test_checks", "test_reading_what_zlib_makes", "test_round_trips", "test_archives", "test_mistakes"]]]) {

@@ -383,8 +383,12 @@ bytes and dictionaries:
   back, in Moth alone, read the same as Python's ElementTree reads it.
 - [`big.moth`](tools/big.moth) works with whole numbers of any size, kept as
   text, so `say` shows them and `is` compares them: `big's times(f, 30)`,
-  `plus`, `minus`, `divided`, `remainder`, `power` and `compare`, in Moth
-  alone, tested against JavaScript's BigInt.
+  `plus`, `minus`, `divided`, `remainder`, `power` and `compare`, and, as
+  Python's `math` has them, `gcd`, `lcm`, `square_root`, `factorial`,
+  `choices`, `power_mod` and bases 2 to 36, in Moth alone, tested against
+  JavaScript's BigInt; [`fractions.moth`](tools/fractions.moth) keeps
+  fractions exactly, as Python's `fractions` does: `"1/3"` plus `"1/6"` is
+  `"1/2"`, and `as_decimal` writes one to any number of places.
 - [`hash.moth`](tools/hash.moth) gives a text's or bytes' SHA-256, SHA-224,
   SHA-512, SHA-384, SHA-1 or MD5, HMAC with any of them, and PBKDF2, as
   Python's `hashlib` and `hmac` do, in Moth alone;
@@ -523,6 +527,27 @@ to welcome with person, greeting or "Hello"   # an input a call can leave out
 end
 welcome("Ana")                      # Hello, Ana
 welcome("Bo", greeting "Hi")        # an input given by its name: Hi, Bo
+
+kind dog with name, sound or "woof"   # a kind: dog("Rex") makes one, a record
+    to speak with self                # each dog's own: rex's speak()
+        return self's name + " says " + self's sound
+    end
+end
+set rex to dog("Rex")
+say rex's speak()                   # Rex says woof
+kind puppy with name from dog(name, sound "yip")   # one kind made from another
+    to speak with self
+        return dog's speak(self) + "!"   # the kind it's made from's own
+    end
+end
+say kind of puppy("Bit")            # puppy
+
+to squares_to with n
+    for each k from 1 to n
+        give k * k                  # a value given, one at a time
+    end
+end
+say squares_to(4)                   # [1, 4, 9, 16]: all it gave, as a list
 
 set a, b to 1, 2                    # several names at once
 set a, b to b, a                    # a swap
@@ -804,6 +829,14 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   written out (or a list of them), which each call that leaves the input out
   gets afresh. Every input after one with `or` needs one too. A call through a
   variable gives them all.
+- **Kinds:** `kind dog with name, sound or "woof"`, with functions inside,
+  makes `dog`, a function that gives a record of its inputs, its `kind`
+  "dog", with each function as a field, so `rex's speak()` calls dog's with
+  rex first; `from pet(name)` after the inputs makes it from what that
+  gives, and `pet's speak(self)` calls pet's own. Python's classes, with
+  records: a kind's functions are called on one, `self's other()` inside.
+- **give:** a function with `give x` in it gives a list of every value it
+  gave, when it returns: a generator, all at once.
 - **Inputs by name:** `greet("Sam", mark "?")`, a name and its value, after
   the inputs given in order, for a function made with `to`; the ones left out
   get their `or`. They're worked out in the order of the function's inputs.
@@ -1291,6 +1324,12 @@ unboxed numbers were all caught, some only by the fuzzer.
   bytes) is nothing in the next entry, two names holding the same list hold
   copies of it after the entry, a task doesn't outlive its entry, and an entry
   that ends with a mistake keeps nothing it set. Ctrl+C ends the shell too.
+- A function with `give` in it runs to its end before the list it gives is
+  there, so one that never ends never gives anything, where a Python
+  generator can be read only as far as it's needed.
+- Numbers of any size are big.moth's and fractions.moth's text, worked out
+  by calling their functions, not with `+` and `*`; Moth's own numbers are
+  64-bit, exact as whole numbers up to 2 to the power of 53.
 - A mistake passed on after `either way` is reported where the `try` is, with
   its message (or what `fail with` gave), not where it happened, and with no
   calls under it; `stop the program` in a `try` ends the program without

@@ -1,0 +1,81 @@
+# fractions.moth's tests, which moth.test.js runs on every engine, as Python's fractions gives them
+
+use "fractions.moth" as f
+
+to test_making
+    expect f's fraction(6, -8) is "-3/4"
+    expect f's fraction(4, 2) is "2"
+    expect f's fraction(0, 5) is "0"
+    expect f's fraction("1/2", "3/4") is "2/3"
+    expect f's fraction(0.1, 1) is "1/10"
+    expect f's plus("1e-7", 0) is "1/10000000"
+    expect f's plus("12345678901234567890/3", 0) is "4115226300411522630"
+    expect f's top_of("-3/4") is "-3"
+    expect f's bottom_of("-3/4") is "4"
+    expect f's bottom_of(5) is "1"
+end
+
+to test_sums
+    expect f's plus("1/3", "1/6") is "1/2"
+    expect f's plus(0.1, 0.2) is "3/10"
+    expect f's minus("1/2", "3/4") is "-1/4"
+    expect f's times("2/3", 9) is "6"
+    expect f's divided(1, 3) is "1/3"
+    expect f's divided("-2/3", "-4/9") is "3/2"
+    expect f's power("2/3", 3) is "8/27"
+    expect f's power("2/3", -2) is "9/4"
+    expect f's power(5, 0) is "1"
+    expect f's negated("1/2") is "-1/2"
+    expect f's absolute("-1/2") is "1/2"
+    set total to 0
+    for each k from 1 to 10
+        set total to f's plus(total, f's fraction(1, k * (k + 1)))
+    end
+    expect total is "10/11"
+end
+
+to test_comparing_and_rounding
+    expect f's compare("1/3", 0.33) is 1
+    expect f's compare("2/4", "1/2") is 0
+    expect f's compare("-1/2", "1/3") is -1
+    expect f's rounded_down("-7/2") is "-4"
+    expect f's rounded_up("-7/2") is "-3"
+    expect f's rounded_up("7/2") is "4"
+    expect f's rounded("5/2") is "3"
+    expect f's rounded("-5/2") is "-3"
+    expect f's as_decimal("1/8", 2) is "0.13"
+    expect f's as_decimal("-1/8", 2) is "-0.13"
+    expect f's as_decimal(2, 2) is "2.00"
+    expect f's as_decimal("-1/3", 0) is "0"
+    expect f's as_decimal("2/3", 5) is "0.66667"
+    expect f's as_decimal("1/7", 30) is "0.142857142857142857142857142857"
+    expect f's as_number("1/3") is 1 / 3
+end
+
+to mistake_of with which
+    set caught to nothing
+    try
+        if which is 1
+            f's divided(1, 0)
+        else if which is 2
+            f's fraction(1, "0/5")
+        else if which is 3
+            f's plus("1/2/3", 1)
+        else if which is 4
+            f's power(0, -1)
+        else
+            f's as_decimal("1/2", -1)
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_mistakes
+    expect mistake_of(1) is "can't divide by zero"
+    expect mistake_of(2) is "can't divide by zero"
+    expect mistake_of(3) is "'1/2/3' isn't a fraction"
+    expect mistake_of(4) is "can't divide by zero"
+    expect mistake_of(5) is "'as_decimal' needs a whole number of places, 0 or more, not -1"
+end

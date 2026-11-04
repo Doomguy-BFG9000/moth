@@ -603,20 +603,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("to")) {
       const fnName = name("a function name");
-      const params = [];
-      const kinds = []; // what each input says it is: `with width as a number`
-      const defaults = []; // what each is when a call leaves it out: `greeting or "Hello"`, or null
-      if (word("with")) {
-        do {
-          const at = peek();
-          params.push(name("an input name"));
-          kinds.push(word("as") ? kind() : -1);
-          const fallback = word("or") ? unary() : null;
-          if (fallback && !fallbackFits(fallback)) fail(fallback.at, `an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out`);
-          if (!fallback && defaults.some((d) => d)) fail(at, `'${params.at(-1)}' needs an 'or' too, as an input before it has one`);
-          defaults.push(fallback);
-        } while (match(",") || word("and"));
-      }
+      const { params, kinds, defaults } = inputsOf();
       const made = { ...func(fnName, params, t), kinds };
       if (defaults.some((d) => d)) made.defaults = defaults;
       reading.defines.push(made);
@@ -711,6 +698,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (isWord("match") && !tokens[pos + 1].nl && whenNext()) {
       pos++;
       return matched(t);
+    }
+    // `kind dog with name, sound or "woof"`, then the functions each dog has (see madeKind)
+    if (isWord("kind") && kindNext()) {
+      pos++;
+      return madeKind(t);
     }
     if (word("use")) {
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "library")) return library(t);
@@ -1473,6 +1465,68 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     return { kind: "several", body: made, at: t };
   }
 
+  // A function's inputs, after its `with`, if it has one: each one's name, what it says it is (`with width as
+  // a number`, or -1), and what it is when a call leaves it out (`greeting or "Hello"`, or null).
+  function inputsOf() {
+    const [params, kinds, defaults] = [[], [], []];
+    if (word("with")) {
+      do {
+        const at = peek();
+        params.push(name("an input name"));
+        kinds.push(word("as") ? kind() : -1);
+        const fallback = word("or") ? unary() : null;
+        if (fallback && !fallbackFits(fallback)) fail(fallback.at, `an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out`);
+        if (!fallback && defaults.some((d) => d)) fail(at, `'${params.at(-1)}' needs an 'or' too, as an input before it has one`);
+        defaults.push(fallback);
+      } while (match(",") || word("and"));
+    }
+    return { params, kinds, defaults };
+  }
+
+  // whether `kind` starts a kind: a name after it, then `with` or `from` on the same line, or the line's end
+  // and a `to` starting the next
+  function kindNext() {
+    const [named, after] = [tokens[pos + 1], tokens[pos + 2]];
+    if (named.nl || named.type !== "word" || RESERVED.has(named.value)) return false;
+    if (after.type !== "eof" && !after.nl) return after.type === "word" && (after.value === "with" || after.value === "from");
+    return wordAt(pos + 2, "to");
+  }
+
+  // `kind dog with name, sound or "woof"`, then the functions each dog has, each made with `to`, then `end`.
+  // `dog` is a function with those inputs, which makes a record of them, its `kind` "dog", with a field for
+  // each of the functions, made as `dog's speak`, so `rex's speak()` calls it with rex first (DESIGN §68).
+  // `kind puppy with name from dog(name)`: what dog(name) makes is given puppy's inputs, kind and functions
+  // instead, and `dog's speak(self)` calls dog's own. Gives the functions, as statements.
+  function madeKind(t) {
+    const kindName = name("a kind's name");
+    const { params, kinds, defaults } = inputsOf();
+    if (params.includes("kind")) fail(t, "a kind's inputs can't include one called 'kind', as that's the field that says which kind it is");
+    const from = word("from") ? expression() : null;
+    if (!peek().nl) expected("a new line");
+    aliases.add(kindName); // `dog's speak` is dog's function, as `math's sine` is math's
+    const fns = blockEnd(t);
+    const owns = [];
+    for (const d of fns) {
+      if (d.kind !== "define") fail(d.at, "a kind holds only its functions, each made with 'to'");
+      if (params.includes(d.name)) fail(d.at, `'${d.name}' is one of the kind's inputs, so a function of it can't be called that too`);
+      owns.push({ own: d.name, at: d.at });
+      d.name = `${kindName}'s ${d.name}`;
+    }
+    const at = (kind, rest) => ({ ...rest, kind, at: t });
+    const made = hidden("the one made", t);
+    const ref = () => at("name", { name: made });
+    const named = at("value", { value: kindName });
+    const body = [at("set", { name: made, value: from ?? at("record", { fields: ["kind"], values: [named] }) })];
+    if (from) body.push(at("setField", { name: "kind", target: ref(), value: at("value", { value: kindName }) }));
+    for (const p of params) body.push(at("setField", { name: p, target: ref(), value: at("name", { name: p }) }));
+    for (const o of owns) body.push(at("setField", { name: o.own, target: ref(), value: { kind: "name", name: `${kindName}'s ${o.own}`, at: o.at } }));
+    body.push(at("return", { value: ref() }));
+    const maker = { kind: "define", name: kindName, params, body, at: t, kinds };
+    if (defaults.some((d) => d)) maker.defaults = defaults;
+    reading.defines.push(maker);
+    return { kind: "several", body: [...fns, maker], at: t };
+  }
+
   // whether the line after this one starts with `when`, as a `match`'s first clause does
   function whenNext() {
     let i = pos + 1;
@@ -1517,6 +1571,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   const made = statements(null);
   if (--reading.depth === 0) {
     fillDefaults(reading);
+    madeGenerators(reading, made);
     ownCalls(reading, made);
   }
   return made;
@@ -1549,6 +1604,30 @@ function ownCalls(reading, body) {
     call.name = helper;
   }
   body.unshift(...helpers);
+}
+
+// `give x` in a function, in a program that makes nothing called `give` (no function, input or variable): the
+// function gives the list of every value it gave, in order, when it returns (DESIGN §96). The list is a
+// variable of its own, made as the function starts; each `give x` adds x to it, and each `return` returns it.
+function madeGenerators(reading, program) {
+  const giving = (s) => s.kind === "call" && s.name === "give" && s.args.length === 1;
+  const gives = (body) => body.some((s) => giving(s) || [s.then, s.otherwise, s.kind !== "define" && s.body, s.handler].some((inner) => Array.isArray(inner) && gives(inner)));
+  const fns = reading.defines.filter((f) => gives(f.body));
+  if (!fns.length || madeNames(program, new Set()).has("give")) return;
+  for (const f of fns) {
+    const t = f.at;
+    const list = `the values given on line ${t.line}${t.file ? ` of ${t.file}` : ""}`;
+    const walk = (body) => body.forEach((s, i) => {
+      if (giving(s)) body[i] = { kind: "add", value: s.args[0], name: list, at: s.at };
+      else if (s.kind === "return") {
+        if (s.value && !(s.value.kind === "name" && s.value.name.includes(" on line "))) fail(s.value.at, "a function that gives its values with 'give' returns the list of them, so it can't return a value too");
+        body[i] = { kind: "return", value: { kind: "name", name: list, at: s.at }, at: s.at };
+      } else for (const inner of [s.then, s.otherwise, s.kind !== "define" && s.body, s.handler]) if (Array.isArray(inner)) walk(inner);
+    });
+    walk(f.body);
+    f.body.unshift({ kind: "set", name: list, value: { kind: "list", items: [], at: t }, at: t });
+    f.body.push({ kind: "return", value: { kind: "name", name: list, at: t }, at: t });
+  }
 }
 
 // every name the code makes: functions, their inputs, and variables, in the order they're written

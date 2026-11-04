@@ -3871,3 +3871,47 @@ hold them to agreeing.
   try with `either way` inside another, and each mistake they can make; and
   `moth format` lays out `match` and `either way` as it does `if` and `else`.
 
+## 96. Kinds, give, and numbers of any size
+
+- **Why.** Python has classes, generators, and whole numbers of any size (and
+  `fractions`, and `math.gcd`, `isqrt`, `comb`, `pow(a, n, m)`). Moth had a
+  record's own functions (§68), lists, and big.moth.
+- **Kinds, only in the parsers.** `kind dog with name, sound or "woof"`, then
+  `to` lines, then `end`, is the statement when a name follows `kind` and
+  then `with` or `from`, or a `to` starts the next line; `kind` alone is
+  still a name. Its functions are made as `dog's speak`, with dog used as a
+  file is (`dog's speak(self)` calls it by that name), and then a function
+  `dog` with the kind's inputs, made as a `to` is, so inputs left out and
+  given by name work: it sets a variable of its own to `record with kind
+  "dog"` (or, with `from pet(name)`, to what that gives, and then its kind),
+  gives the record a field for each input and each function, and returns it.
+  `rex's speak()` is then §68's call of the function rex's `speak` field
+  holds. A kind holds only functions; an input called `kind`, or a function
+  called as an input is, is a mistake.
+- **give.** Once the whole program is read, if nothing in it is called
+  `give`, each function with a `give x` statement in it (not in a function
+  inside it) starts by setting a list of its own to empty; each `give x`
+  adds x to it, and each `return` returns it, as the end does. So the values
+  come all at once, when it returns. A `return` with a value in one is a
+  mistake. A real generator's laziness would need a function to stop and go
+  on again, which only tasks can do here, and the JavaScript engines run a
+  task to its end when it's started.
+- **Numbers of any size.** big.moth has `gcd` (Euclid's, with its own
+  remainder), `lcm`, `square_root` (Newton's way, from 10 to the power of
+  half the digits, rounded up, which is never below the root), `factorial`,
+  `choices` (each step's product divided at once, as each is whole),
+  `power_mod` (squaring, and the remainder after each multiplying, so the
+  power can have hundreds of digits), `absolute`, `negated`, `in_base` and
+  `from_base`. fractions.moth keeps a fraction as text in lowest terms, the
+  sign on top, read from "3/4", a whole number, or a decimal as it's
+  written (a number as it's shown, so 0.1 is 1/10, not the binary fraction
+  Python's Fraction(0.1) is); each sum is big.moth's, then the gcd.
+  `as_decimal` rounds a half away from 0, as Moth's `rounded` does.
+- **Tested.** Kinds, one from another, a function of the kind it's from,
+  inputs by name, a kind with no inputs and one with no functions, `give` in
+  loops, after a return and in a try with `either way`, a program with its
+  own `give`, and each mistake, on the three engines, in compiler.moth and in
+  machine code; big.moth's new functions and fractions.moth against
+  JavaScript's BigInt on 400 random numbers, and their own tests on every
+  engine and in machine code.
+

@@ -1,6 +1,8 @@
 # Whole numbers of any size, kept as text: "265252859812191058636308480000000". So `say` shows one, `is`
 # compares two, and save and json keep them as they are. Each function takes such text, or a whole number,
 # and gives text back: `use "big.moth" as big`, then big's times(f, 30), big's power(2, 100).
+# As Python's math has them too: gcd, lcm, square_root (math.isqrt), factorial, choices (math.comb),
+# power_mod (pow(a, n, m)), absolute and negated; and in_base and from_base, for bases 2 to 36.
 
 set part_size to 10000000 # each part holds 7 digits: two multiplied, and what's carried, stay exact
 
@@ -314,4 +316,173 @@ to compare with a, b
         return 0 - by_size
     end
     return by_size
+end
+
+# ---------- more, as Python's math has them ----------
+
+# a without its sign
+to absolute with a
+    set x to read_big(a)
+    return written_big(made_big(no, parts of x))
+end
+
+to negated with a
+    set x to read_big(a)
+    return written_big(made_big(not negative of x, parts of x))
+end
+
+# the largest whole number both divide by, never below 0, and 0 for 0 and 0 (math.gcd)
+to gcd with a, b
+    set x to absolute(a)
+    set y to absolute(b)
+    repeat while y is not "0"
+        set r to remainder(x, y)
+        set x to y
+        set y to r
+    end
+    return x
+end
+
+# the smallest whole number above 0 that both divide, or 0 if either is 0 (math.lcm)
+to lcm with a, b
+    if compare(a, 0) is 0 or compare(b, 0) is 0
+        return "0"
+    end
+    return absolute(times(divided(a, gcd(a, b)), b))
+end
+
+# the whole square root, rounded down: the largest r with r times r at most a (math.isqrt)
+to square_root with a
+    set x to whole(a)
+    if compare(x, 0) is -1
+        fail with "'square_root' needs a whole number of 0 or more, not " + x
+    end
+    if x is "0"
+        return "0"
+    end
+    set guess to "1" # 10 to the power of half the digits, rounded up: at least the root, so Newton's way comes down to it
+    repeat (length of x + 1 - remainder of (length of x + 1) divided by 2) / 2 times
+        set guess to guess + "0"
+    end
+    set better to divided(plus(guess, divided(x, guess)), 2)
+    repeat while compare(better, guess) is -1
+        set guess to better
+        set better to divided(plus(guess, divided(x, guess)), 2)
+    end
+    return guess
+end
+
+# 1 times 2 times ... n, for a whole number n of 0 or more (math.factorial)
+to factorial with n
+    if not (n is divisible by 1) or n is less than 0
+        fail with "'factorial' needs a whole number of 0 or more, not " + n
+    end
+    set made to "1"
+    for each k from 2 to n
+        set made to times(made, k)
+    end
+    return made
+end
+
+# how many ways there are to choose k things of n, in no order (math.comb)
+to choices with n, k
+    if not (n is divisible by 1) or not (k is divisible by 1) or n is less than 0 or k is less than 0
+        fail with "'choices' needs whole numbers of 0 or more"
+    end
+    if k is greater than n
+        return "0"
+    end
+    set fewer to k
+    if n - k is less than k
+        set fewer to n - k
+    end
+    set made to "1"
+    for each i from 1 to fewer
+        set made to divided(times(made, n - fewer + i), i)
+    end
+    return made
+end
+
+# a to the power of n, divided by m, and what's left: Python's pow(a, n, m), worked out a step at a time
+# without the whole power, so n can have hundreds of digits
+to power_mod with a, n, m
+    if compare(m, 0) is 0
+        fail with "can't divide by zero"
+    end
+    if compare(n, 0) is -1
+        fail with "'power_mod' needs a power of 0 or more, not " + whole(n)
+    end
+    set made to remainder(1, m)
+    set base to remainder(a, m)
+    set left to whole(n)
+    repeat while left is not "0"
+        set halves to divided_whole(left, 2)
+        if left of halves is "1"
+            set made to remainder(times(made, base), m)
+        end
+        set left to times of halves
+        if left is not "0"
+            set base to remainder(times(base, base), m)
+        end
+    end
+    return made
+end
+
+set base_digits to "0123456789abcdefghijklmnopqrstuvwxyz"
+
+to base_of with b
+    if not (b is divisible by 1) or b is less than 2 or b is greater than 36
+        fail with "a base is a whole number from 2 to 36, not " + b
+    end
+end
+
+# a written in base b, 2 to 36, in lowercase, as Python's format(a, "x") or "b" writes it; "-" first below 0
+to in_base with a, b
+    base_of(b)
+    set x to read_big(a)
+    if length of parts of x is 0
+        return "0"
+    end
+    set digits to empty list
+    set left to written_big(made_big(no, parts of x))
+    repeat while left is not "0"
+        set step to divided_whole(left, b)
+        add item (number of left of step + 1) of base_digits to digits
+        set left to times of step
+    end
+    set made to ""
+    if negative of x
+        set made to "-"
+    end
+    set k to length of digits
+    repeat while k is at least 1
+        set made to made + item k of digits
+        set k to k - 1
+    end
+    return made
+end
+
+# the whole number text in base b says, as Python's int(text, b) reads it: any case, a "-" first if it's below 0
+to from_base with text, b
+    base_of(b)
+    set written to lowercase of ("" + text)
+    set first to 1
+    if length of written is at least 1 and item 1 of written is "-"
+        set first to 2
+    end
+    if first is greater than length of written
+        fail with "'" + text + "' isn't a whole number in base " + b
+    end
+    set made to "0"
+    for each k from first to length of written
+        set digit to (position of (item k of written) in base_digits) - 1
+        if digit is less than 0 or digit is at least b
+            fail with "'" + text + "' isn't a whole number in base " + b
+        end
+        set made to plus(times(made, b), digit)
+    end
+    if first is 2
+        return negated(made)
+    end
+    return made
 end

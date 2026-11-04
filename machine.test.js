@@ -684,7 +684,7 @@ test("moth.exe has the standard library, so a program anywhere can use it, and a
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["[1, 2]\n4\n1180591620717411303424\n", "", 0]);
   writeFileSync(join(sub, "big.test.moth"), here("tools/big.test.moth"));
   const tested = spawnSync(exe, ["test", "big.test.moth"], { cwd: sub, encoding: "utf8", timeout: 120_000 });
-  assert.deepEqual([tested.stdout.split("\n").at(-2), tested.status], ["6 passed", 0], tested.stdout);
+  assert.deepEqual([tested.stdout.split("\n").at(-2), tested.status], ["8 passed", 0], tested.stdout);
   writeFileSync(join(sub, "math.moth"), "to sqrt with x\n    return \"my own\"\nend\n");
   const own = spawnSync(exe, ["run", "p.moth"], { cwd: sub, encoding: "utf8" });
   assert.deepEqual([own.stdout, own.status], ["[1, 2]\nmy own\n1180591620717411303424\n", 0]);
@@ -1542,20 +1542,20 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
-    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth"]) {
+    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "72 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "78 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux

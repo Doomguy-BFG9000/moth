@@ -1522,39 +1522,12 @@ to parse with tokens, reading
         end
         if word("to")
             set fn_name to take_name("a function name")
-            set params to empty list
-            set kinds to empty list # what each input says it is: `with width as a number`
-            set fallbacks to empty list # what each is when a call leaves it out: `greeting or "Hello"`, or nothing
-            set any_fallback to no
-            if word("with")
-                set another to yes
-                repeat while another
-                    set input_at to peek()
-                    add take_name("an input name") to params
-                    if word("as")
-                        add input_kind() to kinds
-                    else
-                        add -1 to kinds
-                    end
-                    set fallback to nothing
-                    if word("or")
-                        set fallback to unary()
-                        if not fallback_fits(fallback)
-                            fail with problem(at of fallback, "an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out")
-                        end
-                        set any_fallback to yes
-                    else if any_fallback
-                        fail with problem(input_at, "'" + item (length of params) of params + "' needs an 'or' too, as an input before it has one")
-                    end
-                    add fallback to fallbacks
-                    set another to match(",") or word("and")
-                end
-            end
-            set made to func(fn_name, params, t)
-            set kinds of made to kinds
+            set fn_inputs to inputs_of()
+            set made to func(fn_name, params of fn_inputs, t)
+            set kinds of made to kinds of fn_inputs
             set defaults of made to nothing
-            if any_fallback
-                set defaults of made to fallbacks
+            if any_fallback of fn_inputs
+                set defaults of made to fallbacks of fn_inputs
             end
             set made_defines to defines of reading
             add made to made_defines
@@ -1710,6 +1683,12 @@ to parse with tokens, reading
                     set pos to pos + 1
                     return matched(t)
                 end
+            end
+        end
+        if is_word("kind") # `kind dog with name, sound or "woof"`, then the functions each dog has (see made_kind)
+            if kind_next()
+                set pos to pos + 1
+                return made_kind(t)
             end
         end
         if word("use")
@@ -2898,6 +2877,116 @@ to parse with tokens, reading
         return record with kind "several", body ew_made, at t
     end
 
+    # A function's inputs, after its `with`, if it has one: each one's name, what it says it is (`with width as
+    # a number`, or -1), and what it is when a call leaves it out (`greeting or "Hello"`, or nothing).
+    to inputs_of
+        set in_params to empty list
+        set in_kinds to empty list
+        set in_fallbacks to empty list
+        set in_any to no
+        if word("with")
+            set in_another to yes
+            repeat while in_another
+                set input_at to peek()
+                add take_name("an input name") to in_params
+                if word("as")
+                    add input_kind() to in_kinds
+                else
+                    add -1 to in_kinds
+                end
+                set in_fallback to nothing
+                if word("or")
+                    set in_fallback to unary()
+                    if not fallback_fits(in_fallback)
+                        fail with problem(at of in_fallback, "an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out")
+                    end
+                    set in_any to yes
+                else if in_any
+                    fail with problem(input_at, "'" + item (length of in_params) of in_params + "' needs an 'or' too, as an input before it has one")
+                end
+                add in_fallback to in_fallbacks
+                set in_another to match(",") or word("and")
+            end
+        end
+        return record with params in_params, kinds in_kinds, fallbacks in_fallbacks, any_fallback in_any
+    end
+
+    # whether `kind` starts a kind: a name after it, then `with` or `from` on the same line, or the line's end
+    # and a `to` starting the next
+    to kind_next
+        set kn_named to item (pos + 1) of tokens
+        set kn_after to item (pos + 2) of tokens
+        if nl of kn_named or type of kn_named is not "word"
+            return no
+        end
+        if contains(reserved, value of kn_named)
+            return no
+        end
+        if type of kn_after is not "eof" and not nl of kn_after
+            return type of kn_after is "word" and (value of kn_after is "with" or value of kn_after is "from")
+        end
+        return word_at(pos + 2, "to")
+    end
+
+    # `kind dog with name, sound or "woof"`, then the functions each dog has, as moth.js's madeKind makes it
+    to made_kind with t
+        set mk_name to take_name("a kind's name")
+        set mk_inputs to inputs_of()
+        set mk_params to params of mk_inputs
+        if contains(mk_params, "kind")
+            fail with problem(t, "a kind's inputs can't include one called 'kind', as that's the field that says which kind it is")
+        end
+        set mk_from to nothing
+        if word("from")
+            set mk_from to expression()
+        end
+        if not nl of peek()
+            expected("a new line")
+        end
+        add mk_name to aliases # `dog's speak` is dog's function, as `math's sine` is math's
+        set mk_fns to block_end(t)
+        set mk_owns to empty list
+        for each mk_d in mk_fns
+            if kind of mk_d is not "define"
+                fail with problem(at of mk_d, "a kind holds only its functions, each made with 'to'")
+            end
+            if contains(mk_params, name of mk_d)
+                fail with problem(at of mk_d, "'" + name of mk_d + "' is one of the kind's inputs, so a function of it can't be called that too")
+            end
+            add (record with own name of mk_d, at at of mk_d) to mk_owns
+            set name of mk_d to mk_name + "'s " + name of mk_d
+        end
+        set mk_made to hidden_name("the one made", t)
+        set mk_start to mk_from
+        if mk_start is nothing
+            set mk_start to record with kind "record", fields (list of "kind"), values (list of (record with kind "value", type "string", value mk_name, at t)), at t
+        end
+        set mk_body to list of (record with kind "set", name mk_made, value mk_start, at t)
+        if mk_from is not nothing
+            add (record with kind "setField", name "kind", target (record with kind "name", name mk_made, at t), value (record with kind "value", type "string", value mk_name, at t), at t) to mk_body
+        end
+        for each mk_p in mk_params
+            add (record with kind "setField", name mk_p, target (record with kind "name", name mk_made, at t), value (record with kind "name", name mk_p, at t), at t) to mk_body
+        end
+        for each mk_o in mk_owns
+            set mk_fn_value to record with kind "name", name mk_name + "'s " + own of mk_o, at at of mk_o
+            add (record with kind "setField", name own of mk_o, target (record with kind "name", name mk_made, at t), value mk_fn_value, at t) to mk_body
+        end
+        add (record with kind "return", value (record with kind "name", name mk_made, at t), at t) to mk_body
+        set mk_maker to record with kind "define", name mk_name, params mk_params, kinds kinds of mk_inputs, body mk_body, at t, order 0, native nothing, defaults nothing
+        if any_fallback of mk_inputs
+            set defaults of mk_maker to fallbacks of mk_inputs
+        end
+        set mk_defines to defines of reading
+        add mk_maker to mk_defines
+        set mk_all to empty list
+        for each mk_d in mk_fns
+            add mk_d to mk_all
+        end
+        add mk_maker to mk_all
+        return record with kind "several", body mk_all, at t
+    end
+
     # whether the line after this one starts with `when`, as a `match`'s first clause does
     to when_next
         set wn_i to pos + 1
@@ -2980,6 +3069,7 @@ to parse with tokens, reading
     set depth of reading to depth of reading - 1
     if depth of reading is 0
         fill_defaults(reading)
+        made_generators(reading, made)
         own_calls(reading, made)
         set counted to record with n orders_from
         numbered(made, counted)
@@ -3218,6 +3308,104 @@ to place_named with pn_call, made_fns
         end
     end
     set args of pn_call to pn_filled
+end
+
+# `give x` in a function, in a program that makes nothing called `give`: the function gives the list of every
+# value it gave, in order, when it returns, as moth.js's madeGenerators makes it
+to made_generators with reading, program
+    set mg_fns to empty list
+    for each mg_f in defines of reading
+        if gives_in(body of mg_f)
+            add mg_f to mg_fns
+        end
+    end
+    if length of mg_fns is 0
+        return nothing
+    end
+    set mg_names to record with seen (empty dictionary), order (empty list)
+    made_names(program, mg_names)
+    if "give" is in seen of mg_names
+        return nothing
+    end
+    for each mg_f in mg_fns
+        set mg_t to at of mg_f
+        set mg_list to "the values given on line " + line of mg_t
+        if file of mg_t is not ""
+            set mg_list to mg_list + " of " + file of mg_t
+        end
+        given_walk(body of mg_f, mg_list)
+        set mg_body to list of (record with kind "set", name mg_list, value (record with kind "list", items empty list, at mg_t), at mg_t)
+        for each mg_s in body of mg_f
+            add mg_s to mg_body
+        end
+        add (record with kind "return", value (record with kind "name", name mg_list, at mg_t), at mg_t) to mg_body
+        set body of mg_f to mg_body
+    end
+end
+
+# whether a statement is `give x`
+to giving_one with s
+    if kind of s is not "call"
+        return no
+    end
+    return name of s is "give" and length of args of s is 1
+end
+
+# the blocks inside a statement, but a function's own
+to blocks_in with s
+    set bi_made to empty list
+    set bi_what to kind of s
+    if bi_what is "if"
+        add then of s to bi_made
+        add otherwise of s to bi_made
+    else if bi_what is "while" or bi_what is "repeat" or bi_what is "count" or bi_what is "each"
+        add body of s to bi_made
+    else if bi_what is "try"
+        add body of s to bi_made
+        add handler of s to bi_made
+    end
+    return bi_made
+end
+
+# whether `give x` is in these statements, but not in a function made inside them
+to gives_in with body
+    for each gi_s in body
+        if giving_one(gi_s)
+            return yes
+        end
+        for each gi_inner in blocks_in(gi_s)
+            if gives_in(gi_inner)
+                return yes
+            end
+        end
+    end
+    return no
+end
+
+# each `give x` made an add to the list, and each `return` its return
+to given_walk with body, gw_list
+    for each gw_k from 1 to length of body
+        set gw_s to item gw_k of body
+        if giving_one(gw_s)
+            set item gw_k of body to record with kind "add", value item 1 of args of gw_s, name gw_list, at at of gw_s
+        else if kind of gw_s is "return"
+            set gw_value to value of gw_s
+            if gw_value is not nothing
+                set gw_hidden to no
+                if kind of gw_value is "name"
+                    set gw_hidden to " on line " is in name of gw_value
+                end
+                if not gw_hidden
+                    fail with problem(at of gw_value, "a function that gives its values with 'give' returns the list of them, so it can't return a value too")
+                end
+            end
+            set item gw_k of body to record with kind "return", value (record with kind "name", name gw_list, at at of gw_s), at at of gw_s
+        else
+            for each gw_inner in blocks_in(gw_s)
+                given_walk(gw_inner, gw_list)
+            end
+        end
+    end
 end
 
 # a value written out after an input's `or`, made again for a call: a list's own items too

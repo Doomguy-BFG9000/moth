@@ -78,3 +78,65 @@ to test_mistakes
     expect mistake_of(4) is "'power' needs a whole number of 0 or more, not -1"
     expect mistake_of(5) is "'' isn't a whole number"
 end
+
+# gcd, lcm, roots, factorials, choices, powers kept small, and bases, as Python's math and int() give them
+to test_more
+    expect big's gcd("1071", "462") is "21"
+    expect big's gcd(0, 0) is "0"
+    expect big's gcd("-12", "18") is "6"
+    expect big's gcd("123456789012345678901234567890", "987654321098765432109876543210") is "9000000000900000000090"
+    expect big's lcm(4, 6) is "12"
+    expect big's lcm(0, 5) is "0"
+    expect big's lcm("-21", "6") is "42"
+    expect big's square_root(0) is "0"
+    expect big's square_root(15) is "3"
+    expect big's square_root(16) is "4"
+    expect big's square_root("100000000000000000000000000000000000000") is "10000000000000000000"
+    expect big's square_root(big's minus(big's power(10, 40), 1)) is "99999999999999999999"
+    expect big's factorial(0) is "1"
+    expect big's factorial(30) is "265252859812191058636308480000000"
+    expect big's choices(52, 5) is "2598960"
+    expect big's choices(100, 50) is "100891344545564193334812497256"
+    expect big's choices(3, 5) is "0"
+    expect big's power_mod(4, 13, 497) is "445"
+    expect big's power_mod(2, "1000000000000000000000", "1000000007") is "741583475"
+    expect big's power_mod(-3, 3, 7) is "1"
+    expect big's in_base(255, 16) is "ff"
+    expect big's in_base(-10, 2) is "-1010"
+    expect big's in_base(0, 36) is "0"
+    expect big's in_base(big's power(2, 64), 16) is "10000000000000000"
+    expect big's from_base("FF", 16) is "255"
+    expect big's from_base("-1010", 2) is "-10"
+    expect big's from_base("zz", 36) is "1295"
+    expect big's absolute("-5") is "5"
+    expect big's negated(5) is "-5"
+    expect big's negated(0) is "0"
+end
+
+to more_mistake_of with which
+    set caught to nothing
+    try
+        if which is 1
+            big's square_root(-4)
+        else if which is 2
+            big's from_base("12", 2)
+        else if which is 3
+            big's in_base(5, 37)
+        else if which is 4
+            big's power_mod(2, 3, 0)
+        else
+            big's factorial(-1)
+        end
+    if it fails with why
+        set caught to why
+    end
+    return caught
+end
+
+to test_more_mistakes
+    expect more_mistake_of(1) is "'square_root' needs a whole number of 0 or more, not -4"
+    expect more_mistake_of(2) is "'12' isn't a whole number in base 2"
+    expect more_mistake_of(3) is "a base is a whole number from 2 to 36, not 37"
+    expect more_mistake_of(4) is "can't divide by zero"
+    expect more_mistake_of(5) is "'factorial' needs a whole number of 0 or more, not -1"
+end

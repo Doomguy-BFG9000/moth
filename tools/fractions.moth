@@ -1,0 +1,199 @@
+# Fractions, exact, as Python's fractions has them: kept as text, "3/4", "-1/2", or "2" for a whole one,
+# always in lowest terms with the sign on top, so `say` shows one and `is` compares two. Each function takes
+# such text, a whole number of any size, or a decimal written out ("0.75" is 3/4, and a number counts as it's
+# shown, so 0.1 is 1/10), and gives text back. In Moth alone, on big.moth.
+#
+#   use "fractions.moth" as f
+#   say f's plus("1/3", "1/6")            # 1/2
+#   say f's times("2/3", 9)               # 6
+#   say f's divided(1, 3)                 # 1/3
+#   say f's fraction(6, -8)               # -3/4
+#   say f's as_decimal("1/3", 5)          # 0.33333: to 5 places, a half away from 0
+#   say f's compare("1/3", 0.33)          # 1: -1, 0 or 1, as with big.moth
+#   say f's top_of("3/4") " " f's bottom_of("3/4")   # 3 4
+#
+# minus, power (to a whole number, below 0 too), negated, absolute, rounded_down, rounded_up and rounded
+# (a half away from 0) are here too.
+
+use "big.moth" as big
+
+# ---------- reading and writing ----------
+
+# a top and a bottom in lowest terms, the bottom above 0, as a record
+to lowest with p, q
+    if big's compare(q, 0) is 0
+        fail with "can't divide by zero"
+    end
+    set up to p
+    set down to q
+    if big's compare(down, 0) is -1
+        set up to big's negated(up)
+        set down to big's negated(down)
+    end
+    set common to big's gcd(up, down)
+    if common is not "1"
+        set up to big's divided(up, common)
+        set down to big's divided(down, common)
+    end
+    return record with top up, bottom down
+end
+
+# the text for a record with a top and a bottom
+to written_of with f
+    if bottom of f is "1"
+        return top of f
+    end
+    return top of f + "/" + bottom of f
+end
+
+# x as a record with its top and bottom, in lowest terms
+to read_fraction with x
+    set said to "" + x
+    if "/" is in said
+        set pieces to split said by "/"
+        if length of pieces is not 2
+            fail with "'" + said + "' isn't a fraction"
+        end
+        return lowest(big's whole(item 1 of pieces), big's whole(item 2 of pieces))
+    end
+    set power_of_ten to 0 # `1e-7`, as a small number is shown: its digits, and where the point goes
+    if "e" is in said
+        set pieces to split said by "e"
+        if length of pieces is not 2
+            fail with "'" + said + "' isn't a fraction"
+        end
+        set said to item 1 of pieces
+        set power_of_ten to number of big's whole(item 2 of pieces)
+    end
+    if "." is in said
+        set pieces to split said by "."
+        if length of pieces is not 2 or length of item 2 of pieces is 0
+            fail with "'" + x + "' isn't a fraction"
+        end
+        set power_of_ten to power_of_ten - length of item 2 of pieces
+        set said to item 1 of pieces + item 2 of pieces
+    end
+    set up to big's whole(said)
+    if power_of_ten is at least 0
+        return lowest(big's times(up, big's power(10, power_of_ten)), "1")
+    end
+    return lowest(up, big's power(10, 0 - power_of_ten))
+end
+
+# ---------- what a program uses ----------
+
+# a fraction from a top and a bottom: whole numbers of any size, or fractions or decimals themselves
+to fraction with up, down
+    return divided(up, down)
+end
+
+to top_of with x
+    return top of read_fraction(x)
+end
+
+to bottom_of with x
+    return bottom of read_fraction(x)
+end
+
+to plus with a, b
+    set x to read_fraction(a)
+    set y to read_fraction(b)
+    set up to big's plus(big's times(top of x, bottom of y), big's times(top of y, bottom of x))
+    return written_of(lowest(up, big's times(bottom of x, bottom of y)))
+end
+
+to minus with a, b
+    return plus(a, negated(b))
+end
+
+to times with a, b
+    set x to read_fraction(a)
+    set y to read_fraction(b)
+    return written_of(lowest(big's times(top of x, top of y), big's times(bottom of x, bottom of y)))
+end
+
+to divided with a, b
+    set x to read_fraction(a)
+    set y to read_fraction(b)
+    if top of y is "0"
+        fail with "can't divide by zero"
+    end
+    return written_of(lowest(big's times(top of x, bottom of y), big's times(bottom of x, top of y)))
+end
+
+to negated with a
+    set x to read_fraction(a)
+    return written_of(record with top big's negated(top of x), bottom bottom of x)
+end
+
+to absolute with a
+    set x to read_fraction(a)
+    return written_of(record with top big's absolute(top of x), bottom bottom of x)
+end
+
+# a to the power of n, a whole number, below 0 too
+to power with a, n
+    if not (n is divisible by 1)
+        fail with "'power' needs a whole number, not " + n
+    end
+    set x to read_fraction(a)
+    if n is less than 0
+        if top of x is "0"
+            fail with "can't divide by zero"
+        end
+        return written_of(lowest(big's power(bottom of x, 0 - n), big's power(top of x, 0 - n)))
+    end
+    return written_of(lowest(big's power(top of x, n), big's power(bottom of x, n)))
+end
+
+# -1, 0 or 1: whether a is less than, the same as, or more than b
+to compare with a, b
+    set x to read_fraction(a)
+    set y to read_fraction(b)
+    return big's compare(big's times(top of x, bottom of y), big's times(top of y, bottom of x))
+end
+
+# the whole number at or below it, at or above it, and the nearest, a half away from 0
+to rounded_down with a
+    set x to read_fraction(a)
+    return big's divided(top of x, bottom of x)
+end
+
+to rounded_up with a
+    return big's negated(rounded_down(negated(a)))
+end
+
+to rounded with a
+    return as_decimal(a, 0)
+end
+
+# a written as a decimal, to so many places, the last a half away from 0, as Python's round() of a
+# Fraction to places, with all of them written: as_decimal("1/8", 2) is "0.13", as_decimal(2, 2) "2.00"
+to as_decimal with a, places
+    if not (places is divisible by 1) or places is less than 0
+        fail with "'as_decimal' needs a whole number of places, 0 or more, not " + places
+    end
+    set x to read_fraction(a)
+    set scaled to big's times(big's absolute(top of x), big's power(10, places))
+    set split_up to big's divided_whole(scaled, bottom of x)
+    set digits to times of split_up
+    if big's compare(big's times(left of split_up, 2), bottom of x) is at least 0
+        set digits to big's plus(digits, 1)
+    end
+    repeat while length of digits is at most places
+        set digits to "0" + digits
+    end
+    set made to digits
+    if places is greater than 0
+        set made to (items 1 to (length of digits - places) of digits) + "." + (items (length of digits - places + 1) to (length of digits) of digits)
+    end
+    if big's compare(top of x, 0) is -1 and big's compare(digits, 0) is 1
+        set made to "-" + made
+    end
+    return made
+end
+
+# a as an ordinary number, to the 15 digits a number has
+to as_number with a
+    return number of as_decimal(a, 20)
+end
