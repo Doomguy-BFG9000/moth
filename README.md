@@ -400,6 +400,11 @@ bytes and dictionaries:
   running totals, folding, sorting by a function; and
   [`stats.moth`](tools/stats.moth) has `statistics`' means, medians, modes,
   spread, quantiles, correlation and a straight line through points.
+- [`sync.moth`](tools/sync.moth) keeps tasks in step, as Python's `threading`,
+  `queue` and `concurrent.futures` do: a lock one task holds at a time, a
+  semaphore a few can, a flag tasks wait to see raised, a queue that one task
+  sends to and another takes from, waiting while it's empty or full, each with
+  a time to give up after, and `run_each(f, things)`, a task for each thing.
 - [`zones.moth`](tools/zones.moth) knows the world's time zones, as
   `zoneinfo` does: what time it is in "Asia/Kolkata", with summer time,
   and the moment a time in a zone is, from Windows' own zones or Linux's
@@ -655,6 +660,7 @@ set me to read "https://example.com/me" with headers (dictionary where "Authoriz
 set job to start count_to(1000000)          # a task: the call runs on a thread of its own,
 say "counting..."                           # sharing the program's names, while the program goes on
 say wait for job                            # waits for it to end, and gives what it gave back
+say job has ended                           # yes: whether it's done, without waiting
 
 play note "C" for 0.5 seconds               # middle C; also "C#5", "Bb3", or "rest"
 play note 440 for 200 milliseconds          # or a pitch, in hertz
@@ -1252,8 +1258,10 @@ unboxed numbers were all caught, some only by the fuzzer.
 - Tasks take turns: one thread runs Moth at a time, and lets the others run
   every so often and whenever it waits, so a task keeps a program from
   waiting, but doesn't make a sum faster on more cores. On the JavaScript
-  engines a task runs to its end when it's started. There's no lock a program
-  can take yet, and no way to ask whether a task has ended without waiting for it.
+  engines a task runs to its end when it's started, so one there that waits
+  for something the program does after starting it, a lock it holds or a
+  queue it sends to, waits for ever. sync.moth's locks and queues wait by
+  looking again every millisecond, not by being woken.
 - The shell runs each entry as a program of its own, and keeps names' values
   from one to the next by saving them: a value that can't be saved (a function,
   bytes) is nothing in the next entry, two names holding the same list hold

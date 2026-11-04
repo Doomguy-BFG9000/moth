@@ -790,6 +790,7 @@ export const BUILTINS = [
   { name: "remainder", needs: [["number"], ["number"]], gives: "number", run: ([a, b], error) => remainder(a, b, error) },
   { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
   { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
+  { name: "has ended", needs: [["record"]], gives: "yes/no", run: ([task], error) => taskEnded(task, error) },
 ];
 
 // `x to the power of n` (DESIGN §66): n a whole number to 15 digits, as an item's number is, and x multiplied by
@@ -873,6 +874,12 @@ function taskOf(gave) {
   tasksGave.set(tasksGave.size + 1, gave);
   return makeRecord(["task"], [tasksGave.size]);
 }
+// `job has ended` (DESIGN §94): here a task runs to its end when it's started, so a task has always ended
+function taskEnded(task, error) {
+  if (!isRecord(task) || !Object.hasOwn(task, "task") || !tasksGave.has(task.task)) error(`'has ended' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
+  return true;
+}
+
 function waitedFor(task, error) {
   if (!isRecord(task) || !Object.hasOwn(task, "task") || !tasksGave.has(task.task)) error(`'wait for' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
   return tasksGave.get(task.task);

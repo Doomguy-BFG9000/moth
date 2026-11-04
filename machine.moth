@@ -28481,6 +28481,44 @@ to emit_threads with a, target
     pop_r(a, rbx)
     ret(a)
 
+    # rt_task_ended: rax a task's number: rax 1 if it has ended, 0 while it's running, or 2 if there's no such task
+    set ended_seek to new_label(a)
+    set ended_next to new_label(a)
+    set ended_yes to new_label(a)
+    set ended_none to new_label(a)
+    mark(a, "rt_task_ended")
+    push_r(a, rbx)
+    test_rr(a, rax, rax)
+    jcc(a, cc_le, ended_none)
+    alu_load(a, "cmp", rax, rip("tasks_made"))
+    jcc(a, cc_g, ended_none)
+    lea(a, rbx, rip_plus("thr_slots", thr_size))
+    movi(a, rcx, 1)
+    mark(a, ended_seek)
+    alui(a, "cmp", rcx, thr_max)
+    jcc(a, cc_ae, ended_yes)
+    load(a, rdx, mem(rbx, thr_state))
+    alui(a, "cmp", rdx, 1)
+    jcc(a, cc_ne, ended_next)
+    load(a, rdx, mem(rbx, thr_number))
+    alu(a, "cmp", rdx, rax)
+    jcc(a, cc_ne, ended_next)
+    movi(a, rax, 0) # running
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, ended_next)
+    alui(a, "add", rbx, thr_size)
+    inc_r(a, rcx)
+    jmp_to(a, ended_seek)
+    mark(a, ended_yes)
+    movi(a, rax, 1)
+    pop_r(a, rbx)
+    ret(a)
+    mark(a, ended_none)
+    movi(a, rax, 2)
+    pop_r(a, rbx)
+    ret(a)
+
     # rt_task_join_all: once the program's own code is done, every task still running waited for
     set join_again to new_label(a)
     set join_seek to new_label(a)
@@ -41442,6 +41480,8 @@ to gen_expr with fc, e
         gen_task_start(fc, e)
     else if what is "builtin" and name of e is "wait for"
         gen_task_wait(fc, e)
+    else if what is "builtin" and name of e is "has ended"
+        gen_task_ended(fc, e)
     else if what is "task_made" # the number of the task just started
         movsd_load(a, xmm0, rip("task_made"))
     else if what is "builtin" and name of e is "library call" # the body of a library's function
@@ -42548,6 +42588,51 @@ to gen_task_start with fc, e
 end
 
 # `wait for job`: the task's number, from the record start gave; then what it gave, once it's done
+# `job has ended` (DESIGN §94): the task found as `wait for` finds it, yes once it's in no slot as running
+to gen_task_ended with fc, e
+    set a to a of fc
+    set uses_waitfor of st of fc to yes
+    set not_task to fail_stub(fc, at of e, "'has ended' needs a task, as 'start' gives, not this record")
+    gen_expr(fc, item 1 of args of e)
+    lea(a, rdx, rip(text_object(a, "task")))
+    call_to(a, "rt_field")
+    set bad to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, bad)
+    cvttsd2si(a, rax, xmm0)
+    cvtsi2sd(a, xmm1, rax)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_ne, not_task)
+    jcc(a, cc_p, not_task)
+    call_to(a, "rt_task_ended")
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_e, not_task)
+    set running to new_label(a)
+    set given to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, running)
+    load_bits(a, xmm0, bits_yes)
+    jmp_to(a, given)
+    mark(a, running)
+    load_bits(a, xmm0, bits_no)
+    mark(a, given)
+    set was to enter_cold(a)
+    set over to new_label(a)
+    if was is "cold"
+        jmp_to(a, over)
+    end
+    mark(a, bad)
+    load(a, rcx, rip("err_why"))
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_ne, not_task)
+    stub_start(fc, at of e)
+    stub_text(a, "'has ended' needs a task, as 'start' gives, not ")
+    stub_kind(a, "err_a")
+    jmp_to(a, "rt_e_end")
+    mark(a, over)
+    leave_cold(a, was)
+end
+
 to gen_task_wait with fc, e
     set a to a of fc
     set uses_waitfor of st of fc to yes

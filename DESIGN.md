@@ -2783,8 +2783,8 @@ hold them to agreeing.
   program that starts no task made to the same bytes as before. A thousand
   tasks start and end in about a tenth of a second.
 - **Not yet.** Two threads running Moth at the same moment, which needs a
-  collector that can stop them all; a lock a program can take; and asking
-  whether a task has ended without waiting for it.
+  collector that can stop them all. (A lock a program can take, and asking
+  whether a task has ended without waiting for it, came in §94.)
 
 ## 63. Functions put in line, and inputs in registers
 
@@ -3771,4 +3771,38 @@ hold them to agreeing.
   package at a tag, which update leaves, on a branch, which it follows, and
   at a version that isn't there; and a program built to be debugged
   stopping at its mistake, with its variables, its calls and its lines.
+
+## 94. Concurrency: asking whether a task has ended, locks and queues
+
+- **Why.** Python has `future.done()`, `threading.Lock`, `Semaphore` and
+  `Event`, `queue.Queue`, and `concurrent.futures`' `map`; Moth could start a
+  task and wait for it, and nothing else (§62's "not yet").
+- **`job has ended`.** A test, as `is` is: after a value, `has ended` on the
+  same line, parsed by moth.js and compiler.moth alike into the builtin `has
+  ended`, last in vm.js's BUILTINS. `has` alone is still a name. In machine
+  code it finds the task's number as `wait for` does and looks through the
+  slots (rt_task_ended): a slot running that task means no, and a number no
+  task has had is the same mistake as `wait for`'s. On the JavaScript engines
+  a task has always ended, as it ran to its end when it was started.
+- **sync.moth, in Moth alone.** One thread runs Moth at a time and only lets
+  the turn go at a loop's end, a call or a wait (§62), so between those
+  nothing else runs: `take` sees the lock is free and marks it held with no
+  call in between, and `receive` sees a value is there and takes it off the
+  same way, which is why neither calls a function of its own to do it. They
+  wait by `wait 1 millisecond` and looking again, which lets the turn go. A
+  lock is a semaphore for one: a record with how many places are free and how
+  many there are, so letting go of one that's free is a mistake. `holding`
+  calls a function with the lock held and lets it go even if the function
+  fails. The queue is collections.moth's, a dictionary from `first` to
+  `last`, with `queue_holding(n)` making `send` wait while n are waiting.
+  `take_within`, `wait_for_flag_within` and `receive_within` give up after so
+  many milliseconds of `the clock`, which on the JavaScript engines moves on
+  with each `wait`, so they give up there too. `run_each` starts a task for
+  each thing and waits for them in order; `run_each_at_most(f, things, n)`
+  waits for the oldest before starting more than n.
+- **Tested.** sync.moth's own tests on every engine and in machine code;
+  through tasks that really wait, on Windows and Linux: `has ended` before and
+  after a task ends, three tasks adding to one total through a lock (which,
+  without it, ends at 20 of 60), fifty values through a queue that holds 3, a
+  task waiting on a flag, a wait for any, and a queue that gives up.
 

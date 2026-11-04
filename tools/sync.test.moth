@@ -1,0 +1,125 @@
+# sync.moth's tests, which moth.test.js runs on every engine; machine.test.js runs tasks that really wait
+
+use "sync.moth" as sync
+
+set total to 0
+
+to square with n
+    return n * n
+end
+
+to add_up with n
+    set total to total + n
+    return n
+end
+
+to fails_inside
+    fail with "inside"
+end
+
+to gives_seven
+    return 7
+end
+
+to test_lock
+    set guard to sync's lock()
+    expect not sync's is_held(guard)
+    sync's take(guard)
+    expect sync's is_held(guard)
+    expect not sync's take_if_free(guard)
+    expect not sync's take_within(guard, 20)
+    sync's let_go(guard)
+    expect not sync's is_held(guard)
+    expect sync's take_within(guard, 20)
+    sync's let_go(guard)
+    expect sync's take_if_free(guard)
+    sync's let_go(guard)
+    try
+        sync's let_go(guard)
+        expect no
+    if it fails with why
+        expect why is "the lock isn't held, so it can't be let go"
+    end
+end
+
+to test_semaphore
+    set places to sync's semaphore(2)
+    sync's take(places)
+    expect not sync's is_held(places)
+    sync's take(places)
+    expect sync's is_held(places)
+    expect not sync's take_if_free(places)
+    sync's let_go(places)
+    expect sync's take_if_free(places)
+    try
+        set wrong to sync's semaphore(0)
+        expect no
+    if it fails with why
+        expect why is "a semaphore is for 1 or more tasks at once, not 0"
+    end
+end
+
+to test_holding
+    set guard to sync's lock()
+    expect sync's holding(guard, gives_seven) is 7
+    expect not sync's is_held(guard)
+    try
+        set wrong to sync's holding(guard, fails_inside)
+        expect no
+    if it fails with why
+        expect why is "inside"
+    end
+    expect not sync's is_held(guard)
+end
+
+to test_flag
+    set f to sync's flag()
+    expect not sync's is_raised(f)
+    expect not sync's wait_for_flag_within(f, 10)
+    sync's raise_flag(f)
+    expect sync's is_raised(f)
+    sync's wait_for_flag(f)
+    expect sync's wait_for_flag_within(f, 10)
+    sync's lower_flag(f)
+    expect not sync's is_raised(f)
+end
+
+to test_queue
+    set q to sync's queue()
+    expect sync's is_empty(q)
+    sync's send(q, "a")
+    sync's send(q, "b")
+    sync's send(q, nothing)
+    expect sync's waiting(q) is 3
+    expect sync's receive(q) is "a"
+    expect sync's receive_within(q, 10) is "b"
+    expect sync's receive(q) is nothing
+    expect sync's is_empty(q)
+    try
+        set wrong to sync's receive_within(q, 15)
+        expect no
+    if it fails with why
+        expect why is "nothing came in 15 milliseconds"
+    end
+    set small to sync's queue_holding(2)
+    sync's send(small, 1)
+    sync's send(small, 2)
+    expect sync's waiting(small) is 2
+    expect sync's receive(small) is 1
+    sync's send(small, 3)
+    expect sync's receive(small) is 2
+    expect sync's receive(small) is 3
+end
+
+to test_tasks
+    set total to 0
+    expect sync's run_each(square, list of 1, 2, 3) is list of 1, 4, 9
+    expect sync's run_each_at_most(add_up, (list of 1, 2, 3, 4, 5, 6, 7, 8, 9, 10), 1) is list of 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+    expect total is 55
+    set jobs to list of (start square(4)), (start square(5))
+    expect sync's wait_for_all(jobs) is list of 16, 25
+    expect sync's ended_count(jobs) is 2
+    expect (wait for sync's wait_for_any(jobs)) is 16
+    expect item 1 of jobs has ended
+    expect sync's run_each(square, empty list) is empty list
+end

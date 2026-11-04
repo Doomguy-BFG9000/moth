@@ -923,6 +923,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
 
   function comparison() {
     const left = bitwise();
+    if (isWord("has") && !peek().nl && wordAt(pos + 1, "ended")) { // `job has ended`: whether a task is done (DESIGN §94)
+      const t = peek();
+      pos += 2;
+      return { kind: "builtin", name: "has ended", args: [left], at: t };
+    }
     const t = word("is");
     if (!t) return left;
     const negate = Boolean(word("not"));

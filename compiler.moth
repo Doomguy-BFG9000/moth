@@ -417,7 +417,7 @@ set builtin_names to list of "uppercase", "lowercase", "split", "join", "number"
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
     "average", "largest", "smallest", "run program", "run program keeping", "order", "order by", "reverse order", "reverse order by",
     "save", "load", "as json", "json from", "send", "send with headers", "read with headers", "read bytes with headers", "ticked", "choice in list", "text in box", "slider value", "chosen file",
-    "library call", "power", "items", "rounded down", "rounded up", "rounded", "remainder", "start", "wait for"
+    "library call", "power", "items", "rounded down", "rounded up", "rounded", "remainder", "start", "wait for", "has ended"
 # whether a file `use` names could be outside the program's folder: from the top of a disk ("/x", "C:x"), or
 # going up out of a folder ("../x")
 to outside_folder with wanted
@@ -2059,6 +2059,11 @@ to parse with tokens, reading
 
     to comparison
         set left to bitwise()
+        if is_word("has") and not nl of peek() and word_at(pos + 1, "ended") # `job has ended`: whether a task is done
+            set t to peek()
+            set pos to pos + 2
+            return record with kind "builtin", name "has ended", args (list of left), at t
+        end
         set t to word("is")
         if not t
             return left

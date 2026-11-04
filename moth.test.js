@@ -1069,6 +1069,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       ["collections.test.moth", ["test_counting", "test_queue", "test_heap", "test_sorted"]],
       ["lists.test.moth", ["test_shapes", "test_choosing", "test_functions", "test_sorting"]],
       ["stats.test.moth", ["test_middles", "test_spread", "test_two_sets", "test_mistakes"]],
+      ["sync.test.moth", ["test_lock", "test_semaphore", "test_holding", "test_flag", "test_queue", "test_tasks"]],
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
         "test_comparing", "test_mistakes"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",

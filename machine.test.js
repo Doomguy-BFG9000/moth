@@ -1542,20 +1542,20 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
-    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth"]) {
+    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "66 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "72 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux
@@ -4494,6 +4494,73 @@ say "main counted to " ticks " while C slept: " (the clock - t0 is less than 0.2
 say wait for s
 say wait for q`, { allow: ["--allow-libraries"] });
   assert.deepEqual(library, { stdout: "main counted to 3000000 while C slept: yes\nslept in C\n(16 bytes: 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0)\n", stderr: "", status: 0 });
+});
+
+// `has ended` (DESIGN §94), and sync.moth's lock, queue and flag with tasks that really wait: three tasks each
+// adding 20 to a total they read, wait and write back, which without the lock loses most of them
+test("a task can be asked whether it has ended, and sync.moth's locks, queues and flags keep tasks in step", { skip }, () => {
+  const ran = taskRun(`use "sync.moth" as sync
+to nap with ms
+    wait ms milliseconds
+    return ms
+end
+set job to start nap(300)
+say job has ended
+say wait for job
+say job has ended
+set guard to sync's lock()
+set total to 0
+to bump with n
+    for each k from 1 to n
+        sync's take(guard)
+        set seen to total
+        wait 1 millisecond
+        set total to seen + 1
+        sync's let_go(guard)
+    end
+    return n
+end
+set jobs to list of (start bump(20)), (start bump(20)), (start bump(20))
+say sync's wait_for_all(jobs) " " total
+set q to sync's queue_holding(3)
+to producer
+    for each k from 1 to 50
+        sync's send(q, k)
+    end
+    sync's send(q, nothing)
+end
+to consumer
+    set sum to 0
+    repeat while yes
+        set x to sync's receive(q)
+        if x is nothing
+            return sum
+        end
+        set sum to sum + x
+    end
+end
+set c to start consumer()
+set p to start producer()
+say wait for c
+set ready to sync's flag()
+to waiter
+    sync's wait_for_flag(ready)
+    return "saw it"
+end
+set w to start waiter()
+wait 30 milliseconds
+say w has ended
+sync's raise_flag(ready)
+say sync's wait_for_any(list of job, w) is job
+say wait for w
+try
+    say sync's receive_within(sync's queue(), 40)
+if it fails with why
+    say why
+end
+say 5 has ended`, { files: { "sync.moth": readFileSync(new URL("./tools/sync.moth", import.meta.url), "utf8") } });
+  assert.deepEqual(ran, { stdout: "no\n300\nyes\n[20, 20, 20] 60\n1275\nno\nyes\nsaw it\nnothing came in 40 milliseconds\n",
+    stderr: "p.moth:60:7: 'has ended' needs a task, as 'start' gives, not a number\nsay 5 has ended\n      ^\n", status: 1 });
 });
 
 test("a window's timer ticks while a task works", { skip: onUi }, () => {
