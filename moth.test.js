@@ -1086,7 +1086,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
   }
 });
 
-// The company libraries' own tests (DESIGN §103-§110), those that ask nothing of the system: yaml.moth, wire.moth,
+// The company libraries' own tests (DESIGN §107-§114), those that ask nothing of the system: yaml.moth, wire.moth,
 // redis.moth and s3.moth on all three engines, and jwt.moth, postgres.moth and mysql.moth, whose RSA, SCRAM and
 // PBKDF2 take the slower engines a while, on the JIT; machine.test.js runs them all in machine code, oauth.moth's too
 test("yaml.moth, wire.moth, redis.moth, s3.moth, jwt.moth, postgres.moth and mysql.moth pass their own tests on the engines", () => {

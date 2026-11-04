@@ -292,12 +292,13 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "moth-debugger.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "moth-debugger.moth", "tools/hash.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "tools/hash.moth": sources["tools/hash.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
   if (target === "linux") chmodSync(exe, 0o755);
+  mkdirSync(join(dir, "tools"));
   for (const [name, text] of Object.entries(sources)) writeFileSync(join(dir, name), text);
   standalone = { dir, exe, made };
   return standalone;
@@ -550,6 +551,273 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "remove", "greet"), ["removed greet\n", "", 0]);
   assert.deepEqual(readdirSync(join(other, "packages")), ["shout"]);
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
+});
+
+// The sum moth.sums keeps for a package's files (DESIGN §103), made here as sha256sum would: for each file but
+// Git's own, in the order of its path's bytes, its SHA-256, two spaces, its path and a line end; then the
+// SHA-256 of that
+function filesSum(root) {
+  const paths = [];
+  const walk = (at, inside) => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      if (entry.isDirectory()) walk(join(at, entry.name), `${inside}${entry.name}/`);
+      else paths.push(`${inside}${entry.name}`);
+    }
+  };
+  walk(root, "");
+  paths.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  const lines = paths.map((path) => `${createHash("sha256").update(readFileSync(join(root, path))).digest("hex")}  ${path}\n`).join("");
+  return `sha256:${createHash("sha256").update(lines).digest("hex")}`;
+}
+
+// moth.sums (DESIGN §103): add and update write the sum of each package's files and get checks it, so a package
+// changed in packages/, or where it comes from, is found; a moth.packages from before sums gets them from get;
+// and a package's own moth.sums is checked for the packages it brings
+test("moth.sums keeps the sum of each package's files, and moth get finds a package that has changed", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "summing");
+  mkdirSync(root, { recursive: true });
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const lib = join(root, "lib");
+  mkdirSync(join(lib, "data"), { recursive: true });
+  writeFileSync(join(lib, "lib.moth"), 'use "data/words.moth" as words\nto hello with n\n    return words\'s hi + ", " + n\nend\n');
+  writeFileSync(join(lib, "data", "words.moth"), 'set hi to "Hello"\n');
+  writeFileSync(join(lib, ".gitattributes"), "* text=auto\n"); // line ends the system's own, but for moth's checkouts
+  git(lib, "init", "-q");
+  git(lib, "add", ".");
+  git(lib, "commit", "-qm", "one");
+  const one = git(lib, "rev-parse", "HEAD");
+  const app = join(root, "app");
+  mkdirSync(app);
+  writeFileSync(join(app, "app.moth"), 'use the package "lib" as lib\nsay lib\'s hello("Sam")\n');
+  const sums = () => readFileSync(join(app, "moth.sums"), "utf8");
+  const packaged = join(app, "packages", "lib");
+  assert.deepEqual(moth(app, "add", "../lib"), [`added lib at ${one.slice(0, 7)}, from ../lib\n`, "", 0]);
+  assert.equal(readFileSync(join(packaged, "lib.moth"), "utf8").includes("\r"), false);
+  const sum = filesSum(packaged);
+  assert.match(sums(), new RegExp(`^# .*\\n# .*\\nlib ${one} ${sum}\\n$`));
+  assert.deepEqual(moth(app, "get"), [`lib at ${one.slice(0, 7)}\n`, "", 0]);
+
+  // a file changed, or one added, in packages/: get and update say which, and leave them
+  const changed = (file) => ["", `moth: packages/lib has changed since it was fetched (${file}): remove that folder, and moth get fetches it again\n`, 1];
+  writeFileSync(join(packaged, "data", "words.moth"), 'set hi to "Gotcha"\n');
+  assert.deepEqual(moth(app, "get"), changed("data/words.moth"));
+  assert.deepEqual(moth(app, "update"), changed("data/words.moth"));
+  assert.equal(readFileSync(join(packaged, "data", "words.moth"), "utf8"), 'set hi to "Gotcha"\n');
+  git(packaged, "checkout", "-q", "--", ".");
+  writeFileSync(join(packaged, "extra.moth"), "say 1\n");
+  assert.deepEqual(moth(app, "get"), changed("extra.moth"));
+  rmSync(join(app, "packages"), { recursive: true, force: true });
+  assert.deepEqual(moth(app, "get"), [`lib at ${one.slice(0, 7)}\n`, "", 0]);
+  assert.deepEqual(moth(app, "run", "app.moth"), ["Hello, Sam\n", "", 0]);
+
+  // where it comes from, it isn't what it was: what's fetched isn't kept
+  const zeros = `sha256:${"0".repeat(64)}`;
+  writeFileSync(join(app, "moth.sums"), sums().replace(sum, zeros));
+  rmSync(join(app, "packages"), { recursive: true, force: true });
+  assert.deepEqual(moth(app, "get"), ["", `moth: lib at ${one.slice(0, 7)}, from ../lib, isn't what moth.sums says: its files' sum is ${sum}, not ${zeros}, so it wasn't kept\n`, 1]);
+  assert.equal(existsSync(packaged), false);
+
+  // a moth.packages from before sums: get fetches each package again, as moth fetches now, and writes its sum down
+  rmSync(join(app, "moth.sums"));
+  assert.deepEqual(moth(app, "get"), [`lib at ${one.slice(0, 7)}, its sum now in moth.sums\n`, "", 0]);
+  assert.match(sums(), new RegExp(`\\nlib ${one} ${sum}\\n$`));
+  rmSync(join(app, "moth.sums"));
+  writeFileSync(join(packaged, "lib.moth"), readFileSync(join(packaged, "lib.moth"), "utf8").replace(/\n/g, "\r\n")); // as an older moth could leave it
+  assert.deepEqual(moth(app, "get"), [`lib at ${one.slice(0, 7)}, its sum now in moth.sums\n`, "", 0]);
+  assert.match(sums(), new RegExp(`\\nlib ${one} ${sum}\\n$`));
+
+  // update: the new commit, and its sum
+  writeFileSync(join(lib, "data", "words.moth"), 'set hi to "Hi"\n');
+  git(lib, "commit", "-qam", "two");
+  const two = git(lib, "rev-parse", "HEAD");
+  assert.deepEqual(moth(app, "update"), [`lib: ${one.slice(0, 7)} -> ${two.slice(0, 7)}\n`, "", 0]);
+  const newer = filesSum(packaged);
+  assert.notEqual(newer, sum);
+  assert.match(sums(), new RegExp(`\\nlib ${two} ${newer}\\n$`));
+  assert.deepEqual(moth(app, "run", "app.moth"), ["Hi, Sam\n", "", 0]);
+
+  // a package's own moth.sums, for the packages it brings: a sum that fits, and one that doesn't
+  const user = join(root, "user");
+  mkdirSync(user);
+  writeFileSync(join(user, "user.moth"), 'use the package "lib" as lib\nto shout with n\n    return uppercase of lib\'s hello(n)\nend\n');
+  writeFileSync(join(user, "moth.packages"), `lib ../lib ${one}\n`);
+  writeFileSync(join(user, "moth.sums"), `lib ${one} ${sum}\n`);
+  git(user, "init", "-q");
+  git(user, "add", ".");
+  git(user, "commit", "-qm", "one");
+  const using = git(user, "rev-parse", "HEAD");
+  const other = join(root, "other");
+  mkdirSync(other);
+  assert.deepEqual(moth(other, "add", "../user"), [`added user at ${using.slice(0, 7)}, from ../user\nadded lib at ${one.slice(0, 7)}, which user uses\n`, "", 0]);
+  assert.match(readFileSync(join(other, "moth.sums"), "utf8"), new RegExp(`\\nuser ${using} ${filesSum(join(other, "packages", "user"))}\\nlib ${one} ${sum}\\n$`));
+  const ones = `sha256:${"1".repeat(64)}`;
+  writeFileSync(join(user, "moth.sums"), `lib ${one} ${ones}\n`);
+  git(user, "commit", "-qam", "wrong");
+  const wrong = git(user, "rev-parse", "HEAD");
+  const third = join(root, "third");
+  mkdirSync(third);
+  assert.deepEqual(moth(third, "add", "../user"), [`added user at ${wrong.slice(0, 7)}, from ../user\n`,
+    `moth: lib at ${one.slice(0, 7)}, from ../lib, isn't what user's moth.sums says: its files' sum is ${sum}, not ${ones}, so it wasn't kept\n`, 1]);
+  assert.deepEqual(readdirSync(join(third, "packages")), ["user"]);
+
+  // remove: its sum goes with it
+  assert.deepEqual(moth(other, "remove", "lib"), ["removed lib\n", "", 0]);
+  assert.doesNotMatch(readFileSync(join(other, "moth.sums"), "utf8"), /\nlib /);
+});
+
+// --signed (DESIGN §104): a package's commit, or the tag it was asked for at, must have a signature git trusts;
+// here SSH signatures, checked against a file of the keys allowed to sign
+const sshKeygen = gitHere && spawnSync("ssh-keygen", ["-?"], { encoding: "utf8" }).error === undefined;
+test("moth add, get and update --signed take only packages signed by a key git trusts", { skip: skip || (sshKeygen ? false : "there's no git or no ssh-keygen") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "signing");
+  mkdirSync(root, { recursive: true });
+  for (const key of ["trusted", "stranger"]) {
+    assert.equal(spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", key, "-f", join(root, key)]).status, 0);
+  }
+  writeFileSync(join(root, "allowed"), `moth@example.com ${readFileSync(join(root, "trusted.pub"), "utf8").trim()}\n`);
+  const env = { ...process.env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "gpg.ssh.allowedSignersFile", GIT_CONFIG_VALUE_0: join(root, "allowed") };
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", "-c", "gpg.format=ssh", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const by = (key) => ["-c", `user.signingkey=${join(root, key)}`];
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, env, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const lib = join(root, "lib");
+  mkdirSync(lib);
+  const commit = (word, key) => {
+    writeFileSync(join(lib, "lib.moth"), `set word to "${word}"\n`);
+    git(lib, "add", ".");
+    git(lib, ...(key ? by(key) : []), "commit", "-q", ...(key ? ["-S"] : []), "-m", word);
+    return git(lib, "rev-parse", "HEAD");
+  };
+  git(lib, "init", "-q");
+  const plain = commit("plain");
+  git(lib, "tag", "v1"); // a tag that's only a name, which can't be signed
+  const signed = commit("signed", "trusted");
+  const tagged = commit("tagged");
+  git(lib, ...by("trusted"), "tag", "-s", "v3", "-m", "v3");
+  const strange = commit("strange", "stranger");
+  const folder = (name) => {
+    const at = join(root, name);
+    mkdirSync(at);
+    return at;
+  };
+
+  let app = folder("plain");
+  assert.deepEqual(moth(app, "add", "../lib@v1", "--signed"), ["", `moth: lib at ${plain.slice(0, 7)} isn't signed\n`, 1]);
+  assert.deepEqual(readdirSync(app), ["packages"]);
+  assert.deepEqual(readdirSync(join(app, "packages")), []);
+  app = folder("signed");
+  assert.deepEqual(moth(app, "add", `../lib@${signed}`, "--signed"), [`added lib at ${signed.slice(0, 7)} (${signed}), from ../lib\n`, "", 0]);
+  assert.deepEqual(moth(app, "get", "--signed"), [`lib at ${signed.slice(0, 7)}\n`, "", 0]);
+  app = folder("tagged");
+  assert.deepEqual(moth(app, "add", "../lib@v3", "--signed"), [`added lib at ${tagged.slice(0, 7)} (v3), from ../lib\n`, "", 0]);
+  assert.deepEqual(moth(app, "get", "--signed"), [`lib at ${tagged.slice(0, 7)}\n`, "", 0]);
+
+  // signed, by a key that isn't trusted; taken without --signed, after which get --signed says so
+  app = folder("strange");
+  let got = moth(app, "add", "../lib", "--signed");
+  assert.deepEqual([got[0], got[2]], ["", 1]);
+  assert.match(got[1], new RegExp(`^moth: lib at ${strange.slice(0, 7)} has no signature git trusts: .+\\n$`));
+  assert.deepEqual(moth(app, "add", "../lib"), [`added lib at ${strange.slice(0, 7)}, from ../lib\n`, "", 0]);
+  got = moth(app, "get", "--signed");
+  assert.deepEqual([got[0], got[2]], ["", 1]);
+  assert.match(got[1], /^moth: lib at [0-9a-f]{7} has no signature git trusts: /);
+
+  // update --signed on a branch: a newest commit that isn't signed isn't taken, and a signed one is
+  git(lib, "checkout", "-qb", "next", signed);
+  app = folder("following");
+  assert.deepEqual(moth(app, "add", "../lib@next", "--signed"), [`added lib at ${signed.slice(0, 7)} (next), from ../lib\n`, "", 0]);
+  const unsigned = commit("unsigned");
+  assert.deepEqual(moth(app, "update", "--signed"), ["", `moth: lib at ${unsigned.slice(0, 7)} isn't signed\nmoth: so lib stays at ${signed.slice(0, 7)}\n`, 1]);
+  assert.match(readFileSync(join(app, "moth.packages"), "utf8"), new RegExp(`\\nlib \\.\\./lib@next ${signed}\\n$`));
+  assert.equal(git(join(app, "packages", "lib"), "rev-parse", "HEAD"), signed);
+  const later = commit("later", "trusted");
+  assert.deepEqual(moth(app, "update", "--signed"), [`lib: ${signed.slice(0, 7)} -> ${later.slice(0, 7)}\n`, "", 0]);
+  assert.equal(moth(app, "search", "--signed")[2], 2);
+});
+
+// moth audit (DESIGN §105): each package checked against the package index's advisories, by the commits one
+// names, or from the commit a problem came in with to the one that fixed it; a package not fetched, an index
+// with no advisories, one whose advisories aren't, and a folder with no packages
+test("moth audit says which advisories in the package index are about the commits a program's packages are at", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "auditing");
+  mkdirSync(root, { recursive: true });
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const lib = join(root, "lib");
+  mkdirSync(lib);
+  git(lib, "init", "-q");
+  const commit = (word) => {
+    writeFileSync(join(lib, "lib.moth"), `set word to "${word}"\n`);
+    git(lib, "add", ".");
+    git(lib, "commit", "-qm", word);
+    return git(lib, "rev-parse", "HEAD");
+  };
+  const first = commit("first");
+  const broken = commit("broken");
+  const fixed = commit("fixed");
+  const zipCommit = "0123456789abcdef0123456789abcdef01234567";
+  const where = lib.replace(/\\/g, "/");
+  writeFileSync(join(root, "index.json"), JSON.stringify({
+    packages: { lib: { repository: where, about: "Words" }, zipper: { repository: "github.com/example/zipper", about: "Squeezes files" } },
+    advisories: [
+      { id: "MOTH-2026-1", package: "lib", introduced: broken, fixed, severity: "high", about: "hello() runs what it's given", link: "https://example.com/1" },
+      { id: "MOTH-2026-2", repository: `${where.toUpperCase()}.git/`, commits: [first.slice(0, 7)], about: "the first commit leaks" },
+      { id: "MOTH-2026-3", package: "zipper", commits: [zipCommit], about: "zipper eats files" },
+    ],
+  }));
+  const at = (name, commit) => {
+    const app = join(root, name);
+    mkdirSync(app);
+    assert.equal(moth(app, "add", `${lib}@${commit}`)[2], 0);
+    return app;
+  };
+  const index = ["--index", "../index.json"];
+  assert.deepEqual(moth(at("first", first), "audit", ...index), [`lib at ${first.slice(0, 7)}: MOTH-2026-2: the first commit leaks\n  not fixed yet\n1 advisory is about these packages\n`, "", 1]);
+  const brokenApp = at("broken", broken);
+  assert.deepEqual(moth(brokenApp, "audit", ...index), [`lib at ${broken.slice(0, 7)}: MOTH-2026-1 (high): hello() runs what it's given\n  fixed at ${fixed.slice(0, 7)}: moth update lib takes its newest\n  https://example.com/1\n1 advisory is about these packages\n`, "", 1]);
+  const fixedApp = at("fixed", fixed);
+  assert.deepEqual(moth(fixedApp, "audit", ...index), [`no advisories about lib at ${fixed.slice(0, 7)}\n`, "", 0]);
+
+  // a package from a site, written another way than the index has it, and named by the commits it's at
+  writeFileSync(join(fixedApp, "moth.packages"), `${readFileSync(join(fixedApp, "moth.packages"), "utf8")}zip https://GitHub.com/example/zipper.git ${zipCommit}\n`);
+  assert.deepEqual(moth(fixedApp, "audit", ...index), [`zip at 0123456: MOTH-2026-3: zipper eats files\n  not fixed yet\n1 advisory is about these packages\n`, "", 1]);
+
+  // the history it needs isn't fetched; an index with no advisories; advisories that aren't; no packages
+  rmSync(join(brokenApp, "packages"), { recursive: true, force: true });
+  assert.deepEqual(moth(brokenApp, "audit", ...index), ["", "moth: lib isn't fetched, so it couldn't be checked: moth get fetches it\n", 1]);
+  writeFileSync(join(root, "quiet.json"), JSON.stringify({ packages: {} }));
+  assert.deepEqual(moth(brokenApp, "audit", "--index", "../quiet.json"), [`no advisories about lib at ${broken.slice(0, 7)}\n`, "", 0]);
+  writeFileSync(join(root, "bad.json"), JSON.stringify({ packages: { lib: { repository: where } }, advisories: [5] }));
+  const bad = moth(brokenApp, "audit", "--index", "../bad.json");
+  assert.deepEqual([bad[0], bad[2]], ["", 1]);
+  assert.match(bad[1], /^moth: an advisory in the package index at \.\.\/bad\.json isn't one: /);
+  assert.deepEqual(moth(root, "audit", ...index), ["", "moth: there's no moth.packages here: moth add <git repository> adds a package\n", 1]);
+  assert.equal(moth(root, "audit", "extra")[2], 2);
 });
 
 // moth build --web: a page holding the program and the files it uses (math.moth from the standard library),
@@ -1603,7 +1871,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
   assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
 });
 
-// The company libraries (DESIGN §103-§110): yaml.moth, jwt.moth, s3.moth, oauth.moth, redis.moth, postgres.moth,
+// The company libraries (DESIGN §107-§114): yaml.moth, jwt.moth, s3.moth, oauth.moth, redis.moth, postgres.moth,
 // mysql.moth and wire.moth: their own tests, run by moth.exe's test runner, in machine code; --allow-libraries for
 // those that ask the system for randomness or the time
 const COMPANY_TESTS = ["yaml", "jwt", "s3", "oauth", "redis", "postgres", "mysql", "wire"].map((name) => `${name}.test.moth`);
