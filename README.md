@@ -3,7 +3,7 @@
 <h1>Moth</h1>
 
 <p><b>A programming language that reads like plain English.</b><br>
-Written from scratch in JavaScript, with no dependencies.</p>
+Built from scratch, with no dependencies, into programs for Windows and Linux as fast as C.</p>
 
 <p>
 <a href="https://samyyy2423.github.io/moth/"><b>Open the playground</b></a>
@@ -12,7 +12,9 @@ Written from scratch in JavaScript, with no dependencies.</p>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
-<a href="https://github.com/samyyy2423/moth/releases/tag/v1.10.0">Release 1.10.0</a>
+<a href="https://github.com/samyyy2423/moth/releases/latest">Download</a>
+&nbsp;·&nbsp;
+<a href="CONTRIBUTING.md">Help with it</a>
 </p>
 
 <p>
@@ -31,9 +33,10 @@ Written from scratch in JavaScript, with no dependencies.</p>
 <br>
 
 Moth reads the way you'd say it out loud. It's small enough to learn in an
-afternoon, and built like a real language underneath: three engines that must
-agree on every result, a compiler written in Moth itself, a debugger that runs
-backwards, and neural networks written in it.
+afternoon, and built like a real language underneath: a compiler written in Moth
+itself that makes Windows and Linux programs as fast as C, three engines in the
+browser that must agree with it on every result, a debugger that runs backwards,
+and a standard library from web servers and databases to pictures and encryption.
 
 <table>
 <tr>
@@ -85,6 +88,27 @@ the list only has 3 items
 <td valign="top"><b>Mistakes found as you type.</b> Wavy lines mark code that will fail, in the same words as the error it would stop with.</td>
 </tr>
 </table>
+
+## Start in a minute
+
+**In your browser:** open the [playground](https://samyyy2423.github.io/moth/),
+write Moth and press Run. There's nothing to install.
+
+**On your computer:** download Moth from the
+[latest release](https://github.com/samyyy2423/moth/releases/latest), one file
+with nothing else to install: `moth-windows.exe`, saved as `moth.exe`, or
+`moth-linux`, saved as `moth` (then `chmod +x moth`).
+
+```text
+moth run hello.moth          runs a program
+moth build hello.moth        makes hello.exe (hello on Linux), a program of its own
+moth                         the Moth shell: Moth a line at a time
+```
+
+<p align="center"><img src="docs/build.gif" width="760" alt="A terminal: fib.moth, a Fibonacci function in plain English, is built by moth build into fib.exe, which works out fib(32) in 16 ms; the same program in Python takes 341 ms"></p>
+
+[The language](#the-language) has all of Moth on one page, and
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to help.
 
 ## What makes it different
 
@@ -1550,6 +1574,9 @@ npm run versus               # Moth against C, Rust and Python
 node bootstrap.mjs           # moth.exe (moth on Linux), made from the source
 python -m http.server        # then open http://localhost:8000 for the playground
 ```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: how the parts fit together, and
+how to make a change.
 
 <br>
 
