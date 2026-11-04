@@ -1264,7 +1264,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth", "email.moth", "dates.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1984,6 +1984,183 @@ end
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// tools/email.moth reading mail: a message it made, read back, with its encoded words, a name in quotes, HTML and
+// files; one another program wrote, in quoted-printable and Latin-1 with Q words and folded headers; a POP3
+// server and an IMAP server of the test's own, in tasks: counting, getting, searching, marking, removing, and
+// a password each won't take
+test("tools/email.moth reads messages in MIME, and mailboxes over POP3 and IMAP", { skip }, () => {
+  const ran = libraryRun(String.raw`use "email.moth" as mail
+use "sockets.moth" as net
+
+set crlf to (list of 13, 10) as bytes as text
+
+# a message made, then read back
+set m to mail's message("Sam Pudke <sam@example.com>", (list of "you@example.com", "\"Them, Two\" <them@example.com>"), "Héllo from Moth, a subject long enough for two encoded words ✓", "Line one\n.dot line\nLine three, é")
+set cc of m to list of "cc@example.com"
+set html of m to "<p>Hi <b>there</b></p>"
+mail's attach_bytes(m, "notes é.txt", "some notes\n", "text/plain")
+mail's attach_bytes(m, "data.bin", (list of 0, 1, 2, 250, 255) as bytes, "application/octet-stream")
+set back to mail's read_message(mail's message_text(m))
+say sender of back
+say recipients of back
+say cc of back
+say subject of back
+say text of back
+say html of back
+for each a in attachments of back
+    say name of a + " " + type of a + " " + length of data of a
+end
+say data of item 1 of attachments of back as text
+say length of message_id of back is greater than 10
+
+# one written by another program: quoted-printable, Latin-1, Q words, folded headers, bare line ends
+set other to "From: =?ISO-8859-1?Q?Andr=E9?= <andre@example.com>\nTo: a@example.com,\n b@example.com\nSubject: =?utf-8?q?caf=C3=A9_au_lait?= =?utf-8?b?IOKckw==?=\nContent-Type: text/plain; charset=\"iso-8859-1\"\nContent-Transfer-Encoding: quoted-printable\n\nCaf=E9 cr=E8me, a line that goes on =\nand on.\n"
+set read_other to mail's read_message(other)
+say sender of read_other
+say recipients of read_other
+say subject of read_other
+say text of read_other
+
+# a fake POP3 server: two messages, a wrong password, a removal
+to pop_serve with listener, raw_messages
+    set conn to net's accept(listener)
+    set heard to empty list
+    net's send(conn, "+OK ready" + crlf)
+    repeat while yes
+        set line to net's receive_line(conn)
+        if line is nothing
+            return heard
+        end
+        add line to heard
+        set word to uppercase of item 1 of split line by " "
+        if word is "USER"
+            net's send(conn, "+OK go on" + crlf)
+        else if word is "PASS"
+            if line is "PASS secret"
+                net's send(conn, "+OK in" + crlf)
+            else
+                net's send(conn, "-ERR wrong password" + crlf)
+            end
+        else if word is "STAT"
+            net's send(conn, "+OK " + length of raw_messages + " 1000" + crlf)
+        else if word is "RETR"
+            set n to number of item 2 of split line by " "
+            set stuffed to empty list
+            for each l in split item n of raw_messages by crlf
+                if length of l is greater than 0 and item 1 of l is "."
+                    add "." + l to stuffed
+                else
+                    add l to stuffed
+                end
+            end
+            net's send(conn, "+OK message follows" + crlf + (join stuffed with crlf) + crlf + "." + crlf)
+        else if word is "DELE"
+            net's send(conn, "+OK marked" + crlf)
+        else if word is "QUIT"
+            net's send(conn, "+OK bye" + crlf)
+            net's close(conn)
+            return heard
+        else
+            net's send(conn, "-ERR what" + crlf)
+        end
+    end
+end
+
+set listener to net's listen(0)
+set port to net's port_of(listener)
+set first_raw to mail's message_text(mail's message("a@example.com", "b@example.com", "First", "one\n.two"))
+set second_raw to mail's message_text(m)
+set job to start pop_serve(listener, list of first_raw, second_raw)
+set s to mail's server("127.0.0.1", port)
+set security of s to "none"
+mail's log_in(s, "sam", "secret")
+set box to mail's pop_open(s)
+say mail's pop_count(box)
+set got to mail's pop_get(box, 1)
+say subject of got + " | " + text of got
+say subject of mail's pop_get(box, 2)
+mail's pop_delete(box, 1)
+mail's pop_close(box)
+say wait for job
+set job to start pop_serve(listener, list of first_raw)
+mail's log_in(s, "sam", "wrong")
+try
+    mail's pop_open(s)
+if it fails with why
+    say why
+end
+say item 2 of wait for job
+
+# a fake IMAP server: folders, a folder chosen, a search, a message by its UID, a mark
+to imap_serve with listener, raw
+    set conn to net's accept(listener)
+    set heard to empty list
+    net's send(conn, "* OK IMAP ready" + crlf)
+    repeat while yes
+        set line to net's receive_line(conn)
+        if line is nothing
+            return heard
+        end
+        add line to heard
+        set words to split line by " "
+        set tag to item 1 of words
+        set command to uppercase of item 2 of words
+        if command is "LOGIN"
+            if line is tag + " LOGIN \"sam\" \"se\\\"cret\""
+                net's send(conn, tag + " OK logged in" + crlf)
+            else
+                net's send(conn, tag + " NO wrong password" + crlf)
+            end
+        else if command is "LIST"
+            net's send(conn, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"" + crlf + "* LIST (\\HasNoChildren) \"/\" Archive" + crlf + tag + " OK done" + crlf)
+        else if command is "SELECT"
+            net's send(conn, "* 3 EXISTS" + crlf + "* 0 RECENT" + crlf + tag + " OK [READ-WRITE] selected" + crlf)
+        else if command is "UID" and uppercase of item 3 of words is "SEARCH"
+            net's send(conn, "* SEARCH 4 9 12" + crlf + tag + " OK done" + crlf)
+        else if command is "UID" and uppercase of item 3 of words is "FETCH"
+            set b to raw as bytes
+            net's send(conn, "* 2 FETCH (UID " + item 4 of words + " BODY[] {" + length of b + "}" + crlf)
+            net's send(conn, b)
+            net's send(conn, ")" + crlf + tag + " OK done" + crlf)
+        else if command is "UID" and uppercase of item 3 of words is "STORE"
+            net's send(conn, "* 2 FETCH (FLAGS (\\Seen))" + crlf + tag + " OK done" + crlf)
+        else if command is "LOGOUT"
+            net's send(conn, "* BYE" + crlf + tag + " OK bye" + crlf)
+            net's close(conn)
+            return heard
+        else
+            net's send(conn, tag + " BAD what" + crlf)
+        end
+    end
+end
+
+set job to start imap_serve(listener, second_raw)
+mail's log_in(s, "sam", "se\"cret")
+set box to mail's imap_open(s)
+say mail's imap_folders(box)
+say mail's imap_select(box, "INBOX")
+say mail's imap_search(box, "UNSEEN")
+set got to mail's imap_get(box, 9)
+say subject of got
+say length of attachments of got
+mail's imap_mark(box, 9, "\\Seen")
+mail's imap_close(box)
+for each line in wait for job
+    say line
+end
+set job to start imap_serve(listener, second_raw)
+mail's log_in(s, "sam", "nope")
+try
+    mail's imap_open(s)
+if it fails with why
+    say why
+end
+wait for job
+say "done"
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["Sam Pudke <sam@example.com>\n[\"you@example.com\", \"\\\"Them, Two\\\" <them@example.com>\"]\n[\"cc@example.com\"]\nHéllo from Moth, a subject long enough for two encoded words ✓\nLine one\n.dot line\nLine three, é\n<p>Hi <b>there</b></p>\nnotes é.txt text/plain 11\ndata.bin application/octet-stream 5\nsome notes\n\nyes\nAndré <andre@example.com>\n[\"a@example.com\", \"b@example.com\"]\ncafé au lait ✓\nCafé crème, a line that goes on and on.\n\n2\nFirst | one\n.two\nHéllo from Moth, a subject long enough for two encoded words ✓\n[\"USER sam\", \"PASS secret\", \"STAT\", \"RETR 1\", \"RETR 2\", \"DELE 1\", \"QUIT\"]\nthe mail server said no to logging in: -ERR wrong password\nPASS wrong\n[\"INBOX\", \"Archive\"]\n3\n[4, 9, 12]\nHéllo from Moth, a subject long enough for two encoded words ✓\n2\nm8 LOGIN \"sam\" \"se\\\"cret\"\nm9 LIST \"\" \"*\"\nm10 SELECT \"INBOX\"\nm11 UID SEARCH UNSEEN\nm12 UID FETCH 9 BODY.PEEK[]\nm13 UID STORE 9 +FLAGS (\\Seen)\nm14 LOGOUT\nthe mail server said no to logging in: NO wrong password\ndone\n", "", 0]);
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;

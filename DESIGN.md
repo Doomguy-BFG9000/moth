@@ -3599,3 +3599,30 @@ hold them to agreeing.
   and the program connecting to it, with text, a ping, 70,000 bytes, 300
   letters, and a close; and Node's own WebSocket client, as a browser's,
   asking a server of Moth's.
+
+## 89. Reading mail
+
+- **Why.** Sending is half of Python's mail: `email` reads messages, and
+  `poplib` and `imaplib` fetch them from a mailbox.
+- **read_message(raw)** reads MIME, as text or bytes: headers (lines folded
+  back into one, each name in small letters, RFC 2047's encoded words
+  decoded, in B and Q, the space between two of them dropped), then the
+  body. A multipart body is split at its boundary, part by part, inside each
+  other; base64 and quoted-printable are undone; UTF-8 and Latin-1 (with
+  ASCII and Windows-1252 taken as it) become text, with plain line ends. The
+  first plain text and the first HTML that aren't files are the message's
+  text and html; every other part is a file, its name from
+  Content-Disposition (RFC 2231's `filename*` too) or Content-Type. Address
+  headers are split at commas outside quotes and < >.
+- **POP3.** `pop_open` (port 995 secure from the start, 110 after STLS),
+  USER and PASS; `pop_count` (STAT), `pop_get` (RETR, its dots taken off),
+  `pop_delete` (DELE), `pop_close` (QUIT).
+- **IMAP.** `imap_open` (993, or 143 after STARTTLS), LOGIN in IMAP's
+  quotes; `imap_folders` (LIST), `imap_select`, `imap_search` and `imap_get`
+  by UID, the message fetched with BODY.PEEK[] so it isn't marked seen,
+  `imap_mark` (STORE +FLAGS), `imap_close`. Each command has a tag of its own;
+  an answer that carries bytes ({n}, then n bytes) is read exactly.
+- **Tested.** In machine code on Windows and Linux: a message email.moth
+  made, read back as it was; one another program wrote, in
+  quoted-printable and Latin-1, with Q words and folded headers; and POP3
+  and IMAP servers of the test's own, in tasks, with what each was told.

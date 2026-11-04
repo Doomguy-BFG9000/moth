@@ -368,7 +368,12 @@ bytes and dictionaries:
   bcc, a page of HTML and files (`attach`), in MIME with UTF-8 headers,
   through a server over SMTP, secure from the start (465) or after
   STARTTLS (587), logged in: `mail's log_in(server, user, password)`, then
-  `mail's send(server, m)`.
+  `mail's send(server, m)`. It reads mail too, as `email`, `poplib` and
+  `imaplib` do: `read_message(raw)` (MIME, base64 and quoted-printable,
+  UTF-8 and Latin-1, encoded headers), and mailboxes over POP3
+  (`pop_open`, `pop_count`, `pop_get`, `pop_delete`) and IMAP
+  (`imap_open`, `imap_folders`, `imap_select`, `imap_search`, `imap_get`,
+  `imap_mark`).
 - [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`
