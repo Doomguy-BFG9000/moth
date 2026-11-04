@@ -21,14 +21,15 @@
 #   set local to ai's openai_compatible("http://localhost:11434/v1", "nomic-embed-text")   # Ollama, no key
 #   set vectors to ai's embed(local, list of "moths fly at night", "bees fly by day")   # an array, a row each
 #
-# openai(model) is OpenAI's own, its key from OPENAI_API_KEY. Options, a dictionary: system, max_tokens,
-# effort (Anthropic's output_config.effort), temperature (OpenAI's), and for a client base_url and
-# key_variable. A reply is a record: text, stop_reason, tool_calls (each a record of id, name and input),
-# usage (input_tokens and output_tokens), and message, the model's turn to add to a conversation. On Claude
-# Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5, a request the model declines is run again on another model
-# (Anthropic's server-side fallbacks); "fallbacks" is no in a client's options to turn that off. Keys are only
-# read from the environment, never kept in a value or shown. A program that uses it is built with
-# --allow-libraries and --allow-net. The API's mistakes are a `fail with` that says what it said.
+# openai(model) is OpenAI's own. Keys come only from the environment: ANTHROPIC_API_KEY for anthropic(), and
+# OPENAI_API_KEY for openai(), and for openai_compatible(base_url, model, yes), a server that wants a key;
+# they're never kept in a value or shown. Options, a dictionary: system, max_tokens, effort (Anthropic's
+# output_config.effort), temperature (OpenAI's), and for a client base_url. A reply is a record: text,
+# stop_reason, tool_calls (each a record of id, name and input), usage (input_tokens and output_tokens), and
+# message, the model's turn to add to a conversation. On Claude Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5, a
+# request the model declines is run again on another model (Anthropic's server-side fallbacks); "fallbacks"
+# is no in a client's options to turn that off. A program that uses it is built with --allow-libraries and
+# --allow-net. The API's mistakes are a `fail with` that says what it said.
 
 use "http.moth" as ai_http
 use "sockets.moth" as ai_net
@@ -52,7 +53,7 @@ end
 to anthropic with model or "claude-opus-5-5", options or nothing
     set chosen to ai_options(options)
     set made to ai_client("Anthropic", model, ai_option(chosen, "base_url", "https://api.anthropic.com"),
-        ai_option(chosen, "key_variable", "ANTHROPIC_API_KEY"), ai_option(chosen, "max_tokens", nothing),
+        "ANTHROPIC_API_KEY", ai_option(chosen, "max_tokens", nothing),
         ai_option(chosen, "effort", nothing), ai_option(chosen, "fallbacks", yes))
     set kind of made to "ai client"
     return made
@@ -60,11 +61,16 @@ end
 
 to openai with model, options or nothing
     set chosen to ai_options(options)
-    return openai_compatible(ai_option(chosen, "base_url", "https://api.openai.com/v1"), model, ai_option(chosen, "key_variable", "OPENAI_API_KEY"))
+    return openai_compatible(ai_option(chosen, "base_url", "https://api.openai.com/v1"), model, yes)
 end
 
-# any server that speaks OpenAI's API, at base_url (as "http://localhost:11434/v1"); with no key_variable, no key
-to openai_compatible with base_url, model, key_variable or nothing
+# any server that speaks OpenAI's API, at base_url (as "http://localhost:11434/v1"): with uses_key yes, one that
+# wants a key, from OPENAI_API_KEY; else none is sent
+to openai_compatible with base_url, model, uses_key or no
+    set key_variable to nothing
+    if uses_key
+        set key_variable to "OPENAI_API_KEY"
+    end
     set made to ai_client("OpenAI", model, base_url, key_variable, nothing, nothing, no)
     set kind of made to "ai client"
     return made
@@ -280,7 +286,8 @@ to ai_reply with client, answered
     set calls to empty list
     set usage to record with input_tokens 0, output_tokens 0
     if client's provider is "Anthropic"
-        for each block in item "content" of answered
+        set blocks to ai_kept_blocks(item "content" of answered)
+        for each block in blocks
             if item "type" of block is "text"
                 add item "text" of block to text
             else if item "type" of block is "tool_use"
@@ -291,7 +298,7 @@ to ai_reply with client, answered
             set used to item "usage" of answered
             set usage to record with input_tokens ai_option(used, "input_tokens", 0), output_tokens ai_option(used, "output_tokens", 0)
         end
-        set message to dictionary where "role" is "assistant", "content" is item "content" of answered
+        set message to dictionary where "role" is "assistant", "content" is blocks
         return record with text text, stop_reason item "stop_reason" of answered, tool_calls calls, usage usage, message message, model ai_option(answered, "model", client's model)
     end
     set choice to item 1 of item "choices" of answered
@@ -310,6 +317,25 @@ to ai_reply with client, answered
         set usage to record with input_tokens ai_option(used, "prompt_tokens", 0), output_tokens ai_option(used, "completion_tokens", 0)
     end
     return record with text text, stop_reason ai_option(choice, "finish_reason", nothing), tool_calls calls, usage usage, message message, model ai_option(answered, "model", client's model)
+end
+
+# The blocks of the model's turn, as they're sent back: after a refusal part of the way through, which another
+# model went on from (a server-side fallback), only the text of what came before the last "fallback" block,
+# which marks where, and everything from it on; not tool uses or thinking from the model that declined
+to ai_kept_blocks with blocks
+    set last to 0
+    for each k from 1 to length of blocks
+        if ai_option(item k of blocks, "type", "") is "fallback"
+            set last to k
+        end
+    end
+    set kept to empty list
+    for each k from 1 to length of blocks
+        if k is at least last or ai_option(item k of blocks, "type", "") is "text"
+            add item k of blocks to kept
+        end
+    end
+    return kept
 end
 
 to ai_json_or_text with written
@@ -438,12 +464,13 @@ to ai_streamed_reply with state
     set usage to record with input_tokens state's input_tokens, output_tokens state's output_tokens
     set calls to empty list
     if state's client's provider is "Anthropic"
-        for each block in state's blocks
+        set blocks to ai_kept_blocks(state's blocks)
+        for each block in blocks
             if item "type" of block is "tool_use"
                 add (record with id item "id" of block, name item "name" of block, input item "input" of block) to calls
             end
         end
-        set message to dictionary where "role" is "assistant", "content" is state's blocks
+        set message to dictionary where "role" is "assistant", "content" is blocks
         return record with text state's text, stop_reason state's stop_reason, tool_calls calls, usage usage, message message, model state's model
     end
     set message to dictionary where "role" is "assistant", "content" is state's text

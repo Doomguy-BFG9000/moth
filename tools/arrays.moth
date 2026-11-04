@@ -1,6 +1,6 @@
 # Arrays of numbers, as NumPy has them: a shape, and the numbers row after row, with maths on all of them at
 # once, matrix multiplication, sums, means and the largest along an axis, reshaping, slicing and broadcasting.
-# A program `moth build` makes does the work in machine code, loops of Moth's own (DESIGN §103) over the
+# A program `moth build` makes does the work in machine code, loops of Moth's own (DESIGN §107) over the
 # numbers where they are, one after another in memory; anywhere else, the same in Moth, with the same answers.
 #
 #   use "arrays.moth" as arrays

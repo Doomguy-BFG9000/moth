@@ -1,5 +1,6 @@
 {
   "argv": ["python", "{resource_dir}/moth_kernel.py", "-f", "{connection_file}"],
   "display_name": "Moth",
-  "language": "moth"
+  "language": "moth",
+  "interrupt_mode": "signal"
 }

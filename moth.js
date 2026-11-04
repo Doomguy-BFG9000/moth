@@ -1832,7 +1832,7 @@ const fallbackFits = (e) => e.kind === "value" || (e.kind === "negate" && e.oper
 // for anything): a number is a double, a float a float, a whole number an int, a long whole number 64 bits,
 // and a pointer a whole number, nothing or bytes; text is UTF-8, wide text wchar_t's (UTF-16 on Windows). A
 // structure is a record, or nothing, and a callback a function. A list of numbers is a double*, to the list's own
-// numbers, which C can read and change (DESIGN §103).
+// numbers, which C can read and change (DESIGN §107).
 const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a long whole number": 0, "a pointer": -1, "text": 1, "wide text": 1, "bytes": 6, "yes or no": 2,
   "a byte": 0, "a signed byte": 0, "a short whole number": 0, "an unsigned short whole number": 0, "an unsigned whole number": 0, "an unsigned long whole number": 0,
   "a list of numbers": 3 };
