@@ -234,7 +234,7 @@ to new_asm
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
         library_callbacks empty dictionary, callback_jobs empty list, shipping nothing, task_runtime no, threading no,
-        guarded empty list, released empty list, last_store nothing, field_spots 0
+        guarded empty list, released empty list, last_store nothing, field_spots 0, last_word no
     set code of made to hot of made
     return made
 end
@@ -2459,6 +2459,10 @@ to emit_mistakes with a
     load(a, rsi, rip("b_ptr"))
     load(a, rdx, rip("b_len"))
     call_to(a, "rt_write")
+    if last_word of a # what the profiler found, up to the mistake
+        call_to(a, "rt_last_word")
+        call_to(a, "rt_flush_out")
+    end
     movi(a, rcx, 1)
     jmp_to(a, "rt_exit")
     mark(a, one_line) # the call r12 to the function named t_prev_fn, r13 times in a row; the first 10 are shown
@@ -13630,6 +13634,9 @@ to emit_gui_common with a
     call_r(a, rcx)
     call_mark(a, -1)
     mov_rr(a, rsp, r12)
+    if last_word of a # the handler done, the app waits for what happens next
+        call_to(a, "rt_dbg_waits")
+    end
     call_to(a, "rt_flush_out") # what it said, shown now
     for each r in list of r15, r14, r13, r12, rbp, rbx
         pop_r(a, r)
@@ -15352,6 +15359,10 @@ to emit_gui with a, title
     jcc(a, cc_e, pad_answered)
     call_to(a, "rt_out_line") # closed: the program ends
     call_to(a, "rt_flush_out")
+    if last_word of a
+        call_to(a, "rt_last_word")
+        call_to(a, "rt_flush_out")
+    end
     movi(a, rcx, 0)
     jmp_to(a, "rt_exit")
     mark(a, pad_answered)
@@ -28411,6 +28422,7 @@ to emit_runtime with st
     set controls of a to uses_controls of st
     set files of a to target of st is "windows" and uses_files of st
     set window of a to windowed
+    set last_word of a to debugging of st
     mark(a, "rt_begin")
     call_to(a, "rt_gc_init")
     if uses_clock of st # the clock starts with the program
@@ -28439,7 +28451,14 @@ to emit_runtime with st
     push_r(a, rcx)
     call_to(a, "rt_flush_out")
     if windowed
+        if last_word of a # its lines done, it waits for the window
+            call_to(a, "rt_dbg_waits")
+        end
         call_to(a, "rt_gui_finish")
+        call_to(a, "rt_flush_out")
+    end
+    if last_word of a # once the window has closed too: an app's handlers are part of its run
+        call_to(a, "rt_last_word")
         call_to(a, "rt_flush_out")
     end
     if uses_sound of st
@@ -28447,6 +28466,9 @@ to emit_runtime with st
     end
     pop_r(a, rcx)
     jmp_to(a, "rt_exit")
+    if last_word of a
+        emit_debugger_calls(a, st)
+    end
     emit_output(a)
     emit_numbers(a)
     emit_bignums(a)
@@ -37097,6 +37119,64 @@ to new_state with a, program_name, files, source, target
         threaded no, inline_bodies empty dictionary
 end
 
+# In a program built to be debugged or profiled, the runtime's calls to the debugger (DESIGN §81):
+# rt_last_word, moth_debugger's finish, once, when the program ends however it does: after its last line
+# and any window it left open, at `stop the program`, after a mistake's report, or when the pad it asked with
+# is closed; rt_dbg_waits, moth_debugger's waits, when the program's own lines stop for now and it waits for
+# what happens next: before its window's loop, and after each handler. Each is called as a handler is, the
+# first call in progress, so a mistake in it lists only the calls under it, and ends the program with no
+# second last word. Every register but rax, rcx and rdx is kept.
+to emit_debugger_calls with a, st
+    set said to new_label(a)
+    reserve(a, "dbg_said", 8, 8)
+    mark(a, "rt_last_word")
+    load(a, rax, rip("dbg_said"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, said)
+    storei(a, rip("dbg_said"), 1)
+    debugger_call(a, st, "finish")
+    mark(a, said)
+    ret(a)
+    mark(a, "rt_dbg_waits")
+    load(a, rax, rip("dbg_said"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, said) # the last word said: nothing more
+    debugger_call(a, st, "waits")
+    ret(a)
+end
+
+to debugger_call with a, st, name
+    set fns to functions of st
+    set f to item ("moth_debugger's " + name) of fns
+    for each r in list of rbx, rbp, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15
+        push_r(a, r)
+    end
+    mov_rr(a, r12, rsp)
+    lea(a, rcx, rip(label of f))
+    movi(a, rdx, 0)
+    lea(a, r8, rip(info of f))
+    call_to(a, "rt_closure")
+    push_r(a, rax)
+    load(a, rcx, rip("try_top"))
+    push_r(a, rcx)
+    push_r(a, rcx) # (two, for the stack's 16)
+    storei(a, rip("try_top"), 0)
+    movi(a, r15, 1)
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rcx, mem(rax, 0))
+    movi(a, rax, -1)
+    call_r(a, rcx)
+    call_mark(a, -1)
+    pop_r(a, rcx)
+    pop_r(a, rcx)
+    store(a, rip("try_top"), rcx) # a handler's try, if it's in one, as it was
+    mov_rr(a, rsp, r12)
+    for each r in list of r15, r14, r13, r12, r11, r10, r9, r8, rdi, rsi, rbp, rbx
+        pop_r(a, r)
+    end
+end
+
 # The program with the debugger's code before it, and between them the debugger told the program's name and
 # each file's text, for showing a line
 to with_debugger with debugger_body, body, files, source, program_name
@@ -37119,8 +37199,7 @@ to with_debugger with debugger_body, body, files, source, program_name
     for each s in body
         add s to made
     end
-    add record with kind "call", name "moth_debugger's finish", args empty list, at at to made # once the program has ended
-    return made
+    return made # the runtime calls its finish, however the program ends, and its waits (see emit_debugger_calls)
 end
 
 to text_node with t, at
@@ -38117,9 +38196,6 @@ end
 # whole number from 0 to 255; no `try` stops it
 to gen_exit with fc, s
     set a to a of fc
-    if debugging of st of fc # the debugger's, or the profiler's, last word, as when the program ends
-        gen_expr(fc, record with kind "call", name "moth_debugger's finish", args empty list, at at of s)
-    end
     if value of s is nothing
         movi(a, rcx, 0)
     else

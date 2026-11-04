@@ -3372,3 +3372,31 @@ hold them to agreeing.
   across six texts and views, with the collector running between them, the
   same on the three engines and in machine code on Windows and Linux.
 
+
+## 81. The profiler's last word, however a program ends
+
+- **Why.** `moth profile` (§76) said nothing when a program ended with a
+  mistake, and for an app it spoke too soon: its report was a call put after
+  the program's last line, so a mistake never reached it, and an app, whose
+  handlers run after its last line, had its report before any of them ran.
+- **What it does now.** The runtime calls the debugger's `finish`, once,
+  when the program ends however it does: after its last line and any window
+  it left open, at `stop the program`, after a mistake's report, and when
+  the pad it asked with is closed. It's called as a handler is, the first
+  call in progress, so a mistake in it ends the program with no second last
+  word. The debugger (moth debug, §59) has nothing to say then.
+- **Waiting.** The runtime also calls the debugger's `waits` before an app's
+  window loop and after each handler. The profiler gives the time from
+  there to the next line to a row of its own, "(waiting for events)",
+  instead of the line before, and the next line starts a call, so a
+  handler run twice shows two calls.
+- **Not yet.** Calls are counted by depth: when tasks (§62) take turns, a
+  task's first line one call deep after another task's isn't counted as a
+  call of its own.
+- **Also.** server.moth's HTTPS test runs with Git's OpenSSL too, built
+  with MinGW, when it's there: before §73's change to where a library's own
+  libraries are looked for, it found no randomness in a Moth program
+  ("entropy source strength too weak").
+- **Tested.** Through moth.exe: a mistake, then the profile up to it; an
+  app driven by two keys, with its handler's two calls and lines and the
+  wait; on Windows and Linux.

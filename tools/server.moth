@@ -23,8 +23,8 @@
 # serve_secure(443, answer, "cert.pem", "key.pem") answers with HTTPS instead, through OpenSSL 3, with a
 # certificate (and the chain after it) and its key, each in a PEM file; serve_secure_everywhere() as well. Linux
 # has OpenSSL; on Windows, OpenSSL's two DLLs go beside the program: libssl-3.dll and libcrypto-3.dll, as Python
-# has them in its DLLs folder, or libssl-3-x64.dll and libcrypto-3-x64.dll, as the Win64 OpenSSL installer has
-# them. (Git for Windows' own, built with MinGW, don't work in a program of Moth's.)
+# has them in its DLLs folder, or libssl-3-x64.dll and libcrypto-3-x64.dll, as Git for Windows has them in its
+# mingw64 folder, and the Win64 OpenSSL installer too.
 
 use the library "ws2_32"
     WSAStartup(a whole number, bytes) gives a whole number

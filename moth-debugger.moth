@@ -94,8 +94,14 @@ to follow with line, file, depth, fn
     set last to record with file file, line line, fn fn
 end
 
-# once the program's last line has run: nothing more to do (the profiler, in the debugger's place, says what it found)
+# once the program has ended, however it ended: nothing more to do (the profiler, in the debugger's place, says
+# what it found)
 to finish
+end
+
+# when the program's lines stop for now, and it waits for what happens next, as an app between its handlers:
+# nothing to do (the profiler counts that time as waiting)
+to waits
 end
 
 # whether to stop at this line, before it runs

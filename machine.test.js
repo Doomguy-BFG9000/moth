@@ -572,7 +572,21 @@ test("moth.exe profile runs a program, then says where its time went", { skip },
   const stops = spawnSync(exe, ["profile", "stops.moth"], { cwd: sub, encoding: "utf8" });
   assert.deepEqual([stops.stdout, stops.status], ["before\n", 3]);
   assert.match(stops.stderr, /^moth profile: 0\.\d{3} s in all, 2 lines run\n[^]*stops\.moth:2  stop the program with 3\n$/);
-  assert.deepEqual(readdirSync(sub).sort(), ["stops.moth", "work.moth"], "the program built to profile was left behind");
+  // after a mistake: its report, then the profile up to it
+  writeFileSync(join(sub, "oops.moth"), "to f with n\n    return item n of list of 1\nend\nsay f(1)\nsay f(2)\nsay \"never\"\n");
+  const oops = spawnSync(exe, ["profile", "oops.moth"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([oops.stdout, oops.status], ["1\n", 1]);
+  assert.match(oops.stderr, /^oops\.moth:2:12: there is no item 2, the list only has 1 item\n[^]*\nmoth profile: \d+\.\d{3} s in all, 5 lines run\n[^]* 2  f\n/);
+  // an app: its handlers' calls and lines, and the time it waited for them on a line of its own
+  writeFileSync(join(sub, "keys.moth"), "set count to 0\nwhen a key is pressed with key\n    set count to count + 1\n    say \"key \" + key\nend\n");
+  const keys = spawnSync(exe, ["profile", "keys.moth"], { cwd: sub, encoding: "utf8", env: { ...process.env, MOTH_PICTURE: join(sub, "keys.bmp"), MOTH_EVENTS: "key left;key right;tick 0" } });
+  assert.deepEqual([keys.stdout, keys.status], ["key left\nkey right\n", 0], keys.stderr);
+  assert.match(keys.stderr, /^moth profile: \d+\.\d{3} s in all, 6 lines run\n/);
+  assert.match(keys.stderr, /\n +\d+\.\d{3} s +\d+\.\d% {10}\(waiting for events\)\n/);
+  assert.match(keys.stderr, /\n +\d+\.\d{3} s +\d+\.\d% +2  when a key is pressed\n/);
+  assert.match(keys.stderr, /\n +\d+\.\d{3} s +\d+\.\d% +2  keys\.moth:4  say "key " \+ key\n/);
+  rmSync(join(sub, "keys.bmp"), { force: true });
+  assert.deepEqual(readdirSync(sub).sort(), ["keys.moth", "oops.moth", "stops.moth", "work.moth"], "the program built to profile was left behind");
 });
 
 // The standard library: in a folder with nothing else in it, a program uses json.moth, math.moth and big.moth,
@@ -1776,25 +1790,30 @@ say read site + "/stop"`, ["--allow-net"]);
 });
 
 // tools/server.moth with HTTPS: a certificate made for the test by the openssl command, OpenSSL 3's libraries
-// (Linux's own; on Windows, Python's, put beside the program), and Node's https, which trusts that certificate
-// alone, asking: a page, a body in chunks and one with its length, a page that isn't there, and a client that
-// doesn't trust it, which the server says couldn't agree on TLS; then a certificate or key it can't use
+// (Linux's own; on Windows, each beside the program in turn: Python's, built with Visual C++, and Git's, built with
+// MinGW, which once found no randomness when its libraries were looked for only in the program's folder), and
+// Node's https, which trusts that certificate alone, asking: a page, a body in chunks and one with its length, a
+// page that isn't there, and a client that doesn't trust it, which the server says couldn't agree on TLS; then a
+// certificate or key it can't use
 const OPENSSL = ["openssl", "C:/Program Files/Git/usr/bin/openssl.exe", "C:/Program Files/Git/mingw64/bin/openssl.exe"]
   .find((c) => spawnSync(c, ["version"], { encoding: "utf8" }).status === 0);
-const SSL_DLLS = target !== "windows" ? null : (() => {
+const SSL_SETS = target !== "windows" ? [null] : (() => {
   const found = spawnSync("python", ["-c", "import sys, os; print(os.path.join(sys.base_prefix, 'DLLs'))"], { encoding: "utf8" });
-  const dir = found.status === 0 ? found.stdout.trim() : "";
-  return ["libssl-3.dll", "libcrypto-3.dll"].every((n) => existsSync(join(dir, n))) ? dir : null;
+  return [{ dir: found.status === 0 ? found.stdout.trim() : "", names: ["libssl-3.dll", "libcrypto-3.dll"] },
+    { dir: "C:/Program Files/Git/mingw64/bin", names: ["libssl-3-x64.dll", "libcrypto-3-x64.dll"] }]
+    .filter((set) => set.dir && set.names.every((n) => existsSync(join(set.dir, n))));
 })();
-const httpsSkip = skip || (!OPENSSL ? "there's no openssl command" : target === "windows" && !SSL_DLLS ? "there's no OpenSSL 3 of Python's" : false);
+const httpsSkip = skip || (!OPENSSL ? "there's no openssl command" : SSL_SETS.length === 0 ? "there's no OpenSSL 3 here" : false);
 test("tools/server.moth answers with HTTPS through OpenSSL, and reads bodies in chunks", { skip: httpsSkip }, async () => {
+  for (const [k, set] of SSL_SETS.entries()) await servesHttps(set, 23000 + ((process.pid + 700 * k) % 2000));
+});
+async function servesHttps(set, port) {
   const dir = mkdtempSync(join(tmpdir(), "moth-https-"));
-  const port = 23000 + (process.pid % 2000);
   try {
     const made = spawnSync(OPENSSL, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem"),
       "-days", "2", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost"], { encoding: "utf8" });
     assert.equal(made.status, 0, made.stderr);
-    if (SSL_DLLS) for (const n of ["libssl-3.dll", "libcrypto-3.dll"]) writeFileSync(join(dir, n), readFileSync(join(SSL_DLLS, n)));
+    if (set) for (const n of set.names) writeFileSync(join(dir, n), readFileSync(join(set.dir, n)));
     const exe = executable(dir, "site");
     writeFileSync(exe, machine(`use "server.moth" as web
 to answer with request
@@ -1849,7 +1868,7 @@ say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries", "--all
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}
 
 // tools/windows.moth, Windows' own controls for a program of Moth's: a window, hidden here, that drives itself
 // from a timer, sending its controls what a click or typing sends them, and pressing its menu's keys with Ctrl

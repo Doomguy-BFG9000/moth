@@ -1,7 +1,9 @@
 # The profiler `moth profile` builds into a program, in the debugger's place (DESIGN §76). Before each line of
 # the program, and of the files it uses, wants() counts it, and gives the time since the line before to that
 # line, and to the function it was in; a line one call deeper than the one before starts a call. When the
-# program ends, finish() says where the time went, on the error output. It never stops the program.
+# program's lines stop and it waits, as an app does between its handlers, waits() gives that time to waiting
+# instead. When the program ends, however it ends, finish() says where the time went, on the error output. It
+# never stops the program.
 #
 # The clock moves a millisecond at a time, so each millisecond goes to the line that was running when it
 # passed: over a run long enough to be worth profiling, that's where the time is.
@@ -18,6 +20,8 @@ set last_function to ""
 set last_depth to 0
 set last_time to 0
 set first_time to 0
+set waiting to 0 # the seconds it spent waiting for what happens next
+set is_waiting to no # whether it's waiting now
 
 # Before the program's first line: its name, and each file's name and text
 to start with name, file_names, texts
@@ -40,7 +44,10 @@ end
 # before each line: counted, and the time since the line before given to that one
 to wants with line, file, depth, fn
     set now to the clock
-    if last_key is not nothing and now is not last_time
+    if is_waiting
+        set waiting to waiting + now - last_time
+        set is_waiting to no
+    else if last_key is not nothing and now is not last_time
         spend(now - last_time)
     end
     set key to line_key(line, file)
@@ -64,6 +71,22 @@ to wants with line, file, depth, fn
     return no
 end
 
+# The program's lines have stopped for now, and it waits for what happens next: the time from here to its next
+# line is waiting, and that line, a handler's first, starts a call
+to waits
+    set now to the clock
+    if not is_waiting and last_key is not nothing and now is not last_time
+        spend(now - last_time)
+    end
+    if not is_waiting
+        set last_time to now
+    end
+    set is_waiting to yes
+    set last_key to nothing
+    set last_function to ""
+    set last_depth to 0
+end
+
 # the seconds since the line before, given to it and its function
 to spend with seconds
     if last_key is in line_times
@@ -85,7 +108,9 @@ end
 # When the program ends: the functions by the time their own lines took, then the lines that took longest
 to finish
     set now to the clock
-    if last_key is not nothing and now is not last_time
+    if is_waiting
+        set waiting to waiting + now - last_time
+    else if last_key is not nothing and now is not last_time
         spend(now - last_time)
     end
     set total to now - first_time
@@ -101,15 +126,22 @@ to finish
     if not ("" is in calls)
         add (record with name "", time time_of(function_times, ""), calls 1) to by_function
     end
+    if waiting is greater than 0
+        add (record with name nothing, time waiting, calls 0) to by_function
+    end
     say "" to the error output
     say "  own time        calls  function" to the error output
     set by_function to by_function in reverse order by calls # so the same time goes by calls
     for each f in by_function in reverse order by time
         set named to name of f
-        if named is ""
+        set called to "" + calls of f
+        if named is nothing
+            set named to "(waiting for events)"
+            set called to ""
+        else if named is ""
             set named to "(the program)"
         end
-        say "  " + padded(seconds_of(time of f), 8) + " " + padded(share_of(time of f, total), 6) + " " + padded("" + calls of f, 7) + "  " + named to the error output
+        say "  " + padded(seconds_of(time of f), 8) + " " + padded(share_of(time of f, total), 6) + " " + padded(called, 7) + "  " + named to the error output
     end
     set by_line to empty list
     for each key in runs
