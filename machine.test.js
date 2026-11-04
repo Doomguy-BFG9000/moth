@@ -1021,7 +1021,8 @@ test("moth.exe finds the problems the checker finds without running the program"
     ["module.moth", `use "lib.moth" as lib\nsay lib's twice(2)\nsay lib's thrice(2)\n`, 1],
     ["plain.moth", 'use "lib.moth"\nsay twice(lib_x)\nsay thrice(1)\n', 1],
     ["sums.moth", 'set name to "Moth"\nsay name * 2\nsay 1 / 0\nsay length of 5\nrepeat "x" times\nend\nset l to list of 1\nsay item 0 of l\n', 1],
-    ...TYPED.map((source, i) => [`typed${i}.moth`, source, 1]),
+    // what each ends with is the checker's: TYPED[4] and TYPED[6] are right as they are (see moth.test.js)
+    ...TYPED.map((source, i) => [`typed${i}.moth`, source, wrongIn(checkedBy(`typed${i}.moth`, source))]),
   ];
   writeFileSync(join(sub, "lib.moth"), lib);
   for (const [name, source] of cases) writeFileSync(join(sub, name), source);

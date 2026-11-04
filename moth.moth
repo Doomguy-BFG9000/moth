@@ -193,6 +193,10 @@ to cli_files_of with cli_names, cli_texts
     return cli_made
 end
 
+# the text of each file an editor has open, by its path, which moth lsp keeps (see cli_lsp_handle): read in
+# place of the file on the disk, so a change not yet saved counts
+set cli_open_texts to empty dictionary
+
 # every file the program uses, and the files those use, by the names their `use` lines give: beside the file
 # that uses it, or else, for one of the standard library's (json.moth, math.moth and the rest), moth's own
 # copy. A file that's neither is left out: compile_machine says there is no file called that, at the line
@@ -208,10 +212,14 @@ to cli_sources_of with cli_path, cli_source
         add 1 to cli_k
         if not (cli_name is in cli_names)
             set cli_text to nothing
-            try
-                set cli_text to read cli_folder + cli_name
-            if it fails
-                set cli_text to standard's standard_text(cli_name)
+            if (cli_folder + cli_name) is in cli_open_texts
+                set cli_text to item (cli_folder + cli_name) of cli_open_texts
+            else
+                try
+                    set cli_text to read cli_folder + cli_name
+                if it fails
+                    set cli_text to standard's standard_text(cli_name)
+                end
             end
             if cli_text is not nothing
                 add cli_name to cli_names
@@ -1192,7 +1200,15 @@ to cli_new_state
     return record with found empty list, made empty dictionary, used empty dictionary, scopes 0, sources empty dictionary,
         sure empty dictionary, said empty dictionary, mode "sure", checks empty list, defines empty dictionary,
         declared empty dictionary, gives empty list, kinds empty dictionary, makers empty dictionary, fields_set empty dictionary,
-        unknown_kinds empty dictionary, rulebook cli_rules()
+        unknown_kinds empty dictionary, rulebook cli_rules(), places empty dictionary
+end
+
+# Where a variable, an input or what a function gives is made, so moth lsp can say its type once they're all
+# worked out: its file, line and column, and what it is there ("set", "input w" or "gives"), to its key.
+to cli_note_place with cli_state, cli_at, cli_what, cli_key
+    if cli_key is not nothing
+        set item (file of cli_at + ":" + line of cli_at + ":" + col of cli_at + " " + cli_what) of (places of cli_state) to cli_key
+    end
 end
 
 # a problem found: where it is, what kind it is ("fails", "doesn't fit", "never runs" or "unused"), and what to say
@@ -1272,6 +1288,9 @@ to cli_check_function with cli_state, cli_outer, cli_name, cli_params, cli_body,
         end
         set cli_key to cli_key_for(cli_frame, item cli_k of cli_params)
         cli_add_source(cli_state, cli_key, record with how "fixed", type cli_type)
+        if cli_def is not nothing
+            cli_note_place(cli_state, at of cli_def, "input " + lowercase of item cli_k of cli_params, cli_key)
+        end
         if cli_def is not nothing and types of cli_def is not nothing
             if item cli_k of types of cli_def is not nothing
                 set item cli_key of (declared of cli_state) to record with words item cli_k of types of cli_def, at at of cli_def
@@ -2010,6 +2029,7 @@ to cli_check_statement with cli_state, cli_frame, cli_s
         cli_check_expr(cli_state, cli_frame, value of cli_s)
         set cli_key to cli_key_for(cli_frame, name of cli_s)
         cli_add_source(cli_state, cli_key, record with how "expr", frame cli_frame, e value of cli_s)
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
         cli_made_name(cli_state, cli_key, at of cli_s, "'" + name of cli_s + "' is set but never used")
     else if cli_what is "add"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
@@ -2036,12 +2056,16 @@ to cli_check_statement with cli_state, cli_frame, cli_s
     else if cli_what is "count"
         cli_check_expr(cli_state, cli_frame, start of cli_s)
         cli_check_expr(cli_state, cli_frame, limit of cli_s)
-        cli_add_source(cli_state, cli_key_for(cli_frame, name of cli_s), record with how "fixed", type "number")
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "fixed", type "number")
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
         cli_rule(cli_state, cli_frame, at of cli_s, "count", empty list, (list of start of cli_s, limit of cli_s))
         cli_check_block(cli_state, cli_frame, body of cli_s)
     else if cli_what is "each"
         cli_check_expr(cli_state, cli_frame, over of cli_s)
-        cli_add_source(cli_state, cli_key_for(cli_frame, name of cli_s), record with how "each", frame cli_frame, e over of cli_s)
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "each", frame cli_frame, e over of cli_s)
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
         cli_rule(cli_state, cli_frame, at of cli_s, "each", empty list, (list of over of cli_s))
         cli_check_block(cli_state, cli_frame, body of cli_s)
     else if cli_what is "define"
@@ -2070,6 +2094,7 @@ to cli_check_statement with cli_state, cli_frame, cli_s
             set item (name of cli_s) of (makers of cli_state) to made_kind of cli_s
         end
         set cli_inner to cli_check_function(cli_state, cli_frame, name of cli_s, params of cli_s, body of cli_s, order of cli_s, cli_s)
+        cli_note_place(cli_state, at of cli_s, "gives", return_key of cli_inner)
         set cli_defines to defines of cli_state
         if not (cli_key is in cli_defines)
             set item cli_key of cli_defines to empty list
@@ -2249,6 +2274,11 @@ end
 
 # every problem in a program's tree (the parser's, with the files it uses in place)
 to cli_problems_in with cli_body
+    return cli_sorted_problems(found of cli_checked(cli_body))
+end
+
+# the checker's state once it has checked a program's tree: what it found, and the type of every variable
+to cli_checked with cli_body
     set cli_state to cli_new_state()
     cli_check_function(cli_state, nothing, "main", empty list, cli_body, 0, nothing)
     # every variable's type: again until nothing changes, first from what's sure, then with what the code says
@@ -2319,7 +2349,7 @@ to cli_problems_in with cli_body
             cli_note_problem(cli_state, at of cli_entry, "unused", message of cli_entry)
         end
     end
-    return cli_sorted_problems(found of cli_state)
+    return cli_state
 end
 
 # every problem in a program, with the files it uses in place
@@ -2552,9 +2582,9 @@ end
 
 # ----- problems -----
 
-# what each problem kind is to an editor: 1 an error, 2 a warning
+# what each problem kind is to an editor: 1 an error (what makes moth check end with 1), 2 a warning
 to cli_lsp_severity with cli_kind
-    if cli_kind is "fails" or cli_kind is "error"
+    if cli_kind is "fails" or cli_kind is "error" or cli_kind is "doesn't fit"
         return 1
     end
     return 2
@@ -2574,22 +2604,18 @@ end
 # running is shown on the line that uses that file; the file's other problems show when it's opened itself.
 to cli_lsp_problems with cli_path, cli_source
     set cli_lines to split cli_source by "\n"
-    set cli_used to cli_sources_of(cli_path, cli_source)
+    set cli_known to cli_lsp_known(cli_path, cli_source)
     set cli_out to empty list
-    try
-        set cli_problems to cli_problems_of(cli_source, names of cli_used, texts of cli_used)
-    if it fails with cli_why
-        if not cli_is_problem(cli_why)
-            fail with cli_why
-        end
-        set cli_at to at of cli_why
+    if why of cli_known is not nothing # code that can't be read: its first mistake, as moth check says it
+        set cli_at to at of why of cli_known
         if file of cli_at is ""
-            add cli_lsp_diagnostic(cli_lines, line of cli_at, col of cli_at, "error", reason of cli_why) to cli_out
+            add cli_lsp_diagnostic(cli_lines, line of cli_at, col of cli_at, "error", reason of why of cli_known) to cli_out
         else
-            add cli_lsp_used_problem(cli_lines, file of cli_at, line of cli_at, col of cli_at, "error", reason of cli_why) to cli_out
+            add cli_lsp_used_problem(cli_lines, file of cli_at, line of cli_at, col of cli_at, "error", reason of why of cli_known) to cli_out
         end
         return cli_out
     end
+    set cli_problems to cli_sorted_problems(found of cli_lsp_state(cli_known))
     for each cli_p in cli_problems
         if file of cli_p is ""
             add cli_lsp_diagnostic(cli_lines, line of cli_p, col of cli_p, kind of cli_p, message of cli_p) to cli_out
@@ -2626,17 +2652,124 @@ end
 # (the file, "" for the document's own, and the line and column of its `to`, `kind`, `set`...), and the
 # lines it covers.
 
-# the program's tree, with the files it uses in place, or nothing if it can't be read
-to cli_lsp_tree with cli_path, cli_source
+# What moth knows of each document, by its path, kept while its text and the texts of the files it uses stay
+# the same, so the outline, a hover and the problems after one change read the program once: see cli_lsp_known.
+set cli_lsp_kept to empty dictionary
+
+# What moth knows of a document: a record with source and used (what it was worked out from), why (the first
+# mistake that stops the code being read as it is, or nothing), tree (the program's tree, with the files it
+# uses in place, or nothing), and state (the checker's, once something wants it: see cli_lsp_state).
+to cli_lsp_known with cli_path, cli_source
     set cli_used to cli_sources_of(cli_path, cli_source)
-    try
-        return machine's read_program(cli_source, cli_files_of(names of cli_used, texts of cli_used))
-    if it fails with cli_why
-        if not cli_is_problem(cli_why)
-            fail with cli_why
+    if cli_path is in cli_lsp_kept
+        set cli_kept to item cli_path of cli_lsp_kept
+        if cli_lsp_same(cli_kept, cli_source, cli_used)
+            return cli_kept
         end
     end
-    return nothing
+    set cli_read to cli_lsp_read_tree(cli_source, cli_used)
+    set cli_kept to record with source cli_source, used cli_used, why why of cli_read, tree tree of cli_read, state nothing
+    set item cli_path of cli_lsp_kept to cli_kept
+    return cli_kept
+end
+
+# whether what's kept was worked out from this text, and these files with these texts
+to cli_lsp_same with cli_kept, cli_source, cli_used
+    if source of cli_kept is not cli_source or length of names of used of cli_kept is not length of names of cli_used
+        return no
+    end
+    for each cli_k from 1 to length of names of cli_used
+        if item cli_k of names of used of cli_kept is not item cli_k of names of cli_used
+            return no
+        end
+        if item cli_k of texts of used of cli_kept is not item cli_k of texts of cli_used
+            return no
+        end
+    end
+    return yes
+end
+
+# The checker's state for a document, its problems and the type of each variable, or nothing if its tree
+# couldn't be read; checked once, the first time it's wanted
+to cli_lsp_state with cli_kept
+    if state of cli_kept is nothing and tree of cli_kept is not nothing
+        set state of cli_kept to cli_checked(tree of cli_kept)
+    end
+    return state of cli_kept
+end
+
+# A program's tree, from code that's being typed: a record with why (the first mistake that stopped it being
+# read as it is, or nothing) and tree. Code often can't be read for a moment as it's typed, so each time it
+# can't, the line with the mistake is left out (made empty, so the lines after it keep their numbers; for a
+# mistake at the end of the code, the last line with something on it), or a block left open is ended at the
+# end, and it's read again, a few times at most. The outline, hovers and completion then still know the rest.
+to cli_lsp_read_tree with cli_source, cli_used
+    set cli_files to cli_files_of(names of cli_used, texts of cli_used)
+    set cli_lines to split cli_source by "\n"
+    set cli_first_why to nothing
+    set cli_last_mark to ""
+    repeat 12 times
+        set cli_text to join cli_lines with "\n"
+        set cli_tree to nothing
+        set cli_wrong to nothing
+        try
+            set cli_tree to machine's read_program(cli_text, cli_files)
+        if it fails with cli_why
+            if not cli_is_problem(cli_why)
+                fail with cli_why
+            end
+            set cli_wrong to cli_why
+        end
+        if cli_wrong is nothing
+            return record with why cli_first_why, tree cli_tree
+        end
+        if cli_first_why is nothing
+            set cli_first_why to cli_wrong
+        end
+        if file of at of cli_wrong is not "" # a mistake in a file it uses, which isn't the editor's to mend
+            return record with why cli_first_why, tree nothing
+        end
+        set cli_mark to line of at of cli_wrong + ":" + col of at of cli_wrong + ":" + reason of cli_wrong
+        if cli_finishes_with(reason of cli_wrong, "is missing its 'end'")
+            add "end" to cli_lines
+        else
+            set cli_n to line of at of cli_wrong
+            if cli_n is greater than length of cli_lines
+                set cli_n to length of cli_lines
+            else if cli_mark is not cli_last_mark and cli_lsp_starts_line(item cli_n of cli_lines, col of at of cli_wrong)
+                # A mistake at the start of a line is most often the line before's, left unfinished: `set x to`,
+                # then a line that isn't the value it waits for. That line's left out first; if the mistake is
+                # still here then, it's this line's own.
+                if not cli_begins_with(reason of cli_wrong, "a line can't start with")
+                    set cli_n to cli_n - 1
+                    repeat while cli_n is at least 1 and cli_trimmed(item cli_n of cli_lines) is ""
+                        set cli_n to cli_n - 1
+                    end
+                    if cli_n is less than 1
+                        set cli_n to line of at of cli_wrong
+                    end
+                end
+            end
+            repeat while cli_n is at least 1 and cli_trimmed(item cli_n of cli_lines) is ""
+                set cli_n to cli_n - 1
+            end
+            if cli_n is less than 1
+                return record with why cli_first_why, tree nothing
+            end
+            set item cli_n of cli_lines to ""
+        end
+        set cli_last_mark to cli_mark
+    end
+    return record with why cli_first_why, tree nothing
+end
+
+# whether a column of a line, counted from 1 as JavaScript counts them, is its first that isn't a space
+to cli_lsp_starts_line with cli_text, cli_col
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and (item cli_k of cli_text is " " or item cli_k of cli_text is "\t")
+        add 1 to cli_k
+    end
+    return cli_lsp_char_at(cli_text, cli_col) is cli_k
 end
 
 # what a define is called where it's written: dog's speak is speak, in the kind dog
@@ -2810,7 +2943,7 @@ end
 
 # the outline: each function, kind and variable the document makes, functions inside the ones they're made in
 to cli_lsp_symbols with cli_path, cli_source
-    set cli_tree to cli_lsp_tree(cli_path, cli_source)
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
     if cli_tree is nothing
         return empty list
     end
@@ -2910,7 +3043,7 @@ to cli_lsp_meaning with cli_path, cli_source, cli_line, cli_char
     if cli_named is nothing
         return nothing
     end
-    set cli_tree to cli_lsp_tree(cli_path, cli_source)
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
     if cli_tree is nothing
         return nothing
     end
@@ -2940,6 +3073,15 @@ to cli_lsp_meaning with cli_path, cli_source, cli_line, cli_char
             end
         end
     end
+    if cli_best is nothing and cli_full is nothing # a kind's own function, on the line that makes it
+        for each cli_m in cli_made
+            if what of cli_m is "method" and file of cli_m is "" and line of cli_m is cli_line + 1
+                if lowercase of cli_lsp_own_name(name of cli_m) is cli_want
+                    set cli_best to cli_m
+                end
+            end
+        end
+    end
     return cli_best
 end
 
@@ -2961,10 +3103,14 @@ to cli_lsp_scope_depth with cli_lines, cli_m, cli_line
     return col of at of cli_d
 end
 
-# where a thing is made, as the protocol has a place in a file
+# Where a thing is made, as the protocol has a place in a file; or nothing for one made in a file of the
+# standard library's that's moth's own copy, which isn't on the disk for the editor to open
 to cli_lsp_location with cli_uri, cli_path, cli_source, cli_m
     set cli_uri_of to cli_uri
     if file of cli_m is not ""
+        if not cli_lsp_on_disk(cli_folder_of(cli_path) + file of cli_m)
+            return nothing
+        end
         set cli_uri_of to cli_lsp_uri(cli_folder_of(cli_path) + file of cli_m)
     end
     set cli_lines to split cli_lsp_file_text(cli_path, cli_source, file of cli_m) by "\n"
@@ -2993,26 +3139,102 @@ to cli_lsp_comment_above with cli_lines, cli_n
     return cli_said
 end
 
-# what a name is, for a hover: how it's made, in Moth, and the comment above it
+# whether a file is there to open: one the editor has open, or one on the disk
+to cli_lsp_on_disk with cli_path
+    if cli_path is in cli_open_texts
+        return yes
+    end
+    try
+        return length of (read cli_path) is at least 0
+    if it fails
+        return no
+    end
+end
+
+# A type as a hover says it ("a number", "yes or no", "a list of dogs", "a dog or nothing"), or nothing if
+# it isn't known
+to cli_lsp_type_words with cli_t
+    if cli_t is nothing or cli_t is "?"
+        return nothing
+    end
+    if cli_begins_with(cli_t, "maybe:")
+        set cli_inner to cli_lsp_type_words(cli_tail(cli_t, 7))
+        if cli_inner is nothing
+            return nothing
+        end
+        return cli_inner + " or nothing"
+    end
+    if cli_t is "yes/no"
+        return "yes or no"
+    end
+    return cli_described(cli_t)
+end
+
+# What the checker worked out a thing holds, as words, or nothing if that isn't known: a variable's value
+# ("set"), an input's ("input w"), or what a function gives ("gives"). What the code says of itself counts.
+to cli_lsp_type_of with cli_known, cli_m, cli_what
+    return cli_lsp_type_words(cli_lsp_raw_type(cli_known, cli_m, cli_what))
+end
+
+# the same, as the checker writes a type: "number", "record:dog", "list:text"..., or nothing
+to cli_lsp_raw_type with cli_known, cli_m, cli_what
+    set cli_state to cli_lsp_state(cli_known)
+    if cli_state is nothing
+        return nothing
+    end
+    set cli_place to file of cli_m + ":" + line of cli_m + ":" + col of cli_m + " " + cli_what
+    if not (cli_place is in places of cli_state)
+        return nothing
+    end
+    set cli_key to item cli_place of places of cli_state
+    set cli_t to nothing
+    if cli_key is in said of cli_state
+        set cli_t to item cli_key of said of cli_state
+    end
+    if (cli_t is nothing or cli_t is "?") and cli_key is in sure of cli_state
+        set cli_t to item cli_key of sure of cli_state
+    end
+    return cli_t
+end
+
+# What a name is, for a hover: a variable or an input, with what it holds where that's known; or how a
+# function or a kind is made, in Moth, with what it takes and gives, and the comment above it
 to cli_lsp_hover_text with cli_path, cli_source, cli_m
+    set cli_known to cli_lsp_known(cli_path, cli_source)
     set cli_lines to split cli_lsp_file_text(cli_path, cli_source, file of cli_m) by "\n"
     set cli_code to ""
     set cli_d to define of cli_m
+    set cli_in to ""
+    if file of cli_m is not ""
+        set cli_in to " of " + file of cli_m
+    end
     if what of cli_m is "input"
-        set cli_code to name of cli_m + ", an input of '" + name of cli_d + "'"
+        set cli_said to nothing
         for each cli_k from 1 to length of params of cli_d
             if lowercase of item cli_k of params of cli_d is lowercase of name of cli_m
                 if types of cli_d is not nothing and item cli_k of types of cli_d is not nothing
-                    set cli_code to cli_code + ", " + item cli_k of types of cli_d
+                    set cli_said to item cli_k of types of cli_d
                 else if item cli_k of kinds of cli_d is at least 0
-                    set cli_code to cli_code + ", " + item (item cli_k of kinds of cli_d + 1) of cli_kind_words
+                    set cli_said to item (item cli_k of kinds of cli_d + 1) of cli_kind_words
                 end
             end
+        end
+        if cli_said is nothing
+            set cli_said to cli_lsp_type_of(cli_known, cli_m, "input " + lowercase of name of cli_m)
+        end
+        set cli_code to "`" + name of cli_m + "`, an input of `" + name of cli_d + "`"
+        if cli_said is not nothing
+            set cli_code to cli_code + ": " + cli_said
         end
         return cli_code
     end
     if what of cli_m is "variable"
-        return name of cli_m + ", a variable, first set on line " + line of cli_m
+        set cli_code to "`" + name of cli_m + "`, a variable"
+        set cli_holds_now to cli_lsp_type_of(cli_known, cli_m, "set")
+        if cli_holds_now is not nothing
+            set cli_code to cli_code + ": " + cli_holds_now
+        end
+        return cli_code + "\n\nFirst set on line " + line of cli_m + cli_in + "."
     end
     set cli_sig to cli_lsp_signature(cli_d)
     if what of cli_m is "kind"
@@ -3024,12 +3246,110 @@ to cli_lsp_hover_text with cli_path, cli_source, cli_m
         set cli_code to cli_code + " " + cli_sig
     end
     set cli_said to "```moth\n" + cli_code + "\n```"
+    if what of cli_m is not "kind" and gives of cli_d is nothing # what it gives, as the checker works it out
+        set cli_gives to cli_lsp_type_of(cli_known, cli_m, "gives")
+        if cli_gives is not nothing
+            set cli_said to cli_said + "\n\nGives " + cli_gives + "."
+        end
+    end
     set cli_comment to cli_lsp_comment_above(cli_lines, line of cli_m)
     if cli_comment is not ""
         set cli_said to cli_said + "\n\n" + cli_comment
     end
     if file of cli_m is not ""
         set cli_said to cli_said + "\n\nIn " + file of cli_m + ", line " + line of cli_m + "."
+    end
+    return cli_said
+end
+
+# ----- the files a document uses -----
+
+# what a `use` line names: a record with file (the path, from the folder of the file that uses it), called (the
+# name it's used as, or nothing), and from and upto (the characters of the line its name in quotes is at),
+# or nothing for a line that isn't a use line
+to cli_lsp_use_line with cli_text
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and (item cli_k of cli_text is " " or item cli_k of cli_text is "\t")
+        add 1 to cli_k
+    end
+    set cli_rest to cli_tail(cli_text, cli_k)
+    set cli_package to no
+    if cli_begins_with(cli_rest, "use the package \"")
+        set cli_package to yes
+        add 17 to cli_k
+    else if cli_begins_with(cli_rest, "use \"")
+        add 5 to cli_k
+    else
+        return nothing
+    end
+    set cli_from to cli_k
+    repeat while cli_k is at most length of cli_text and item cli_k of cli_text is not "\""
+        add 1 to cli_k
+    end
+    if cli_k is greater than length of cli_text
+        return nothing
+    end
+    set cli_name to ""
+    if cli_k is greater than cli_from
+        set cli_name to items cli_from to (cli_k - 1) of cli_text
+    end
+    set cli_upto to cli_k - 1
+    set cli_as to nothing
+    set cli_after to cli_trimmed(cli_tail(cli_text, cli_k + 1))
+    if cli_begins_with(cli_after, " as ")
+        set cli_as to cli_trimmed_front(cli_tail(cli_after, 5))
+        set cli_cut to position of "#" in cli_as
+        if cli_cut is greater than 0
+            set cli_as to cli_trimmed(cli_first(cli_as, cli_cut - 1))
+        end
+    end
+    set cli_file to cli_name
+    if cli_package
+        set cli_file to "packages/" + cli_name + "/" + cli_name + ".moth"
+    end
+    return record with file cli_file, called cli_as, from cli_from, upto cli_upto
+end
+
+# The file a position names: on the name in quotes of a `use` line, or on the name a file is used as
+# (shapes, in shapes's area): a record with path and text (the use line), or nothing
+to cli_lsp_used_at with cli_path, cli_lines, cli_line, cli_char
+    set cli_named to cli_lsp_name_at(cli_lines, cli_line, cli_char)
+    for each cli_k from 1 to length of cli_lines
+        set cli_text to cli_lsp_line(cli_lines, cli_k)
+        set cli_use to cli_lsp_use_line(cli_text)
+        if cli_use is not nothing
+            set cli_on to no
+            if cli_k is cli_line + 1
+                set cli_at to cli_lsp_char_at(cli_text, cli_char + 1)
+                set cli_on to cli_at is at least from of cli_use and cli_at is at most upto of cli_use + 1
+            end
+            if not cli_on and cli_named is not nothing and owner of cli_named is nothing and called of cli_use is not nothing
+                set cli_on to lowercase of word of cli_named is lowercase of called of cli_use
+            end
+            if cli_on
+                return record with path cli_folder_of(cli_path) + file of cli_use, file file of cli_use, text cli_trimmed(cli_trimmed_front(cli_text))
+            end
+        end
+    end
+    return nothing
+end
+
+# the comment a file starts with, its first paragraph, as what it's for
+to cli_lsp_file_comment with cli_text
+    set cli_said to ""
+    for each cli_line in split cli_text by "\n"
+        set cli_rest to cli_trimmed(cli_trimmed_front(cli_line))
+        if not cli_begins_with(cli_rest, "#")
+            return cli_said
+        end
+        set cli_words to cli_trimmed_front(cli_tail(cli_rest, 2))
+        if cli_words is "" and cli_said is not ""
+            return cli_said
+        end
+        if cli_said is not "" and cli_words is not ""
+            add " " to cli_said
+        end
+        add cli_words to cli_said
     end
     return cli_said
 end
@@ -3057,7 +3377,7 @@ to cli_lsp_completions with cli_path, cli_source, cli_line, cli_char
         end
         set cli_owner to lowercase of (items cli_o to (cli_k - 3) of cli_before)
     end
-    set cli_tree to cli_lsp_tree(cli_path, cli_source)
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
     set cli_made to empty list
     if cli_tree is not nothing
         cli_lsp_made(cli_tree, nothing, cli_made, empty dictionary)
@@ -3082,10 +3402,67 @@ to cli_lsp_completions with cli_path, cli_source, cli_line, cli_char
             add cli_item to cli_out
         end
     end
+    if cli_owner is not nothing and length of cli_out is 0 # x's, for x a record a kind makes: what the kind has
+        set cli_at to cli_width_of(cli_first(cli_before, cli_o - 1))
+        set cli_m to cli_lsp_meaning(cli_path, cli_source, cli_line, cli_at)
+        if cli_m is not nothing and (what of cli_m is "variable" or what of cli_m is "input")
+            set cli_what_it_is to "set"
+            if what of cli_m is "input"
+                set cli_what_it_is to "input " + lowercase of name of cli_m
+            end
+            set cli_known to cli_lsp_known(cli_path, cli_source)
+            set cli_t to cli_lsp_raw_type(cli_known, cli_m, cli_what_it_is)
+            if cli_t is not nothing and cli_begins_with(cli_t, "maybe:")
+                set cli_t to cli_tail(cli_t, 7)
+            end
+            if cli_t is not nothing and cli_begins_with(cli_t, "record:")
+                for each cli_item in cli_lsp_kind_has(cli_lsp_state(cli_known), cli_tail(cli_t, 8), cli_made)
+                    add cli_item to cli_out
+                end
+            end
+        end
+    end
     if cli_owner is nothing
         for each cli_w in cli_lsp_words
             add (dictionary where "label" is cli_w, "kind" is 14) to cli_out
         end
+    end
+    return cli_out
+end
+
+# what a record the kind makes has, for completion: each input of the kind (and of the kind it's made from)
+# as a field, and each of its functions, with what it takes
+to cli_lsp_kind_has with cli_state, cli_name, cli_made
+    set cli_out to empty list
+    if cli_state is nothing
+        return cli_out
+    end
+    set cli_seen to empty dictionary
+    set cli_kind to cli_kind_named(cli_state, cli_name)
+    set cli_from to cli_name
+    set cli_steps to 0
+    repeat while cli_kind is not nothing and cli_steps is less than 20
+        for each cli_p in params of define of cli_kind
+            if not (lowercase of cli_p is in cli_seen)
+                set item (lowercase of cli_p) of cli_seen to yes
+                add (dictionary where "label" is cli_p, "kind" is 5) to cli_out
+            end
+        end
+        for each cli_own in owns of cli_kind
+            if not (lowercase of cli_own is in cli_seen)
+                set item (lowercase of cli_own) of cli_seen to yes
+                set cli_item to dictionary where "label" is cli_own, "kind" is 2
+                for each cli_m in cli_made
+                    if lowercase of name of cli_m is lowercase of (cli_from + "'s " + cli_own) and define of cli_m is not nothing
+                        set item "detail" of cli_item to cli_lsp_signature(define of cli_m)
+                    end
+                end
+                add cli_item to cli_out
+            end
+        end
+        set cli_from to cli_parent_kind(cli_state, cli_kind)
+        set cli_kind to cli_kind_named(cli_state, cli_from)
+        add 1 to cli_steps
     end
     return cli_out
 end
@@ -3111,6 +3488,11 @@ to cli_lsp_handle with cli_state, cli_msg
     set cli_uri to cli_lsp_get(cli_doc, "uri")
     set cli_docs to docs of cli_state
     if cli_method is "initialize"
+        # an editor that finds the problems itself (the VS Code extension, with Moth's engine) can ask for none
+        set cli_options to cli_lsp_get(cli_params, "initializationOptions")
+        if cli_lsp_get(cli_options, "diagnostics") is no
+            set publish of cli_state to no
+        end
         set cli_sync to dictionary where "openClose" is yes, "change" is 1, "save" is yes
         set cli_can to dictionary where "textDocumentSync" is cli_sync, "documentFormattingProvider" is yes, "documentSymbolProvider" is yes,
             "definitionProvider" is yes, "hoverProvider" is yes, "completionProvider" is (dictionary where "triggerCharacters" is (list of "'"))
@@ -3119,23 +3501,18 @@ to cli_lsp_handle with cli_state, cli_msg
         set down of cli_state to yes
         cli_lsp_reply(cli_id, nothing)
     else if cli_method is "textDocument/didOpen"
-        set item cli_uri of cli_docs to item "text" of cli_doc
-        cli_lsp_publish(cli_uri, item cli_uri of cli_docs)
+        cli_lsp_keep(cli_state, cli_uri, item "text" of cli_doc)
     else if cli_method is "textDocument/didChange"
         set cli_changes to item "contentChanges" of cli_params
         if length of cli_changes is greater than 0
-            set item cli_uri of cli_docs to item "text" of item (length of cli_changes) of cli_changes
+            cli_lsp_keep(cli_state, cli_uri, item "text" of item (length of cli_changes) of cli_changes)
         end
-        cli_lsp_publish(cli_uri, item cli_uri of cli_docs)
     else if cli_method is "textDocument/didSave"
-        if cli_uri is in cli_docs
+        if cli_uri is in cli_docs and publish of cli_state
             cli_lsp_publish(cli_uri, item cli_uri of cli_docs)
         end
     else if cli_method is "textDocument/didClose"
-        if cli_uri is in cli_docs
-            remove cli_uri from cli_docs
-        end
-        cli_lsp_publish(cli_uri, nothing)
+        cli_lsp_keep(cli_state, cli_uri, nothing)
     else if cli_id is not nothing and cli_method is not nothing and cli_begins_with(cli_method, "textDocument/") and cli_uri is not nothing
         set cli_source to nothing
         if cli_uri is in cli_docs
@@ -3168,17 +3545,36 @@ to cli_lsp_handle with cli_state, cli_msg
             cli_lsp_reply(cli_id, cli_lsp_symbols(cli_path, cli_source))
         else if cli_method is "textDocument/definition"
             set cli_m to cli_lsp_meaning(cli_path, cli_source, item "line" of cli_place, item "character" of cli_place)
+            set cli_file to nothing
             if cli_m is nothing
-                cli_lsp_reply(cli_id, nothing)
-            else
+                set cli_file to cli_lsp_used_at(cli_path, (split cli_source by "\n"), item "line" of cli_place, item "character" of cli_place)
+            end
+            if cli_m is not nothing
                 cli_lsp_reply(cli_id, cli_lsp_location(cli_uri, cli_path, cli_source, cli_m))
+            else if cli_file is not nothing and cli_lsp_on_disk(path of cli_file) # the file itself, from its start
+                cli_lsp_reply(cli_id, dictionary where "uri" is cli_lsp_uri(path of cli_file), "range" is cli_lsp_range(0, 0, 0, 0))
+            else
+                cli_lsp_reply(cli_id, nothing)
             end
         else if cli_method is "textDocument/hover"
             set cli_m to cli_lsp_meaning(cli_path, cli_source, item "line" of cli_place, item "character" of cli_place)
-            if cli_m is nothing
+            set cli_said to nothing
+            if cli_m is not nothing
+                set cli_said to cli_lsp_hover_text(cli_path, cli_source, cli_m)
+            else
+                set cli_file to cli_lsp_used_at(cli_path, (split cli_source by "\n"), item "line" of cli_place, item "character" of cli_place)
+                if cli_file is not nothing # the use line, and what the file says it's for
+                    set cli_said to "```moth\n" + text of cli_file + "\n```"
+                    set cli_about to cli_lsp_file_comment(cli_lsp_file_text(cli_path, cli_source, file of cli_file))
+                    if cli_about is not ""
+                        set cli_said to cli_said + "\n\n" + cli_about
+                    end
+                end
+            end
+            if cli_said is nothing
                 cli_lsp_reply(cli_id, nothing)
             else
-                set cli_shown to dictionary where "kind" is "markdown", "value" is cli_lsp_hover_text(cli_path, cli_source, cli_m)
+                set cli_shown to dictionary where "kind" is "markdown", "value" is cli_said
                 cli_lsp_reply(cli_id, dictionary where "contents" is cli_shown)
             end
         else if cli_method is "textDocument/completion"
@@ -3196,9 +3592,52 @@ to cli_lsp_unknown with cli_id, cli_method
     cli_lsp_send(dictionary where "jsonrpc" is "2.0", "id" is cli_id, "error" is cli_error)
 end
 
+# A document's text as the editor has it now, or nothing once it's closed: kept, read in place of the file by
+# the documents that use it, and its problems said again, and theirs, as they may have changed with it
+to cli_lsp_keep with cli_state, cli_uri, cli_text
+    set cli_docs to docs of cli_state
+    set cli_path to cli_lsp_path(cli_uri)
+    if cli_text is nothing
+        if cli_uri is in cli_docs
+            remove cli_uri from cli_docs
+        end
+        if cli_path is in cli_open_texts
+            remove cli_path from cli_open_texts
+        end
+        if cli_path is in cli_lsp_kept
+            remove cli_path from cli_lsp_kept
+        end
+    else
+        set item cli_uri of cli_docs to cli_text
+        set item cli_path of cli_open_texts to cli_text
+    end
+    if not publish of cli_state
+        return nothing
+    end
+    cli_lsp_publish(cli_uri, cli_text)
+    for each cli_other in cli_docs
+        if cli_other is not cli_uri and cli_lsp_uses(cli_lsp_path(cli_other), cli_path)
+            cli_lsp_publish(cli_other, item cli_other of cli_docs)
+        end
+    end
+end
+
+# whether the document at one path used the file at another, when its problems were last found
+to cli_lsp_uses with cli_path, cli_used_path
+    if not (cli_path is in cli_lsp_kept)
+        return no
+    end
+    for each cli_name in names of used of item cli_path of cli_lsp_kept
+        if cli_folder_of(cli_path) + cli_name is cli_used_path
+            return yes
+        end
+    end
+    return no
+end
+
 # `moth lsp`: messages answered until the editor says exit: 0 if it said shutdown first, as the protocol has it
 to cli_lsp
-    set cli_state to record with docs empty dictionary, down no
+    set cli_state to record with docs empty dictionary, down no, publish yes
     repeat while yes
         set cli_msg to cli_lsp_read()
         if cli_msg is nothing

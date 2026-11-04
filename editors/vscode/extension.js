@@ -1,10 +1,14 @@
-// Moth in VS Code. The colours are syntaxes/moth.tmLanguage.json's; this adds problems as you type, from
-// Moth's own checker, with a fix where it has one; Format Document, as moth tidy writes code; each function
-// in the outline, and Go to Definition for one; and Run, Debug and Build, which start moth on the file.
+// Moth in VS Code. The colours are syntaxes/moth.tmLanguage.json's. This adds problems as you type, from Moth's
+// own checker, with a fix where it has one, and Format Document, as moth tidy writes code: both from Moth's
+// engine, built into the extension, so they need nothing else. Where moth is installed, Moth's language server
+// (`moth lsp`, client.js starts it) gives the outline, Go to Definition, in the file or one it uses, what a name
+// is when the pointer is on it, and what can come next as you type; without it, the outline and Go to Definition
+// find the file's functions by their lines. Run, Debug and Build start moth on the file.
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
+const { startServer } = require("./client.js");
 
 // Moth's engine, the one the playground runs: copied into engine/ when the extension is packaged (see
 // make-vsix.mjs), or the repository's own while it's worked on there
@@ -33,7 +37,7 @@ function filesFor(document) {
   };
 }
 
-const SEVERE = new Set(["error", "fails"]); // red, as the playground shows them; the others are warnings
+const SEVERE = new Set(["error", "fails", "doesn't fit"]); // red: what makes moth check end with 1; the others are warnings
 
 // where a problem is: the word at its column, or the one character there
 function rangeAt(document, line, col) {
@@ -67,7 +71,8 @@ async function problemsOf(document) {
 }
 
 // Each function a document makes, `to name with ...` up to its `end`, the functions made inside it among
-// its children: found by their lines, so it works on code with a mistake in it too
+// its children: found by their lines, so it works on code with a mistake in it too. What the outline is
+// when there's no language server.
 function functionsIn(document) {
   const top = [];
   const open = []; // the functions not ended yet, innermost last
@@ -93,6 +98,95 @@ function functionsIn(document) {
 
 const allOf = (symbols) => symbols.flatMap((s) => [s, ...allOf(s.children)]);
 
+// ---------- what the language server says, as VS Code has it ----------
+// The protocol counts its kinds of symbol and of completion from 1, VS Code's enums from 0.
+
+const rangeOf = (r) => new vscode.Range(new vscode.Position(r.start.line, r.start.character), new vscode.Position(r.end.line, r.end.character));
+const placeOf = (p) => ({ line: p.line, character: p.character });
+function symbolOf(s) {
+  const symbol = new vscode.DocumentSymbol(s.name, s.detail ?? "", Math.max((s.kind ?? 13) - 1, 0), rangeOf(s.range), rangeOf(s.selectionRange ?? s.range));
+  symbol.children = (s.children ?? []).map(symbolOf);
+  return symbol;
+}
+function locationsOf(found) {
+  if (!found) return null;
+  return (Array.isArray(found) ? found : [found]).map((l) => new vscode.Location(vscode.Uri.parse(l.uri ?? l.targetUri), rangeOf(l.range ?? l.targetSelectionRange)));
+}
+function hoverOf(found) {
+  if (!found?.contents) return null;
+  const said = typeof found.contents === "string" ? found.contents : found.contents.value ?? "";
+  return new vscode.Hover(new vscode.MarkdownString(said), found.range ? rangeOf(found.range) : undefined);
+}
+function completionsOf(found) {
+  const items = Array.isArray(found) ? found : found?.items ?? [];
+  return items.map((c) => {
+    const item = new vscode.CompletionItem(c.label, Math.max((c.kind ?? 1) - 1, 0));
+    if (c.detail) item.detail = c.detail;
+    return item;
+  });
+}
+
+// ---------- the language server ----------
+
+// Moth's language server for the documents VS Code has open: started with the extension, told of each Moth
+// document as it's opened, changed and closed, and asked what it knows. It finds the problems too, but the
+// extension asks it not to say them: the engine's checker finds those, and the ones that rest on a value
+// written out (1 / 0) as well, which moth check leaves to it. `server` is nothing until it has started, and
+// again if it can't or once it ends; the providers then do without it.
+function languageServer(output) {
+  const state = { server: null, sent: new Map() }; // each document's version as the server has it, by its address
+  const document = (d) => ({ uri: d.uri.toString(), languageId: "moth", version: d.version ?? 0, text: d.getText() });
+  const opened = (d) => {
+    if (!state.server || d.languageId !== "moth" || state.sent.has(d.uri.toString())) return;
+    state.sent.set(d.uri.toString(), d.version ?? 0);
+    state.server.notify("textDocument/didOpen", { textDocument: document(d) });
+  };
+  const changed = (d) => {
+    if (!state.server || d.languageId !== "moth") return;
+    if (!state.sent.has(d.uri.toString())) return opened(d);
+    state.sent.set(d.uri.toString(), d.version ?? 0);
+    state.server.notify("textDocument/didChange", { textDocument: { uri: d.uri.toString(), version: d.version ?? 0 }, contentChanges: [{ text: d.getText() }] });
+  };
+  const closed = (d) => {
+    if (!state.server || !state.sent.delete(d.uri.toString())) return;
+    state.server.notify("textDocument/didClose", { textDocument: { uri: d.uri.toString() } });
+  };
+  // what the server says to a request about a document (null for nothing there), or undefined if there's no
+  // server or it failed, for the provider to do without it
+  const ask = async (method, d, more = {}) => {
+    if (!state.server) return undefined;
+    if (state.sent.get(d.uri.toString()) !== (d.version ?? 0)) changed(d); // a change not yet sent
+    try {
+      return await state.server.request(method, { textDocument: { uri: d.uri.toString() }, ...more });
+    } catch (err) {
+      output.appendLine(`moth lsp: ${method}: ${err.message}`);
+      return undefined;
+    }
+  };
+  const start = async () => {
+    const settings = vscode.workspace.getConfiguration("moth");
+    if (settings.get("languageServer") === false) return;
+    const command = settings.get("path") || "moth";
+    try {
+      const server = await startServer(command, { initializationOptions: { diagnostics: false } });
+      server.on("window/showMessage", (m) => vscode.window.showWarningMessage(m.message));
+      server.on("window/logMessage", (m) => output.appendLine(m.message));
+      server.onExit((why) => {
+        output.appendLine(`moth lsp ended: ${why}`);
+        state.server = null;
+        state.sent.clear();
+      });
+      state.server = server;
+      output.appendLine(`moth lsp started (${command})`);
+      vscode.workspace.textDocuments.forEach(opened);
+    } catch (err) {
+      output.appendLine(`${err.message}. The outline and Go to Definition find the file's functions by their lines instead; hovers, completion and definitions in other files need moth (set moth.path if it isn't on your PATH).`);
+    }
+  };
+  const stop = () => state.server?.stop();
+  return { state, start, stop, opened, changed, closed, ask };
+}
+
 // `moth run`, `debug` or `build` on the file in front, saved first, in a terminal of its own
 async function start(command) {
   const document = vscode.window.activeTextEditor?.document;
@@ -106,8 +200,13 @@ async function start(command) {
   return terminal;
 }
 
+let running = null; // the language server, for deactivate
+
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection("moth");
+  const output = vscode.window.createOutputChannel("Moth");
+  const lsp = languageServer(output);
+  running = lsp;
   const waiting = new Map(); // a document's next check, a moment after the last change
   const check = async (document) => {
     if (document.languageId !== "moth") return;
@@ -121,9 +220,20 @@ function activate(context) {
   const selector = { language: "moth" };
   context.subscriptions.push(
     diagnostics,
-    vscode.workspace.onDidOpenTextDocument(check),
-    vscode.workspace.onDidChangeTextDocument((e) => soon(e.document)),
-    vscode.workspace.onDidCloseTextDocument((document) => diagnostics.delete(document.uri)),
+    output,
+    { dispose: () => lsp.stop() },
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      lsp.opened(document);
+      return check(document);
+    }),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      lsp.changed(e.document);
+      soon(e.document);
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      lsp.closed(document);
+      diagnostics.delete(document.uri);
+    }),
     vscode.languages.registerDocumentFormattingEditProvider(selector, {
       async provideDocumentFormattingEdits(document) {
         const moth = await loadEngine();
@@ -159,23 +269,44 @@ function activate(context) {
         return actions;
       },
     }),
-    vscode.languages.registerDocumentSymbolProvider(selector, { provideDocumentSymbols: functionsIn }),
-    vscode.languages.registerDefinitionProvider(selector, {
-      provideDefinition(document, position) {
-        const word = document.getWordRangeAtPosition(position);
-        if (!word) return null;
-        const name = document.getText(word).toLowerCase(); // Moth's names don't care about case
-        const found = allOf(functionsIn(document)).find((s) => s.name.toLowerCase() === name);
-        return found ? new vscode.Location(document.uri, found.selectionRange) : null;
+    vscode.languages.registerDocumentSymbolProvider(selector, {
+      async provideDocumentSymbols(document) {
+        const found = await lsp.ask("textDocument/documentSymbol", document);
+        return found === undefined ? functionsIn(document) : (found ?? []).map(symbolOf);
       },
     }),
+    vscode.languages.registerDefinitionProvider(selector, {
+      async provideDefinition(document, position) {
+        const found = await lsp.ask("textDocument/definition", document, { position: placeOf(position) });
+        if (found !== undefined) return locationsOf(found)?.[0] ?? null;
+        const word = document.getWordRangeAtPosition(position); // without the server: a function this file makes
+        if (!word) return null;
+        const name = document.getText(word).toLowerCase(); // Moth's names don't care about case
+        const made = allOf(functionsIn(document)).find((s) => s.name.toLowerCase() === name);
+        return made ? new vscode.Location(document.uri, made.selectionRange) : null;
+      },
+    }),
+    vscode.languages.registerHoverProvider(selector, {
+      async provideHover(document, position) {
+        return hoverOf(await lsp.ask("textDocument/hover", document, { position: placeOf(position) }));
+      },
+    }),
+    vscode.languages.registerCompletionItemProvider(selector, {
+      async provideCompletionItems(document, position) {
+        const found = await lsp.ask("textDocument/completion", document, { position: placeOf(position) });
+        return found ? completionsOf(found) : undefined;
+      },
+    }, "'"),
     vscode.commands.registerCommand("moth.run", () => start("run")),
     vscode.commands.registerCommand("moth.debug", () => start("debug")),
     vscode.commands.registerCommand("moth.build", () => start("build")),
   );
   vscode.workspace.textDocuments.forEach(check);
+  return lsp.start();
 }
 
-function deactivate() {}
+function deactivate() {
+  return running?.stop();
+}
 
 module.exports = { activate, deactivate };
