@@ -1,0 +1,140 @@
+# The guestbook's own work: its database, its page, and what each request does. guestbook.moth serves it, and
+# book.test.moth tests it with no network at all. docs/guestbook.md walks through it.
+
+use "sqlite.moth" as sqlite
+use "http.moth" as http
+use "dates.moth" as dates
+use "text.moth" as text
+
+set book_most_name to 40
+set book_most_message to 500
+
+# the guestbook in a file, with its table made the first time
+to open_book with path
+    set db to sqlite's open(path)
+    sqlite's run(db, "create table if not exists entries (id integer primary key autoincrement, name text not null, message text not null, signed text not null)")
+    return db
+end
+
+# the newest 100 entries, newest first, each a dictionary of its id, name, message and when it was signed
+to entries_of with db
+    return sqlite's query(db, "select id, name, message, signed from entries order by id desc limit 100")
+end
+
+# text with no spaces or new lines at either end
+to trimmed with words
+    return text's replace_all("^\\s+|\\s+$", words, "")
+end
+
+# what a form sends, name=Ada+L&message=Hi%21, as a dictionary of its fields
+to form_fields with body
+    set fields to empty dictionary
+    for each pair in split body by "&"
+        set parts to split pair by "="
+        if length of parts is 2
+            set item (http's decoded(item 1 of parts)) of fields to http's decoded(item 2 of parts)
+        end
+    end
+    return fields
+end
+
+# A new entry from the form's fields, signed now: nothing if it was added, or what's wrong with it.
+# The values go to SQLite as parameters, never as part of the SQL, so no text can change the query.
+to sign with db, fields
+    set name to ""
+    set message to ""
+    if "name" is in fields
+        set name to trimmed(item "name" of fields)
+    end
+    if "message" is in fields
+        set message to trimmed(item "message" of fields)
+    end
+    if name is ""
+        return "Please write your name."
+    end
+    if message is ""
+        return "Please write a message."
+    end
+    if length of name is greater than book_most_name
+        return "A name can be at most " + book_most_name + " letters."
+    end
+    if length of message is greater than book_most_message
+        return "A message can be at most " + book_most_message + " letters."
+    end
+    set signed to dates's format_date(dates's now(), "D MMM YYYY, hh:mm")
+    sqlite's run_with(db, "insert into entries (name, message, signed) values (?, ?, ?)", list of name, message, signed)
+    return nothing
+end
+
+# text as it's shown in a page: &, <, >, " and ' as entities, so what someone writes is never taken as HTML
+to html_of with words
+    set made to empty list
+    for each c in words
+        if c is "&"
+            add "&amp;" to made
+        else if c is "<"
+            add "&lt;" to made
+        else if c is ">"
+            add "&gt;" to made
+        else if c is "\""
+            add "&quot;" to made
+        else if c is "'"
+            add "&#39;" to made
+        else
+            add c to made
+        end
+    end
+    return join made with ""
+end
+
+# how the page looks
+set book_style to "body { margin: 0; background: #faf7f0; color: #2b2622; font: 17px/1.6 system-ui, sans-serif; } main { max-width: 640px; margin: 0 auto; padding: 48px 22px; } h1 { margin: 0; font: 600 44px/1.1 Georgia, serif; } .lede { color: #6b625a; } a { color: #b0621a; } form { display: grid; gap: 10px; margin: 26px 0 34px; } input, textarea { padding: 11px 13px; border: 1px solid #d9d0c3; border-radius: 10px; background: #fff; font: inherit; } textarea { min-height: 96px; resize: vertical; } button { justify-self: start; padding: 11px 20px; border: 0; border-radius: 999px; background: #e8952e; color: #fff; font: 600 16px system-ui, sans-serif; cursor: pointer; } article { padding: 16px 0; border-top: 1px solid #e7dfd3; } article header { display: flex; justify-content: space-between; gap: 12px; } article time { color: #8a8177; font-size: 14px; } article p { margin: 6px 0 0; white-space: pre-wrap; } .problem { padding: 10px 14px; border-radius: 10px; background: #fde8e4; color: #9b2c1c; } .empty { color: #8a8177; }"
+
+# the page: the form to sign (with what's wrong, if something was), and every entry
+to page with entries, problem, name, message
+    set rows to empty list
+    for each entry in entries
+        add "<article><header><b>" + html_of(item "name" of entry) + "</b><time>" + html_of(item "signed" of entry) + "</time></header><p>" + html_of(item "message" of entry) + "</p></article>" to rows
+    end
+    if length of rows is 0
+        add "<p class=\"empty\">No one has signed yet. Be the first!</p>" to rows
+    end
+    set warning to ""
+    if problem is not nothing
+        set warning to "<p class=\"problem\">" + html_of(problem) + "</p>"
+    end
+    set count to length of entries
+    set signatures to "" + count + " signatures"
+    if count is 1
+        set signatures to "1 signature"
+    end
+    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" + "<title>Guestbook</title><style>" + book_style + "</style></head><body><main><h1>Guestbook</h1><p class=\"lede\">Leave a message. " + signatures + " so far, kept in SQLite by a program written in <a href=\"https://github.com/samyyy2423/moth\">Moth</a>.</p>" + warning + "<form method=\"post\" action=\"/sign\"><input name=\"name\" placeholder=\"Your name\" maxlength=\"" + book_most_name + "\" value=\"" + html_of(name) + "\" required><textarea name=\"message\" placeholder=\"Your message\" maxlength=\"" + book_most_message + "\" required>" + html_of(message) + "</textarea><button>Sign the guestbook</button></form>" + (join rows with "") + "</main></body></html>"
+end
+
+# What the guestbook gives for a request: the page, a new entry then the page again, the entries as JSON, or 404.
+to answer_with with request, db
+    set where to path of request
+    if where is "/" and method of request is "GET"
+        return page(entries_of(db), nothing, "", "")
+    end
+    if where is "/sign" and method of request is "POST"
+        set fields to form_fields(body of request)
+        set problem to sign(db, fields)
+        if problem is nothing
+            return record with status 303, headers (dictionary where "location" is "/"), body ""
+        end
+        set name to ""
+        set message to ""
+        if "name" is in fields
+            set name to item "name" of fields
+        end
+        if "message" is in fields
+            set message to item "message" of fields
+        end
+        return record with status 400, body page(entries_of(db), problem, name, message)
+    end
+    if where is "/api/entries" and method of request is "GET"
+        return entries_of(db)
+    end
+    return record with status 404, body "<!doctype html><title>Not here</title><p>There's nothing at " + html_of(where) + ". <a href=\"/\">The guestbook</a></p>"
+end

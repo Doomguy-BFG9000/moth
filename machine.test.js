@@ -2888,6 +2888,49 @@ say read site + "/stop"`, ["--allow-net"]);
   }
 });
 
+// apps/guestbook (docs/guestbook.md): a web app with a SQLite database, built by moth.exe from its own folder with
+// the standard library's server, SQLite, HTTP, dates and text: its own tests, then signed and read over HTTP, a
+// script given as a name shown as text, an entry with no name refused, the entries as JSON, a 404, and its file
+test("apps/guestbook: a web app with a database, built by moth.exe, tested, then signed and read over HTTP", { skip: skip || (!sqliteHere && "SQLite isn't installed") }, async () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "guestbook");
+  mkdirSync(sub);
+  for (const name of ["guestbook.moth", "book.moth", "book.test.moth"]) writeFileSync(join(sub, name), here(`apps/guestbook/${name}`));
+  const allow = ["--allow-libraries", "--allow-read", "--allow-write"];
+  const tested = spawnSync(exe, ["test", "book.test.moth", ...allow], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual([tested.stdout.split("\n").at(-2), tested.status], ["4 passed", 0], tested.stdout + tested.stderr);
+  const built = spawnSync(exe, ["build", "guestbook.moth", ...allow], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  const port = 23000 + (process.pid % 2000);
+  const running = spawn(executable(sub, "guestbook"), [String(port)], { cwd: sub, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "", err = "";
+  running.stdout.on("data", (d) => (out += d));
+  running.stderr.on("data", (d) => (err += d));
+  try {
+    for (let waited = 0; !err.includes("listening") && waited < 10000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+    const site = `http://127.0.0.1:${port}`;
+    const form = (fields) => ({ method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString(), redirect: "manual" });
+    assert.match(await (await fetch(`${site}/`)).text(), /0 signatures so far/);
+    const signed = await fetch(`${site}/sign`, form({ name: "Ada Lovelace", message: "Hello!" }));
+    assert.deepEqual([signed.status, signed.headers.get("location")], [303, "/"]);
+    assert.equal((await fetch(`${site}/sign`, form({ name: "<script>x</script>", message: "Tom & Jerry" }))).status, 303);
+    const refused = await fetch(`${site}/sign`, form({ name: " ", message: "hi" }));
+    assert.equal(refused.status, 400);
+    assert.match(await refused.text(), /Please write your name\./);
+    const page = await (await fetch(`${site}/`)).text();
+    assert.match(page, /2 signatures so far/);
+    assert.ok(page.includes("&lt;script&gt;x&lt;/script&gt;") && !page.includes("<script>x"), page);
+    const entries = await (await fetch(`${site}/api/entries`)).json();
+    assert.deepEqual(entries.map((e) => [e.id, e.name, e.message]), [[2, "<script>x</script>", "Tom & Jerry"], [1, "Ada Lovelace", "Hello!"]]);
+    assert.match(entries[0].signed, /^\d{1,2} [A-Z][a-z]{2} \d{4}, \d\d:\d\d$/);
+    assert.equal((await fetch(`${site}/nowhere`)).status, 404);
+    assert.ok(existsSync(join(sub, "guestbook.db")));
+  } finally {
+    running.kill();
+  }
+  assert.match(out, /^The guestbook is at http:\/\/localhost:\d+\/ \(Ctrl\+C stops it\)\n/);
+});
+
 // tools/server.moth with HTTPS: a certificate made for the test by the openssl command, OpenSSL 3's libraries
 // (Linux's own; on Windows, each beside the program in turn: Python's, built with Visual C++, and Git's, built with
 // MinGW, which once found no randomness when its libraries were looked for only in the program's folder), and

@@ -8,6 +8,8 @@ Built from scratch, with no dependencies, into programs for Windows and Linux as
 <p>
 <a href="https://samyyy2423.github.io/moth/"><b>Open the playground</b></a>
 &nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/learn.html">Learn Moth</a>
+&nbsp;·&nbsp;
 <a href="#the-language">The language</a>
 &nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
@@ -92,7 +94,9 @@ the list only has 3 items
 ## Start in a minute
 
 **In your browser:** open the [playground](https://samyyy2423.github.io/moth/),
-write Moth and press Run. There's nothing to install.
+write Moth and press Run, or [learn Moth in an afternoon](https://samyyy2423.github.io/moth/learn.html):
+eleven short lessons, each with a program to run and change. There's nothing to
+install.
 
 **On your computer:** download Moth from the
 [latest release](https://github.com/samyyy2423/moth/releases/latest), one file
@@ -760,6 +764,9 @@ Apps: pictures that answer keys, clicks and time, with buttons, checkboxes,
 lists, dropdowns, sliders and boxes to type in. [`apps/snake.moth`](apps/snake.moth) is a whole game in 110 lines,
 [`apps/paint.moth`](apps/paint.moth) a paint program in 54, and
 [`apps/todo.moth`](apps/todo.moth) a to-do list in 38.
+[`apps/guestbook`](apps/guestbook) is a web app with a SQLite database, in
+about 160 lines, and [docs/guestbook.md](docs/guestbook.md) walks through
+building it.
 
 ```
 move to 50, -20                             # straight to a spot, drawing if the pen is down

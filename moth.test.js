@@ -1824,3 +1824,32 @@ test("choosing a file is asking for one: nothing for no answer, and a slider's a
   assert.deepEqual(drawn, [{ shape: "slider", label: "S", value: 10, from: 10, to: -5, focused: false, x: 0, y: 0, width: 200, height: 20, color: "#4f8ff7" }]);
 });
 
+// learn.html's lessons (learn-lessons.js): each program runs on every engine and says the same on all of them,
+// with the answers a lesson types when it asks; one that fails on purpose fails with the mistake it means to
+// show, the rest with none; and the drawing lesson draws
+test("every lesson on the Learn page runs, and says the same on every engine", async () => {
+  const { LESSONS } = await import("./learn-lessons.js");
+  assert.ok(LESSONS.length >= 10);
+  for (const lesson of LESSONS) {
+    const seen = ENGINES.map((engine) => {
+      const said = [];
+      const answers = [...(lesson.answers ?? [])];
+      let drew = 0;
+      let mistake = null;
+      try {
+        run(lesson.code, (line) => said.push(line), { engine, ask: () => answers.shift(), draw: () => drew++ });
+      } catch (err) {
+        mistake = err.message;
+      }
+      return { said, drew, mistake };
+    });
+    for (const other of seen.slice(1)) assert.deepEqual(other, seen[0], lesson.title);
+    const { said, drew, mistake } = seen[0];
+    if (lesson.fails) assert.ok(mistake?.includes(lesson.fails), `${lesson.title}: ${mistake}`);
+    else assert.equal(mistake, null, lesson.title);
+    if (lesson.draws) assert.ok(drew > 0, lesson.title);
+    else assert.ok(said.length > 0, lesson.title);
+    for (const key of ["title", "intro", "code", "try"]) assert.equal(typeof lesson[key], "string", `${lesson.title}: ${key}`);
+  }
+});
+

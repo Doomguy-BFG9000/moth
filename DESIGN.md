@@ -4132,3 +4132,38 @@ hold them to agreeing.
   one done here, a part's mistake inside the program's own try, a copy that
   came to another each_at_once, and no files left behind.
 
+## 102. Learning it, and a web app made with it
+
+- **Why.** The README shows all of Moth at once, which suits someone who
+  already programs; someone new needs it a step at a time. And a language is
+  believed when something real is made with it, start to finish.
+- **learn.html.** Eleven lessons, from `say` to a word counter and the turtle,
+  each with what it teaches, a program in a box to change, Run (or
+  Ctrl+Enter), Reset, Open in the playground, and something to try. Each run
+  is a worker.js of its own, as the playground's are, on WebAssembly where the
+  browser has it and the JIT where it hasn't, stopped after 10 seconds. A
+  question shows a box under the output; its answer runs the program again with
+  the answers so far, as the playground does. The lesson that draws opens in the
+  playground, which shows drawings. Lessons run are ticked, and kept in the
+  browser's storage.
+- **Lessons that can't go stale.** They're in learn-lessons.js, which the page
+  imports and moth.test.js runs: every program on every engine, the same on all
+  of them, with the answers the lesson types; the one that fails on purpose (an
+  item that isn't there, to show a mistake's words) fails with that mistake.
+- **apps/guestbook.** A page to sign and read, in SQLite, with the entries as
+  JSON: guestbook.moth serves book.moth, which does the work with no network,
+  so it's tested by calling answer_with with requests made by hand. Values go to
+  SQLite as parameters, never in the SQL; everything shown is escaped; a sign is
+  answered with 303 to the page, so Reload doesn't sign again; a refused one with
+  400, the page, the problem and what was typed. docs/guestbook.md walks through
+  it. 161 lines, built into a 1.3 MB program.
+- **A bug it found.** In text.moth, `^\s+|\s+$` never matched its first part:
+  text_either worked out where each part jumps to from the list of steps it had
+  before the last part, and a repeat in the last part (`+`) makes a new list. It
+  reads the list again before setting the jumps now.
+- **Tested.** Every lesson, as above; text.moth's either-ors whose last part
+  repeats, against Python's re; the guestbook's own tests in machine code, then
+  the guestbook built by moth.exe, run, signed (a name of `<script>`, one of
+  only spaces), read as a page and as JSON, a 404, and its database file, over
+  HTTP.
+

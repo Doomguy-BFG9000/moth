@@ -47,6 +47,10 @@ to test_replacing_and_splitting
     expect text's replace_all("a", "banana", "[$0]") is "b[a]n[a]n[a]"
     expect text's split_by(",\\s*", "a, b,c,   d") is list of "a", "b", "c", "d"
     expect text's split_by("x", "axbxc") is list of "a", "b", "c"
+    # an either-or whose last part repeats: each part still ends where it should
+    expect text's replace_all("^\\s+|\\s+$", "  hi there \n", "") is "hi there"
+    expect text's replace_all("^a+|b+|c+$", "aaxbbxcc", "-") is "-x-x-"
+    expect length of text's find_all("^ +| +$", "  hi  ") is 2
 end
 
 to test_no_endless_loops

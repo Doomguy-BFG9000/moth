@@ -1,0 +1,21 @@
+# A guestbook on the web, written in Moth: a page to sign and read, kept in a SQLite database, with the entries
+# as JSON too. Build it and run it, then open http://localhost:8080/ (docs/guestbook.md walks through it):
+#
+#   moth build guestbook.moth --allow-libraries --allow-read --allow-write
+#   guestbook.exe                  (./guestbook on Linux; give a port after it for another one)
+
+use "server.moth" as web
+use "book.moth" as book
+
+set guestbook_port to 8080
+if length of arguments is at least 1
+    set guestbook_port to number of item 1 of arguments
+end
+set guestbook_db to book's open_book("guestbook.db")
+
+to answer with request
+    return book's answer_with(request, guestbook_db)
+end
+
+say "The guestbook is at http://localhost:" + guestbook_port + "/ (Ctrl+C stops it)"
+web's serve(guestbook_port, answer)

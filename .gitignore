@@ -9,3 +9,7 @@ apps/*.html
 /.bench-*
 # the VS Code extension, packed (by node editors/vscode/make-vsix.mjs)
 editors/vscode/*.vsix
+# what the guestbook keeps, and its tests' database, when it's run in its folder
+apps/guestbook/*.db
+apps/guestbook/guestbook
+apps/guestbook/guestbook.exe

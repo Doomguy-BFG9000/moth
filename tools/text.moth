@@ -251,6 +251,7 @@ to text_either with reading
         set start to length of program + 1
         text_sequence(reading)
     end
+    set program to program of reading # a repeat in the last part made it a new list too
     for each jump in jumps
         set target of jump to length of program + 1
     end

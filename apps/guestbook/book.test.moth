@@ -1,0 +1,71 @@
+# The guestbook's tests, with no network: moth test book.test.moth --allow-libraries --allow-read --allow-write
+
+use "book.moth" as book
+
+to test_form_fields
+    set fields to book's form_fields("name=Ada+Lovelace&message=Hi%21%20%C3%A9&empty=")
+    expect item "name" of fields is "Ada Lovelace"
+    expect item "message" of fields is "Hi! é"
+    expect item "empty" of fields is ""
+    expect length of keys of book's form_fields("") is 0
+end
+
+to test_html_of
+    expect book's html_of("<b>Tom & Jerry's \"show\"</b>") is "&lt;b&gt;Tom &amp; Jerry&#39;s &quot;show&quot;&lt;/b&gt;"
+    expect book's html_of("plain") is "plain"
+    expect book's trimmed("  hi there \n") is "hi there"
+end
+
+# a database of the test's own, emptied first
+to fresh_book
+    try
+        remove the file "book-test.db"
+    if it fails
+    end
+    return book's open_book("book-test.db")
+end
+
+to test_signing
+    set db to fresh_book()
+    expect book's sign(db, dictionary where "name" is " Ada ", "message" is "Hello!") is nothing
+    expect book's sign(db, dictionary where "name" is "  ", "message" is "Hello!") is "Please write your name."
+    expect book's sign(db, dictionary where "name" is "Bo") is "Please write a message."
+    set long to ""
+    repeat 501 times
+        set long to long + "x"
+    end
+    expect book's sign(db, dictionary where "name" is "Bo", "message" is long) is "A message can be at most 500 letters."
+    expect book's sign(db, dictionary where "name" is "Robert'); drop table entries; --", "message" is "hi") is nothing
+    set entries to book's entries_of(db)
+    expect length of entries is 2
+    expect item "name" of item 1 of entries is "Robert'); drop table entries; --"
+    expect item "name" of item 2 of entries is "Ada"
+    expect item "message" of item 2 of entries is "Hello!"
+end
+
+to request with method, where, body
+    return record with method method, path where, query empty dictionary, headers empty dictionary, body body
+end
+
+to test_answers
+    set db to fresh_book()
+    set first to book's answer_with(request("GET", "/", ""), db)
+    expect "No one has signed yet" is in first
+    expect "0 signatures so far" is in first
+    set signed to book's answer_with(request("POST", "/sign", "name=%3Cscript%3E&message=x+%26+y"), db)
+    expect status of signed is 303
+    expect item "location" of headers of signed is "/"
+    set shown to book's answer_with(request("GET", "/", ""), db)
+    expect "&lt;script&gt;" is in shown
+    expect not ("<script>" is in shown)
+    expect "x &amp; y" is in shown
+    expect "1 signature so far" is in shown
+    set refused to book's answer_with(request("POST", "/sign", "name=&message=kept"), db)
+    expect status of refused is 400
+    expect "Please write your name." is in body of refused
+    expect ">kept</textarea>" is in body of refused
+    set listed to book's answer_with(request("GET", "/api/entries", ""), db)
+    expect length of listed is 1
+    expect item "message" of item 1 of listed is "x & y"
+    expect status of book's answer_with(request("GET", "/nowhere", ""), db) is 404
+end
