@@ -3576,3 +3576,26 @@ hold them to agreeing.
   bytes, each redirect, one to another host, gzip, a 404, a loop of
   redirects, chunks, and each mistake. By hand, example.com over HTTP and
   HTTPS.
+
+## 88. WebSockets
+
+- **Why.** A page that's told things as they happen (a chat, a game, a
+  dashboard) talks to its server over a WebSocket; Python has the websockets
+  package. Moth's server.moth answers one request at a time and closes.
+- **What it is.** tools/websocket.moth, over sockets.moth, both ends.
+  `connect(url)` asks for one (ws:// or wss://) with a key of 16 random bytes
+  (secrets.moth) and checks the server's answer: base64 of the SHA-1 of the
+  key and RFC 6455's own text (hash.moth, base64.moth). `accept(listener)`
+  answers such a request, and says 400 to any other. Each connection keeps
+  the path and headers it was asked with.
+- **Messages.** `send` sends text as text and bytes as bytes, a frame each,
+  with a 7, 16 or 64-bit length; a client's are masked with 4 random bytes,
+  as RFC 6455 says. `receive` gives the next message, putting pieces
+  together, answering a ping with a pong, and passing over pongs; a close
+  frame is answered and gives (record with kind "close", code, reason).
+  `close` sends one and waits up to 2 seconds for the answer. A message is
+  up to 16 MB.
+- **Tested.** In machine code on Windows and Linux: an echo server in a task
+  and the program connecting to it, with text, a ping, 70,000 bytes, 300
+  letters, and a close; and Node's own WebSocket client, as a browser's,
+  asking a server of Moth's.

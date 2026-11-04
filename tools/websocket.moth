@@ -1,0 +1,390 @@
+# WebSockets (RFC 6455), as browsers and Python's websockets package have them: a connection that stays open
+# and carries messages both ways, text or bytes, between a program and a web page or another program. Both
+# ends, over sockets.moth, ws:// and wss://. A program `moth build` makes can use it, built with
+# --allow-libraries.
+#
+#   use "websocket.moth" as ws
+#   set c to ws's connect("ws://127.0.0.1:9000/chat")
+#   ws's send(c, "hello")                    # text; bytes go as bytes
+#   set m to ws's receive(c)                 # (record with kind "text", data "HELLO"); kind "close" when it ends
+#   ws's close(c)
+#
+#   set listener to ws's listen(9000)        # or listen_on("::", 9000), as sockets.moth's
+#   set c to ws's accept(listener)           # path of c and headers of c say what it asked for
+#   repeat while yes
+#       set m to ws's receive(c)
+#       if kind of m is "close"
+#           stop the program
+#       end
+#       ws's send(c, uppercase of data of m)
+#   end
+#
+# receive() answers pings itself and puts messages sent in pieces together. A message is up to 16 MB.
+
+use "sockets.moth" as ws_net
+use "hash.moth" as ws_hash
+use "base64.moth" as ws_b64
+use "secrets.moth" as ws_secrets
+
+set ws_guid to "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+set ws_line_end to (list of 13, 10) as bytes as text
+set ws_most to 16777216
+
+# ---------- connections ----------
+
+# a connection to a WebSocket server, by its ws:// or wss:// address
+to connect with url
+    set rest to url
+    set secure to no
+    if ws_starts(lowercase of rest, "wss://")
+        set secure to yes
+        set rest to items 7 to (length of rest) of rest
+    else if ws_starts(lowercase of rest, "ws://")
+        set rest to items 6 to (length of rest) of rest
+    else
+        fail with "a WebSocket's address starts with ws:// or wss://, not " + url
+    end
+    set slash to position of "/" in rest
+    set authority to rest
+    set path to "/"
+    if slash is greater than 0
+        set authority to items 1 to (slash - 1) of rest
+        set path to items slash to (length of rest) of rest
+    end
+    set port to 80
+    if secure
+        set port to 443
+    end
+    set host to authority
+    if ws_starts(authority, "[")
+        set close_at to position of "]" in authority
+        set host to items 2 to (close_at - 1) of authority
+        if close_at is less than length of authority
+            set port to number of items (close_at + 2) to (length of authority) of authority
+        end
+    else if ":" is in authority
+        set host to item 1 of split authority by ":"
+        set port to number of item 2 of split authority by ":"
+    end
+    set c to nothing
+    if secure
+        set c to ws_net's connect_secure(host, port)
+    else
+        set c to ws_net's connect(host, port)
+    end
+    set key to ws_b64's base64_of(ws_secrets's random_bytes(16))
+    set shown_host to authority
+    set asked to list of "GET " + path + " HTTP/1.1", "Host: " + shown_host, "Upgrade: websocket", "Connection: Upgrade",
+        "Sec-WebSocket-Key: " + key, "Sec-WebSocket-Version: 13"
+    ws_net's send(c, (join asked with ws_line_end) + ws_line_end + ws_line_end)
+    set first to ws_net's receive_line(c)
+    if first is nothing or not (" 101" is in first)
+        ws_net's close(c)
+        fail with "the server at " + url + " didn't take a WebSocket: " + first
+    end
+    set headers to ws_headers(c)
+    set accepted to ""
+    if "sec-websocket-accept" is in headers
+        set accepted to item "sec-websocket-accept" of headers
+    end
+    if accepted is not ws_accept_for(key)
+        ws_net's close(c)
+        fail with "the server at " + url + " answered a WebSocket's handshake wrongly"
+    end
+    return record with link c, client yes, path path, headers headers, open yes
+end
+
+# a listener for WebSocket connections on this computer's own address, or every network's, or one of its own
+to listen with port
+    return ws_net's listen(port)
+end
+
+to listen_everywhere with port
+    return ws_net's listen_everywhere(port)
+end
+
+to listen_on with host, port
+    return ws_net's listen_on(host, port)
+end
+
+to port_of with listener
+    return ws_net's port_of(listener)
+end
+
+# the next connection, once it's asked for a WebSocket: what it asked for in path and headers
+to accept with listener
+    repeat while yes
+        set c to ws_net's accept(listener)
+        set first to ws_net's receive_line(c)
+        set headers to ws_headers(c)
+        set words to split first by " "
+        set key to ""
+        if "sec-websocket-key" is in headers
+            set key to item "sec-websocket-key" of headers
+        end
+        set upgrading to "upgrade" is in headers and lowercase of item "upgrade" of headers is "websocket"
+        if length of words is at least 2 and item 1 of words is "GET" and upgrading and key is not ""
+            set answer to list of "HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade",
+                "Sec-WebSocket-Accept: " + ws_accept_for(key)
+            ws_net's send(c, (join answer with ws_line_end) + ws_line_end + ws_line_end)
+            return record with link c, client no, path item 2 of words, headers headers, open yes
+        end
+        set refusal to "a WebSocket goes here"
+        ws_net's send(c, "HTTP/1.1 400 Bad Request" + ws_line_end + "Content-Length: " + length of refusal + ws_line_end
+            + "Connection: close" + ws_line_end + ws_line_end + refusal)
+        ws_net's close(c)
+    end
+end
+
+# what the server sends back for a key: base64 of the SHA-1 of the key and RFC 6455's own text
+to ws_accept_for with key
+    return ws_b64's base64_of(ws_hash's bytes_of_hex(ws_hash's sha1(key + ws_guid)))
+end
+
+# the header lines after the first, until a line of none, as a dictionary, each name in small letters
+to ws_headers with c
+    set made to empty dictionary
+    repeat while yes
+        set line to ws_net's receive_line(c)
+        if line is nothing or line is ""
+            return made
+        end
+        set colon to position of ":" in line
+        if colon is greater than 1
+            set value to ""
+            if colon is less than length of line
+                set value to ws_trim(items (colon + 1) to (length of line) of line)
+            end
+            set item (lowercase of ws_trim(items 1 to (colon - 1) of line)) of made to value
+        end
+    end
+end
+
+# ---------- messages ----------
+
+# a message: text as text, bytes as bytes
+to send with c, data
+    if ws_is_text(data)
+        ws_frame(c, 1, data as bytes)
+    else
+        ws_frame(c, 2, data as bytes)
+    end
+end
+
+# a ping, which the other end answers with a pong, which receive() passes over
+to ping with c
+    ws_frame(c, 9, 0 bytes)
+end
+
+# The next message: (record with kind "text" or "binary", data ...), or kind "close" (with code and reason)
+# when the other end has closed it. Pings are answered, and pieces put together, on the way.
+to receive with c
+    if not open of c
+        return record with kind "close", data "", code 1006, reason "the connection is closed"
+    end
+    set pieces to empty list
+    set kind to nothing
+    repeat while yes
+        set frame to ws_read_frame(c)
+        set op to op of frame
+        if op is 9
+            ws_frame(c, 10, payload of frame)
+        else if op is 10
+            set op to op # a pong: nothing to do
+        else if op is 8
+            set code to 1005
+            set reason to ""
+            set p to payload of frame
+            if length of p is at least 2
+                set code to byte 1 of p * 256 + byte 2 of p
+                if length of p is greater than 2
+                    set reason to (items 3 to (length of p) of p) as text
+                end
+            end
+            if open of c
+                set open of c to no
+                set echoed to 0 bytes
+                if length of p is at least 2
+                    set echoed to items 1 to 2 of p
+                end
+                try
+                    ws_frame_now(c, 8, echoed)
+                if it fails
+                    set code to code # it's gone already
+                end
+                ws_net's close(link of c)
+            end
+            return record with kind "close", data "", code code, reason reason
+        else
+            if op is not 0
+                set kind to op
+                set pieces to empty list
+            end
+            for each b in payload of frame
+                add b to pieces
+            end
+            if length of pieces is greater than ws_most
+                fail with "a WebSocket message was bigger than 16 MB"
+            end
+            if fin of frame
+                if kind is 1
+                    return record with kind "text", data (pieces as bytes as text)
+                end
+                return record with kind "binary", data (pieces as bytes)
+            end
+        end
+    end
+end
+
+# closes it: the close frame, its answer if one comes, and the connection
+to close with c
+    if open of c
+        set open of c to no
+        try
+            set code_bytes to (list of 3, 232) as bytes # 1000, all done
+            ws_frame_now(c, 8, code_bytes)
+            ws_net's wait_at_most(link of c, 2000)
+            repeat while yes # until the other end's close, or it's gone
+                set frame to ws_read_frame(c)
+                if op of frame is 8
+                    ws_net's close(link of c)
+                    return nothing
+                end
+            end
+        if it fails
+            ws_net's close(link of c)
+        end
+    end
+end
+
+to ws_frame with c, op, payload
+    if not open of c
+        fail with "can't send on a WebSocket that's closed"
+    end
+    ws_frame_now(c, op, payload)
+end
+
+# one frame, whole: FIN, its kind, its length, and from a client its bytes masked with 4 bytes of chance
+to ws_frame_now with c, op, payload
+    set n to length of payload
+    set head to list of 128 + op
+    set masked to 0
+    if client of c
+        set masked to 128
+    end
+    if n is less than 126
+        add masked + n to head
+    else if n is less than 65536
+        add masked + 126 to head
+        add shift n right by 8 to head
+        add n bit and 255 to head
+    else
+        add masked + 127 to head
+        set high to list of 0, 0, 0, 0, 0, 0, 0, 0
+        set left to n
+        set k to 8
+        repeat while k is at least 1
+            set item k of high to remainder of left divided by 256
+            set left to (left - item k of high) / 256
+            set k to k - 1
+        end
+        for each b in high
+            add b to head
+        end
+    end
+    set body to payload
+    if client of c
+        set mask to ws_secrets's random_bytes(4)
+        for each b in mask
+            add b to head
+        end
+        set body to n bytes
+        for each k from 1 to n
+            set byte k of body to byte k of payload bit xor byte (remainder of (k - 1) divided by 4 + 1) of mask
+        end
+    end
+    ws_net's send(link of c, head as bytes)
+    if n is greater than 0
+        ws_net's send(link of c, body)
+    end
+end
+
+# the next frame: whether it's the last piece, its kind, and its bytes, unmasked
+to ws_read_frame with c
+    set two to ws_read_exact(c, 2)
+    set fin to byte 1 of two is at least 128
+    set op to byte 1 of two bit and 15
+    set masked to byte 2 of two is at least 128
+    set n to byte 2 of two bit and 127
+    if n is 126
+        set b to ws_read_exact(c, 2)
+        set n to byte 1 of b * 256 + byte 2 of b
+    else if n is 127
+        set b to ws_read_exact(c, 8)
+        set n to 0
+        for each x in b
+            set n to n * 256 + x
+        end
+    end
+    if n is greater than ws_most
+        fail with "a WebSocket frame was bigger than 16 MB"
+    end
+    set mask to nothing
+    if masked
+        set mask to ws_read_exact(c, 4)
+    end
+    set payload to ws_read_exact(c, n)
+    if masked
+        for each k from 1 to n
+            set byte k of payload to byte k of payload bit xor byte (remainder of (k - 1) divided by 4 + 1) of mask
+        end
+    end
+    return record with fin fin, op op, payload payload
+end
+
+# exactly n bytes, or a mistake if it closes first
+to ws_read_exact with c, n
+    set made to n bytes
+    set got to 0
+    repeat while got is less than n
+        set piece to ws_net's receive(link of c, n - got)
+        if length of piece is 0
+            set open of c to no
+            fail with "the WebSocket's connection closed"
+        end
+        for each k from 1 to length of piece
+            set byte (got + k) of made to byte k of piece
+        end
+        set got to got + length of piece
+    end
+    return made
+end
+
+# ---------- small things ----------
+
+to ws_text_check with value as text
+    return yes
+end
+
+to ws_is_text with value
+    try
+        return ws_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to ws_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to ws_trim with words
+    set made to words
+    repeat while length of made is greater than 0 and (item 1 of made is " " or item 1 of made is "\t")
+        set made to items 2 to (length of made) of made
+    end
+    repeat while length of made is greater than 0 and (item (length of made) of made is " " or item (length of made) of made is "\t")
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end

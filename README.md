@@ -359,6 +359,10 @@ bytes and dictionaries:
   own, bodies of text, bytes or JSON, redirects followed, and answers in
   chunks or gzipped, over HTTP and HTTPS: `http's request("PUT", url, body,
   headers)`, `get`, `post`, `put`, `patch`, `delete`, `get_json`, `check`.
+- [`websocket.moth`](tools/websocket.moth) keeps a connection open with a web
+  page or another program and carries messages both ways (RFC 6455), as
+  both ends: `ws's connect("ws://host:9000/chat")`, `listen` and `accept`,
+  `send`, `receive`, `ping` and `close`, over ws:// and wss://.
 - [`email.moth`](tools/email.moth) sends mail as Python's `smtplib` and
   `email` do: `mail's message(sender, recipients, subject, text)`, with cc,
   bcc, a page of HTML and files (`attach`), in MIME with UTF-8 headers,

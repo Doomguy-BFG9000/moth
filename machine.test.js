@@ -1264,7 +1264,7 @@ function libraryRun(source, allow = ["--allow-libraries"], env = {}) {
   try {
     const files = {};
     for (const name of ["sqlite.moth", "windows.moth", "linux.moth", "ui.moth", "tasks.moth", "system.moth", "game.moth", "sockets.moth", "cores.moth",
-      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+      "secrets.moth", "base64.moth", "http.moth", "server.moth", "zip.moth", "websocket.moth", "hash.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
     if (source.includes("mandelbrot.png")) writeFileSync(join(dir, "mandelbrot.png"), readFileSync(new URL("./docs/mandelbrot.png", import.meta.url)));
     if (source.includes("beep.wav")) writeFileSync(join(dir, "beep.wav"), silentWav());
     const exe = executable(dir, "p");
@@ -1866,6 +1866,124 @@ say "done"
 `);
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`200 OK <h1>Hello</h1> text/html; charset=utf-8\nPUT a body é | text/plain; charset=utf-8 | mine | nobody | one two\nPOST {\"name\":\"Sam\"} | application/json | nothing | nobody | json\nPATCH hi | none | nothing | nobody | bytes\nDELETE  | none | nothing | nobody | gone\n200 0\n(dictionary where \"name\" is \"Sam\", \"scores\" is [1, 2, 3])\nGET  | none | nothing | nobody | after302 at http://127.0.0.1:${port}/echo?q=after302\nGET  | none | nothing | nobody | after303\nPOST kept | text/plain; charset=utf-8 | nothing | nobody | after307\nGET  | none | nothing | nobody | far\nsqueezed é, squeezed é, squeezed é 37\n404 nothing at /missing\nthe server said 404 Not Found to http://127.0.0.1:${port}/missing\ntoo many redirects, from http://127.0.0.1:${port}/loop\na%20b%26c%3Dd%2F%C3%A9 a b&c=d/é\nq=moth%20lang&n=2\nhello world\nhttp.moth asks http:// and https:// addresses, not ftp://example.com/\n'http:///nohost' has no host\n'http://[::1/x' has a [ with no ]\ncan't connect to 127.0.0.1 port 1: nothing answered there\ndone\n`, `listening on http://127.0.0.1:${port}/
 `, 0]);
+});
+
+// tools/websocket.moth: an echo server in a task of the program's, and the program connecting to it: text, a
+// ping, 70,000 bytes (a 64-bit length), 300 letters (a 16-bit one), and closing, which the server sees with its
+// code; sending after it's closed, and an address that isn't ws://
+test("tools/websocket.moth carries messages both ways, as client and server", { skip }, () => {
+  const ran = libraryRun(String.raw`use "websocket.moth" as ws
+
+set listener to ws's listen(0)
+set port to ws's port_of(listener)
+to echo_server with listener
+    set c to ws's accept(listener)
+    set heard to empty list
+    add path of c to heard
+    repeat while yes
+        set m to ws's receive(c)
+        if kind of m is "close"
+            add "closed " + code of m to heard
+            return heard
+        end
+        if kind of m is "text"
+            add "text " + data of m to heard
+            ws's send(c, uppercase of data of m)
+        else
+            add "bytes " + length of data of m to heard
+            ws's send(c, data of m)
+        end
+    end
+end
+set job to start echo_server(listener)
+set c to ws's connect("ws://127.0.0.1:" + port + "/chat?room=1")
+ws's send(c, "hello é")
+say ws's receive(c)
+ws's ping(c)
+set big to 70000 bytes
+for each k from 1 to 70000
+    set byte k of big to remainder of k divided by 251
+end
+ws's send(c, big)
+set back to ws's receive(c)
+say kind of back + " " + (data of back is big)
+set mid to ""
+repeat 300 times
+    add "x" to mid
+end
+ws's send(c, mid)
+say length of data of ws's receive(c)
+ws's close(c)
+for each line in wait for job
+    say line
+end
+try
+    ws's send(c, "after")
+if it fails with why
+    say why
+end
+try
+    ws's connect("http://127.0.0.1:1")
+if it fails with why
+    say why
+end
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["(record with kind \"text\", data \"HELLO É\")\nbinary yes\n300\n/chat?room=1\ntext hello é\nbytes 70000\ntext xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nclosed 1000\ncan't send on a WebSocket that's closed\na WebSocket's address starts with ws:// or wss://, not http://127.0.0.1:1\n", "", 0]);
+});
+
+// and Node's own WebSocket client, as a browser's, asking a server of Moth's: text, bytes, 200,000 letters, a close
+test("a WebSocket server of Moth's talks to Node's WebSocket client, as a browser's", { skip: skip || (typeof WebSocket !== "function" && "this Node has no WebSocket") }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-ws-"));
+  const port = 22000 + (process.pid % 2000);
+  try {
+    const files = {};
+    for (const name of ["websocket.moth", "sockets.moth", "hash.moth", "base64.moth", "secrets.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    const exe = executable(dir, "ws");
+    writeFileSync(exe, machine(`use "websocket.moth" as ws
+set listener to ws's listen(${port})
+say "listening" to the error output
+set c to ws's accept(listener)
+say path of c
+say item "sec-websocket-version" of headers of c
+repeat while yes
+    set m to ws's receive(c)
+    if kind of m is "close"
+        say "closed " + code of m + " " + reason of m
+        stop the program
+    end
+    if kind of m is "text"
+        say "text " + length of data of m
+        ws's send(c, uppercase of data of m)
+    else
+        say "bytes " + length of data of m
+        ws's send(c, data of m)
+    end
+end
+`, { target, name: "ws.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const running = spawn(exe, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    running.stdout.on("data", (d) => (out += d));
+    const ended = new Promise((resolve) => running.on("exit", resolve));
+    await new Promise((resolve) => running.stderr.on("data", (d) => String(d).includes("listening") && resolve()));
+    const s = new WebSocket(`ws://127.0.0.1:${port}/room?x=1`);
+    s.binaryType = "arraybuffer";
+    await new Promise((resolve, failed) => { s.onopen = resolve; s.onerror = failed; });
+    const next = () => new Promise((resolve) => (s.onmessage = (e) => resolve(e.data)));
+    const got = [];
+    s.send("hello é");
+    got.push(await next());
+    s.send(new Uint8Array([1, 2, 3, 250]));
+    got.push([...new Uint8Array(await next())].join(","));
+    s.send("y".repeat(200000));
+    got.push((await next()).length);
+    s.close(1000, "done here");
+    assert.equal(await ended, 0);
+    assert.deepEqual(got, ["HELLO É", "1,2,3,250", 200000]);
+    assert.equal(out, "/room?x=1\n13\ntext 7\nbytes 4\ntext 200000\nclosed 1000 done here\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // tools/cores.moth: a list's items done by copies of the program, as one part and as one part a core, the same;
