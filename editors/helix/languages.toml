@@ -17,4 +17,4 @@ args = ["lsp"]
 
 [[grammar]]
 name = "moth"
-source = { git = "https://github.com/samyyy2423/moth", rev = "GRAMMAR_COMMIT", subpath = "editors/tree-sitter-moth" }
+source = { git = "https://github.com/samyyy2423/moth", rev = "0d4281a42eceee521ad953d832bb759fbfb38369", subpath = "editors/tree-sitter-moth" }

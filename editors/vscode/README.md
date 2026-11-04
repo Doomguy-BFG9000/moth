@@ -33,4 +33,4 @@ node editors/vscode/make-vsix.mjs
 code --install-extension editors/vscode/moth-0.1.0.vsix
 ```
 
-Other editors use `moth lsp` directly: see [editors/README.md](../README.md).
+Other editors use `moth lsp` directly: see [editors/README.md](https://github.com/samyyy2423/moth/blob/main/editors/README.md).
