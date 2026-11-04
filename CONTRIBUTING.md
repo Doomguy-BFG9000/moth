@@ -55,7 +55,11 @@ keep it working:
 2. Add a test that fails without the change.
 3. If it changes what Moth does, add a section to DESIGN.md (why, what it does, how it's tested), and put
    anything a person using Moth would see in the README.
-4. Run `npm test`. CI runs it again on Linux for every pull request, and it must pass.
+4. If it changes the language, the standard library or the `moth` command, change [SPEC.md](SPEC.md) to
+   match, add a line under "Not released yet" in [CHANGELOG.md](CHANGELOG.md), and check it keeps
+   [VERSIONING.md](VERSIONING.md)'s promise: nothing a 1.x program does may change. A security problem goes
+   to [SECURITY.md](SECURITY.md)'s private report, not a pull request.
+5. Run `npm test`. CI runs it again on Linux for every pull request, and it must pass.
 
 By sending a pull request you agree that your change is under the [Apache License 2.0](LICENSE), as the rest
 of Moth is.
