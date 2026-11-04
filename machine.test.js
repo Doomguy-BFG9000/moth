@@ -10,6 +10,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { networkInterfaces, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, SAVING, TYPED, brokenPrograms } from "./cases.js";
@@ -1259,7 +1261,7 @@ test("moth.exe tidies code to the same bytes format() does, and --check only say
   }
 });
 
-// `moth check`: the problems checker.js finds, in its own words and its own order (DESIGN §103), types and
+// `moth check`: the problems checker.js finds, in its own words and its own order (DESIGN §107), types and
 // all: it works them out as checker.js does, and looks up what each rule does in checker-rules.moth. What it
 // leaves out are the problems checker.js marks `valued`, which rest on a value written out, not on types.
 const checkedBy = (file, source, files = {}) => { // what `moth check file` must say
@@ -1328,6 +1330,263 @@ test("moth.exe finds the problems the checker finds without running the program"
     checked++;
   });
   assert.ok(checked > 100, `only ${checked} were checked`);
+});
+
+// `moth lsp` (DESIGN §108), spoken to as an editor speaks to it: each message written as the Language Server
+// Protocol frames it, and each it says read so, its Content-Length the bytes after the empty line exactly.
+// What isn't framed so goes in `framing`, which must stay empty.
+function lspSession(exe, cwd) {
+  const child = spawn(exe, ["lsp"], { cwd });
+  const session = { framing: [], stderr: "", said: [] };
+  const waiters = [];
+  let buffer = Buffer.alloc(0);
+  child.stderr.on("data", (data) => (session.stderr += data));
+  child.stdout.on("data", (data) => {
+    buffer = Buffer.concat([buffer, data]);
+    for (;;) {
+      const head = buffer.indexOf("\r\n\r\n");
+      if (head < 0) return;
+      const header = buffer.subarray(0, head).toString("latin1");
+      const length = /^Content-Length: (\d+)$/.exec(header);
+      if (!length) {
+        session.framing.push(header);
+        buffer = buffer.subarray(head + 4);
+        continue;
+      }
+      const end = head + 4 + Number(length[1]);
+      if (buffer.length < end) return;
+      const body = buffer.subarray(head + 4, end).toString("utf8");
+      buffer = buffer.subarray(end);
+      let message;
+      try {
+        message = JSON.parse(body);
+      } catch {
+        session.framing.push(body);
+        continue;
+      }
+      const k = waiters.findIndex((w) => w.fits(message));
+      if (k >= 0) waiters.splice(k, 1)[0].done(message);
+      else session.said.push(message);
+    }
+  });
+  session.exited = new Promise((done) => child.on("exit", done));
+  session.kill = () => child.kill();
+  session.raw = (bytes) => child.stdin.write(bytes);
+  session.framed = (message) => {
+    const body = Buffer.from(JSON.stringify(message), "utf8");
+    return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "latin1"), body]);
+  };
+  // the next message that fits, said already or yet to be
+  session.next = (fits) => new Promise((done, fail) => {
+    const k = session.said.findIndex(fits);
+    if (k >= 0) return done(session.said.splice(k, 1)[0]);
+    const timer = setTimeout(() => fail(new Error(`moth lsp said nothing that fits: ${JSON.stringify(session.said)} ${session.stderr}`)), 60_000);
+    waiters.push({ fits, done: (m) => (clearTimeout(timer), done(m)) });
+  });
+  let id = 0;
+  session.ask = async (method, params) => {
+    const n = ++id;
+    session.raw(session.framed({ jsonrpc: "2.0", id: n, method, params }));
+    const answer = await session.next((m) => m.id === n && m.method === undefined);
+    return answer.error ? { error: answer.error } : answer.result;
+  };
+  session.tell = (method, params) => session.raw(session.framed({ jsonrpc: "2.0", method, params }));
+  session.problems = (uri) => session.next((m) => m.method === "textDocument/publishDiagnostics" && m.params.uri === uri).then((m) => m.params.diagnostics);
+  return session;
+}
+
+test("moth lsp answers an editor: problems as it's typed, tidying, the outline, definitions across files, hovers and completion", { skip }, async () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "lsp work"); // a space, which a file's address writes as %20
+  mkdirSync(sub, { recursive: true });
+  const lib = "# twice the number, for café prices\nto twice with n as a number gives a number\n    return n * 2\nend\n";
+  const shapes = "# Shapes: the areas of squares and the rest.\n\n# a square's area\nto square with side\n    return side * side\nend\n";
+  writeFileSync(join(sub, "lib.moth"), lib);
+  writeFileSync(join(sub, "shapes.moth"), shapes);
+  const uri = (name) => pathToFileURL(join(sub, name)).href;
+  const main = [
+    'use "lib.moth"', // 0
+    'use "shapes.moth" as shapes',
+    "",
+    "# the area of a box",
+    "to area with w as a number, h as a number gives a number",
+    "    return w * h", // 5
+    "end",
+    "",
+    "kind dog with name as text",
+    "    to speak with self",
+    '        return self\'s name + " says woof"', // 10
+    "    end",
+    "end",
+    "",
+    "set size to area(2, 3)",
+    'set rex to dog("Rex")', // 15
+    "say rex's speak() + twice(size) + shapes's square(2)",
+    'say area("wide", 2)',
+    "set unused to 1",
+    "",
+  ].join("\n");
+  // what moth check, and checker.js, find in a document, as the protocol has a problem: its line and column
+  // from 0, 1 for what makes moth check end with 1 and 2 for the rest, and the checker's words
+  const want = (source, files) => check(source, { files: (name) => files[name] }).filter((p) => !p.valued && !p.file)
+    .map((p) => [p.line - 1, p.col - 1, ["fails", "error", "doesn't fit"].includes(p.kind) ? 1 : 2, p.message]);
+  const got = (found) => found.map((d) => [d.range.start.line, d.range.start.character, d.severity, d.message]);
+  const at = (line, character, name = "main.moth") => ({ textDocument: { uri: uri(name) }, position: { line, character } });
+  const s = lspSession(exe, sub);
+  try {
+    const hello = await s.ask("initialize", { processId: null, rootUri: pathToFileURL(sub).href, capabilities: {} });
+    assert.deepEqual(hello, { capabilities: { textDocumentSync: { openClose: true, change: 1, save: true }, documentFormattingProvider: true,
+      documentSymbolProvider: true, definitionProvider: true, hoverProvider: true, completionProvider: { triggerCharacters: ["'"] } }, serverInfo: { name: "moth" } });
+    s.tell("initialized", {});
+
+    // the problems as a document opens: moth check's, the types' among them, with what's never used faded
+    s.tell("textDocument/didOpen", { textDocument: { uri: uri("main.moth"), languageId: "moth", version: 1, text: main } });
+    const opened = await s.problems(uri("main.moth"));
+    assert.deepEqual(got(opened), want(main, { "lib.moth": lib, "shapes.moth": shapes }));
+    assert.ok(opened.some((d) => d.message === "'area' needs w to be a number, not text" && d.severity === 1), JSON.stringify(opened));
+    assert.deepEqual(opened.find((d) => d.message === "'unused' is set but never used").tags, [1]);
+
+    // the outline: functions, kinds with their own functions in them, and variables, each to its end
+    const shown = (x) => [x.name, x.kind, x.detail, x.range.start.line, x.range.end.line, x.selectionRange.start.character, x.children.map(shown)];
+    assert.deepEqual((await s.ask("textDocument/documentSymbol", { textDocument: { uri: uri("main.moth") } })).map(shown), [
+      ["area", 12, "with w as a number, h as a number gives a number", 4, 6, 3, []],
+      ["dog", 5, "with name as text", 8, 12, 5, [["speak", 6, "with self", 9, 11, 7, []]]],
+      ["size", 13, "", 14, 14, 4, []],
+      ["rex", 13, "", 15, 15, 4, []],
+      ["unused", 13, "", 18, 18, 4, []],
+    ]);
+
+    // where a name is made: here, in a file it uses, a kind's own function, a file a use line names
+    const where = async (...p) => {
+      const l = await s.ask("textDocument/definition", at(...p));
+      return l && [l.uri, l.range.start.line, l.range.start.character, l.range.end.character];
+    };
+    assert.deepEqual(await where(14, 13), [uri("main.moth"), 4, 3, 7]); // area
+    assert.deepEqual(await where(5, 11), [uri("main.moth"), 4, 13, 14]); // w, an input of area
+    assert.deepEqual(await where(16, 27), [uri("main.moth"), 14, 4, 8]); // size
+    assert.deepEqual(await where(16, 22), [uri("lib.moth"), 1, 3, 8]); // twice, lib.moth's
+    assert.deepEqual(await where(16, 45), [uri("shapes.moth"), 3, 3, 9]); // shapes's square
+    assert.deepEqual(await where(16, 12), [uri("main.moth"), 9, 7, 12]); // rex's speak, dog's
+    assert.deepEqual(await where(16, 36), [uri("shapes.moth"), 0, 0, 0]); // shapes, the file
+    assert.deepEqual(await where(0, 7), [uri("lib.moth"), 0, 0, 0]); // "lib.moth"
+    assert.equal(await where(16, 1), null); // say, a Moth word
+
+    // what a name is: a function with what it takes and gives and the comment above it, a variable with
+    // what it holds, an input, a kind, a kind's own function with what it gives, and a file it uses
+    const hover = async (...p) => (await s.ask("textDocument/hover", at(...p)))?.contents ?? null;
+    assert.deepEqual(await hover(14, 13), { kind: "markdown", value: "```moth\nto area with w as a number, h as a number gives a number\n```\n\nthe area of a box" });
+    assert.equal((await hover(16, 22)).value, "```moth\nto twice with n as a number gives a number\n```\n\ntwice the number, for café prices\n\nIn lib.moth, line 2.");
+    assert.equal((await hover(14, 5)).value, "`size`, a variable: a number\n\nFirst set on line 15.");
+    assert.equal((await hover(15, 5)).value, "`rex`, a variable: a dog\n\nFirst set on line 16.");
+    assert.equal((await hover(5, 11)).value, "`w`, an input of `area`: a number");
+    assert.equal((await hover(8, 6)).value, "```moth\nkind dog with name as text\n```");
+    assert.equal((await hover(16, 12)).value, "```moth\nto speak with self\n```\n\nGives text.");
+    assert.equal((await hover(1, 22)).value, '```moth\nuse "shapes.moth" as shapes\n```\n\nShapes: the areas of squares and the rest.');
+    assert.equal(await hover(16, 1), null);
+
+    // what can come next: what the program makes that the line can see, and Moth's words
+    const all = await s.ask("textDocument/completion", at(17, 0));
+    assert.deepEqual(all.filter((c) => c.kind !== 14).map((c) => [c.label, c.kind, c.detail]), [["twice", 3, "with n as a number gives a number"],
+      ["area", 3, "with w as a number, h as a number gives a number"], ["dog", 7, "with name as text"], ["size", 6, undefined], ["rex", 6, undefined], ["unused", 6, undefined]]);
+    assert.ok(["say", "set", "for each", "if it fails"].every((w) => all.some((c) => c.label === w && c.kind === 14)));
+
+    // As it's typed: an unfinished line and a function not yet ended are the one mistake moth check says, and
+    // the rest is still known; after `rex's`, what a dog has, and after `shapes's`, what shapes.moth makes
+    const typing = main + "set half to\nto later with x\n    say rex's \n    say shapes's ";
+    s.tell("textDocument/didChange", { textDocument: { uri: uri("main.moth"), version: 2 }, contentChanges: [{ text: typing }] });
+    const typed = await s.problems(uri("main.moth"));
+    assert.deepEqual(got(typed), want(typing, { "lib.moth": lib, "shapes.moth": shapes }));
+    assert.equal(typed.length, 1);
+    assert.deepEqual((await s.ask("textDocument/documentSymbol", { textDocument: { uri: uri("main.moth") } })).map((x) => x.name), ["area", "dog", "size", "rex", "unused", "later"]);
+    const labels = async (...p) => (await s.ask("textDocument/completion", at(...p))).map((c) => c.label);
+    assert.ok((await labels(19, 11)).includes("later"));
+    assert.deepEqual(await labels(21, 14), ["name", "speak"]);
+    assert.deepEqual(await labels(22, 17), ["square"]);
+    assert.equal((await hover(15, 5)).value, "`rex`, a variable: a dog\n\nFirst set on line 16.");
+
+    // An unsaved change to a file it uses counts: lib.moth, opened with twice taking text, has its problems
+    // said, and main.moth, which uses it, has its own said again
+    s.tell("textDocument/didChange", { textDocument: { uri: uri("main.moth"), version: 3 }, contentChanges: [{ text: main }] });
+    await s.problems(uri("main.moth"));
+    const changed = lib.replace("with n as a number gives a number", "with n as text gives text").replace("n * 2", "n + n");
+    s.tell("textDocument/didOpen", { textDocument: { uri: uri("lib.moth"), languageId: "moth", version: 1, text: changed } });
+    assert.deepEqual(got(await s.problems(uri("lib.moth"))), want(changed, {}));
+    const again = await s.problems(uri("main.moth"));
+    assert.deepEqual(got(again), want(main, { "lib.moth": changed, "shapes.moth": shapes }));
+    assert.ok(again.some((d) => d.message === "'twice' needs n to be text, not a number"), JSON.stringify(again));
+    assert.equal((await hover(16, 22)).value, "```moth\nto twice with n as text gives text\n```\n\ntwice the number, for café prices\n\nIn lib.moth, line 2.");
+    // closed, it's the file on the disk again
+    s.tell("textDocument/didClose", { textDocument: { uri: uri("lib.moth") } });
+    assert.deepEqual(await s.problems(uri("lib.moth")), []);
+    assert.deepEqual(got(await s.problems(uri("main.moth"))), got(opened));
+
+    // tidying is moth tidy's, which is format()'s; tidy code needs nothing; code with a mistake is left as it is
+    const messy = "to   area with w,h\nreturn w*h\n  end\nsay area(2,3)\n";
+    s.tell("textDocument/didOpen", { textDocument: { uri: uri("messy.moth"), languageId: "moth", version: 1, text: messy } });
+    await s.problems(uri("messy.moth"));
+    const tidy = (name) => s.ask("textDocument/formatting", { textDocument: { uri: uri(name) }, options: { tabSize: 4, insertSpaces: true } });
+    assert.deepEqual(await tidy("messy.moth"), [{ range: { start: { line: 0, character: 0 }, end: { line: 4, character: 0 } }, newText: format(messy) }]);
+    s.tell("textDocument/didChange", { textDocument: { uri: uri("messy.moth"), version: 2 }, contentChanges: [{ text: format(messy) }] });
+    await s.problems(uri("messy.moth"));
+    assert.deepEqual(await tidy("messy.moth"), []);
+    s.tell("textDocument/didChange", { textDocument: { uri: uri("messy.moth"), version: 3 }, contentChanges: [{ text: "say (1\n" }] });
+    await s.problems(uri("messy.moth"));
+    assert.deepEqual(await tidy("messy.moth"), []);
+    assert.deepEqual((await s.next((m) => m.method === "window/showMessage")).params,
+      { type: 2, message: "Moth can't tidy this until its mistake is put right: expected ')' but found the end of the code" });
+    // a file not open is read from the disk
+    assert.deepEqual((await s.ask("textDocument/documentSymbol", { textDocument: { uri: uri("shapes.moth") } })).map((x) => x.name), ["square"]);
+
+    // what it doesn't do it says so, and a note it doesn't know it lets be
+    assert.deepEqual(await s.ask("textDocument/references", at(14, 13)), { error: { code: -32601, message: "moth lsp doesn't do textDocument/references" } });
+    s.tell("$/setTrace", { value: "off" });
+    // a message that comes in pieces, and two that come in one, are each read as they are
+    const piece = s.framed({ jsonrpc: "2.0", id: 900, method: "textDocument/hover", params: at(14, 5) });
+    s.raw(piece.subarray(0, 10));
+    await new Promise((r) => setTimeout(r, 100));
+    s.raw(piece.subarray(10, piece.length - 5));
+    await new Promise((r) => setTimeout(r, 100));
+    s.raw(piece.subarray(piece.length - 5));
+    assert.equal((await s.next((m) => m.id === 900)).result.contents.value, "`size`, a variable: a number\n\nFirst set on line 15.");
+    s.raw(Buffer.concat([s.framed({ jsonrpc: "2.0", id: 901, method: "textDocument/hover", params: at(14, 13) }), s.framed({ jsonrpc: "2.0", id: 902, method: "textDocument/hover", params: at(15, 5) })]));
+    assert.match((await s.next((m) => m.id === 901)).result.contents.value, /^```moth\nto area/);
+    assert.match((await s.next((m) => m.id === 902)).result.contents.value, /^`rex`/);
+
+    // shutdown, then exit: it ends with 0
+    assert.equal(await s.ask("shutdown", null), null);
+    s.tell("exit", null);
+    assert.equal(await s.exited, 0);
+    assert.deepEqual([s.framing, s.stderr], [[], ""]);
+  } finally {
+    s.kill(); // if it hasn't ended, as when something above didn't hold
+  }
+
+  // An editor that finds the problems itself asks for none; and exit with no shutdown first ends with 1
+  const quiet = lspSession(exe, sub);
+  try {
+    await quiet.ask("initialize", { processId: null, capabilities: {}, initializationOptions: { diagnostics: false } });
+    quiet.tell("textDocument/didOpen", { textDocument: { uri: uri("main.moth"), languageId: "moth", version: 1, text: main } });
+    assert.deepEqual((await quiet.ask("textDocument/documentSymbol", { textDocument: { uri: uri("main.moth") } })).map((x) => x.name), ["area", "dog", "size", "rex", "unused"]);
+    assert.deepEqual(quiet.said, []);
+    quiet.tell("exit", null);
+    assert.equal(await quiet.exited, 1);
+  } finally {
+    quiet.kill();
+  }
+
+  // the VS Code extension's client.js, spoken to it: started, asked, and stopped, which ends it with 0
+  const { startServer } = createRequire(import.meta.url)("./editors/vscode/client.js");
+  const server = await startServer(exe, { cwd: sub, initializationOptions: { diagnostics: false } });
+  assert.equal(server.capabilities.hoverProvider, true);
+  server.notify("textDocument/didOpen", { textDocument: { uri: uri("main.moth"), languageId: "moth", version: 1, text: main } });
+  assert.equal((await server.request("textDocument/hover", at(16, 22))).contents.value.split("\n")[1], "to twice with n as a number gives a number");
+  await assert.rejects(server.request("textDocument/references", at(14, 13)), { code: -32601 });
+  const ended = new Promise((done) => server.onExit(done));
+  await server.stop();
+  assert.equal(await ended, "it ended with 0");
+  // and a moth that isn't there, or that ends before it answers, as one from before moth lsp would
+  await assert.rejects(startServer(join(sub, "no-moth-here")), /moth lsp couldn't start: there's no /);
+  await assert.rejects(startServer(exe, { args: ["lsp-not"] }), /moth lsp couldn't start: it ended with 2/);
 });
 
 // `moth test`: every test_ function in a file, each in a run of its own, said as test() in moth.js says it.

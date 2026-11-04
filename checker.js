@@ -2,7 +2,7 @@
 // what running would say: each "will fail" warning comes from the VM's own checks (vm.js), run on sample
 // values of the types it worked out, so its message is the exact error that line would stop with.
 //
-// It works the types out twice (DESIGN §103). Once from what is sure: values written out, what each operation
+// It works the types out twice (DESIGN §107). Once from what is sure: values written out, what each operation
 // and builtin gives, an input whose `as` each call checks, what a kind makes, what a function returns. A
 // check that fails on those types "fails": that line stops the program whenever it runs. Then again, adding
 // what the code says of itself that no run checks: `with pet as a dog` (each call checks only that it's a
@@ -45,7 +45,7 @@ const literalType = (v) => (v === null ? "nothing" : typeof v === "boolean" ? "y
 // the statements after which nothing in the same block runs, as a warning names them
 const ENDINGS = new Map([["return", "return"], ["fail", "fail"], ["stop", "stop"], ["exit", "stop the program"]]);
 
-// ---------- types beyond SAMPLES' (DESIGN §103) ----------
+// ---------- types beyond SAMPLES' (DESIGN §107) ----------
 // A type is text: one of SAMPLES' keys, or "record:dog", a record the kind dog makes, or "list:number", a list
 // whose every item is a number ("list:list:text", "list:record:dog"...). `undefined` means nothing known yet,
 // `null` could be several.
@@ -88,7 +88,7 @@ const found = (message) => {
   throw new Found(message);
 };
 
-// ---------- the rules (DESIGN §103) ----------
+// ---------- the rules (DESIGN §107) ----------
 // Each check the checker makes of values, as a rule: given what's fixed at its spot (an operator, a name, a
 // unit) and a value for each operand, it throws Found with the message running would stop with, or doesn't.
 // The checker runs each on a value of the type it worked out for each operand (SAMPLES', or the value itself

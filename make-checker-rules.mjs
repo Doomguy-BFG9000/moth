@@ -1,5 +1,5 @@
 // Makes checker-rules.moth: what each of the checker's rules (RULES in checker.js) does with a value of each
-// type, for `moth check`, which works the types out as checker.js does but can't run vm.js (DESIGN §103).
+// type, for `moth check`, which works the types out as checker.js does but can't run vm.js (DESIGN §107).
 //
 //     node make-checker-rules.mjs
 //
@@ -69,7 +69,7 @@ export function checkerRules() {
   };
   const made = [
     "# Made by make-checker-rules.mjs from checker.js's RULES and vm.js: what each rule the checker checks does",
-    "# with a value of each type, for moth check (DESIGN §103). Don't change it by hand: change those, then run",
+    "# with a value of each type, for moth check (DESIGN §107). Don't change it by hand: change those, then run",
     "# node make-checker-rules.mjs.",
     "",
     "# the rules, a line each: \"math|-|tn=|12\" is that text - a number fails with message 12",
