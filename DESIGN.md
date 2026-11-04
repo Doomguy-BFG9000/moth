@@ -4167,3 +4167,195 @@ hold them to agreeing.
   only spaces), read as a page and as JSON, a 404, and its database file, over
   HTTP.
 
+## 103. YAML
+
+- **Why.** CI files, Kubernetes, Docker Compose and most of a company's
+  settings are YAML; toml.moth read only TOML.
+- **What.** yaml.moth reads YAML 1.2's core schema, as PyYAML does with
+  YAML 1.2's resolver: `true`/`false`, `null`/`~`/nothing, decimal, `0x` and
+  `0o` whole numbers, decimals with exponents and `.inf`; everything else text,
+  so `on`, `no`, `1.2.3` and dates stay text (the "Norway problem" of 1.1
+  doesn't happen). Block mappings and sequences (a sequence as indented as its
+  key, compact `- key: v` items, `- - a`), flow `[ ]` and `{ }` over lines,
+  plain text folded over lines, both quotes with every escape (`\x`, `\u`,
+  `\U`, halves of a pair), `|` and `>` with `-`, `+` and an indentation
+  digit, comments, `---` and `...`, `%` directives, anchors and aliases
+  (the same value, as PyYAML gives), `<<` merges (one or a list, the
+  mapping's own keys winning), `? key` explicit keys, and the tags !!str,
+  !!int, !!float, !!bool, !!null and !!binary (bytes); other tags (`!Ref`)
+  are passed over. Keys are text as written. A key twice is a mistake, as
+  in toml.moth; YAML forbids it, though PyYAML keeps the last.
+- **Writing.** yaml_of writes block style, two spaces a level; text plain
+  where it reads back as itself, also by YAML 1.1 readers (so `yes`, `on`
+  and anything starting with a digit, sign or dot is quoted), text with
+  lines after `|`, `|-` or `|+`, bytes as `!!binary`, records as mappings.
+- **Tested.** 62 documents (the spec's chapter 2, CI, Compose and Kubernetes
+  files, every scalar kind, block scalar chomping, flow, anchors, merges and
+  mistakes) against PyYAML with a YAML 1.2 resolver: 59 the same, the other
+  three differences on purpose (a key twice, a tab after `:`, and `! 12`,
+  which the spec says is text). Each of the 59 written by yaml_of, read back
+  the same by yaml.moth and by PyYAML. yaml.test.moth keeps the cases, on all
+  three engines and in machine code.
+
+## 104. JSON Web Tokens
+
+- **Why.** Every API a company runs or calls has bearer tokens, and an
+  identity provider's are JWTs signed with RSA.
+- **What.** jwt.moth makes tokens with HS256, HS384 and HS512 (hash.moth's
+  HMAC) and checks them, and checks RS256, RS384 and RS512 with big.moth's
+  `power_mod`: 0.05 s for a 2048-bit key in machine code, so checking is
+  practical; signing with RSA (a 2048-bit private exponent, about 4 seconds
+  even with the CRT) isn't offered. The signature is checked by building the
+  whole expected PKCS #1 v1.5 block (00 01 FF.. 00, DigestInfo, hash) and
+  comparing every byte with `same_secret`, never by parsing what the power
+  gives, which is how forgeries have got through others' checks. Keys: a
+  secret (text, bytes, or a JWK of kty `oct`), or RSA as a PEM public key,
+  RSA public key or certificate (a small DER reader finds the key), or a JWK.
+- **Algorithm confusion.** The key decides the algorithms, not the token: a
+  secret only HS*, an RSA key only RS*; `none` is always turned down, and
+  `crit` too. So a token signed with HMAC using the RSA public key's PEM as
+  its secret fails, as does `alg: none`.
+- **Claims.** exp and nbf with leeway, iat not in the future, iss among the
+  issuers given, and aud: a token that has one must name the audience given,
+  as RFC 7519 says; `require` lists claims that must be there; `now` can be
+  given, so tests never ask the clock.
+- **Tested.** RFC 7515's A.1 (HS256, its key a JWK) and A.2 (RS256); tokens
+  PyJWT made with all six algorithms, the same bytes made here for HS*; a
+  key from Python's cryptography as SPKI, PKCS #1, a certificate and a JWK;
+  every claim failing; and the attacks above. On the JIT (RSA is slow on the
+  other two engines) and in machine code.
+- **A bug found.** In machine code, `list of a for each a in xs where ...`
+  inside a function of a file used `as` a name fails, "'jwt' has nothing
+  called 'jwt's each item'": the libraries use loops instead. Not fixed here.
+
+## 105. S3 and Signature Version 4
+
+- **Why.** Files a company keeps are in S3, or a store that speaks its
+  language: MinIO, R2, B2, Ceph.
+- **What.** s3.moth signs each request with SigV4 (the canonical request,
+  the string to sign, the key derived from the date, region and service) and
+  sends it through http.moth, with the Host header it signed and the path and
+  query exactly as signed (each encoded once, as S3 wants, the query sorted).
+  Objects are put, got, looked at, listed (ListObjectsV2, page after page),
+  deleted; buckets made (with a LocationConstraint outside us-east-1),
+  removed and listed; and presigned URLs made for GET, PUT or DELETE.
+  Buckets go in the path for MinIO and other stores, in the host's name for
+  amazonaws.com. Temporary credentials' token is sent and signed;
+  `sign_payload no` sends UNSIGNED-PAYLOAD, as hashing in Moth is about
+  1.7 MB a second. `sign()` is public, for other AWS services.
+- **Tested.** Against the signatures in S3's own guide (GET with a Range,
+  PUT of a key with `$`, a bucket's lifecycle, a listing, and the presigned
+  URL), and AWS's test suite's get-vanilla, query order and header trimming,
+  all matching on every engine and in machine code; then a real MinIO.
+
+## 106. OAuth 2
+
+- **Why.** A program a company writes signs people in through Google,
+  GitHub, Okta or Entra, and calls APIs with its own credentials.
+- **What.** oauth.moth has the authorization code flow with PKCE (S256; a
+  32-byte verifier and 16-byte state from secrets.moth), and `sign_in`, which
+  does it as command-line tools do (RFC 8252): server.moth answers on
+  127.0.0.1, at the first free port from 8765; the browser is opened where
+  the program may run one (rundll32 or xdg-open), and the address is said to
+  the error output either way; a request whose state isn't the one sent is
+  answered 400 and waited past; the code, or the provider's error, ends the
+  wait. Then the client credentials grant, refresh (the old refresh token
+  kept if no new one comes), `expired`, and `discover`, from OpenID Connect's
+  document. A client secret goes as HTTP Basic or in the form. A token
+  endpoint's answer in a form (GitHub's, unless asked for JSON) is read too.
+- **Tested.** RFC 7636's PKCE example, the authorization address, every kind
+  of answer, in machine code (the randomness is the system's); and a whole
+  sign-in in machine.test.js: Node is the provider, checking the verifier
+  against the challenge in the address the program said, and the browser,
+  coming back to the program's own server first with a wrong state, then the
+  code; refresh, a revoked refresh token, client credentials both ways, and a
+  person saying no, its words escaped in the page.
+
+## 107. Bytes on a connection, and Redis
+
+- **Why.** Databases speak protocols of bytes: lengths, numbers and lines,
+  arriving in pieces.
+- **wire.moth.** A reader keeps a buffer of what came, twice as big when a
+  message needs more, so a 10 MB reply costs about 10 MB of copying, not its
+  square; `take(n)`, `line` (to \r\n), `text_to_zero`, numbers of 1 to 8 bytes
+  either way round, signed or not, and IEEE 754 doubles both ways, written by
+  finding the exponent and scaling by powers of 2, which are exact. A
+  writer keeps pieces and joins them once. A negative 8-byte number is
+  written as -n-1 with its bits turned over, so it stays exact to 2^53.
+- **redis.moth.** RESP2 and RESP3 (maps as dictionaries, sets as lists,
+  doubles, booleans, big numbers as text, verbatim strings, attributes passed
+  over, pushes); commands as arrays of bulk strings, binary-safe; pipelining
+  (every reply read before any error is raised, so the connection stays in
+  step); MULTI/EXEC; SCAN rather than KEYS; BLPOP; pub/sub by channel and
+  pattern, with a time limit through sockets.moth's `ready`; AUTH with a
+  user; `rediss://` over TLS. Bulk strings come back as text, or as bytes
+  through get_bytes and command_bytes.
+- **Tested.** Every reply type read from bytes, and commands written byte
+  for byte, on every engine and in machine code; then a real Redis.
+
+## 108. PostgreSQL
+
+- **Why.** It's the database most companies start with.
+- **What.** Protocol 3: SSLRequest first unless TLS is "disable"; then
+  SCRAM-SHA-256 (the server's signature checked at the end, so a server that
+  doesn't know the password is found out), MD5 or a password in the clear,
+  whichever the server asks for. Every query goes by the extended protocol:
+  Parse with each parameter's type left to the server (bytea's said, as its
+  bytes go in binary), Bind, Describe, Execute and Sync in one send, so the
+  SQL and the values never meet. Results come as text and are made Moth
+  values by their type's OID (int2/4/8, float4/8, numeric, bool, bytea, json
+  and jsonb, one-dimensional arrays of those); NULL is nothing. After an
+  error the server skips to Sync's ReadyForQuery, which is read before the
+  error is raised, so the connection is ready for the next query. Notices
+  are kept on the connection. `run_script` uses the simple protocol, for
+  files of many statements. `in_transaction` commits, or rolls back and
+  raises the mistake again.
+- **TLS.** "prefer" tries TLS where the server has it; as sockets.moth
+  always checks certificates, a server whose certificate can't be checked
+  (or a Windows computer without OpenSSL) is connected to again without TLS,
+  which is what "prefer" means in libpq, where it never checks at all.
+  "require" never falls back.
+- **Tested.** RFC 7677's SCRAM example; MD5; the messages of a query byte for
+  byte, and a server's answers (every type, NULLs, an error with a notice
+  before it, a constraint's detail) as Python's struct makes them, on the
+  JIT and in machine code; then a real PostgreSQL 16.
+
+## 109. MySQL
+
+- **Why.** The other database companies run, with MariaDB.
+- **What.** The handshake (protocol 10), an SSLRequest where TLS is wanted,
+  HandshakeResponse41 with utf8mb4, and both plugins:
+  `mysql_native_password` (SHA-1) and `caching_sha2_password` (SHA-256),
+  with the server's switch to another plugin followed. caching_sha2's full
+  way sends the password in the clear over TLS, and without TLS asks for the
+  server's RSA key and sends it XORed with the nonce and encrypted with
+  RSAES-OAEP (SHA-1, MGF1), built here on big.moth and jwt.moth's key reader.
+  Statements are prepared once each (kept by their SQL on the connection) and
+  run with COM_STMT_EXECUTE: whole numbers as 8 bytes, others as doubles,
+  text, bytes as blobs, NULLs in the bitmap. Rows in the binary protocol are
+  read by type (signed and unsigned integers, floats of 4 and 8 bytes,
+  decimals, dates, times with days and a sign, JSON, binary columns as
+  bytes); `run_script` uses COM_QUERY's text rows, with multi-statements on.
+- **Tested.** The handshake, both scrambles, OAEP with a fixed seed against
+  Python's by hand (which Python's cryptography decrypts), the execute
+  message and a server's binary and text rows, OK and ERR, as Python makes
+  them, on the JIT and in machine code; then a real MySQL 8.4, whose
+  certificate is its own, so "prefer" falls back and caching_sha2 goes the
+  RSA way, then the fast way; and a native-password user.
+
+## 110. Real servers in CI
+
+- **Why.** A protocol read only from bytes made by hand is a protocol as
+  understood by whoever made them.
+- **What.** machine.test.js has a live test for each of PostgreSQL, MySQL,
+  Redis and S3, run where `MOTH_POSTGRES_URL`, `MOTH_MYSQL_URL`,
+  `MOTH_REDIS_URL` and `MOTH_S3_URL` say where a server is, skipped where not.
+  CI's test job has PostgreSQL 16 (logins md5, so a SCRAM password logs in by
+  SCRAM and an MD5 one by MD5), Redis 7 and MinIO as service containers, and
+  starts MySQL 8.4 with `docker run`, as `--mysql-native-password=ON` is a
+  server option a service can't be given. MinIO no longer publishes images of
+  its own, so CI uses Bitnami's build of it. The passwords are the
+  containers' own, made up for the tests.
+- **Tested.** Each program is built by the machine compiler and run with the
+  server's address; what it says must be exactly what it said here against
+  the same servers in WSL's Docker.
