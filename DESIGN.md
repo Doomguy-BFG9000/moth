@@ -4167,3 +4167,129 @@ hold them to agreeing.
   only spaces), read as a page and as JSON, a 404, and its database file, over
   HTTP.
 
+
+## 103. Package sums: moth.sums
+
+- **Why.** A commit in `moth.packages` names a package's code, but nothing
+  checked that the files in `packages/` were still that code. A cached
+  `packages/` in CI, or a file changed there by hand, ran as it was; and a
+  commit is a SHA-1, which Git hardens but which is the weakest link a company
+  would be asked about. npm's lockfile has an integrity hash, Go has go.sum,
+  Cargo checks each crate's.
+- **What.** `moth add` and `moth update` write the SHA-256 of each package's
+  files, at its commit, to `moth.sums`, beside `moth.packages`: a line each,
+  its name, the commit and `sha256:` with 64 hex digits. `moth get` works it out
+  again and compares. One that was in `packages/` already and differs is named
+  with the files git sees changed, added or taken away, and left as it is, for
+  a person to look at; one just fetched that differs came from somewhere that
+  isn't what it was, and is taken away, so nothing uses it. `moth update`
+  checks a package first, so a change in `packages/` never becomes the next
+  sum. A package's own `moth.sums` is checked for the packages it brings.
+- **The sum.** For each file in the folder but Git's own (any `.git` folder or
+  file), in the order of its path's bytes, with `/` between its parts: its
+  SHA-256 in hex, two spaces, its path, a line end; then the SHA-256 of that.
+  It's what `sha256sum` writes, so `find`, `sort` and `sha256sum` can check one
+  without moth, and it's Go's dirhash with hex for base64. Every file counts,
+  not only the ones git tracks: a file added to a package's folder is a change.
+  It uses tools/hash.moth, which moth.moth now uses `as cli_hashing`, so
+  bootstrap.mjs and the tests give moth that file too. A megabyte takes moth
+  about half a second.
+- **The same on every system.** Git for Windows checks text files out with
+  `\r\n` (its installer sets `core.autocrlf`), so a package's files, and their
+  sum, were different on Windows and Linux. moth now runs git with
+  `core.autocrlf=false`, `core.eol=lf` and `core.symlinks=false`: files as they
+  were committed, or as the repository's own `.gitattributes` says, which is
+  the same everywhere, and a symbolic link as a small file holding where it
+  points, as Windows has it anyway. So a link in a package can't lead `use`
+  out of it either.
+- **A file of its own.** The sums could have gone at the end of each
+  `moth.packages` line, but moth 1.11 takes a line's last word as its commit,
+  so it couldn't have read the file. `moth.sums` is a file 1.11 doesn't know,
+  and ignores. A `moth.packages` with no sums, or one whose commit has none,
+  gets them from the next `moth get`, which fetches the package again first,
+  as a moth before this one may have checked it out with other line ends.
+- **Tested.** Through moth.exe: the sum against one Node.js works out the same
+  way; a package whose `.gitattributes` asks for the system's line ends
+  checked out with `\n` on Windows too; a file changed and a file added in
+  `packages/`, by get and by update; a fetch whose sum differs, not kept; a
+  `moth.packages` with no sums, and one checked out with `\r\n`; update's new
+  sum; a package's own `moth.sums`, which fits and which doesn't; remove.
+
+## 104. Signed packages: --signed
+
+- **Why.** A sum says the code is what was pinned, not who wrote it. A company
+  that signs its commits, or takes a library only at its signed releases, wants
+  moth to check.
+- **What.** `moth add`, `get` and `update` take `--signed`. A package passes if
+  it was asked for at a tag that's a signed tag (an object of its own, not a
+  name for a commit) at the package's commit and `git verify-tag` accepts it, or
+  else if `git verify-commit` accepts its commit. Which keys count is git's:
+  the person's GPG keyring, or for SSH signatures the file
+  `gpg.ssh.allowedSignersFile` names. moth says what git said when it doesn't
+  pass. `add` takes away what it fetched; `update` goes back to the commit it
+  was at, and says so; `get` ends with 1.
+- **Asked for, not always.** Most packages aren't signed yet, so checking each
+  time would stop everyone. A company puts `moth get --signed` in its CI.
+- **Tested.** Through moth.exe, with SSH keys ssh-keygen makes and an allowed
+  signers file given to git in `GIT_CONFIG_*`: a tag that's only a name on an
+  unsigned commit, refused; a signed commit asked for by its hash, and a signed
+  tag on an unsigned commit, taken by add and get; a commit signed by a key
+  that isn't trusted, refused, then taken without `--signed` and refused by get;
+  update on a branch, refusing an unsigned newest commit and taking a signed
+  one; and `--signed` where it means nothing.
+
+## 105. Advisories and moth audit
+
+- **Why.** npm audit, pip-audit and cargo audit say when a program depends on a
+  version with a known problem. Moth's packages are pinned by commit, so its
+  advisories name commits.
+- **The advisories** are a list in the package index's JSON, beside its
+  packages, so one file, one address and one pull request hold both. Each names
+  its package (by the index's name, or a `repository` of its own), and which
+  commits it's about: `commits`, a list, each all of a commit or its first 7 or
+  more digits; or `introduced` and `fixed`, the commits from the one it came in
+  with (or `"0"`) that aren't from the one that fixed it on, as OSV's GIT ranges
+  are; or neither, for every commit. `id`, `severity`, `about` and `link` are
+  for people.
+- **moth audit** reads moth.packages and the index (`--index` as for search),
+  matches each package to the advisories by where it comes from, in lower case,
+  with no `https://`, `ssh://`, `git@site:`, `.git` or `/` at its end, and asks
+  the package's own clone, with `git merge-base --is-ancestor`, whether a commit
+  is before another. A package not fetched can't be asked, and says so. It ends
+  with 1 if an advisory is about a package's commit or one couldn't be checked,
+  so CI stops; with 0, it says there are none.
+- **The index.** samyyy2423/moth-packages needs `advisories` in index.json,
+  and its check-index.mjs to allow and check it; the pull request that adds
+  this describes the change.
+- **Tested.** Through moth.exe, with an index in a file: an advisory by its
+  commits, written in another case with `.git/` after it, and one by
+  introduced and fixed, each at the commits it's about and not; a package from
+  a site written another way than the index has it; a package not fetched; an
+  index with no advisories; advisories that aren't; and no moth.packages.
+
+## 106. A specification, a promise, a changelog and a security policy
+
+- **Why.** A company that builds on a language asks what it means, what
+  updates will change, what's changed, and where to send a security problem.
+  Moth's answers were spread through the README, DESIGN.md and the release
+  notes.
+- **SPEC.md** is the language as it is, from moth.js's parser and vm.js's
+  checks and messages: how a program is read, the grammar of every statement
+  and expression, values and their kinds, numbers to 15 digits, each built-in
+  operation, mistakes, files, packages and the flags. What's guaranteed is
+  marked apart from what's only how it's done today (the engines, limits,
+  speed, the words of a mistake).
+- **VERSIONING.md** is semantic versioning, with one number for the language,
+  the standard library and the `moth` command, which are released together.
+  1.x keeps every program working; no word is ever reserved in 1.x, as each new
+  phrase has started with a word that stays a name; something to remove is
+  deprecated first and can go only in 2.0. The newest minor release gets every
+  fix and the one before it security fixes for 90 days. Bugs and security holes
+  are fixed even where a program depended on them, as 1.5.1's was.
+- **CHANGELOG.md** is the GitHub releases, newest first, shorter, with a
+  section for what's not released yet.
+- **SECURITY.md** says how to report a problem privately (GitHub's private
+  reporting), which versions get fixes, how to check a download, and what the
+  `--allow` flags protect against and don't: a library or a program the
+  program starts can do anything, a flag allows all of what it names, and
+  there are no limits on memory or time.
