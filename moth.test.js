@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFileSync, readdirSync } from "node:fs";
-import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError, soundSamples, soundWav } from "./moth.js";
+import { run, test as testMoth, format, suggestedFix, debug, timeline, check, compile, compileToJs, compileToWasm, load, mothCompiler, memoryDisk, excerpt, describeTrail, MothError, soundSamples, soundWav, LANGUAGE } from "./moth.js";
 import { Machine, BEEP, Ended } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
@@ -1073,6 +1073,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       ["big.test.moth", ["test_reading_and_writing", "test_adding_and_taking", "test_multiplying", "test_dividing",
         "test_comparing", "test_mistakes", "test_more", "test_more_mistakes"]],
       ["fractions.test.moth", ["test_making", "test_sums", "test_comparing_and_rounding", "test_mistakes"]],
+      ["sets.test.moth", ["test_making_and_finding", "test_combining", "test_showing"]],
       ["xml.test.moth", ["test_elements", "test_finding", "test_around_the_element", "test_entities_and_cdata",
         "test_writing", "test_mistakes"]],
       ["zip.test.moth", ["test_checks", "test_reading_what_zlib_makes", "test_round_trips", "test_archives", "test_mistakes"]]]) {
@@ -1080,6 +1081,12 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
       assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
     }
   }
+});
+
+// the language's own functions (DESIGN §97): moth.js's LANGUAGE and compiler.moth's language_text, the same
+test("moth.js and compiler.moth have the same text for the language's own functions", () => {
+  const written = /\nset language_text to "((?:[^"\\]|\\.)*)"\n/.exec(COMPILER)[1];
+  assert.equal(written.replace(/\\(.)/g, (_, c) => (c === "n" ? "\n" : c)), LANGUAGE);
 });
 
 test("webpage.moth is what make-web.mjs makes of index.html and the engine as they are", async () => {

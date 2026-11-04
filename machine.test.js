@@ -312,7 +312,7 @@ const DEBUG_RUNS = [
   ["step\nstep\nwhere\nlist\nbreak prog.moth 5\ngo\nvars\nwhere\nout\nnext\nshow tick\nshow sam\nshow nope\nbreak prog.moth 12\nbreaks\ngo\nwhere\nout\nshow why\nclear prog.moth 12\nclear prog.moth 12\ngo\nAna\n\n",
     "lib.moth:1: set calls_made to 0\n(moth) step\nlib.moth:2: to twice with t\n(moth) step\nprog.moth:2: to counter\n(moth) where\n  prog.moth:2\n(moth) list\n   1  use \"lib.moth\" as lib\n-> 2  to counter\n   3      set count to 0\n   4      to bump\n   5          add 1 to count\n(moth) break prog.moth 5\nbreakpoint at prog.moth:5\n(moth) go\nprog.moth:5, in 'bump': add 1 to count\n(moth) vars\nbump is <function bump>\ncount is 0\ntick is <function bump>\nsam has no value yet\nwhy has no value yet\nname has no value yet\n(moth) where\n  prog.moth:5, in 'bump'\n  prog.moth:17\n(moth) out\nprog.moth:18: set sam to record with name \"Sam\", pets (list of \"cat\")\n(moth) next\nprog.moth:19: try\n(moth) show tick\ntick is <function bump>\n(moth) show sam\nsam is (record with name \"Sam\", pets [\"cat\"])\n(moth) show nope\nthere's no 'nope' here\n(moth) break prog.moth 12\nbreakpoint at prog.moth:12\n(moth) breaks\nbreakpoint at prog.moth:5\nbreakpoint at prog.moth:12\n(moth) go\nprog.moth:12, in 'risky': fail with \"none left\"\n(moth) where\n  prog.moth:12, in 'risky'\n  prog.moth:14, in 'risky'\n  prog.moth:14, in 'risky'\n  prog.moth:20\n(moth) out\nprog.moth:22: say \"caught \" why\n(moth) show why\nwhy is \"none left\"\n(moth) clear prog.moth 12\nbreakpoint at prog.moth:12 taken away\n(moth) clear prog.moth 12\nthere's no breakpoint there: breaks lists them\n(moth) go\ncaught none left\nName? Ana\nAnaAna (record with name \"Sam\", pets [\"cat\"])\ndone\n"],
   ["break lib.moth 4\ngo\nBo\nshow t\nwhere\nfrobnicate\nhelp\n",
-    "lib.moth:1: set calls_made to 0\n(moth) break lib.moth 4\nbreakpoint at lib.moth:4\n(moth) go\ncaught none left\nName? Bo\nlib.moth:4, in 'lib's twice': return t + t\n(moth) show t\nt is \"Bo\"\n(moth) where\n  lib.moth:4, in 'lib's twice'\n  prog.moth:25\n(moth) frobnicate\nI don't know 'frobnicate': help says what I do\n(moth) help\nstep (s)        run this line, and stop at the next one, in a call it makes too\nnext (n)        run this line, and stop at the next one here or after\nout (o)         run on, and stop once this call is over\ngo (g)          run on, and stop only at a breakpoint\nbreak 12 (b)    stop at line 12 of this file; break math.moth 12 for another\nclear 12        take that breakpoint away; breaks lists them\nshow x (p)      what x holds; vars (v) shows every variable\nwhere (w)       this line, and the calls in progress\nlist (l)        the lines around this one\nquit (q)        end the program here\n(moth) \nBoBo (record with name \"Sam\", pets [\"cat\"])\ndone\n"],
+    "lib.moth:1: set calls_made to 0\n(moth) break lib.moth 4\nbreakpoint at lib.moth:4\n(moth) go\ncaught none left\nName? Bo\nlib.moth:4, in 'lib's twice': return t + t\n(moth) show t\nt is \"Bo\"\n(moth) where\n  lib.moth:4, in 'lib's twice'\n  prog.moth:25\n(moth) frobnicate\nI don't know 'frobnicate': help says what I do\n(moth) help\nstep (s)        run this line, and stop at the next one, in a call it makes too\nnext (n)        run this line, and stop at the next one here or after\nout (o)         run on, and stop once this call is over\ngo (g)          run on, and stop only at a breakpoint\nbreak 12 (b)    stop at line 12 of this file; break math.moth 12 for another\nclear 12        take that breakpoint away; breaks lists them\nshow x (p)      what x holds, or a sum of what they hold: show x + 1, show item 2 of xs, show rex's age\nvars (v)        every variable, and what it holds\nwhere (w)       this line, and the calls in progress\nlist (l)        the lines around this one\nquit (q)        end the program here\n(moth) \nBoBo (record with name \"Sam\", pets [\"cat\"])\ndone\n"],
   ["next\nnext\nquit\n",
     "lib.moth:1: set calls_made to 0\n(moth) next\nlib.moth:2: to twice with t\n(moth) next\nprog.moth:2: to counter\n(moth) quit\n"],
 ];
@@ -653,6 +653,20 @@ test("moth.exe coverage says which lines of a program and the files it uses ran"
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["2\n", "moth coverage: 6 of 8 lines run (75.0%)\n  cov.moth: 3 of 4 (75.0%), not run: 4\n"
     + "  half.moth: 3 of 4 (75.0%), not run: 5\n", 0]);
   assert.deepEqual(readdirSync(sub).sort(), ["cov.moth", "half.moth"], "the program built for coverage was left behind");
+});
+
+// `show` works out a sum of the variables the line can see (DESIGN §98): items, fields, comparisons, brackets
+test("a program built to be debugged shows sums of its variables, and says why one can't be worked out", { skip }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-debug-"));
+  try {
+    const exe = executable(dir, "d");
+    writeFileSync(exe, machine("set xs to list of 10, 20, 30\nset sam to record with name \"Sam\", age 20, pet (record with name \"Rex\")\nset total to 7\nsay total\n", { target, name: "p.moth", debug: true, files: { "moth-debugger.moth": here("moth-debugger.moth") } }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { input: "step\nstep\nstep\nshow total + 1\nshow item 2 of xs + total\nshow sam's pet's name\nshow age of sam\nshow total is greater than 5 and not (total is 9)\nshow 2 * (3 + 4)\nshow -total\nshow nope + 1\nshow item 9 of xs\nquit\n", encoding: "utf8", timeout: 60_000 });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["p.moth:1: set xs to list of 10, 20, 30\n(moth) step\np.moth:2: set sam to record with name \"Sam\", age 20, pet (record with name \"Rex\")\n(moth) step\np.moth:3: set total to 7\n(moth) step\np.moth:4: say total\n(moth) show total + 1\ntotal + 1 is 8\n(moth) show item 2 of xs + total\nitem 2 of xs + total is 27\n(moth) show sam's pet's name\nsam's pet's name is \"Rex\"\n(moth) show age of sam\nage of sam is 20\n(moth) show total is greater than 5 and not (total is 9)\ntotal is greater than 5 and not (total is 9) is yes\n(moth) show 2 * (3 + 4)\n2 * (3 + 4) is 14\n(moth) show -total\n-total is -7\n(moth) show nope + 1\ncan't work out nope + 1: there's no 'nope' here\n(moth) show item 9 of xs\ncan't work out item 9 of xs: there is no item 9, the list only has 3 items\n(moth) quit\n", "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // a program built to be debugged stops at its mistake, after the report, with the variables the line could see
@@ -1542,20 +1556,20 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, sets.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
-    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth"]) {
+    "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth", "sets.moth", "sets.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "78 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "81 passed");
 });
 
 // tools/system.moth: files, folders and the environment, the same on Windows and Linux

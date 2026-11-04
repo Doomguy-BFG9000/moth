@@ -37610,6 +37610,7 @@ end
 to new_state with a, program_name, files, source, target
     set sources to empty dictionary
     set item "" of sources to source
+    set item "the language" of sources to front's language_text # the language's own functions (DESIGN §97)
     for each f in files
         set item (name of f) of sources to text of f
     end
@@ -37723,7 +37724,7 @@ end
 to statement_lines with body, lines, seen
     for each s in body
         set key to file of at of s + " line " + line of at of s
-        if file of at of s is not debugger_file and not (key is in seen) and not parser_made(s)
+        if file of at of s is not debugger_file and file of at of s is not "the language" and not (key is in seen) and not parser_made(s)
             set item key of seen to yes
             add (list of file of at of s, line of at of s) to lines
         end
@@ -38459,7 +38460,7 @@ to gen_block with fc, body
             set marked of fc to marked of fc + 1
             mark(a of fc, item (marked of fc) of marks of fc)
         end
-        if debugging of st of fc and file of at of s is not debugger_file and not parser_made(s)
+        if debugging of st of fc and file of at of s is not debugger_file and file of at of s is not "the language" and not parser_made(s)
             gen_hook(fc, s)
         end
         gen_statement(fc, s)

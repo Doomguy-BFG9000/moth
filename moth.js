@@ -195,11 +195,119 @@ const TURTLE_WORDS = new Map([["move", ["forward", "back", "to"]], ["turn", ["le
 // with none calls `picture`), draws a picture from a file
 const CARRY_ON = ["at", "of", "bit", "is", "and", "or", "in", "as", "bytes"];
 
+// The language's own functions, in Moth, put in a program that needs them as a file used as "the language" is
+// (DESIGN §97); compiler.moth has the same text, and a test holds them to each other.
+export const LANGUAGE = `# What some of Moth's statements are written with (DESIGN §97), put in a program that needs them, its names
+# kept apart as a file used as "the language" is
+
+# n as text, with exactly so many decimals, the last rounded a half away from 0, as n is shown
+to with_decimals with n as a number, places as a number
+    if not (places is divisible by 1) or places is less than 0 or places is greater than 100
+        fail with "'with ... decimals' needs a whole number of decimals from 0 to 100, not " + places
+    end
+    set written to "" + n
+    if written is "Infinity" or written is "-Infinity" or written is "NaN"
+        return written
+    end
+    set negative to n is less than 0
+    if negative
+        set written to "" + (0 - n)
+    end
+    set power to 0
+    set e_at to position of "e" in written
+    if e_at is greater than 0
+        set power_text to items (e_at + 1) to (length of written) of written
+        if item 1 of power_text is "+"
+            set power_text to items 2 to (length of power_text) of power_text
+        end
+        set power to number of power_text
+        set written to items 1 to (e_at - 1) of written
+    end
+    set dot to position of "." in written
+    set digits to written
+    set point to length of written
+    if dot is greater than 0
+        set digits to (items 1 to (dot - 1) of written) + (items (dot + 1) to (length of written) of written)
+        set point to dot - 1
+    end
+    set point to point + power
+    repeat while point is less than 1
+        set digits to "0" + digits
+        set point to point + 1
+    end
+    repeat while length of digits is less than point + places + 1
+        set digits to digits + "0"
+    end
+    set kept to items 1 to (point + places) of digits
+    if position of (item (point + places + 1) of digits) in "56789" is greater than 0
+        set kept to one_more(kept)
+        if length of kept is greater than point + places
+            set point to point + 1
+        end
+    end
+    set made to items 1 to point of kept
+    if places is greater than 0
+        set made to made + "." + (items (point + 1) to (point + places) of kept)
+    end
+    if negative and not_all_zero(made)
+        return "-" + made
+    end
+    return made
+end
+
+# whole number digits, one more
+to one_more with kept
+    set made to ""
+    set carrying to yes
+    set k to length of kept
+    repeat while k is at least 1
+        set d to item k of kept
+        if carrying and d is "9"
+            set made to "0" + made
+        else if carrying
+            set made to (item ((position of d in "0123456789") + 1) of "0123456789") + made
+            set carrying to no
+        else
+            set made to d + made
+        end
+        set k to k - 1
+    end
+    if carrying
+        return "1" + made
+    end
+    return made
+end
+
+to not_all_zero with made
+    for each c in made
+        if c is not "0" and c is not "."
+            return yes
+        end
+    end
+    return no
+end
+
+# a value as its kind shows it: the function in its shown field, if it has one, given it; or the value
+to shown with value
+    set shown_by to nothing
+    try
+        set shown_by to shown of value
+        a_function(shown_by)
+    if it fails
+        return value
+    end
+    return shown_by(value)
+end
+
+to a_function with f as a function
+end
+`;
+
 // Every node keeps the token it came from (`at`), so errors can point at it. `reading` is shared with the
 // files the program uses: `files` gives a file's text by name, `loaded` is every file read so far (each is read
 // once), and `open` the files being read right now, to catch two that use each other.
 function parse(tokens, reading = { loaded: new Set(), open: [] }) {
-  if (!reading.depth) [reading.calls, reading.defines, reading.owns] = [[], [], []]; // see fillDefaults and ownCalls
+  if (!reading.depth) [reading.calls, reading.defines, reading.owns, reading.wants, reading.shows] = [[], [], [], new Set(), []]; // see fillDefaults, ownCalls and LANGUAGE
   reading.depth = (reading.depth ?? 0) + 1;
   let pos = 0;
   const aliases = new Set(); // the names this file used files and libraries `as`: `x's` is theirs, and any other `x's` a value's
@@ -563,10 +671,13 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (word("say")) { // `say "oops" to the error output`
       const parts = [expression()];
       while (!peek().nl && !isWord("to")) parts.push(expression());
-      if (peek().nl || !word("to")) return { kind: "say", parts, at: t };
+      const said = { kind: "say", parts, at: t };
+      reading.shows.push(said); // a kind's `shown` shows its parts, if one has it (see LANGUAGE)
+      if (peek().nl || !word("to")) return said;
       if (!(isWord("the") && wordAt(pos + 1, "error") && wordAt(pos + 2, "output"))) expected("'the error output'");
       pos += 3;
-      return { kind: "say", parts, at: t, errors: true };
+      said.errors = true;
+      return said;
     }
     if (word("if")) return ifRest(t);
     if (word("repeat")) {
@@ -1011,6 +1122,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       const how = word("down") ? "rounded down" : word("up") ? "rounded up" : "rounded";
       left = { kind: "builtin", name: how, args: [left], at: t };
     }
+    // `price with 2 decimals`: the number as text with exactly so many decimals, by the language's own function
+    if (isWord("with") && !peek().nl && tokens[pos + 2] && !tokens[pos + 1].nl && (tokens[pos + 1].type === "number" || tokens[pos + 1].type === "word")
+      && !tokens[pos + 2].nl && (wordAt(pos + 2, "decimals") || wordAt(pos + 2, "decimal"))) {
+      const t = tokens[pos++];
+      const places = primary();
+      pos++;
+      reading.wants.add("decimals");
+      left = madeCall("the language's with_decimals", [left, places], t);
+    }
     // `scores in order`, `scores in reverse order`, `people in order by age`
     if (converting && isWord("in") && !tokens[pos + 1].nl && (wordAt(pos + 1, "order") || (wordAt(pos + 1, "reverse") && wordAt(pos + 2, "order")))) {
       const t = tokens[pos++];
@@ -1307,6 +1427,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
           if (!check("}")) fail(peek(), `expected '}' but found ${describe(peek())} (${BRACE_HINT})`);
         }
         node = node ? { kind: "math", op: "+", left: node, right: piece, at: t } : piece;
+        if (typeof part !== "string") reading.shows.push(node); // a value in text: its kind's `shown`, if it has one
       }
     } finally {
       [tokens, pos, indexing, converting] = outside;
@@ -1510,6 +1631,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       if (d.kind !== "define") fail(d.at, "a kind holds only its functions, each made with 'to'");
       if (params.includes(d.name)) fail(d.at, `'${d.name}' is one of the kind's inputs, so a function of it can't be called that too`);
       owns.push({ own: d.name, at: d.at });
+      if (d.name === "shown") reading.wants.add("shown"); // say and values in text then go through it (see withLanguage)
       d.name = `${kindName}'s ${d.name}`;
     }
     const at = (kind, rest) => ({ ...rest, kind, at: t });
@@ -1569,12 +1691,27 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
 
   const made = statements(null);
+  if (reading.depth === 1) withLanguage(reading, made);
   if (--reading.depth === 0) {
     fillDefaults(reading);
     madeGenerators(reading, made);
     ownCalls(reading, made);
   }
   return made;
+}
+
+// The language's own functions (LANGUAGE), at the program's top, if it needs them: for `with 2 decimals`, or
+// for a kind's `shown`, which every `say` and value in text then goes through, so a record whose `shown` field
+// is a function is shown as that function gives it.
+function withLanguage(reading, body) {
+  if (reading.wants.has("shown")) {
+    const shown = (e) => ({ kind: "call", name: "the language's shown", args: [e], at: e.at });
+    for (const s of reading.shows) {
+      if (s.kind === "say") s.parts = s.parts.map(shown);
+      else s.right = shown(s.right);
+    }
+  }
+  if (reading.wants.size) body.unshift(...prefixed(parse(tokenize(LANGUAGE, "the language"), reading), "the language"));
 }
 
 // `pet's speak(x)`, in a program that makes nothing called speak (no function, input or variable, in any
@@ -1700,7 +1837,7 @@ const LIBRARY_TYPES = { "a number": 0, "a float": 0, "a whole number": 0, "a lon
 const NAMED = new Set(["set", "add", "count", "each", "define", "call", "name", "try"]); // nodes whose `name` is a variable
 function prefixed(body, alias) {
   const walk = (node, hidden, handler) => {
-    if (NAMED.has(node.kind) && node.name != null && !hidden.has(node.name) && !handler) node.name = `${alias}'s ${node.name}`;
+    if (NAMED.has(node.kind) && node.name != null && !hidden.has(node.name) && !handler && !node.name.startsWith("the language's ")) node.name = `${alias}'s ${node.name}`;
     const inside = node.kind === "define" ? new Set([...hidden, ...node.params, ...declarations(node.body).own]) : hidden;
     for (const [key, child] of Object.entries(node)) { // a `when` or `every`'s function (`fn`) has a name that isn't a variable
       if (key !== "at") for (const c of Array.isArray(child) ? child : [child]) if (c?.kind) walk(c, key === "body" ? inside : hidden, key === "fn");

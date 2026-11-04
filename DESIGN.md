@@ -3915,3 +3915,49 @@ hold them to agreeing.
   JavaScript's BigInt on 400 random numbers, and their own tests on every
   engine and in machine code.
 
+## 97. The language's own functions: decimals, and how a kind is shown
+
+- **Why.** Python writes a number to so many places with `f"{x:.2f}"`, and a
+  class says how it's printed with `__str__`. Moth had text.moth's
+  `number_text`, a call away, and showed a kind's record as a record.
+- **Written in Moth.** Both need code that runs, not just a new shape of tree,
+  and every engine and machine code run Moth. So moth.js has `LANGUAGE`, a
+  short Moth file, and compiler.moth the same text (a test holds them to each
+  other): once the whole program is read, if it needs any of it, the parser
+  reads that text as a file used as "the language", its names `the language's
+  with_decimals` and so on, which no program can write and no file's alias
+  renames, and puts it at the program's top. machine.moth knows the text too,
+  for a mistake's line, and the debugger and coverage leave its lines out.
+- **`x with 2 decimals`.** After a sum, `with`, one number or name, then
+  `decimals` (or `decimal`) on the same line: a call of `with_decimals`, which
+  takes the number as it's shown, to 15 digits, moves its point for an
+  exponent, rounds the next digit a half away from 0 and writes exactly so
+  many, so 1.005 is 1.01 (Python's binary 1.005 gives 1.00). A name followed
+  by a value was a mistake in that place before, as `with` after a sum was.
+- **A kind's `shown`.** A kind with a function called `shown` makes the parser
+  send each part of every `say`, and each value in text, through the
+  language's `shown`: the value's `shown` field, if it has one and it's a
+  function (a typed input checks that, inside a `try`), given the value, or
+  else the value itself. A program with no such kind is as it was.
+- **Tested.** Decimals of numbers small, huge, below 0, carried up a place and
+  in text; a kind shown by `say`, in text and inside other text, a record
+  with a `shown` that isn't a function, on the three engines, in compiler.moth
+  and in machine code.
+
+## 98. Sets, and the debugger's sums
+
+- **sets.moth.** A set is a kind's record holding a dictionary of its things,
+  each to yes, its `kind` "set" and a `shown` that writes `{1, 2, 3}`; `has`
+  is a dictionary's own finding, so it's as quick with a million as with ten.
+  Its things are a dictionary's keys: numbers and text.
+- **`show x + 1`.** moth-debugger.moth reads what's after `show` as Moth reads
+  a sum: numbers, text, the line's variables, `+ - * /`, brackets, `is` and
+  its comparisons, `and`, `or`, `not`, `item ... of`, `length of`, `keys of`,
+  a field (`age of sam`, `sam's age`) and a file's name (`math's pi`), each
+  worked out in the debugger with Moth's own operators, so the answer is the
+  program's. A field is found through JSON (`json from (x as json)`), as
+  Moth has no field by a name held in a variable. A function can't be
+  called, as the program isn't running; a mistake says what it was.
+- **Tested.** A program built to be debugged, shown sums, items, fields of
+  fields, comparisons, brackets, a minus, and three it can't work out.
+

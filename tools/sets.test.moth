@@ -1,0 +1,53 @@
+# sets.moth's tests, which moth.test.js runs on every engine
+
+use "sets.moth" as sets
+
+to test_making_and_finding
+    set s to sets's set_of(list of 3, 1, 3, 2, 1)
+    expect sets's items_of(s) is list of 3, 1, 2
+    expect sets's size(s) is 3
+    expect sets's has(s, 2)
+    expect not sets's has(s, 5)
+    expect kind of s is "set"
+    sets's put(s, 5)
+    sets's put(s, 5)
+    expect sets's size(s) is 4
+    sets's take_out(s, 3)
+    sets's take_out(s, 99)
+    expect sets's items_of(s) is list of 1, 2, 5
+    expect sets's size(sets's empty_set()) is 0
+    set words to sets's set_of(split "a b a c" by " ")
+    expect sets's items_of(words) is list of "a", "b", "c"
+    set big to sets's empty_set()
+    for each k from 1 to 2000
+        sets's put(big, k)
+        sets's put(big, k)
+    end
+    expect sets's size(big) is 2000
+end
+
+to test_combining
+    set a to sets's set_of(list of 1, 2, 3, 4)
+    set b to sets's set_of(list of 3, 4, 5)
+    expect sets's items_of(sets's union(a, b)) is list of 1, 2, 3, 4, 5
+    expect sets's items_of(sets's both(a, b)) is list of 3, 4
+    expect sets's items_of(sets's only_in(a, b)) is list of 1, 2
+    expect sets's items_of(sets's in_one(a, b)) is list of 1, 2, 5
+    expect sets's is_within(sets's set_of(list of 4, 3), a)
+    expect not sets's is_within(b, a)
+    expect sets's same(sets's set_of(list of 2, 1), sets's set_of(list of 1, 2))
+    expect not sets's same(a, b)
+    set c to sets's copy_of(a)
+    sets's put(c, 9)
+    expect not sets's has(a, 9)
+end
+
+to test_showing
+    expect "{sets's set_of(list of 1, 2)}" is "{1, 2}"
+    expect "{sets's set_of(list of "x", "y")}" is "{" + chr_quote() + "x" + chr_quote() + ", " + chr_quote() + "y" + chr_quote() + "}"
+    expect "{sets's empty_set()}" is "{}"
+end
+
+to chr_quote
+    return item 2 of ("" + list of "")
+end

@@ -412,6 +412,9 @@ set reserved to list of "set", "add", "say", "if", "else", "end", "repeat", "whi
 # `draw picture` followed by any other word, or by text, a number or a bracket with a space before it (one
 # with none calls `picture`), draws a picture from a file
 set carry_on to list of "at", "of", "bit", "is", "and", "or", "in", "as", "bytes"
+# The language's own functions, in Moth, put in a program that needs them as a file used as "the language" is
+# (DESIGN §97): moth.js's LANGUAGE, which a test holds this to
+set language_text to "# What some of Moth's statements are written with (DESIGN §97), put in a program that needs them, its names\n# kept apart as a file used as \"the language\" is\n\n# n as text, with exactly so many decimals, the last rounded a half away from 0, as n is shown\nto with_decimals with n as a number, places as a number\n    if not (places is divisible by 1) or places is less than 0 or places is greater than 100\n        fail with \"'with ... decimals' needs a whole number of decimals from 0 to 100, not \" + places\n    end\n    set written to \"\" + n\n    if written is \"Infinity\" or written is \"-Infinity\" or written is \"NaN\"\n        return written\n    end\n    set negative to n is less than 0\n    if negative\n        set written to \"\" + (0 - n)\n    end\n    set power to 0\n    set e_at to position of \"e\" in written\n    if e_at is greater than 0\n        set power_text to items (e_at + 1) to (length of written) of written\n        if item 1 of power_text is \"+\"\n            set power_text to items 2 to (length of power_text) of power_text\n        end\n        set power to number of power_text\n        set written to items 1 to (e_at - 1) of written\n    end\n    set dot to position of \".\" in written\n    set digits to written\n    set point to length of written\n    if dot is greater than 0\n        set digits to (items 1 to (dot - 1) of written) + (items (dot + 1) to (length of written) of written)\n        set point to dot - 1\n    end\n    set point to point + power\n    repeat while point is less than 1\n        set digits to \"0\" + digits\n        set point to point + 1\n    end\n    repeat while length of digits is less than point + places + 1\n        set digits to digits + \"0\"\n    end\n    set kept to items 1 to (point + places) of digits\n    if position of (item (point + places + 1) of digits) in \"56789\" is greater than 0\n        set kept to one_more(kept)\n        if length of kept is greater than point + places\n            set point to point + 1\n        end\n    end\n    set made to items 1 to point of kept\n    if places is greater than 0\n        set made to made + \".\" + (items (point + 1) to (point + places) of kept)\n    end\n    if negative and not_all_zero(made)\n        return \"-\" + made\n    end\n    return made\nend\n\n# whole number digits, one more\nto one_more with kept\n    set made to \"\"\n    set carrying to yes\n    set k to length of kept\n    repeat while k is at least 1\n        set d to item k of kept\n        if carrying and d is \"9\"\n            set made to \"0\" + made\n        else if carrying\n            set made to (item ((position of d in \"0123456789\") + 1) of \"0123456789\") + made\n            set carrying to no\n        else\n            set made to d + made\n        end\n        set k to k - 1\n    end\n    if carrying\n        return \"1\" + made\n    end\n    return made\nend\n\nto not_all_zero with made\n    for each c in made\n        if c is not \"0\" and c is not \".\"\n            return yes\n        end\n    end\n    return no\nend\n\n# a value as its kind shows it: the function in its shown field, if it has one, given it; or the value\nto shown with value\n    set shown_by to nothing\n    try\n        set shown_by to shown of value\n        a_function(shown_by)\n    if it fails\n        return value\n    end\n    return shown_by(value)\nend\n\nto a_function with f as a function\nend\n"
 # in the order of BUILTINS in vm.js
 set builtin_names to list of "uppercase", "lowercase", "split", "join", "number", "position", "keys", "bit and", "bit or", "bit xor",
     "shift left", "shift right", "bytes", "as bytes", "as text", "as hex", "as binary", "unit", "in", "table", "column", "total",
@@ -518,6 +521,8 @@ to parse with tokens, reading
         set calls of reading to empty list
         set defines of reading to empty list
         set owns of reading to empty list
+        set wants of reading to empty list
+        set shows of reading to empty list
     end
     set depth of reading to depth_now + 1
     set orders_from to functions_made # functions are numbered on from here (see numbered)
@@ -1448,14 +1453,18 @@ to parse with tokens, reading
             repeat while not nl of peek() and not is_word("to")
                 add expression() to parts
             end
+            set said to record with kind "say", parts parts, errors no, at t
+            set said_shows to shows of reading # a kind's `shown` shows its parts, if one has it (see language_text)
+            add said to said_shows
             if nl of peek() or not word("to")
-                return record with kind "say", parts parts, errors no, at t
+                return said
             end
             if not (is_word("the") and word_at(pos + 1, "error") and word_at(pos + 2, "output"))
                 expected("'the error output'")
             end
             set pos to pos + 3
-            return record with kind "say", parts parts, errors yes, at t
+            set errors of said to yes
+            return said
         end
         if word("if")
             return if_rest(t)
@@ -2224,6 +2233,20 @@ to parse with tokens, reading
             end
             set left to record with kind "builtin", name how, args (list of left), at round_token
         end
+        # `price with 2 decimals`: the number as text with exactly so many decimals, by the language's own function
+        if is_word("with") and not nl of peek() and pos + 2 is at most length of tokens
+            set dec_next to item (pos + 1) of tokens
+            set dec_after to item (pos + 2) of tokens
+            if not nl of dec_next and (type of dec_next is "number" or type of dec_next is "word") and not nl of dec_after and (word_at(pos + 2, "decimals") or word_at(pos + 2, "decimal"))
+                set dec_token to peek()
+                set pos to pos + 1
+                set dec_places to primary()
+                set pos to pos + 1
+                set dec_wants to wants of reading
+                add "decimals" to dec_wants
+                set left to made_call("the language's with_decimals", (list of left, dec_places), dec_token)
+            end
+        end
         # `scores in order`, `scores in reverse order`, `people in order by age`
         if converting and is_word("in") and not nl of item (pos + 1) of tokens and (word_at(pos + 1, "order") or (word_at(pos + 1, "reverse") and word_at(pos + 2, "order")))
             set in_token to peek()
@@ -2675,6 +2698,10 @@ to parse with tokens, reading
                 else
                     set filled to record with kind "math", op "+", left filled, right fill_piece, at t
                 end
+                if text of fill_part is nothing # a value in text: its kind's `shown`, if it has one
+                    set fill_shows to shows of reading
+                    add filled to fill_shows
+                end
             end
         if it fails with why
             set tokens to item 1 of fill_outside
@@ -2954,6 +2981,10 @@ to parse with tokens, reading
                 fail with problem(at of mk_d, "'" + name of mk_d + "' is one of the kind's inputs, so a function of it can't be called that too")
             end
             add (record with own name of mk_d, at at of mk_d) to mk_owns
+            if name of mk_d is "shown" # say and values in text then go through it (see with_language)
+                set mk_wants to wants of reading
+                add "shown" to mk_wants
+            end
             set name of mk_d to mk_name + "'s " + name of mk_d
         end
         set mk_made to hidden_name("the one made", t)
@@ -3066,6 +3097,9 @@ to parse with tokens, reading
     end
 
     set made to statements(nothing, "")
+    if depth of reading is 1
+        set made to with_language(reading, made)
+    end
     set depth of reading to depth of reading - 1
     if depth of reading is 0
         fill_defaults(reading)
@@ -3076,6 +3110,34 @@ to parse with tokens, reading
         set functions_made to n of counted
     end
     return made
+end
+
+# The language's own functions (language_text), at the program's top, if it needs them: for `with 2 decimals`,
+# or for a kind's `shown`, which every `say` and value in text then goes through, as moth.js's withLanguage has it
+to with_language with reading, body
+    if contains(wants of reading, "shown")
+        for each wl_s in shows of reading
+            if kind of wl_s is "say"
+                set wl_parts to parts of wl_s
+                set wl_made_parts to empty list
+                for each wl_part in wl_parts
+                    add (record with kind "call", name "the language's shown", args (list of wl_part), at at of wl_part) to wl_made_parts
+                end
+                set parts of wl_s to wl_made_parts
+            else
+                set wl_right to right of wl_s
+                set right of wl_s to record with kind "call", name "the language's shown", args (list of wl_right), at at of wl_right
+            end
+        end
+    end
+    if length of wants of reading is 0
+        return body
+    end
+    set wl_made to prefixed(parse(tokenize(language_text, "the language"), reading), "the language")
+    for each wl_s in body
+        add wl_s to wl_made
+    end
+    return wl_made
 end
 
 # `pet's speak(x)`, in a program that makes nothing called speak (no function, input or variable, in any
@@ -3499,6 +3561,14 @@ to prefixed with body, alias
     return body
 end
 
+# whether a name is one of the language's own functions', which no file's alias renames
+to language_name with n
+    if length of n is less than 15
+        return no
+    end
+    return items 1 to 15 of n is "the language's "
+end
+
 to rename_all with nodes, alias, hidden
     for each node in nodes
         rename(node, alias, hidden)
@@ -3531,7 +3601,7 @@ to rename with node, alias, hidden
     end
     set what to kind of node
     if contains(named_kinds, what)
-        if name of node is not nothing and not contains(hidden, name of node)
+        if name of node is not nothing and not contains(hidden, name of node) and not language_name(name of node)
             set name of node to alias + "'s " + name of node
         end
     end

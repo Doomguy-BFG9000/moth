@@ -200,6 +200,10 @@ export const PROGRAMS = [
   ["to up_to with n\n    for each k from 1 to n\n        if k is 4\n            return\n        end\n        give k * k\n    end\nend\nsay up_to(3)\nsay up_to(10)\nfor each square in up_to(2)\n    say square\nend\nto tidied\n    try\n        give 1\n        return\n    either way\n        give 2\n    end\nend\nsay tidied()\nto none\n    if no\n        give 1\n    end\nend\nsay none()", "[1, 4, 9]\n[1, 4, 9]\n1\n4\n[1, 2]\n[]"],
   // give is still a call when the program makes something called give
   ["to give with x\n    say \"own give \" x\nend\nto f\n    give 3\n    return 7\nend\nsay f()", "own give 3\n7"],
+  // with 2 decimals: rounded a half away from 0, as the number is shown, tiny, huge and below 0
+  ["for each pair in list of (list of 3.14159, 2), (list of 2.5, 0), (list of -2.5, 0), (list of 1.005, 2), (list of 0.1 + 0.2, 3), (list of 9.995, 2), (list of -0.001, 2), (list of 0.0000006, 6), (list of 123456789012345678901, 1), (list of 0, 2)\n    set places to item 2 of pair\n    say item 1 of pair with places decimals\nend\nset price to 3.14159\nsay \"Total: \" price * 2 with 2 decimals \" EUR\"\nset n to 3\nsay \"{(1 / 3) with n decimals} and {(7) with 1 decimal}\"", "3.14\n3\n-3\n1.01\n0.300\n10.00\n0.00\n0.000001\n123456789012345680000.0\n0.00\nTotal: 6.28 EUR\n0.333 and 7.0"],
+  // a kind's shown: how say and a value in text show one; anything else as it was
+  ["kind point with x, y\n    to shown with self\n        return \"(\" + self's x + \", \" + self's y + \")\"\n    end\nend\nset p to point(1, 2)\nsay p\nsay \"p is {p}\" \" and \" p \" and \" 5\nsay point(3, 4)'s x\nset flags to record with shown yes\nsay flags\nsay \"two: {point(5, 6)}\"", "(1, 2)\np is (1, 2) and (1, 2) and 5\n3\n(record with shown yes)\ntwo: (5, 6)"],
   // a text a letter at a time: past one byte, views of one text's bytes, and the collector in between
   ["set words to \"aé😀b, ça va? ✓ plain ascii too\"\nset made to \"\"\nfor each k from 1 to length of words\n    add item k of words to made\nend\nsay made is words\nsay item 3 of words \" \" item 1 of words \" \" item (length of words) of words \" \" item 2 of words\nsay items 2 to 4 of words\nsay items 5 to 9 of words \" \" item 6 of words \" \" items 1 to 2 of words\nset other to \"x😀y\"\nsay item 2 of words \" \" item 2 of other \" \" item 3 of words \" \" item 3 of other\nset ascii to \"hello\"\nsay item 5 of ascii \" \" item 1 of ascii\nset big to \"\"\nrepeat 3000 times\n    add \"é\" to big\nend\nadd \"!\" to big\nsay item (length of big) of big\nset counted to 0\nfor each k from 1 to length of big\n    if item k of big is \"é\"\n        add 1 to counted\n    end\nend\nsay counted\nsay item 1 of big \" \" item 2999 of big", "yes\n😀 a o é\né😀b\n, ça    aé\né 😀 😀 y\no h\n!\n3000\né é"],
 ];
@@ -562,6 +566,8 @@ export const ERRORS = [
   ["say items 2 to 9 of list of 1, 2", "line 1: there is no item 9, the list only has 2 items"],
   ["say items 0 to 1 of \"ab\"", "line 1: there is no item 0, items are counted from 1"],
   ["to f with a or b\nend", "line 1: an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out"],
+  // with 2 decimals
+  ["say \"x\" with 2 decimals", "line 1: 'the language's with_decimals' needs n to be a number, not text"],
   // kinds and give
   ["to f with n\n    give n\n    return 5\nend\nsay f(1)", "line 3: a function that gives its values with 'give' returns the list of them, so it can't return a value too"],
   ["kind dog with name\n    say \"hi\"\nend", "line 2: a kind holds only its functions, each made with 'to'"],

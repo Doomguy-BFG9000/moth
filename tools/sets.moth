@@ -1,0 +1,122 @@
+# Sets, as Python's set has them: each thing once, found at once however many there are, with unions,
+# intersections and differences. A set holds numbers and text, as a dictionary's keys can be, keeps them in
+# the order they were put in, and `say` shows one as {1, 2, 3}. In Moth alone, so it works everywhere.
+#
+#   use "sets.moth" as sets
+#   set seen to sets's set_of(list of 1, 2, 2, 3)
+#   sets's put(seen, 4)
+#   say seen                                   # {1, 2, 3, 4}
+#   say sets's has(seen, 2)                    # yes
+#   say sets's both(seen, sets's set_of(list of 2, 9))    # {2}: in both (intersection)
+#   say sets's union(seen, sets's set_of(list of 9))       # {1, 2, 3, 4, 9}
+#   say sets's only_in(seen, sets's set_of(list of 1))     # {2, 3, 4}: in the first, not the second
+#   for each x in sets's items_of(seen)        # its things, as a list
+#       say x
+#   end
+#
+# take_out(s, x) takes x out if it's there, in_one(a, b) is what's in one but not both, size(s) how many,
+# is_within(a, b) whether everything in a is in b, same(a, b) whether they hold the same things, and
+# copy_of(s) a set of its own with the same things.
+
+# a set is a record of this kind: `members`, a dictionary of its things, each to yes
+kind set_record with members
+    to shown with self
+        set written to "" + keys of self's members
+        return "{" + (items 2 to (length of written - 1) of written) + "}"
+    end
+end
+
+# a set of the list's things, each once
+to set_of with things
+    set made to set_record(empty dictionary)
+    set kind of made to "set"
+    for each thing in things
+        put(made, thing)
+    end
+    return made
+end
+
+to empty_set
+    return set_of(empty list)
+end
+
+to put with s, thing
+    set kept to members of s
+    set item thing of kept to yes
+end
+
+# thing taken out, if it's there
+to take_out with s, thing
+    set kept to members of s
+    if thing is in kept
+        remove thing from kept
+    end
+end
+
+to has with s, thing
+    return thing is in members of s
+end
+
+to size with s
+    return length of keys of members of s
+end
+
+# its things, as a list, in the order they were put in
+to items_of with s
+    return keys of members of s
+end
+
+to copy_of with s
+    return set_of(items_of(s))
+end
+
+# what's in either
+to union with a, b
+    set made to copy_of(a)
+    for each thing in items_of(b)
+        put(made, thing)
+    end
+    return made
+end
+
+# what's in both (an intersection)
+to both with a, b
+    set made to empty_set()
+    for each thing in items_of(a)
+        if has(b, thing)
+            put(made, thing)
+        end
+    end
+    return made
+end
+
+# what's in a and not in b (a difference)
+to only_in with a, b
+    set made to empty_set()
+    for each thing in items_of(a)
+        if not has(b, thing)
+            put(made, thing)
+        end
+    end
+    return made
+end
+
+# what's in one but not both (a symmetric difference)
+to in_one with a, b
+    return union(only_in(a, b), only_in(b, a))
+end
+
+# whether everything in a is in b
+to is_within with a, b
+    for each thing in items_of(a)
+        if not has(b, thing)
+            return no
+        end
+    end
+    return yes
+end
+
+# whether they hold the same things, in any order
+to same with a, b
+    return size(a) is size(b) and is_within(a, b)
+end

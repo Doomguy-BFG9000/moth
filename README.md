@@ -404,6 +404,9 @@ bytes and dictionaries:
   running totals, folding, sorting by a function; and
   [`stats.moth`](tools/stats.moth) has `statistics`' means, medians, modes,
   spread, quantiles, correlation and a straight line through points.
+- [`sets.moth`](tools/sets.moth) is Python's set: each thing once, found at
+  once, with `union`, `both`, `only_in` and `in_one`, shown as `{1, 2, 3}`;
+  it holds numbers and text, as a dictionary's keys can be.
 - [`sync.moth`](tools/sync.moth) keeps tasks in step, as Python's `threading`,
   `queue` and `concurrent.futures` do: a lock one task holds at a time, a
   semaphore a few can, a flag tasks wait to see raised, a queue that one task
@@ -563,6 +566,7 @@ say items 2 to 3 of squares         # [4, 9]: of a list, text or bytes
 say list of 3, 1, 3 without repeats # [3, 1]: each once, where it first is
 say 2 to the power of 10            # 1024
 say 10 / 4 rounded down             # 2; also rounded up, and rounded (a half away from 0)
+say 3.14159 with 2 decimals         # 3.14: text, with exactly that many, as Python's f"{x:.2f}"
 say remainder of 17 divided by 5    # 2: what's left over, with the divisor's sign
 
 set sam to record with name "Sam", age 20   # a record keeps named values together
@@ -835,6 +839,7 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   rex first; `from pet(name)` after the inputs makes it from what that
   gives, and `pet's speak(self)` calls pet's own. Python's classes, with
   records: a kind's functions are called on one, `self's other()` inside.
+  A kind's `shown` function says how `say`, and a value in text, show one.
 - **give:** a function with `give x` in it gives a list of every value it
   gave, when it returns: a generator, all at once.
 - **Inputs by name:** `greet("Sam", mark "?")`, a name and its value, after
@@ -1334,8 +1339,9 @@ unboxed numbers were all caught, some only by the fuzzer.
   its message (or what `fail with` gave), not where it happened, and with no
   calls under it; `stop the program` in a `try` ends the program without
   running what's after `either way`.
-- `moth debug` stops before a line, not inside one, and shows variables by
-  name, not other values (`show x`, not `show x + 1`). At a mistake it stops
+- `moth debug` stops before a line, not inside one. `show` works out sums of
+  the variables the line can see (`show x + 1`, `show item 2 of xs`, `show
+  rex's age`), but can't call a function. At a mistake it stops
   after the report, with what the line could see, for `show`, `vars`,
   `where` and `list`, and then the program ends as it always does. A program
   built to be debugged is slower: before every line it asks the debugger
