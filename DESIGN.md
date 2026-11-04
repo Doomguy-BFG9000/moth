@@ -3465,3 +3465,43 @@ hold them to agreeing.
   the second of two listeners, bytes to receive, and an end; and
   "localhost" found within a second and a half.
 
+## 84. Email
+
+- **Why.** Python sends mail with `smtplib` and writes it with `email`: a
+  report, an alert, a password reset. Moth had no way to.
+- **What it is.** tools/email.moth, in Moth over sockets.moth (§82), in the
+  standard library. `message(sender, recipients, subject, text)` is a
+  record whose cc, bcc, reply_to, html, attachments and headers can be set;
+  `attach(m, file)` and `attach_bytes(m, name, data, type)` add files;
+  `server(host, port)` is a record of how to reach one, `log_in` adds a
+  user and password, and `send(server, m)` sends it. `message_text(m)` is
+  the message as it's sent.
+- **The message.** Headers, then the body, in MIME: text alone; text and
+  HTML as multipart/alternative; with files, multipart/mixed around them.
+  Text in plain ASCII lines goes as it is; any other, as its UTF-8 in
+  base64, so every byte arrives. Headers that aren't ASCII are RFC 2047's
+  encoded words, of whole letters, a line each; a name with marks a header
+  gives a meaning to goes in quotes; a file's name that isn't ASCII is RFC
+  2231's `filename*`. Date is the time in UTC, from the C library's clock
+  (`_time64` on Windows, `time` on Linux); Message-ID and each boundary are
+  part of a SHA-256 (hash.moth) of the time, a count and a random number. A
+  line end in an address, subject or header is a mistake, so none can add
+  a header of its own (a Bcc, say). Bcc's addresses are sent to and never
+  written.
+- **SMTP.** The server's 220; EHLO, and what it offers; STARTTLS, then
+  `secure` and EHLO again, for "starttls" (the default but on 465, which is
+  "tls", secure from the start; "none" sends in the clear), and a mistake
+  if it isn't offered; AUTH PLAIN, or LOGIN, if logged in; MAIL FROM, RCPT
+  TO for each address, DATA, the message with a dot before each line that
+  starts with one, and a dot alone; QUIT. An answer it doesn't want fails
+  with what the server said, but not what was sent to log in.
+- **base64** both ways: `base64_of` and `bytes_of_base64`.
+- **Tested.** In machine code, against a mail server of the test's own in a
+  task: after STARTTLS, logged in with PLAIN, to, cc and bcc, a subject over
+  two encoded words, a name in quotes, a line that starts with a dot, HTML
+  and three files; secure from the start, logged in with LOGIN; a password
+  it won't take; a server with no STARTTLS; and messages it can't write.
+  Python's email module reads the message back with no defects, each part
+  and file as it was. On Windows (with Python's and Git's OpenSSL) and
+  Linux.
+

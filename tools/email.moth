@@ -1,0 +1,607 @@
+# Sending email, as Python's smtplib and email modules do: a message with text, a page of HTML and files, sent
+# through a mail server over SMTP, secure from the start (port 465) or after STARTTLS (587), logged in. A
+# program `moth build` makes can use it, built with --allow-libraries (and --allow-read, to attach files).
+#
+#   use "email.moth" as mail
+#   set server to mail's server("smtp.example.com", 587)
+#   mail's log_in(server, "me@example.com", "an app password")
+#   set m to mail's message("Sam <me@example.com>", "you@example.com", "Hello", "Hi there,\nall well?")
+#   set cc of m to list of "them@example.com"           # and bcc, reply_to
+#   set html of m to "<p>Hi there, <b>all well?</b></p>"  # shown instead of the text where it can be
+#   mail's attach(m, "report.pdf")                       # or attach_bytes(m, "notes.txt", data, "text/plain")
+#   mail's send(server, m)
+#
+# A server is a record: host, port, security ("tls" for 465, else "starttls"; "none" sends in the clear, for a
+# server of one's own), user and password (nothing until log_in), name (what it says it is, "localhost"),
+# trust (a PEM file of certificates to trust besides the system's, or nothing) and time_limit (the
+# milliseconds an answer may take, 30000). A message is a record: sender, recipients, cc and bcc (lists of
+# addresses, as "you@example.com" or "You <you@example.com>"), reply_to, subject, text, html, attachments
+# and headers (a dictionary of others). message_text(m) is the message as it's sent, in MIME. send() fails
+# with what the server said when it says no. base64_of and bytes_of_base64 are base64's two ways.
+
+use "sockets.moth" as mail_net
+use "dates.moth" as mail_dates
+use "hash.moth" as mail_hash
+use the library "msvcrt"
+    "_time64" as mail_windows_time(a pointer) gives a long whole number
+end
+use the library "c"
+    "time" as mail_unix_time(a pointer) gives a long whole number
+end
+
+set mail_alphabet to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+set mail_codes to mail_alphabet as bytes
+set mail_cr to (list of 13) as bytes as text
+set mail_line_end to (list of 13, 10) as bytes as text
+set mail_types to dictionary where "txt" is "text/plain", "html" is "text/html", "htm" is "text/html",
+    "csv" is "text/csv", "json" is "application/json", "pdf" is "application/pdf", "png" is "image/png",
+    "jpg" is "image/jpeg", "jpeg" is "image/jpeg", "gif" is "image/gif", "svg" is "image/svg+xml",
+    "zip" is "application/zip", "gz" is "application/gzip", "xml" is "application/xml", "ics" is "text/calendar"
+set mail_weekdays to list of "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+set mail_months to list of "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+set mail_made to 0 # Message-IDs and boundaries made, so each is its own
+
+# ---------- what's sent, and to whom ----------
+
+# a mail server, by its name and port: secure from the start on 465, else after STARTTLS
+to server with host, port
+    set security to "starttls"
+    if port is 465
+        set security to "tls"
+    end
+    return record with host host, port port, security security, user nothing, password nothing,
+        name "localhost", trust nothing, time_limit 30000
+end
+
+to log_in with server, user, password
+    set user of server to user
+    set password of server to password
+end
+
+# a message from one address to another (or to a list of them), with a subject and text
+to message with sender, recipients, subject, words
+    set going to recipients
+    if mail_is_text(recipients)
+        set going to list of recipients
+    end
+    return record with sender sender, recipients going, cc empty list, bcc empty list, reply_to nothing,
+        subject subject, text words, html nothing, attachments empty list, headers empty dictionary
+end
+
+# a file, by its name, sent with the message: its type from how its name ends
+to attach with m, file
+    set parts to split file by "/"
+    set named to item (length of parts) of parts
+    set parts to split named by "\\"
+    set named to item (length of parts) of parts
+    attach_bytes(m, named, read bytes file, mail_type_of(named))
+end
+
+to attach_bytes with m, name, data, type
+    set kept to attachments of m
+    add (record with name name, data (data as bytes), type type) to kept
+    set attachments of m to kept
+end
+
+to mail_type_of with named
+    set parts to split lowercase of named by "."
+    if length of parts is greater than 1
+        set ending to item (length of parts) of parts
+        if ending is in mail_types
+            return item ending of mail_types
+        end
+    end
+    return "application/octet-stream"
+end
+
+# ---------- the message, written ----------
+
+# the message as it's sent: its headers, then its parts, in MIME, each line ending in \r\n
+to message_text with m
+    mail_check(m)
+    set made to empty list
+    add "From: " + mail_address_header(sender of m) to made
+    if length of recipients of m is greater than 0
+        add "To: " + mail_addresses_header(recipients of m) to made
+    end
+    if length of cc of m is greater than 0
+        add "Cc: " + mail_addresses_header(cc of m) to made
+    end
+    if reply_to of m is not nothing
+        add "Reply-To: " + mail_address_header(reply_to of m) to made
+    end
+    add "Subject: " + mail_header_words(subject of m) to made
+    add "Date: " + mail_date(mail_now()) to made
+    add "Message-ID: <" + mail_unique() + "@" + mail_domain(sender of m) + ">" to made
+    add "MIME-Version: 1.0" to made
+    for each name in headers of m
+        add name + ": " + mail_header_words(item name of headers of m) to made
+    end
+    set body to mail_text_part(text of m, "text/plain")
+    if html of m is not nothing
+        set body to mail_multipart("alternative", list of body, mail_text_part(html of m, "text/html"))
+    end
+    if length of attachments of m is greater than 0
+        set parts to list of body
+        for each a in attachments of m
+            add mail_attachment_part(a) to parts
+        end
+        set body to mail_multipart("mixed", parts)
+    end
+    return (join made with mail_line_end) + mail_line_end + body # the body's own headers are the message's last
+end
+
+# what a message needs, and no line ends where a header would end early
+to mail_check with m
+    if length of recipients of m + length of cc of m + length of bcc of m is 0
+        fail with "a message needs an address to go to"
+    end
+    set checked to list of sender of m, subject of m
+    for each group in list of recipients of m, cc of m, bcc of m
+        for each address in group
+            add address to checked
+        end
+    end
+    if reply_to of m is not nothing
+        add reply_to of m to checked
+    end
+    for each name in headers of m
+        add name to checked
+        add item name of headers of m to checked
+    end
+    for each words in checked
+        if "\n" is in words or mail_cr is in words
+            fail with "a message's addresses, subject and headers can't have a line end in them"
+        end
+    end
+end
+
+# whether text starts, or ends, with this
+to mail_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to mail_ends with words, ending
+    set n to length of words
+    set m to length of ending
+    return n is at least m and items (n - m + 1) to n of words is ending
+end
+
+# "Sam <sam@example.com>" as its name and address; "sam@example.com" as no name and that address
+to mail_parts_of with address
+    set words to mail_trim(address)
+    if "<" is in words and mail_ends(words, ">")
+        set parts to split words by "<"
+        set name to mail_trim(join (items 1 to (length of parts - 1) of parts) with "<")
+        set at to item (length of parts) of parts
+        set at to items 1 to (length of at - 1) of at
+        if length of name is at least 2 and mail_starts(name, "\"") and mail_ends(name, "\"")
+            set name to items 2 to (length of name - 1) of name
+        end
+        return record with name name, address mail_trim(at)
+    end
+    return record with name "", address words
+end
+
+to mail_address_of with address
+    set found to address of mail_parts_of(address)
+    if not ("@" is in found) or " " is in found or found is ""
+        fail with "'" + address + "' isn't an email address"
+    end
+    return found
+end
+
+# an address as a header has it: its name in encoded words if it isn't plain ASCII, in quotes if it has
+# marks a header gives a meaning to
+to mail_address_header with address
+    set parts to mail_parts_of(address)
+    set at to mail_address_of(address)
+    set name to name of parts
+    if name is ""
+        return at
+    end
+    if not mail_is_ascii(name)
+        return mail_header_words(name) + " <" + at + ">"
+    end
+    for each c in name
+        if c is in "()<>[]:;@\\,.\""
+            set slashes to join (split name by "\\") with "\\\\"
+            set quoted to join (split slashes by "\"") with "\\\""
+            return "\"" + quoted + "\" <" + at + ">"
+        end
+    end
+    return name + " <" + at + ">"
+end
+
+to mail_addresses_header with addresses
+    set made to empty list
+    for each address in addresses
+        add mail_address_header(address) to made
+    end
+    return join made with ", "
+end
+
+# a header's text: as it is if it's ASCII, else RFC 2047's encoded words, a line each, of whole letters
+to mail_header_words with words
+    if mail_is_ascii(words)
+        return words
+    end
+    set pieces to empty list
+    set piece to ""
+    for each c in words
+        if length of ((piece + c) as bytes) is greater than 45
+            add piece to pieces
+            set piece to ""
+        end
+        set piece to piece + c
+    end
+    add piece to pieces
+    set made to empty list
+    for each p in pieces
+        add "=?UTF-8?B?" + base64_of(p) + "?=" to made
+    end
+    return join made with mail_line_end + " "
+end
+
+# a part of text, its lines ending in \r\n: as it is, in 7 bits, if it's ASCII in lines short enough; else its
+# UTF-8 in base64
+to mail_text_part with words, type
+    set plain to mail_is_ascii(words)
+    set clean to empty list
+    for each line in split words by "\n"
+        set l to line
+        if mail_ends(l, mail_cr)
+            set l to items 1 to (length of l - 1) of l
+        end
+        if length of l is greater than 900
+            set plain to no
+        end
+        add l to clean
+    end
+    set head to "Content-Type: " + type + "; charset=UTF-8" + mail_line_end
+    set together to join clean with mail_line_end
+    if plain
+        return head + "Content-Transfer-Encoding: 7bit" + mail_line_end + mail_line_end + together
+    end
+    return head + "Content-Transfer-Encoding: base64" + mail_line_end + mail_line_end + mail_wrapped(base64_of(together))
+end
+
+to mail_attachment_part with a
+    set name to name of a
+    set given to "filename=\"" + name + "\""
+    if not mail_is_ascii(name) or "\"" is in name or "\\" is in name
+        set given to "filename*=UTF-8''" + mail_percent(name)
+    end
+    set head to "Content-Type: " + type of a + mail_line_end + "Content-Disposition: attachment; " + given + mail_line_end
+    return head + "Content-Transfer-Encoding: base64" + mail_line_end + mail_line_end + mail_wrapped(base64_of(data of a))
+end
+
+# parts in one, each after the boundary, which nothing in them has
+to mail_multipart with kind, parts
+    set boundary to "=_moth_" + mail_unique()
+    set made to empty list
+    add "Content-Type: multipart/" + kind + "; boundary=\"" + boundary + "\"" + mail_line_end to made
+    for each p in parts
+        add "--" + boundary + mail_line_end + p to made
+    end
+    add "--" + boundary + "--" to made
+    return join made with mail_line_end
+end
+
+# base64 in lines of 76
+to mail_wrapped with words
+    set made to empty list
+    set at to 1
+    repeat while at is at most length of words
+        set last to at + 75
+        if last is greater than length of words
+            set last to length of words
+        end
+        add items at to last of words to made
+        set at to last + 1
+    end
+    return join made with mail_line_end
+end
+
+# a name's UTF-8, its bytes but letters, digits and -._~ as %XX
+to mail_percent with words
+    set made to empty list
+    set hex to "0123456789ABCDEF"
+    for each b in words as bytes
+        set c to (list of b) as bytes as text
+        if b is less than 128 and c is in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+            add c to made
+        else
+            set high to (shift b right by 4) + 1
+            set low to (b bit and 15) + 1
+            add "%" + item high of hex + item low of hex to made
+        end
+    end
+    return join made with ""
+end
+
+to mail_is_ascii with words
+    for each b in words as bytes
+        if b is greater than 126 or (b is less than 32 and b is not 9 and b is not 10 and b is not 13)
+            return no
+        end
+    end
+    return yes
+end
+
+to mail_text_check with value as text
+    return yes
+end
+
+to mail_is_text with value
+    try
+        return mail_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to mail_trim with words
+    set made to words
+    repeat while length of made is greater than 0 and (item 1 of made is " " or item 1 of made is "\t")
+        set made to items 2 to (length of made) of made
+    end
+    repeat while length of made is greater than 0 and (item (length of made) of made is " " or item (length of made) of made is "\t")
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end
+
+to mail_domain with address
+    set parts to split mail_address_of(address) by "@"
+    return item (length of parts) of parts
+end
+
+# a Message-ID's or boundary's own part: the time, a count and chance, hashed
+to mail_unique
+    set mail_made to mail_made + 1
+    set chance to random number from 1 to 1000000000
+    set hashed to mail_hash's sha256("" + mail_now() + "/" + mail_made + "/" + chance + "/" + the clock)
+    return items 1 to 24 of hashed
+end
+
+# seconds since 1970 began, in UTC
+to mail_now
+    try
+        return mail_windows_time(nothing)
+    if it fails
+        return mail_unix_time(nothing)
+    end
+end
+
+# a time, in seconds since 1970, as a Date header has it: "Wed, 04 Nov 2026 10:15:00 +0000"
+to mail_date with seconds
+    set rest to remainder of seconds divided by 86400
+    set days to (seconds - rest) / 86400
+    set d to mail_dates's date_of_day(days)
+    set weekday to item ((remainder of (days + 3) divided by 7) + 1) of mail_weekdays
+    set second to remainder of rest divided by 60
+    set minutes to (rest - second) / 60
+    set minute to remainder of minutes divided by 60
+    set hour to (minutes - minute) / 60
+    set day_part to weekday + ", " + mail_two(day of d) + " " + item (month of d) of mail_months + " " + year of d
+    return day_part + " " + mail_two(hour) + ":" + mail_two(minute) + ":" + mail_two(second) + " +0000"
+end
+
+to mail_two with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+# ---------- base64 ----------
+
+# text's UTF-8, or bytes, in base64
+to base64_of with data
+    set b to data as bytes
+    set n to length of b
+    set rest to remainder of n divided by 3
+    set size to (n - rest) / 3 * 4
+    if rest is not 0
+        set size to size + 4
+    end
+    set out to size bytes
+    set k to 1
+    set at to 1
+    repeat while k + 2 is at most n
+        set v to byte k of b * 65536 + byte (k + 1) of b * 256 + byte (k + 2) of b
+        set byte at of out to byte ((shift v right by 18) + 1) of mail_codes
+        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of mail_codes
+        set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of mail_codes
+        set byte (at + 3) of out to byte ((v bit and 63) + 1) of mail_codes
+        set k to k + 3
+        set at to at + 4
+    end
+    if rest is not 0
+        set v to byte k of b * 65536
+        if rest is 2
+            set v to v + byte (k + 1) of b * 256
+        end
+        set byte at of out to byte ((shift v right by 18) + 1) of mail_codes
+        set byte (at + 1) of out to byte (((shift v right by 12) bit and 63) + 1) of mail_codes
+        set byte (at + 2) of out to 61 # =
+        if rest is 2
+            set byte (at + 2) of out to byte (((shift v right by 6) bit and 63) + 1) of mail_codes
+        end
+        set byte (at + 3) of out to 61
+    end
+    return out as text
+end
+
+# base64 back to its bytes; what isn't base64 (line ends, spaces, =) is passed over
+to bytes_of_base64 with words
+    set values to 256 bytes # each letter's value, plus 1; 0 for one that isn't base64's
+    for each k from 1 to 64
+        set byte (byte k of mail_codes + 1) of values to k
+    end
+    set made to empty list
+    set v to 0
+    set held to 0
+    for each b in words as bytes
+        set value to byte (b + 1) of values
+        if value is not 0
+            set v to v * 64 + value - 1
+            set held to held + 1
+            if held is 4
+                add shift v right by 16 to made
+                add (shift v right by 8) bit and 255 to made
+                add v bit and 255 to made
+                set v to 0
+                set held to 0
+            end
+        end
+    end
+    if held is 3
+        add shift v right by 10 to made
+        add (shift v right by 2) bit and 255 to made
+    else if held is 2
+        add shift v right by 4 to made
+    end
+    return made as bytes
+end
+
+# ---------- sending ----------
+
+# the message, through the server: secure as the server's security says, logged in if it was, to every
+# address it's to, cc'd and bcc'd
+to send with server, m
+    set written to message_text(m)
+    set going to empty list
+    for each group in list of recipients of m, cc of m, bcc of m
+        for each address in group
+            add mail_address_of(address) to going
+        end
+    end
+    set security to security of server
+    if security is not "tls" and security is not "starttls" and security is not "none"
+        fail with "a mail server's security is \"tls\", \"starttls\" or \"none\", not " + security
+    end
+    if trust of server is not nothing
+        mail_net's trust(trust of server)
+    end
+    set c to nothing
+    if security is "tls"
+        set c to mail_net's connect_secure(host of server, port of server)
+    else
+        set c to mail_net's connect(host of server, port of server)
+    end
+    try
+        mail_net's wait_at_most(c, time_limit of server)
+        mail_expect(c, nothing, 220)
+        set offers to mail_hello(c, server)
+        if security is "starttls"
+            if not ("STARTTLS" is in offers)
+                fail with "the mail server " + host of server + " doesn't offer STARTTLS: set security of the server to \"tls\" for one that's secure from the start, or \"none\" to send in the clear"
+            end
+            mail_expect(c, "STARTTLS", 220)
+            mail_net's secure(c, host of server)
+            set offers to mail_hello(c, server)
+        end
+        if user of server is not nothing
+            mail_log_in(c, server, offers)
+        end
+        mail_expect(c, "MAIL FROM:<" + mail_address_of(sender of m) + ">", 250)
+        for each address in going
+            mail_expect(c, "RCPT TO:<" + address + ">", 250)
+        end
+        mail_expect(c, "DATA", 354)
+        set stuffed to empty list
+        for each line in split written by mail_line_end # a line that starts with a dot gets another, so a dot alone is the end
+            if mail_starts(line, ".")
+                add "." + line to stuffed
+            else
+                add line to stuffed
+            end
+        end
+        mail_net's send(c, (join stuffed with mail_line_end) + mail_line_end + "." + mail_line_end)
+        mail_expect(c, nothing, 250)
+        try
+            mail_expect(c, "QUIT", 221)
+        if it fails
+            set offers to empty list # the message went: a goodbye that doesn't come doesn't matter
+        end
+        mail_net's close(c)
+    if it fails with why
+        mail_net's close(c)
+        fail with why
+    end
+end
+
+# EHLO, and what the server says it can do, as a list in capitals: each line ("AUTH PLAIN LOGIN"), and each
+# line's first word ("AUTH")
+to mail_hello with c, server
+    set answer to mail_expect(c, "EHLO " + name of server, 250)
+    set offers to empty list
+    set k to 2
+    repeat while k is at most length of answer
+        set big to uppercase of mail_trim(item k of answer)
+        add big to offers
+        add item 1 of split big by " " to offers
+        set k to k + 1
+    end
+    return offers
+end
+
+to mail_log_in with c, server, offers
+    set ways to empty list
+    for each offer in offers
+        if mail_starts(offer, "AUTH ")
+            for each way in split offer by " "
+                add way to ways
+            end
+        end
+    end
+    set zero to (list of 0) as bytes as text
+    if "PLAIN" is in ways
+        mail_expect(c, "AUTH PLAIN " + base64_of(zero + user of server + zero + password of server), 235)
+    else if "LOGIN" is in ways
+        mail_expect(c, "AUTH LOGIN", 334)
+        mail_expect(c, base64_of(user of server), 334)
+        mail_expect(c, base64_of(password of server), 235)
+    else
+        fail with "the mail server " + host of server + " doesn't offer a way to log in that this knows (PLAIN or LOGIN)"
+    end
+end
+
+# a command sent (nothing for none), then the server's answer, which must start with this number: its lines,
+# without the number. A command that logs in isn't said when it fails, as it holds the password.
+to mail_expect with c, command, wanted
+    if command is not nothing
+        mail_net's send(c, command + mail_line_end)
+    end
+    set lines to empty list
+    repeat while yes
+        set line to mail_net's receive_line(c)
+        if line is nothing
+            fail with "the mail server closed the connection"
+        end
+        if length of line is less than 3
+            fail with "the mail server said something that isn't SMTP: " + line
+        end
+        set code to items 1 to 3 of line
+        set rest to ""
+        if length of line is greater than 4
+            set rest to items 5 to (length of line) of line
+        end
+        add rest to lines
+        if length of line is 3 or item 4 of line is not "-"
+            if code is not "" + wanted
+                set said to "the message"
+                if command is not nothing
+                    set said to command
+                    if mail_starts(command, "AUTH") or wanted is 334 or wanted is 235
+                        set said to "logging in"
+                    end
+                end
+                fail with "the mail server said no to " + said + ": " + code + " " + join lines with " "
+            end
+            return lines
+        end
+    end
+end

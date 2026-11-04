@@ -354,6 +354,12 @@ bytes and dictionaries:
   one secure after it began (STARTTLS), and `secure_as_server` is the other
   end. `ready(sockets, ms)` says which of many have something to take, as
   `select` does; with tasks, too, one program can talk to many at once.
+- [`email.moth`](tools/email.moth) sends mail as Python's `smtplib` and
+  `email` do: `mail's message(sender, recipients, subject, text)`, with cc,
+  bcc, a page of HTML and files (`attach`), in MIME with UTF-8 headers,
+  through a server over SMTP, secure from the start (465) or after
+  STARTTLS (587), logged in: `mail's log_in(server, user, password)`, then
+  `mail's send(server, m)`.
 - [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`

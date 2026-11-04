@@ -2087,6 +2087,197 @@ say "done"
   }
 });
 
+// tools/email.moth: a message sent through a mail server of the program's own, in a task, over sockets.moth:
+// after STARTTLS, logged in with PLAIN, to three addresses (one bcc'd), with a subject in encoded words, a name
+// in quotes, text with a line that starts with a dot, a page of HTML and three files; then secure from the
+// start, logged in with LOGIN; a password it won't take, a server with no STARTTLS, and messages it can't
+// write. Python's email module reads the message back as it was made, where there's a Python
+const PYTHON = ["python3", "python"].find((c) => spawnSync(c, ["--version"], { encoding: "utf8" }).status === 0);
+test("tools/email.moth sends mail over SMTP, secure and logged in, with HTML and files", { skip: httpsSkip }, () => {
+  const set = SSL_SETS[0];
+  const dir = mkdtempSync(join(tmpdir(), "moth-mail-"));
+  try {
+    const made = spawnSync(OPENSSL, ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem"),
+      "-days", "2", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost"], { encoding: "utf8" });
+    assert.equal(made.status, 0, made.stderr);
+    if (set) for (const n of set.names) writeFileSync(join(dir, n), readFileSync(join(set.dir, n)));
+    const files = {};
+    for (const name of ["email.moth", "sockets.moth", "dates.moth", "hash.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(String.raw`use "email.moth" as mail
+use "sockets.moth" as net
+
+set crlf to (list of 13, 10) as bytes as text
+
+# a mail server of the test's own, for one message: secure at once ("tls"), after STARTTLS ("starttls") or not
+# ("plain"), logging in these ways; what it was told, then the message, after a line "--"
+to smtp_serve with listener, mode, ways
+    set conn to net's accept(listener)
+    if mode is "tls"
+        net's secure_as_server(conn, "cert.pem", "key.pem")
+    end
+    set heard to empty list
+    set message_lines to empty list
+    net's send(conn, "220 test.example ESMTP ready" + crlf)
+    set in_data to no
+    repeat while yes
+        set line to net's receive_line(conn)
+        if line is nothing
+            net's close(conn)
+            return heard
+        end
+        if in_data
+            if line is "."
+                set in_data to no
+                net's send(conn, "250 2.0.0 queued" + crlf)
+            else
+                add line to message_lines
+            end
+        else
+            add line to heard
+            set word to uppercase of item 1 of split line by " "
+            if word is "EHLO"
+                set offered to "250-test.example" + crlf
+                if mode is "starttls"
+                    set offered to offered + "250-STARTTLS" + crlf
+                end
+                net's send(conn, offered + "250-AUTH " + ways + crlf + "250 8BITMIME" + crlf)
+            else if word is "STARTTLS"
+                net's send(conn, "220 2.0.0 go ahead" + crlf)
+                net's secure_as_server(conn, "cert.pem", "key.pem")
+            else if line is "AUTH PLAIN " + mail's base64_of((list of 0) as bytes as text + "sam" + (list of 0) as bytes as text + "secret")
+                net's send(conn, "235 2.7.0 welcome" + crlf)
+            else if line is "AUTH LOGIN"
+                net's send(conn, "334 VXNlcm5hbWU6" + crlf)
+                set who to mail's bytes_of_base64(net's receive_line(conn)) as text
+                net's send(conn, "334 UGFzc3dvcmQ6" + crlf)
+                set secret to mail's bytes_of_base64(net's receive_line(conn)) as text
+                add "(logged in as " + who + " with " + secret + ")" to heard
+                if who is "sam" and secret is "secret"
+                    net's send(conn, "235 2.7.0 welcome" + crlf)
+                else
+                    net's send(conn, "535 5.7.8 bad credentials" + crlf)
+                end
+            else if word is "AUTH"
+                net's send(conn, "535 5.7.8 bad credentials" + crlf)
+            else if word is "MAIL" or word is "RCPT"
+                net's send(conn, "250 2.1.0 ok" + crlf)
+            else if word is "DATA"
+                net's send(conn, "354 go on" + crlf)
+                set in_data to yes
+            else if word is "QUIT"
+                net's send(conn, "221 2.0.0 bye" + crlf)
+                net's close(conn)
+                add "--" to heard
+                for each l in message_lines
+                    add l to heard
+                end
+                return heard
+            else
+                net's send(conn, "500 what?" + crlf)
+            end
+        end
+    end
+end
+
+set listener to net's listen(0)
+set port to net's port_of(listener)
+set s to mail's server("localhost", port)
+set trust of s to "cert.pem"
+mail's log_in(s, "sam", "secret")
+set m to mail's message("Sam Pudke <sam@example.com>", "you@example.com", "Héllo from Moth, with a subject long enough to go over two encoded words ✓", "Line one\n.a line with a dot first\nLine three, é")
+set cc of m to list of "\"Them, Two\" <them@example.com>"
+set bcc of m to list of "hidden@example.com"
+set html of m to "<p>Hi <b>there</b></p>"
+mail's attach_bytes(m, "notes é.txt", "some notes\n", "text/plain")
+mail's attach_bytes(m, "data.bin", (list of 0, 1, 2, 250, 255) as bytes, "application/octet-stream")
+mail's attach(m, "cert.pem")
+set job to start smtp_serve(listener, "starttls", "PLAIN LOGIN")
+mail's send(s, m)
+for each line in wait for job
+    say line
+end
+
+# secure from the start, logged in with LOGIN
+say "=="
+set s2 to mail's server("localhost", port)
+set security of s2 to "tls"
+set trust of s2 to "cert.pem"
+mail's log_in(s2, "sam", "secret")
+set job to start smtp_serve(listener, "tls", "LOGIN")
+mail's send(s2, mail's message("sam@example.com", (list of "a@example.com", "b@example.com"), "Plain", "Just text."))
+set heard to wait for job
+for each line in items 1 to 7 of heard
+    say line
+end
+
+# a password it won't take, a server with no STARTTLS, and messages it can't send
+say "=="
+set job to start smtp_serve(listener, "starttls", "PLAIN")
+mail's log_in(s, "sam", "wrong")
+try
+    mail's send(s, mail's message("sam@example.com", "you@example.com", "Hi", "x"))
+if it fails with why
+    say why
+end
+say item 1 of wait for job
+set job to start smtp_serve(listener, "plain", "PLAIN")
+set s3 to mail's server("127.0.0.1", port)
+try
+    mail's send(s3, mail's message("sam@example.com", "you@example.com", "Hi", "x"))
+if it fails with why
+    say why
+end
+say item 1 of wait for job
+try
+    mail's message_text(mail's message("sam@example.com", "you@example.com", "Hi" + crlf + "Bcc: everyone@example.com", "x"))
+if it fails with why
+    say why
+end
+try
+    mail's message_text(mail's message("sam", "you@example.com", "Hi", "x"))
+if it fails with why
+    say why
+end
+try
+    mail's message_text(mail's message("sam@example.com", empty list, "Hi", "x"))
+if it fails with why
+    say why
+end
+say mail's base64_of("")
+say mail's base64_of("M") + " " + mail's base64_of("Mo") + " " + mail's base64_of("Mot") + " " + mail's base64_of("Moth ✓")
+say mail's bytes_of_base64(mail's base64_of("Moth ✓")) as text
+`, { target, name: "p.moth", allow: ["--allow-libraries", "--allow-read"], files }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", input: "", timeout: 60000 });
+    assert.equal(ran.stderr, "");
+    assert.match(ran.stdout, /\nDate: (Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d\d:\d\d:\d\d \+0000\n/);
+    const seen = new Map();
+    let said = ran.stdout.replace(/^Date: .*$/m, "Date: (now)").replace(/<[0-9a-f]{24}@example\.com>/g, "<(id)@example.com>")
+      .replace(/=_moth_[0-9a-f]{24}/g, (b) => (seen.has(b) || seen.set(b, `=_moth_(${seen.size + 1})`), seen.get(b)));
+    said = said.replace(/(filename="cert\.pem"\nContent-Transfer-Encoding: base64\n\n)[A-Za-z0-9+/=\n]+?(\n--=_moth_)/, "$1(the certificate)$2");
+    assert.equal(said, "EHLO localhost\nSTARTTLS\nEHLO localhost\nAUTH PLAIN AHNhbQBzZWNyZXQ=\nMAIL FROM:<sam@example.com>\nRCPT TO:<you@example.com>\nRCPT TO:<them@example.com>\nRCPT TO:<hidden@example.com>\nDATA\nQUIT\n--\nFrom: Sam Pudke <sam@example.com>\nTo: you@example.com\nCc: \"Them, Two\" <them@example.com>\nSubject: =?UTF-8?B?SMOpbGxvIGZyb20gTW90aCwgd2l0aCBhIHN1YmplY3QgbG9uZyBlbm91Z2gg?=\n =?UTF-8?B?dG8gZ28gb3ZlciB0d28gZW5jb2RlZCB3b3JkcyDinJM=?=\nDate: (now)\nMessage-ID: <(id)@example.com>\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=\"=_moth_(1)\"\n\n--=_moth_(1)\nContent-Type: multipart/alternative; boundary=\"=_moth_(2)\"\n\n--=_moth_(2)\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: base64\n\nTGluZSBvbmUNCi5hIGxpbmUgd2l0aCBhIGRvdCBmaXJzdA0KTGluZSB0aHJlZSwgw6k=\n--=_moth_(2)\nContent-Type: text/html; charset=UTF-8\nContent-Transfer-Encoding: 7bit\n\n<p>Hi <b>there</b></p>\n--=_moth_(2)--\n--=_moth_(1)\nContent-Type: text/plain\nContent-Disposition: attachment; filename*=UTF-8''notes%20%C3%A9.txt\nContent-Transfer-Encoding: base64\n\nc29tZSBub3Rlcwo=\n--=_moth_(1)\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename=\"data.bin\"\nContent-Transfer-Encoding: base64\n\nAAEC+v8=\n--=_moth_(1)\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename=\"cert.pem\"\nContent-Transfer-Encoding: base64\n\n(the certificate)\n--=_moth_(1)--\n==\nEHLO localhost\nAUTH LOGIN\n(logged in as sam with secret)\nMAIL FROM:<sam@example.com>\nRCPT TO:<a@example.com>\nRCPT TO:<b@example.com>\nDATA\n==\nthe mail server said no to logging in: 535 5.7.8 bad credentials\nEHLO localhost\nthe mail server 127.0.0.1 doesn't offer STARTTLS: set security of the server to \"tls\" for one that's secure from the start, or \"none\" to send in the clear\nEHLO localhost\na message's addresses, subject and headers can't have a line end in them\n'sam' isn't an email address\na message needs an address to go to\n\nTQ== TW8= TW90 TW90aCDinJM=\nMoth ✓\n");
+    assert.equal(ran.status, 0);
+    if (PYTHON) {
+      const message = ran.stdout.split("\n--\n")[1].split("\n==\n")[0].split("\n").join("\r\n");
+      const read = spawnSync(PYTHON, ["-c", [
+        "import email, email.policy, sys",
+        "m = email.message_from_bytes(sys.stdin.buffer.read(), policy=email.policy.default)",
+        "parts = [m['subject'], m['from'], m['to'], m['cc'], str(m['bcc']), str(m.defects), str([p.defects for p in m.walk() if p.defects])]",
+        "parts += [m.get_body(preferencelist=('plain',)).get_content(), m.get_body(preferencelist=('html',)).get_content()]",
+        "parts += [a.get_filename() + ' ' + a.get_content_type() + ' ' + a.get_payload(decode=True).hex() for a in m.iter_attachments()]",
+        "sys.stdout.buffer.write('\\n'.join(parts).encode('utf8'))"].join("\n")], { input: message, encoding: "utf8" });
+      assert.equal(read.status, 0, read.stderr);
+      assert.deepEqual(read.stdout.split("\n"), ["Héllo from Moth, with a subject long enough to go over two encoded words ✓", "Sam Pudke <sam@example.com>",
+        "you@example.com", "\"Them, Two\" <them@example.com>", "None", "[]", "[]", "Line one\r", ".a line with a dot first\r", "Line three, é",
+        "<p>Hi <b>there</b></p>", `notes é.txt text/plain ${Buffer.from("some notes\n").toString("hex")}`, "data.bin application/octet-stream 000102faff",
+        `cert.pem application/octet-stream ${readFileSync(join(dir, "cert.pem")).toString("hex")}`]);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // tools/windows.moth, Windows' own controls for a program of Moth's: a window, hidden here, that drives itself
 // from a timer, sending its controls what a click or typing sends them, and pressing its menu's keys with Ctrl
 // held as this thread sees it
