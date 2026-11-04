@@ -1,9 +1,10 @@
 # JSON Web Tokens (RFC 7519), as Python's PyJWT has them: made and checked with a shared secret (HS256, HS384,
 # HS512), and checked with an RSA public key (RS256, RS384, RS512), in PEM or as a JWK, as identity providers
-# sign them. In Moth alone, so it works everywhere.
+# sign them. In Moth alone, so it works everywhere; but now(), and verify when it isn't given `now`, ask the
+# system's clock, so a program `moth build` makes is built with --allow-libraries for those.
 #
 #   use "jwt.moth" as jwt
-#   set token to jwt's make(dictionary where "sub" is "42", "exp" is jwt's now() + 3600, "a long random secret")
+#   set token to jwt's make((dictionary where "sub" is "42", "exp" is jwt's now() + 3600), "a long random secret")
 #   set claims to jwt's verify(token, "a long random secret")   # its claims, or a mistake if it isn't good
 #   say item "sub" of claims
 #   set claims to jwt's verify(token, read "public.pem", record with issuer "https://id.example.com", audience "my-app")
