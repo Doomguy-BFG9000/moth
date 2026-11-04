@@ -975,6 +975,8 @@ moth add greeter                         a package by its name in the index
 moth get                                 fetch every package moth.packages lists, at its commit (on another computer, say)
 moth update                              move the packages to their newest commits (or moth update json, one)
 moth remove json                         take a package away; moth packages lists them
+moth get --signed                        only packages signed by a key git trusts (also moth add and moth update)
+moth audit                               check the packages against the advisories in the package index
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
 moth check hello.moth                    find problems in it without running it
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
@@ -1105,6 +1107,15 @@ come too, at their commits. A file uses files from its own folder, so a
 package's `use "helpers.moth"` is its own helpers, and `use the package` is
 always the program's, from wherever it's written. moth runs the system's `git`
 to fetch them.
+
+`moth.sums`, beside `moth.packages`, has the SHA-256 of each package's files.
+`moth add` and `moth update` write it and `moth get` checks it, so a package
+that changed, in `packages/` or where it comes from, is found rather than run:
+commit it with `moth.packages`. `--signed` takes only packages whose commit,
+or the tag they were asked for at, has a signature git trusts, and `moth
+audit` says which of the package index's advisories are about the commits a
+program's packages are at, ending with 1 if any are, for CI.
+[SECURITY.md](SECURITY.md#packages) has the details.
 
 ```text
 $ moth add github.com/someone/json
@@ -1405,6 +1416,29 @@ unboxed numbers were all caught, some only by the fuzzer.
 
 </details>
 
+## Depending on it
+
+Moth keeps its promises in writing, for anyone who builds on it:
+
+- **[SPEC.md](SPEC.md)**, the language specification: how a program is read,
+  every statement and expression with its grammar, values, numbers to 15
+  digits, each built-in operation, mistakes, files, packages and the
+  permission flags, with what's guaranteed marked apart from what's only how
+  it works today.
+- **[VERSIONING.md](VERSIONING.md)**, the stability promise. One version for
+  the language, the standard library and the `moth` command, by semantic
+  versioning. From 1.11, a program that runs on one 1.x release runs the same
+  on every later 1.x: no word becomes reserved, the standard library keeps its
+  functions, and moth keeps its commands, flags, files and exit codes.
+  Something that has to go is deprecated first, with a warning from `moth
+  check` and `moth build`, keeps working through 1.x, and can go only in 2.0,
+  six months on at least. The newest minor release gets every fix, and the one
+  before it security fixes for 90 days.
+- **[CHANGELOG.md](CHANGELOG.md)**: what changed in each release.
+- **[SECURITY.md](SECURITY.md)**: how to report a vulnerability privately, the
+  versions that get fixes, and what the `--allow` flags protect against and
+  what they don't.
+
 ## Limits
 
 - Tasks take turns: one thread runs Moth at a time, and lets the others run
@@ -1483,7 +1517,10 @@ unboxed numbers were all caught, some only by the fuzzer.
   where they are or by their name in the package index; one can be asked
   for at a tag, branch or commit (`thing@v1.2`), not a range of versions;
   and `moth.packages` keeps only one of each name, the first, if two packages
-  want different commits of a third.
+  want different commits of a third. A package's sum covers every file in its
+  folder, so one with files that differ only in case can't be checked out the
+  same on Windows as on Linux, and one with Git LFS files has the sum of what
+  LFS fetched.
 - In text, a `{` right before a letter or a bracket starts a value, so text
   that means one there as itself, as curl's `%{http_code}` does, needs `\{`.
   One right before a number is itself, as in `"\\d{3}"`, so a value that starts
