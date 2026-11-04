@@ -9,7 +9,7 @@ repository = "https://github.com/samyyy2423/moth"
 # the colours' grammar, editors/tree-sitter-moth, at a commit of Moth's that has it
 [grammars.moth]
 repository = "https://github.com/samyyy2423/moth"
-commit = "GRAMMAR_COMMIT"
+commit = "0d4281a42eceee521ad953d832bb759fbfb38369"
 path = "editors/tree-sitter-moth"
 
 [language_servers.moth]
