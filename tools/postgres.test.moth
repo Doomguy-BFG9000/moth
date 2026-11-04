@@ -1,0 +1,108 @@
+# postgres.moth's tests: SCRAM-SHA-256 as RFC 7677 has it, MD5's password, a query's messages byte for byte and
+# a server's answers read, each made apart by Python's struct; machine.test.js queries a real PostgreSQL, where
+# there is one
+
+use "postgres.moth" as pg
+use "wire.moth" as wire
+use "hash.moth" as hash
+
+# what a call fails with, or nothing if it doesn't
+to failure_of with f
+    try
+        f()
+    if it fails with why
+        return why
+    end
+    return nothing
+end
+
+# a connection whose server's every message is already here, in hex
+to answered with hex
+    return record with connection nothing, reader wire's reader_of(hash's bytes_of_hex(hex)), status "I", settings empty dictionary, process 0, notices empty list
+end
+
+to test_scram
+    # RFC 7677's example: user, pencil, and the nonces it has
+    set first to pg's scram_first("rOprNGfwEbeRWgbNEkqO", "user")
+    expect message of first is "n,,n=user,r=rOprNGfwEbeRWgbNEkqO"
+    set final to pg's scram_final("pencil", first, "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096")
+    expect message of final is "c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,p=dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ="
+    expect server_signature of final is "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
+    expect message of pg's scram_first("abc") is "n,,n=,r=abc"
+    expect failure_of(function gives pg's scram_final("pencil", first, "r=someone-else,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096")) is "the server's SCRAM nonce doesn't start with the client's"
+    expect failure_of(function gives pg's scram_final("pencil", first, "e=other-error")) is "the server's SCRAM message isn't one: e=other-error"
+end
+
+to test_md5_password
+    expect pg's pg_md5_password("postgres", "secret", (list of 1, 2, 3, 4) as bytes) is "md5bb41a296aab6baccb36ff243a562abff"
+end
+
+to test_query_messages
+    set sent to pg's pg_query_bytes("select $1::int + 1 as n, $2 as t, $3 as x, $4 as b", list of 42, "é", nothing, (list of 0, 255) as bytes)
+    expect hash's hex_of(sent) is "500000004a0073656c6563742024313a3a696e74202b2031206173206e2c20243220617320742c20243320617320782c202434206173206200000400000000000000000000000000000011420000002c000000040000000000000001000400000002343200000002c3a9ffffffff0000000200ff0001000044000000065000450000000900000000005300000004"
+    expect pg's pg_parameter(yes) is "true" as bytes
+    expect pg's pg_parameter(2.5) is "2.5" as bytes
+    expect pg's pg_parameter(12345678901234) is "12345678901234" as bytes
+    expect pg's pg_parameter(dictionary where "a" is (list of 1, 2)) is "\{\"a\":[1,2]}" as bytes
+    expect pg's pg_parameter(nothing) is nothing
+end
+
+to test_reading_answers
+    set db to answered("3100000004320000000454000000e9000a69640000000000000000000017ffffffffffff00006e616d650000000000000000000019ffffffffffff00006f6b0000000000000000000010ffffffffffff0000707269636500000000000000000006a4ffffffffffff0000646174610000000000000000000011ffffffffffff0000646f630000000000000000000edaffffffffffff00007461677300000000000000000003f1ffffffffffff00006e756d7300000000000000000003efffffffffffff00007768656e00000000000000000004a0ffffffffffff0000726174696f00000000000000000002bdffffffffffff00004400000091000a00000001370000000353616d00000001740000000531322e3530000000085c78303066663431000000167b2261223a205b312c20747275652c206e756c6c5d7d000000157b782c22612062222c22715c2274222c4e554c4c7d000000087b312c2d322c337d00000016323032362d31312d30342031303a31353a30302b3030000000082d312e35652b32304400000045000a0000000138ffffffff0000000166000000062d302e303031000000025c780000000133000000027b7d000000027b7dffffffff00000008496e66696e697479430000000d53454c4543542032005a0000000549")
+    set result to pg's pg_results(db)
+    expect columns of result is list of "id", "name", "ok", "price", "data", "doc", "tags", "nums", "when", "ratio"
+    expect count of result is 2
+    expect tag of result is "SELECT 2"
+    set first to item 1 of rows of result
+    expect item "id" of first is 7
+    expect item "name" of first is "Sam"
+    expect item "ok" of first is yes
+    expect item "price" of first is 12.5
+    expect item "data" of first is (list of 0, 255, 65) as bytes
+    expect item "doc" of first is dictionary where "a" is (list of 1, yes, nothing)
+    expect item "tags" of first is list of "x", "a b", "q\"t", nothing
+    expect item "nums" of first is list of 1, -2, 3
+    expect item "when" of first is "2026-11-04 10:15:00+00"
+    expect item "ratio" of first is -150000000000000000000
+    set second to item 2 of rows of result
+    expect item "name" of second is nothing
+    expect item "ok" of second is no
+    expect item "price" of second is -0.001
+    expect item "data" of second is 0 bytes
+    expect item "doc" of second is 3
+    expect item "tags" of second is empty list
+    expect item "when" of second is nothing
+    expect item "ratio" of second is 10 to the power of 400
+    expect pg's transaction_status(db) is "I"
+    # an UPDATE: no rows, how many it changed, inside a transaction
+    set updated to answered("310000000432000000046e00000004430000000d5550444154452033005a0000000554")
+    expect count of pg's pg_results(updated) is 3
+    expect pg's transaction_status(updated) is "T"
+end
+
+to test_errors
+    set db to answered("31000000044e00000021534e4f5449434500433030303030004d6a75737420736179696e6700004500000041534552524f5200564552524f5200433432503031004d72656c6174696f6e20226e6f77686572652220646f6573206e6f742065786973740050313500005a0000000549")
+    expect failure_of(function gives pg's pg_results(db)) is "PostgreSQL said: relation \"nowhere\" does not exist (42P01)"
+    expect notices of db is list of "PostgreSQL said: just saying (00000)"
+    set duplicate to answered("450000006f534552524f5200433233353035004d6475706c6963617465206b65792076616c75652076696f6c6174657320756e6971756520636f6e73747261696e74202270656f706c655f706b65792200444b657920286964293d28312920616c7265616479206578697374732e00005a0000000545")
+    expect failure_of(function gives pg's pg_results(duplicate)) is "PostgreSQL said: duplicate key value violates unique constraint \"people_pkey\" (23505). Key (id)=(1) already exists."
+    expect pg's transaction_status(duplicate) is "E"
+end
+
+to test_urls
+    expect pg's pg_url_options("postgres://app:s%40cret@db.example.com:6543/shop?sslmode=require") is dictionary where "tls" is "require", "user" is "app", "password" is "s@cret", "database" is "shop", "host" is "db.example.com", "port" is 6543
+    expect pg's pg_url_options("postgresql://me@localhost/") is dictionary where "user" is "me", "host" is "localhost"
+    expect pg's pg_url_options("postgres://u@h/d?sslmode=disable&x=1") is dictionary where "tls" is "disable", "user" is "u", "database" is "d", "host" is "h"
+    expect failure_of(function gives pg's pg_url_options("mysql://x")) is "a PostgreSQL URL starts postgres:// or postgresql://, not mysql://x"
+end
+
+to test_values
+    expect pg's pg_array("\{}", 1009) is empty list
+    expect pg's pg_array("\{t,f,NULL}", 1000) is list of yes, no, nothing
+    expect pg's pg_array("\{1.5,-2e3}", 1022) is list of 1.5, -2000
+    expect pg's pg_array("\{\"NULL\",\"\\\\\"}", 1009) is list of "NULL", "\\"
+    expect failure_of(function gives pg's pg_array("\{\{1,2},\{3,4}}", 1007)) is "postgres.moth reads arrays of one dimension, not \{\{1,2},\{3,4}}"
+    expect failure_of(function gives pg's pg_float("NaN")) is "PostgreSQL sent NaN, which Moth's numbers don't have"
+    expect pg's pg_value("2026-11-04", 1082) is "2026-11-04"
+    expect pg's pg_value("-9007199254740991", 20) is -9007199254740991
+end

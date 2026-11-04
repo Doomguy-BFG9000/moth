@@ -10,6 +10,7 @@
 #   set claims to jwt's verify(token, key)        # a JWK: a dictionary with kty "RSA", n and e, as a JWKS lists
 #   set token to jwt's make(claims, secret, "HS512", dictionary where "kid" is "2026-11")   # another algorithm, a kid
 #   set parts to jwt's decode(token)               # its header and claims, NOT checked: to look at, never to trust
+#   set key to jwt's read_key(read "public.pem")   # an RSA key's n and e (as big.moth has them), and size in bytes
 #
 # verify checks the signature first, with an algorithm of the key's kind: a secret (text or bytes, or a JWK of
 # kty "oct") only with HS256, HS384 or HS512; an RSA key (a PEM public key, RSA public key or certificate, or a
@@ -257,6 +258,13 @@ to jwt_hmac_hash with name
 end
 
 # ---------- keys ----------
+
+# A key as jwt.moth reads one: a record with kind "secret", and its bytes as secret; or kind "rsa", with n and
+# e (big.moth's whole numbers, as text) and size, n's length in bytes. For a PEM public key, RSA public key or
+# certificate, a JWK, or a secret.
+to read_key with key
+    return jwt_key(key)
+end
 
 # A key as a record: kind "secret", with its bytes as secret; or kind "rsa", with n and e (big.moth's whole numbers, as
 # text), and size, n's length in bytes
