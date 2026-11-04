@@ -1340,7 +1340,8 @@ test("a sound's mistakes say what's wrong, the same on all three engines, and th
   // the checker only speaks when it's sure: of a note or a time written out, or of a kind that can't be one
   assert.deepEqual(problems('set n to "C"\nplay note n for 0.5 seconds\nset t to "x"\nplay note 440 for t seconds\nset l to list of 1\nplay note l for 1 second'),
     ["4:1 fails: 'play note ... for' needs a number, not text", "6:1 fails: 'play note' needs a note like \"C4\" or a number, not a list"]);
-  assert.deepEqual(problems('to f\n    return 1\nend\nplay note "Q" for f() seconds\nplay note f() for -1 seconds'), [`4:1 fails: there is no note called 'Q' ${hint}`]);
+  // (what a function gives is known from its returns: this f gives what it's given, which could be anything)
+  assert.deepEqual(problems('to f with x\n    return x\nend\nplay note "Q" for f(1) seconds\nplay note f(1) for -1 seconds'), [`4:1 fails: there is no note called 'Q' ${hint}`]);
 });
 
 test("a hand-over to the VM plays nothing twice, and an app's handlers make sounds as events come", () => {

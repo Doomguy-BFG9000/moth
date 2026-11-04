@@ -291,8 +291,11 @@ export const ERRORS = [
   ["to shout with words as text\n    say uppercase of words\nend\nshout(nothing)", "line 4: 'shout' needs words to be text, not nothing"],
   ["to f with ok as yes or no\n    say ok\nend\nf(1)", "line 4: 'f' needs ok to be yes or no, not a number"],
   ["to f with l as a list\n    say l\nend\nto g\n    f(\"a\")\nend\ng()", "line 5: 'f' needs l to be a list, not text"],
-  ["to f with x as a thing\n    say x\nend", "line 1: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'a'"],
-  ["to f with x as\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function') but found 'say'"],
+  ["to f with x as thing\n    say x\nend", "line 1: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function', or a kind's name, like 'a dog') but found 'thing'"],
+  ["to f with x as a list of\n    say x\nend", "line 2: expected what the list holds, like 'numbers', 'text' or 'dogs' but found 'say'"],
+  ["to f with x gives\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function', or a kind's name, like 'a dog') but found 'say'"],
+  ["to f with x gives a number or\n    say x\nend", "line 1: expected a new line but found 'or'"],
+  ["to f with x as\n    say x\nend", "line 2: expected what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function', or a kind's name, like 'a dog') but found 'say'"],
   // `use` only reads files in the program's folder, or folders inside it
   ['use "../secret.moth"', "line 1: '../secret.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
   ['say 1\nuse "lib/../../x.moth" as x', "line 2: 'lib/../../x.moth' isn't in the program's folder: 'use' only reads files there, or in folders inside it"],
