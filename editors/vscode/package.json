@@ -1,7 +1,7 @@
 {
   "name": "moth",
   "displayName": "Moth",
-  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, and Run, Debug and Build",
+  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, Go to Definition, hovers, completion, and Run, Debug and Build",
   "version": "0.1.0",
   "publisher": "samyyy2423",
   "license": "Apache-2.0",
@@ -98,7 +98,12 @@
         "moth.path": {
           "type": "string",
           "default": "moth",
-          "description": "The moth command line that Run, Debug and Build use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+          "description": "The moth command line that Run, Debug, Build and the language server use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+        },
+        "moth.languageServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start Moth's language server (moth lsp) for the outline, Go to Definition in the file and the files it uses, hovers and completion. Without it, the outline and Go to Definition find the file's functions by their lines."
         }
       }
     }

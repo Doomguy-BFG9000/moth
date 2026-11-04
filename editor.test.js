@@ -1,12 +1,13 @@
-// The VS Code extension (editors/vscode, DESIGN §61): its colours, run through a small TextMate tokenizer;
-// its indenting; the extension itself, against a stand-in for VS Code's API; and the .vsix it's packed in.
+// The VS Code extension (editors/vscode, DESIGN §61 and §104): its colours, run through a small TextMate
+// tokenizer; its indenting; the extension itself, against a stand-in for VS Code's API, with and without a
+// stand-in for moth lsp; and the .vsix it's packed in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 import { createRequire, Module } from "node:module";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { check, format, suggestedFix } from "./moth.js";
@@ -150,13 +151,20 @@ class Range {
     this.end = end;
   }
 }
-// A document of the stand-in's: its text, by lines, and words as the language's wordPattern finds them
+// A document of the stand-in's: its text, by lines, and words as the language's wordPattern finds them;
+// edit(text) changes it, as typing does, and counts its version up
 function makeDocument(fsPath, text, languageId = "moth") {
-  const lines = text.split(/\r?\n/);
+  let lines = text.split(/\r?\n/);
   const offsetOf = (p) => lines.slice(0, p.line).reduce((n, l) => n + l.length + 1, 0) + p.character;
   return {
     uri: { scheme: "file", fsPath, toString: () => `file://${fsPath}` },
     languageId,
+    version: 1,
+    edit(changed) {
+      text = changed;
+      lines = text.split(/\r?\n/);
+      this.version++;
+    },
     isUntitled: false,
     isDirty: false,
     getText: (range) => (range ? text.slice(offsetOf(range.start), offsetOf(range.end)) : text),
@@ -174,10 +182,11 @@ function makeDocument(fsPath, text, languageId = "moth") {
     },
   };
 }
-function standIn() {
-  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [] };
+// the stand-in, with moth.path and moth.languageServer as `settings` says
+function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }) {
+  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [], output: [], triggers: {} };
   const on = (kind) => (f) => ((seen.listeners[kind] = f), { dispose() {} });
-  const provider = (kind) => (selector, p) => ((seen.providers[kind] = p), { dispose() {} });
+  const provider = (kind) => (selector, p, ...triggers) => ((seen.providers[kind] = p), (seen.triggers[kind] = triggers), { dispose() {} });
   const vscode = {
     Position, Range,
     Diagnostic: class { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } },
@@ -186,6 +195,10 @@ function standIn() {
     DocumentSymbol: class { constructor(name, detail, kind, range, selectionRange) { Object.assign(this, { name, detail, kind, range, selectionRange, children: [] }); } },
     SymbolKind: { Function: 11 },
     Location: class { constructor(uri, range) { Object.assign(this, { uri, range }); } },
+    Hover: class { constructor(contents, range) { Object.assign(this, { contents, range }); } },
+    MarkdownString: class { constructor(value) { this.value = value; } },
+    CompletionItem: class { constructor(label, kind) { Object.assign(this, { label, kind }); } },
+    Uri: { parse: (text) => ({ scheme: text.split(":")[0], toString: () => text }) },
     TextEdit: { replace: (range, newText) => ({ range, newText }) },
     CodeAction: class { constructor(title, kind) { Object.assign(this, { title, kind }); } },
     CodeActionKind: { QuickFix: "quickfix" },
@@ -196,17 +209,20 @@ function standIn() {
       registerCodeActionsProvider: provider("actions"),
       registerDocumentSymbolProvider: provider("symbols"),
       registerDefinitionProvider: provider("definition"),
+      registerHoverProvider: provider("hover"),
+      registerCompletionItemProvider: provider("completion"),
     },
     workspace: {
       textDocuments: [],
       onDidOpenTextDocument: on("open"),
       onDidChangeTextDocument: on("change"),
       onDidCloseTextDocument: on("close"),
-      getConfiguration: () => ({ get: () => "C:/tools/moth.exe" }),
+      getConfiguration: () => ({ get: (key) => settings[key] }),
     },
     window: {
       activeTextEditor: null,
       createTerminal: (options) => (seen.terminals.push(options), { show() {} }),
+      createOutputChannel: () => ({ appendLine: (line) => seen.output.push(line), dispose() {} }),
       showInformationMessage: (m) => seen.messages.push(m),
       showWarningMessage: (m) => seen.messages.push(m),
     },
@@ -214,10 +230,13 @@ function standIn() {
   };
   return { vscode, seen };
 }
-function loadExtension(vscode) {
+// the extension, with the stand-in for VS Code, and `client` for client.js if it's given
+function loadExtension(vscode, client) {
   const load = Module._load;
   Module._load = function (request, ...rest) {
-    return request === "vscode" ? vscode : load.call(this, request, ...rest);
+    if (request === "vscode") return vscode;
+    if (request === "./client.js" && client) return client;
+    return load.call(this, request, ...rest);
   };
   try {
     const require = createRequire(import.meta.url);
@@ -232,7 +251,7 @@ function loadExtension(vscode) {
 test("the extension shows the checker's problems, fixes what it can, tidies, outlines, and starts moth", async () => {
   const { vscode, seen } = standIn();
   const extension = loadExtension(vscode);
-  extension.activate({ subscriptions: [] });
+  await extension.activate({ subscriptions: [] }); // with moth.languageServer off: the outline found by the lines
   const folder = mkdtempSync(join(tmpdir(), "moth-editor-"));
   try {
     writeFileSync(join(folder, "lib.moth"), "to twice with n\n    return n * 2\nend\n");
@@ -246,7 +265,7 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     for (const [i, p] of want.entries()) {
       assert.equal(found[i].message, p.message);
       assert.equal(found[i].source, "moth");
-      assert.equal(found[i].severity, ["error", "fails"].includes(p.kind) ? 0 : 1);
+      assert.equal(found[i].severity, ["error", "fails", "doesn't fit"].includes(p.kind) ? 0 : 1);
       assert.deepEqual([found[i].range.start.line, found[i].range.start.character], [p.line - 1, p.col - 1]);
     }
     // a misspelling's fix, and a symbol's from another language, are what suggestedFix says, in their places
@@ -277,12 +296,14 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     assert.equal(seen.messages.at(-1), "Moth can't tidy this until its mistake is put right: line 2: expected ')' but found the end of the code");
 
     // the outline: outer, with inner inside it, each to its end; and Go to Definition
-    const symbols = seen.providers.symbols.provideDocumentSymbols(document);
+    const symbols = await seen.providers.symbols.provideDocumentSymbols(document);
     assert.deepEqual(symbols.map((s) => [s.name, s.range.start.line, s.range.end.line, s.children.map((c) => [c.name, c.range.start.line, c.range.end.line])]),
       [["outer", 3, 8, [["inner", 4, 6]]]]);
-    const location = seen.providers.definition.provideDefinition(document, new Position(11, 10)); // outer()
+    const location = await seen.providers.definition.provideDefinition(document, new Position(11, 10)); // outer()
     assert.deepEqual([location.range.start.line, location.range.start.character], [3, 3]);
-    assert.equal(seen.providers.definition.provideDefinition(document, new Position(9, 5)), null); // twice is lib.moth's
+    assert.equal(await seen.providers.definition.provideDefinition(document, new Position(9, 5)), null); // twice is lib.moth's
+    assert.equal(await seen.providers.hover.provideHover(document, new Position(11, 10)), null); // hovers need the server
+    assert.equal(await seen.providers.completion.provideCompletionItems(document, new Position(11, 10)), undefined);
 
     // Run and Debug: moth, started on the file, from its folder
     vscode.window.activeTextEditor = { document };
@@ -294,6 +315,119 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     assert.equal(seen.messages.at(-1), "Open a Moth file first.");
   } finally {
     rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+// A stand-in for client.js: a language server that keeps what it's told of each document, and answers from
+// it, so what the extension sends and makes of the answers can be looked at; machine.test.js starts client.js
+// on moth lsp itself
+function serverStandIn({ fails = false } = {}) {
+  const seen = { started: [], told: [], asked: [], docs: new Map(), stopped: false, exits: [] };
+  const range = (line, from, to, endLine = line) => ({ start: { line, character: from }, end: { line: endLine, character: to } });
+  const answers = {
+    "textDocument/documentSymbol": () => [{ name: "outer", detail: "with n", kind: 12, range: range(3, 0, 3, 8), selectionRange: range(3, 3, 8),
+      children: [{ name: "inner", detail: "", kind: 12, range: range(4, 4, 7, 6), selectionRange: range(4, 7, 12) }] }, { name: "totl", kind: 13, range: range(1, 0, 13), selectionRange: range(1, 4, 8) }],
+    "textDocument/definition": ({ textDocument }) => (textDocument.uri.endsWith("main.moth") ? { uri: "file:///work/lib.moth", range: range(0, 3, 8) } : null),
+    // what the server holds of the document, which must be what's in front
+    "textDocument/hover": ({ textDocument, position }) => ({ contents: { kind: "markdown", value: `v${seen.docs.get(textDocument.uri).version} ${seen.docs.get(textDocument.uri).text.split("\n")[position.line]}` } }),
+    "textDocument/completion": () => [{ label: "twice", kind: 3, detail: "with n" }, { label: "rex", kind: 6 }, { label: "say", kind: 14 }],
+  };
+  const client = {
+    async startServer(command, options) {
+      seen.started.push({ command, options });
+      if (fails) throw new Error(`moth lsp couldn't start: there's no ${command}`);
+      return {
+        capabilities: {},
+        async request(method, params) {
+          seen.asked.push(method);
+          return answers[method](params);
+        },
+        notify(method, params) {
+          seen.told.push([method, params.textDocument.uri, params.textDocument.version]);
+          if (method === "textDocument/didOpen") seen.docs.set(params.textDocument.uri, { version: params.textDocument.version, text: params.textDocument.text });
+          if (method === "textDocument/didChange") seen.docs.set(params.textDocument.uri, { version: params.textDocument.version, text: params.contentChanges.at(-1).text });
+          if (method === "textDocument/didClose") seen.docs.delete(params.textDocument.uri);
+        },
+        on() {},
+        onExit: (f) => seen.exits.push(f),
+        async stop() {
+          seen.stopped = true;
+        },
+      };
+    },
+  };
+  return { client, seen };
+}
+
+test("where moth is installed, the extension asks moth lsp for the outline, definitions, hovers and completion", async () => {
+  const { vscode, seen } = standIn({ path: "/opt/moth/moth" });
+  const server = serverStandIn();
+  const lib = makeDocument("/work/lib.moth", "to twice with n\n    return n * 2\nend\n");
+  vscode.workspace.textDocuments.push(lib, makeDocument("/work/notes.txt", "hi", "plaintext"));
+  const extension = loadExtension(vscode, server.client);
+  await extension.activate({ subscriptions: [] });
+  // started with moth.path, asked not to say problems (the engine's checker does), and told of the open Moth files
+  assert.deepEqual(server.seen.started, [{ command: "/opt/moth/moth", options: { initializationOptions: { diagnostics: false } } }]);
+  assert.deepEqual(server.seen.told, [["textDocument/didOpen", "file:///work/lib.moth", 1]]);
+  const source = 'use "lib.moth"\nset totl to 1\nsay twice(totl)\nto outer with n\n    to inner\n        say n\n    end\nend\n';
+  const document = makeDocument("/work/main.moth", source);
+  await seen.listeners.open(document);
+  assert.equal(server.seen.docs.get("file:///work/main.moth").text, source);
+  assert.ok(seen.diagnostics.get("file:///work/main.moth").length > 0, "the engine's checker still finds the problems");
+
+  // the outline: the server's, its kinds counted from 0 as VS Code counts them
+  const symbols = await seen.providers.symbols.provideDocumentSymbols(document);
+  const shown = (s) => [s.name, s.detail, s.kind, s.range.start.line, s.range.end.line, s.selectionRange.start.character, s.children.map(shown)];
+  assert.deepEqual(symbols.map(shown), [["outer", "with n", 11, 3, 8, 3, [["inner", "", 11, 4, 6, 7, []]]], ["totl", "", 12, 1, 1, 4, []]]);
+  // Go to Definition, in another file
+  const location = await seen.providers.definition.provideDefinition(document, new Position(2, 5));
+  assert.deepEqual([location.uri.toString(), location.range.start.line, location.range.start.character, location.range.end.character], ["file:///work/lib.moth", 0, 3, 8]);
+  assert.equal(await seen.providers.definition.provideDefinition(lib, new Position(0, 4)), null); // the server found nothing
+  // each change is sent as it's made, and a change VS Code asks about before saying it is sent first
+  document.edit(source.replace("set totl to 1", "set totl to 2"));
+  seen.listeners.change({ document });
+  assert.deepEqual(server.seen.told.at(-1), ["textDocument/didChange", "file:///work/main.moth", 2]);
+  document.edit(source.replace("set totl to 1", "set totl to 3"));
+  const hover = await seen.providers.hover.provideHover(document, new Position(1, 5));
+  assert.equal(hover.contents.value, "v3 set totl to 3");
+  // completion, the trigger the server asks for, and each kind counted from 0
+  assert.deepEqual(seen.triggers.completion, ["'"]);
+  const items = await seen.providers.completion.provideCompletionItems(document, new Position(2, 4));
+  assert.deepEqual(items.map((c) => [c.label, c.kind, c.detail]), [["twice", 2, "with n"], ["rex", 5, undefined], ["say", 13, undefined]]);
+  // a closed file is said to be closed, and a file that isn't Moth is never sent
+  seen.listeners.close(document);
+  assert.deepEqual(server.seen.told.at(-1), ["textDocument/didClose", "file:///work/main.moth", undefined]);
+  assert.ok(!server.seen.told.some(([, uri]) => uri.endsWith(".txt")));
+
+  // once the server has ended, the outline and definitions are found by the lines again, and there's no hover
+  const asked = server.seen.asked.length;
+  for (const f of server.seen.exits) f("it ended with 1");
+  await seen.listeners.open(document);
+  const own = await seen.providers.symbols.provideDocumentSymbols(document);
+  assert.deepEqual(own.map((s) => [s.name, s.children.map((c) => c.name)]), [["outer", ["inner"]]]);
+  assert.equal(await seen.providers.hover.provideHover(document, new Position(1, 5)), null);
+  assert.equal(server.seen.asked.length, asked);
+  assert.ok(seen.output.includes("moth lsp ended: it ended with 1"), seen.output.join("\n"));
+  await extension.deactivate();
+});
+
+test("without moth, or with moth.languageServer off, the extension does without the server", async () => {
+  for (const settings of [{ path: "missing" }, { languageServer: false }]) {
+    const { vscode, seen } = standIn(settings);
+    const server = serverStandIn({ fails: true });
+    const extension = loadExtension(vscode, server.client);
+    await extension.activate({ subscriptions: [] });
+    assert.equal(server.seen.started.length, settings.languageServer === false ? 0 : 1);
+    if (settings.path) {
+      assert.equal(server.seen.started[0].command, "missing");
+      assert.match(seen.output.join("\n"), /moth lsp couldn't start: there's no missing\. The outline and Go to Definition find the file's functions by their lines instead/);
+    }
+    const document = makeDocument("/work/main.moth", "to outer\n    say 1\nend\nouter()\n");
+    await seen.listeners.open(document);
+    assert.deepEqual((await seen.providers.symbols.provideDocumentSymbols(document)).map((s) => s.name), ["outer"]);
+    assert.deepEqual((await seen.providers.definition.provideDefinition(document, new Position(3, 2))).range.start, new Position(0, 3));
+    assert.equal(await seen.providers.hover.provideHover(document, new Position(3, 2)), null);
+    assert.deepEqual(seen.messages, []); // nothing in the way: what happened is in the Moth output
   }
 });
 
@@ -357,6 +491,9 @@ test("in VS Code, the extension shows problems, fixes, tidies and outlines", { s
   const folder = mkdtempSync(join(tmpdir(), "moth-vscode-"));
   try {
     writeFileSync(join(folder, "main.moth"), "set totl to 1\nsay total\nto  outer\n    to inner\n        say 1\n    end\nend\n");
+    // the outline found by the lines, whether or not moth is installed here (the server's is tested above)
+    mkdirSync(join(folder, "data", "User"), { recursive: true });
+    writeFileSync(join(folder, "data", "User", "settings.json"), JSON.stringify({ "moth.languageServer": false }));
     const done = spawnSync(vscodeAt, [`--extensionDevelopmentPath=${new URL("./editors/vscode", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")}`,
       `--extensionTestsPath=${new URL("./editors/vscode/in-vscode.js", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")}`,
       `--user-data-dir=${join(folder, "data")}`, `--extensions-dir=${join(folder, "ext")}`, "--disable-extensions", "--disable-workspace-trust", "--skip-welcome", "--skip-release-notes"],
