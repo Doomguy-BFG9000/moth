@@ -1202,6 +1202,7 @@ moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (
 moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
 moth build app.moth --installer --name "Notes"   and app-setup.exe, which installs it: a Start menu entry, removable in Settings
 moth build app.moth --sign "signtool sign /fd SHA256 /a"   run a command on each program made, its name after it
+moth build fast.moth --library           a shared library of its functions, for C: libfast.so, or fast.dll, and fast.h
 ```
 
 `moth run` is `moth build` and then the program: it builds it into a file
@@ -1214,6 +1215,64 @@ comes after it is the program's own. `moth tidy` and `moth test` take any
 number of files, and `moth test` with none finds every file ending in
 `.test.moth` here and in the folders inside, but not hidden ones or
 `node_modules`; `moth check` takes one.
+
+### A library for C
+
+`moth build fast.moth --library` makes the program a shared library:
+`libfast.so` on Linux, or `fast.dll` on Windows (`--target` picks the other),
+and `fast.h`, which declares it for C, beside the file (or in the folder
+`--into build` names). Its functions are the ones `fast.moth`
+makes at its top level (not the files it uses), each called by its own name
+through the system's own C convention, so anything that calls C calls Moth:
+C itself, Python's `ctypes`, Rust, Go, C#, Node's FFI.
+
+```moth
+to fib with n
+    if n is less than 2
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+```
+
+```c
+#include <stdio.h>
+#include "fast.h"
+
+int main(void) {
+    moth_value result;
+    if (fib(&result, moth_number(30)) == 0)
+        printf("%g\n", moth_number_of(result));          /* 832040 */
+    return 0;
+}
+```
+
+```text
+gcc main.c -L. -lfast -Wl,-rpath,'$ORIGIN'     (on Windows, gcc main.c fast.dll)
+```
+
+- **Values.** A `moth_value` is any Moth value, its own 8 bytes: a number is
+  its double (`moth_number(2.5)`, `moth_number_of(v)`), and `moth_text`,
+  `moth_bytes`, `moth_list`, `moth_numbers`, `moth_dictionary` and the rest
+  make the others, which `moth_kind`, `moth_text_utf8`, `moth_list_item`,
+  `moth_dictionary_keys`, `moth_record_names` and the rest read. Text is
+  UTF-8. `fast.h` lists them all.
+- **Whose they are.** Every value the library gives you is yours until you
+  give it to `moth_free`, and the collector leaves it alone until then; what
+  you give a function stays yours. Numbers, yes, no and nothing need no
+  freeing (`moth_free` takes them anyway).
+- **Mistakes.** Each function gives 0, with what it gave in `*result`, or 1,
+  with a record of what went wrong there instead: its `message`, `line`,
+  `column`, `file` and `value` (what `fail with` gave). A mistake never ends
+  the program that loaded the library.
+- **Once, and one at a time.** The first call runs the program's top level,
+  once for the process: its variables then last from call to call. One call
+  runs Moth at a time; a call from another thread waits its turn. Every call
+  runs on the library's own 256 MB stack, so recursion goes as deep as in a
+  program of Moth's own, whatever stack the calling thread has.
+- **What a library can't do:** stop the program (`fail with` instead), start
+  tasks or workers, draw, play sounds, or take callbacks from C. Each is a
+  mistake when it's built. Names starting with `moth_` are the library's own.
 
 ### Installers and signing
 
@@ -1737,6 +1796,12 @@ calls that led there.
   matmul through OpenBLAS, an ONNX model the tests write run through ONNX
   Runtime, and Python run inside a program, where each is installed (CI
   installs them)
+- libraries for C: a C program, built with gcc, calling a library's
+  functions with every kind of value, mistakes as records, a top level that
+  fails, eight threads at once, recursion 50,000 deep from a 256 KB thread
+  stack, and values held through collections; the mistakes a library can't
+  build; and a Windows DLL read as Windows reads it (exports, relocations,
+  imports), and on Windows, run
 - `tools/ai.moth` against a server of the tests' own that answers as
   Anthropic's and OpenAI's APIs do: answers, streams read however the bytes
   come, tools, JSON, embeddings and searching them, a refusal another model

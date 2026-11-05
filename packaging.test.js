@@ -1,4 +1,4 @@
-// The installers and the release's files (packaging/, DESIGN §129 and §130): the winget and Scoop manifests
+// The installers and the release's files (packaging/, DESIGN §130 and §131): the winget and Scoop manifests
 // are what manifests.mjs writes, the SBOM names what's built into moth, the .deb holds moth-linux as it is, and
 // install.sh installs only a download whose sum is the release's. All here, with no network; CI's packaging
 // workflow does what needs it (the real release, Windows, Docker, the schemas).

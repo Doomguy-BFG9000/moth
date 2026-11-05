@@ -1141,7 +1141,7 @@ test("moth.exe coverage says which lines of a program and the files it uses ran"
   rmSync(join(dir, "lcov.info"));
 });
 
-// moth coverage of tests (DESIGN §132): each test run as moth test runs it, with what each ran added up, and said
+// moth coverage of tests (DESIGN §133): each test run as moth test runs it, with what each ran added up, and said
 // of the files the tests use: not the tests' own, nor moth's copies of the standard library, nor packages
 test("moth.exe coverage runs a file's tests, or a folder's, and says which lines of the files they test ran", { skip }, () => {
   const { dir, exe } = mothExe();
@@ -7238,6 +7238,512 @@ test("moth.exe with nothing after it is the Moth shell, each entry a program wit
     const wrong = spawnSync(exe, ["shell", "--allow-everything"], { cwd: dir, encoding: "utf8", input: "" });
     assert.deepEqual([wrong.status, wrong.stdout], [2, ""]);
     assert.match(wrong.stderr, /^usage: moth /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A program made a shared library (DESIGN §129): its functions called from C, through the C ABI, with values
+// made, read and freed through the value API; mistakes given back, never ending the process; the top level
+// run once; calls from many threads at once, one at a time; and the library's own stack, as deep as a
+// program's, whatever stack C's thread has.
+const LIBRARY_PROGRAM = String.raw`set counted to 0
+set greeted to 0
+say "the top level runs once"
+
+to fib with n
+    if n is less than 2
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+
+to greet with name
+    add 1 to greeted
+    return "Hello, " + name + "! (" + greeted + ")"
+end
+
+to total_of with numbers
+    set sum to 0
+    for each x in numbers
+        set sum to sum + x
+    end
+    return sum
+end
+
+to divide with a, b
+    if b is 0
+        fail with "can't divide " + a + " by 0"
+    end
+    return a / b
+end
+
+to described with d
+    set made to empty list
+    for each k in keys of d
+        add k + "=" + item k of d to made
+    end
+    return made
+end
+
+to point with x, y
+    return record with x x, y y, on (x is y), none nothing
+end
+
+to doubled with n as a number
+    return n * 2
+end
+
+to adder with n
+    return function with m gives n + m
+end
+
+to reversed with data
+    set made to empty list
+    for each b in data
+        add b to made
+    end
+    set back to empty list
+    set k to length of made
+    repeat while k is at least 1
+        add item k of made to back
+        set k to k - 1
+    end
+    return back
+end
+
+to fails_with_a_record
+    fail with record with code 7
+end
+
+to count_up with n
+    for each k from 1 to n
+        set counted to counted + 1
+    end
+    return counted
+end
+
+to depth with n
+    if n is 0
+        return 0
+    end
+    return 1 + depth(n - 1)
+end
+
+to churn with n
+    set kept to empty list
+    for each k from 1 to n
+        set junk to list of k, k + 1, "text " + k
+        if remainder of k divided by 1000 is 0
+            add junk to kept
+        end
+    end
+    return length of kept
+end
+
+to echo with x
+    return x
+end
+`;
+const LIBRARY_C = String.raw`#define __USE_MINGW_ANSI_STDIO 1
+#include <stdio.h>
+#include <string.h>
+#include "work.h"
+#ifdef _WIN32
+#include <windows.h>
+typedef HANDLE thread_t;
+static thread_t start_thread(DWORD (WINAPI *f)(void *), unsigned stack) {
+  return CreateThread(NULL, stack, f, NULL, stack ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0, NULL);
+}
+static void join_thread(thread_t t) { WaitForSingleObject(t, INFINITE); CloseHandle(t); }
+#define THREAD_FN(name) static DWORD WINAPI name(void *arg)
+#else
+#include <pthread.h>
+typedef pthread_t thread_t;
+static thread_t start_thread(void *(*f)(void *), unsigned stack) {
+  pthread_t t; pthread_attr_t attr; pthread_attr_init(&attr);
+  if (stack) pthread_attr_setstacksize(&attr, stack);
+  pthread_create(&t, &attr, f, NULL);
+  return t;
+}
+static void join_thread(thread_t t) { pthread_join(t, NULL); }
+#define THREAD_FN(name) static void *name(void *arg)
+#endif
+
+static void show(moth_value v) {
+  int64_t n;
+  const char *s;
+  const unsigned char *b;
+  switch (moth_kind(v)) {
+  case MOTH_NUMBER: printf("%g", moth_number_of(v)); break;
+  case MOTH_TEXT: s = moth_text_utf8(v, &n); printf("\"%.*s\"", (int)n, s); break;
+  case MOTH_YES_OR_NO: printf(moth_is_yes(v) ? "yes" : "no"); break;
+  case MOTH_NOTHING: printf("nothing"); break;
+  case MOTH_BYTES:
+    b = moth_bytes_data(v, &n);
+    printf("bytes");
+    for (int64_t i = 0; i < n; i++) printf(" %d", b[i]);
+    break;
+  case MOTH_FUNCTION: printf("a function"); break;
+  case MOTH_LIST:
+    printf("[");
+    for (int64_t i = 0; i < moth_list_length(v); i++) {
+      moth_value item;
+      if (i) printf(", ");
+      if (moth_list_item(&item, v, i)) printf("?");
+      else show(item);
+      moth_free(item);
+    }
+    printf("]");
+    break;
+  case MOTH_DICTIONARY: {
+    moth_value keys, k, x;
+    moth_dictionary_keys(&keys, v);
+    printf("{");
+    for (int64_t i = 0; i < moth_list_length(keys); i++) {
+      moth_list_item(&k, keys, i);
+      moth_dictionary_get(&x, v, k);
+      if (i) printf(", ");
+      show(k); printf(": "); show(x);
+      moth_free(k); moth_free(x);
+    }
+    printf("}");
+    moth_free(keys);
+    break;
+  }
+  case MOTH_RECORD: {
+    moth_value names, values, k, x;
+    moth_record_names(&names, v);
+    moth_record_values(&values, v);
+    printf("(");
+    for (int64_t i = 0; i < moth_list_length(names); i++) {
+      moth_list_item(&k, names, i);
+      moth_list_item(&x, values, i);
+      if (i) printf(", ");
+      moth_text_utf8(k, &n);
+      printf("%.*s ", (int)n, moth_text_utf8(k, NULL)); show(x);
+      moth_free(k); moth_free(x);
+    }
+    printf(")");
+    moth_free(names); moth_free(values);
+    break;
+  }
+  default: printf("<kind %d>", moth_kind(v));
+  }
+}
+
+static void said(const char *what, int status, moth_value v) {
+  printf("%s -> %d ", what, status);
+  show(v);
+  printf("\n");
+  moth_free(v);
+}
+
+static moth_value text(const char *s) { moth_value v; moth_text(&v, s, -1); return v; }
+
+static volatile long failures = 0;
+THREAD_FN(worker) {
+  for (int i = 0; i < 200; i++) {
+    moth_value r;
+    if (count_up(&r, moth_number(100))) failures++;
+    moth_free(r);
+  }
+  return 0;
+}
+
+THREAD_FN(deep) {
+  moth_value r;
+  int status = depth(&r, moth_number(50000));
+  said("depth(50000), on a 256 KB stack", status, r);
+  status = depth(&r, moth_number(200000));
+  moth_value values, message;
+  moth_record_values(&values, r);
+  moth_list_item(&message, values, 0);
+  said("depth(200000)", status, message);
+  moth_free(values);
+  moth_free(r);
+  return 0;
+}
+
+int main(void) {
+  moth_value r, a, b, list, d, f, inputs;
+  int status;
+  setvbuf(stdout, NULL, _IONBF, 0);
+  printf("%s", moth_exports());
+  status = fib(&r, moth_number(20)); said("fib(20)", status, r);
+  a = text("W\xc3\xb6rld \xf0\x9f\x98\x80");
+  status = greet(&r, a); said("greet", status, r);
+  status = greet(&r, a); said("greet", status, r);
+  moth_free(a);
+  moth_list(&list);
+  for (int i = 1; i <= 100; i++) moth_list_add(NULL, list, moth_number(i));
+  status = total_of(&r, list); said("total_of", status, r);
+  moth_free(list);
+  double numbers[5] = { 1.5, 2.5, 3, -4, 1e100 }, back[5];
+  moth_numbers(&list, numbers, 5);
+  status = total_of(&r, list); said("total_of(moth_numbers)", status, r);
+  printf("moth_list_numbers -> %lld", (long long)moth_list_numbers(list, back, 5));
+  for (int i = 0; i < 5; i++) printf(" %g", back[i]);
+  printf("\n");
+  moth_free(list);
+  status = divide(&r, moth_number(1), moth_number(4)); said("divide(1, 4)", status, r);
+  status = divide(&r, moth_number(1), moth_number(0)); said("divide(1, 0)", status, r);
+  status = total_of(&r, moth_number(3)); said("total_of(3)", status, r);
+  status = doubled(&r, text("x")); said("doubled(\"x\")", status, r);
+  status = fails_with_a_record(&r); said("fails_with_a_record", status, r);
+  moth_dictionary(&d);
+  a = text("a"); moth_dictionary_set(NULL, d, a, moth_number(1)); moth_free(a);
+  a = text("b"); moth_dictionary_set(NULL, d, a, moth_number(2)); moth_free(a);
+  moth_dictionary_set(NULL, d, moth_number(3), moth_yes_or_no(0));
+  status = described(&r, d); said("described", status, r);
+  status = echo(&r, d); said("echo(dictionary)", status, r);
+  status = moth_dictionary_get(&r, d, moth_number(9)); said("moth_dictionary_get(missing)", status, r);
+  status = moth_dictionary_set(&r, d, d, moth_nothing()); said("moth_dictionary_set(list key)", status, r);
+  moth_free(d);
+  status = point(&r, moth_number(3), moth_number(3)); said("point", status, r);
+  unsigned char raw[4] = { 0, 1, 254, 255 };
+  moth_bytes(&a, raw, 4);
+  status = reversed(&r, a); said("reversed(bytes)", status, r);
+  status = echo(&r, a); said("echo(bytes)", status, r);
+  moth_free(a);
+  adder(&f, moth_number(10));
+  moth_list(&inputs);
+  moth_list_add(NULL, inputs, moth_number(5));
+  status = moth_call(&r, f, inputs); said("moth_call(adder(10), [5])", status, r);
+  moth_list_add(NULL, inputs, moth_number(6));
+  status = moth_call(&r, f, inputs); said("moth_call(adder(10), [5, 6])", status, r);
+  status = moth_call(&r, moth_number(3), inputs); said("moth_call(3, [])", status, r);
+  moth_free(inputs); moth_free(f);
+  status = moth_list_item(&r, moth_nothing(), 0); said("moth_list_item(past the end)", status, r);
+  said("moth_number(nan) is a number", 0, moth_number(0.0 / 0.0 * 0));
+  printf("kinds %d %d %d %d, yes %d %d %d\n", moth_kind(moth_number(1)), moth_kind(moth_nothing()), moth_kind(moth_yes_or_no(1)),
+    moth_kind(text("t")), moth_is_yes(moth_yes_or_no(1)), moth_is_yes(moth_yes_or_no(0)), moth_is_yes(moth_number(1)));
+  a = text("kept twice");
+  moth_keep(&b, a);
+  moth_free(a);
+  churn(&r, moth_number(200000));
+  said("moth_keep", 0, b);
+
+  moth_value held[100];
+  for (int i = 0; i < 100; i++) { char s[32]; sprintf(s, "held %d", i); held[i] = text(s); }
+  thread_t t[8];
+  for (int i = 0; i < 8; i++) t[i] = start_thread(worker, 0);
+  for (int i = 0; i < 8; i++) join_thread(t[i]);
+  count_up(&r, moth_number(0));
+  printf("eight threads counted %g, with %ld failures\n", moth_number_of(r), failures);
+  join_thread(start_thread(deep, 262144));
+  status = churn(&r, moth_number(2000000)); said("churn", status, r);
+  int bad = 0;
+  for (int i = 0; i < 100; i++) {
+    char s[32]; int64_t n; moth_value e;
+    sprintf(s, "held %d", i);
+    const char *got = moth_text_utf8(held[i], &n);
+    echo(&e, held[i]);
+    if (n != (int64_t)strlen(s) || memcmp(got, s, (size_t)n) || e != held[i]) bad++;
+    moth_free(e); moth_free(held[i]);
+  }
+  printf("texts held through the collections: %d changed\n", bad);
+  return 0;
+}
+`;
+const LIBRARY_SAID = `fib\tn
+greet\tname
+total_of\tnumbers
+divide\ta\tb
+described\td
+point\tx\ty
+doubled\tn
+adder\tn
+reversed\tdata
+fails_with_a_record
+count_up\tn
+depth\tn
+churn\tn
+echo\tx
+the top level runs once
+fib(20) -> 0 6765
+greet -> 0 "Hello, Wörld 😀! (1)"
+greet -> 0 "Hello, Wörld 😀! (2)"
+total_of -> 0 5050
+total_of(moth_numbers) -> 0 1e+100
+moth_list_numbers -> 5 1.5 2.5 3 -4 1e+100
+divide(1, 4) -> 0 0.25
+divide(1, 0) -> 1 (message "can't divide 1 by 0", line 27, column 9, file "work.moth", value "can't divide 1 by 0")
+total_of(3) -> 1 (message "can only go through a list, text, dictionary or bytes, not a number", line 19, column 5, file "work.moth", value "can only go through a list, text, dictionary or bytes, not a number")
+doubled("x") -> 1 (message "'doubled' needs n to be a number, not text", line nothing, column nothing, file nothing, value "'doubled' needs n to be a number, not text")
+fails_with_a_record -> 1 (message "(record with code 7)", line 67, column 5, file "work.moth", value (code 7))
+described -> 0 ["a=1", "b=2", "3=no"]
+echo(dictionary) -> 0 {"a": 1, "b": 2, 3: no}
+moth_dictionary_get(missing) -> 1 (message "the dictionary has no such key", line nothing, column nothing, file nothing, value "the dictionary has no such key")
+moth_dictionary_set(list key) -> 1 (message "a dictionary's key is text or a number", line nothing, column nothing, file nothing, value "a dictionary's key is text or a number")
+point -> 0 (x 3, y 3, on yes, none nothing)
+reversed(bytes) -> 0 [255, 254, 1, 0]
+echo(bytes) -> 0 bytes 0 1 254 255
+moth_call(adder(10), [5]) -> 0 15
+moth_call(adder(10), [5, 6]) -> 1 (message "'function on line 49' needs 1 input but got 2", line nothing, column nothing, file nothing, value "'function on line 49' needs 1 input but got 2")
+moth_call(3, []) -> 1 (message "moth_call needs a function", line nothing, column nothing, file nothing, value "moth_call needs a function")
+moth_list_item(past the end) -> 1 (message "moth_list_item needs a list", line nothing, column nothing, file nothing, value "moth_list_item needs a list")
+moth_number(nan) is a number -> 0 nan
+kinds 1 4 3 2, yes 1 0 0
+moth_keep -> 0 "kept twice"
+eight threads counted 160000, with 0 failures
+depth(50000), on a 256 KB stack -> 0 50000
+depth(200000) -> 1 "too much recursion: a function kept calling itself"
+churn -> 0 2000
+texts held through the collections: 0 changed
+`;
+const LIBRARY_CC = ["gcc", "cc", "clang"].find((c) => spawnSync(c, ["--version"], { encoding: "utf8" }).status === 0);
+// builds work.moth as a library for this system beside a C program, and runs the program
+function libraryCall(source, cSource, name = "work") {
+  const dir = mkdtempSync(join(tmpdir(), "moth-shared-"));
+  try {
+    const library = join(dir, target === "windows" ? `${name}.dll` : `lib${name}.so`);
+    writeFileSync(library, machine(source, { target, name: `${name}.moth`, library: true }));
+    writeFileSync(join(dir, `${name}.h`), machine(source, { target, name: `${name}.moth`, header: true }));
+    writeFileSync(join(dir, "main.c"), cSource);
+    const exe = executable(dir, "main");
+    // Linux: linked as C links to a shared library; Windows: gcc links straight to the DLL's exports
+    const linking = target === "windows" ? [library] : [`-L${dir}`, `-l${name}`, "-Wl,-rpath,$ORIGIN", "-pthread"];
+    const built = spawnSync(LIBRARY_CC, ["-O1", "-o", exe, join(dir, "main.c"), ...linking], { encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+    return { ...ran, stdout: ran.stdout.replaceAll("\r\n", "\n") }; // C's own printf writes \r\n on Windows
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+test("a library: C calls the program's functions, with its values, mistakes, threads and stack", { skip: skip || (!LIBRARY_CC && "no C compiler") }, () => {
+  const ran = libraryCall(LIBRARY_PROGRAM, LIBRARY_C);
+  assert.equal(ran.stderr, "");
+  assert.equal(ran.stdout.replace(/-nan|NaN/i, "nan"), LIBRARY_SAID);
+  assert.equal(ran.status, 0);
+});
+
+test("a library whose top level fails gives that mistake from each of its functions, and its values still work", { skip: skip || (!LIBRARY_CC && "no C compiler") }, () => {
+  const ran = libraryCall("to fine with x\n    return x * 2\nend\n\nset table to list of 1, 2, 3\nsay item 5 of table\n", String.raw`#include <stdio.h>
+#include "work.h"
+int main(void) {
+  for (int i = 0; i < 2; i++) {
+    moth_value r, values, message, line;
+    int64_t n;
+    int status = fine(&r, moth_number(4));
+    moth_record_values(&values, r);
+    moth_list_item(&message, values, 0);
+    moth_list_item(&line, values, 1);
+    const char *said = moth_text_utf8(message, &n);
+    printf("%d %.*s, on line %g\n", status, (int)n, said, moth_number_of(line));
+    moth_free(r); moth_free(values); moth_free(message);
+  }
+  return 0;
+}
+`);
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["1 there is no item 5, the list only has 3 items, on line 6\n".repeat(2), "", 0]);
+});
+
+test("what a library can't do is a mistake when it's built", { skip }, () => {
+  const refused = (source) => {
+    try {
+      machine(source, { target, name: "work.moth", library: true });
+    } catch (err) {
+      return `${err.line}:${err.col}: ${err.reason}`;
+    }
+    return "built";
+  };
+  assert.equal(refused("to f with x\n    stop the program with 3\nend\n"), "2:5: a library can't stop the program it's in: give back what it gives, or fail with a mistake");
+  assert.equal(refused("to f\n    return 1\nend\nset job to start f()\n"), "4:12: a library can't start tasks yet: one call runs Moth at a time, and a task would outlive it");
+  assert.equal(refused("to f\n    return 1\nend\nset w to start f() on another core\n"), "4:10: a library can't start workers yet");
+  assert.equal(refused("move forward 10\n"), "1:1: a library can't draw, or show a window");
+  assert.equal(refused("to moth_thing\n    return 1\nend\n"), "1:1: a library's own functions are called moth_..., so one of the program's can't be called 'moth_thing'");
+  assert.equal(refused("to fine\n    return 1\nend\n"), "built");
+});
+
+// A Windows DLL, read as Windows reads it: what it exports, in the order GetProcAddress looks by, each in its
+// code; every 8-byte address it has, listed to be moved, and each pointing inside it; and what it imports
+test("a library for Windows is a DLL that exports the program's functions and can be loaded anywhere", { skip }, () => {
+  const dll = Buffer.from(machine(LIBRARY_PROGRAM, { target: "windows", name: "work.moth", library: true }));
+  const pe = dll.readUInt32LE(0x3c);
+  assert.equal(dll.toString("latin1", pe, pe + 4), "PE\0\0");
+  const sectionCount = dll.readUInt16LE(pe + 6);
+  const optional = pe + 24;
+  assert.equal(dll.readUInt16LE(pe + 22), 0x2022); // a DLL, for addresses past 2 GB
+  assert.equal(dll.readUInt32LE(optional + 16), 0); // nothing runs as it loads
+  const base = Number(dll.readBigUInt64LE(optional + 24));
+  const imageSize = dll.readUInt32LE(optional + 56);
+  assert.equal(dll.readUInt16LE(optional + 70), 0x160); // NX, and moved wherever Windows likes
+  const directory = (n) => [dll.readUInt32LE(optional + 112 + 8 * n), dll.readUInt32LE(optional + 116 + 8 * n)];
+  const sections = [];
+  for (let i = 0; i < sectionCount; i++) {
+    const at = optional + 240 + 40 * i;
+    sections.push({ name: dll.toString("latin1", at, at + 8).replace(/\0+$/, ""), size: dll.readUInt32LE(at + 8), rva: dll.readUInt32LE(at + 12), raw: dll.readUInt32LE(at + 20) });
+  }
+  assert.deepEqual(sections.map((s) => s.name), [".text", ".rdata", ".data", ".reloc"]);
+  const offset = (rva) => {
+    const s = sections.find((s) => rva >= s.rva && rva < s.rva + Math.max(s.size, 1));
+    return s.raw + rva - s.rva;
+  };
+  const cText = (rva) => dll.toString("latin1", offset(rva), dll.indexOf(0, offset(rva)));
+  const [exportsAt] = directory(0);
+  const e = offset(exportsAt);
+  assert.equal(cText(dll.readUInt32LE(e + 12)), "work.dll");
+  const count = dll.readUInt32LE(e + 24);
+  const [functions, names, ordinals] = [dll.readUInt32LE(e + 28), dll.readUInt32LE(e + 32), dll.readUInt32LE(e + 36)];
+  const exported = [];
+  for (let i = 0; i < count; i++) {
+    exported.push(cText(dll.readUInt32LE(offset(names) + 4 * i)));
+    const code = dll.readUInt32LE(offset(functions) + 4 * dll.readUInt16LE(offset(ordinals) + 2 * i));
+    assert.ok(code >= sections[0].rva && code < sections[0].rva + sections[0].size);
+  }
+  assert.deepEqual(exported, [...exported].sort());
+  for (const name of ["fib", "greet", "echo", "depth", "moth_text", "moth_free", "moth_number", "moth_kind", "moth_list_numbers", "moth_exports", "moth_call"]) {
+    assert.ok(exported.includes(name), name);
+  }
+  const [relocsAt, relocsSize] = directory(5);
+  let moved = 0;
+  for (let at = offset(relocsAt); at < offset(relocsAt) + relocsSize;) {
+    const page = dll.readUInt32LE(at);
+    const size = dll.readUInt32LE(at + 4);
+    for (let k = 8; k < size; k += 2) {
+      const entry = dll.readUInt16LE(at + k);
+      if (entry >> 12 === 0) continue;
+      assert.equal(entry >> 12, 10); // IMAGE_REL_BASED_DIR64
+      const address = Number(dll.readBigUInt64LE(offset(page + (entry & 0xfff))));
+      assert.ok(address >= base && address < base + imageSize);
+      moved++;
+    }
+    at += size;
+  }
+  assert.ok(moved > 100);
+  const imported = [];
+  for (let at = offset(directory(1)[0]); dll.readUInt32LE(at + 12); at += 20) {
+    for (let lookup = offset(dll.readUInt32LE(at)); dll.readBigUInt64LE(lookup); lookup += 8) imported.push(cText(Number(dll.readBigUInt64LE(lookup)) + 2));
+  }
+  for (const name of ["AcquireSRWLockExclusive", "ReleaseSRWLockExclusive", "VirtualAlloc", "GetStdHandle"]) assert.ok(imported.includes(name), name);
+});
+
+test("moth build --library writes a library and its header, beside the file", { skip: skip || (!LIBRARY_CC && "no C compiler") }, () => {
+  const { exe } = mothExe();
+  const dir = mkdtempSync(join(tmpdir(), "moth-build-library-"));
+  try {
+    writeFileSync(join(dir, "fast.moth"), "to plus with a, b\n    return a + b\nend\n");
+    const built = spawnSync(exe, ["build", "fast.moth", "--library"], { cwd: dir, encoding: "utf8" });
+    const library = target === "windows" ? "fast.dll" : "libfast.so";
+    assert.equal(built.stderr, "");
+    assert.match(built.stdout, new RegExp(`^compiled fast\\.moth to a library for ${target === "windows" ? "Windows" : "Linux"} -> ${library.replace(".", "\\.")} \\([0-9,]+ bytes\\), declared for C in fast\\.h\\n$`));
+    assert.match(readFileSync(join(dir, "fast.h"), "utf8"), /\nint plus\(moth_value \*result, moth_value a, moth_value b\);\n/);
+    writeFileSync(join(dir, "main.c"), `#include <stdio.h>\n#include "fast.h"\nint main(void) {\n  moth_value r;\n  int s = plus(&r, moth_number(2), moth_number(40));\n  printf("%d %g\\n", s, moth_number_of(r));\n  return 0;\n}\n`);
+    const linking = target === "windows" ? [join(dir, library)] : [`-L${dir}`, "-lfast", "-Wl,-rpath,$ORIGIN"];
+    const made = spawnSync(LIBRARY_CC, ["-o", executable(dir, "main"), join(dir, "main.c"), ...linking], { encoding: "utf8" });
+    assert.equal(made.status, 0, made.stderr);
+    const ran = spawnSync(executable(dir, "main"), [], { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([ran.stdout.replace("\r\n", "\n"), ran.status], ["0 42\n", 0]);
+    mkdirSync(join(dir, "out"));
+    const into = spawnSync(exe, ["build", "fast.moth", "--library", "--into", "out", "--target", "windows"], { cwd: dir, encoding: "utf8" });
+    assert.equal(into.status, 0, into.stderr);
+    assert.deepEqual(readdirSync(join(dir, "out")).sort(), ["fast.dll", "fast.h"]);
+    for (const flags of [["--library", "--installer"], ["--into", "out"], ["--library", "--into"]]) {
+      const wrong = spawnSync(exe, ["build", "fast.moth", ...flags], { cwd: dir, encoding: "utf8" });
+      assert.equal(wrong.status, 2, flags.join(" "));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
