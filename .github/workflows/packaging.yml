@@ -227,6 +227,6 @@ jobs:
           Set-Content hello.moth 'say "Hello from " "winget"'
           $said = & "$env:LOCALAPPDATA\Microsoft\WinGet\Links\moth.exe" run hello.moth
           if ($said -ne 'Hello from winget') { throw "moth said $said" }
-          winget uninstall --id samyyy2423.Moth --disable-interactivity --accept-source-agreements
+          winget uninstall --manifest $manifest.FullName --disable-interactivity --accept-source-agreements
           if ($LASTEXITCODE) { throw 'winget uninstall failed' }
           if (Test-Path "$env:LOCALAPPDATA\Microsoft\WinGet\Links\moth.exe") { throw 'winget uninstall left moth behind' }
