@@ -13,7 +13,7 @@ const here = (file) => new URL(file, import.meta.url);
 const repo = (file) => new URL(`../../${file}`, import.meta.url);
 const manifest = JSON.parse(readFileSync(here("package.json"), "utf8"));
 export const ENGINE = ["moth.js", "vm.js", "scope.js", "jit.js", "wasm.js", "wasm-binary.js", "checker.js", "pictures.js"];
-const OWN = ["package.json", "extension.js", "language-configuration.json", "syntaxes/moth.tmLanguage.json", "snippets/moth.json", "README.md"];
+const OWN = ["package.json", "extension.js", "client.js", "debug-adapter.js", "language-configuration.json", "syntaxes/moth.tmLanguage.json", "snippets/moth.json", "README.md"];
 
 // every file in the package, by its name there
 export function contents() {

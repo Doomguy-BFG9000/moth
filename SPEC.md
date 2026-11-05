@@ -97,12 +97,13 @@ item move turn pen record fail stop uppercase lowercase split join number positi
 dictionary remove keys in byte bytes as shift read write arguments expect clear draw when every
 ```
 
-Other words are words of the language only in their phrases, and names anywhere else: `run` in `run
-program`, `load` before a value, `save ... to`, `send ... to`, `json from`, `play note`, `play a beep`,
-`wait` before an amount of time, `wait for`, `start` before a call, `random number from`, `function with`,
-`remainder of`, `items ... to ... of`, `match` before a line starting with `when`, `kind` before a name,
-`the time` and the other times (section 8.11), `rounded`, `with ... decimals`, `without repeats`, `to the
-power of`, `has ended`, `in order`, `bit and`, and `total`, `average`, `largest` and `smallest` before `of`.
+Other words are words of the language only in their phrases, and names anywhere else: `run` in `run program`,
+`load` before a value, `save ... to`, `send ... to`, `json from`, `play note`, `play a beep`, `wait` before an
+amount of time, `wait for`, `start` before a call, `random number from`, `function with`, `remainder of`,
+`items ... to ... of`, `match` before a line starting with `when`, `kind` before a name, `gives` after a
+function's inputs, `the time` and the other times (section 8.11), `rounded`, `with ... decimals`, `without
+repeats`, `to the power of`, `has ended`, `in order`, `bit and`, and `total`, `average`, `largest` and
+`smallest` before `of`.
 A field called `total` can't be read with `of`, since `total of` means a total; `x's total` reads it.
 
 ### 1.4 Numbers written out
@@ -467,11 +468,19 @@ once, with 0, or the number after `with`, a whole number from 0 to 255. Nothing 
 ### 6.8 Functions: to and return
 
 ```text
-to     = "to" name [ "with" input { ("," | "and") input } ] NL block "end"
-input  = name [ "as" kind ] [ "or" default ]
+to     = "to" name [ "with" input { ("," | "and") input } ] [ "gives" gives ] NL block "end"
+input  = name [ "as" type ] [ "or" default ]
+type   = kind | ("a" | "an") name | "a list of" holds
 kind   = "a number" | "text" | "yes or no" | "a list" | "a record" | "a dictionary" | "bytes" | "a function"
+holds  = "numbers" | "text" | "yes or no" | "lists of" holds | "records" | "dictionaries" | "bytes"
+       | "functions" | name
+gives  = "nothing" | type [ "or nothing" ]
 return = "return" [ expression ]
 ```
+
+In `("a" | "an") name`, the name is a kind's (section 7.4), as `a dog`; in `holds`, it's what a kind makes,
+more than one, as `dogs`, `boxes` or `puppies`. `gives` is a word only here, after a function's inputs: it
+stays a name everywhere else.
 
 Section 7 has what they mean. `return` outside a function is a mistake.
 
@@ -620,6 +629,12 @@ A call must give a function as many inputs as it has, counting the ones it can l
 - **What an input is.** `with width as a number` checks every call: `'area' needs width to be a number, not
   text`. The kinds are those of section 6.8's `kind`; `yes or no` is yes or no only, and `a number` is a
   number, not an amount.
+- **What an input says beyond its kind.** `with pet as a dog` is checked at each call as `a record`, and
+  `with xs as a list of numbers` as `a list`; that the record is one the kind dog made, or that every item is
+  a number, isn't checked when the program runs. A function's `gives` (`gives a number`, `gives nothing`,
+  `gives a dog or nothing`) isn't checked when it runs either. They say what the code means, for people and for
+  the checker (`moth check`, the playground's Problems and the editors), which says where the code goes
+  against them before it runs. A program means the same with them or without them.
 - **Inputs left out.** `with name, greeting or "Hello"`: after `or`, a value written out (a number, text,
   yes, no, nothing, or a list of them), which each call that leaves the input out gets afresh. Every input
   after one with `or` needs one too.
@@ -749,6 +764,10 @@ or a copy of bytes. `byte n of b` is `item n of b`. `set byte n of b to v` needs
 ### 8.6 Asking
 
 `ask q` shows q and gives the line typed in answer, as text. If the input has ended, it's a mistake.
+`ask for n bytes` gives the input's next n bytes, as bytes: it waits for them, but not for a line's end, and
+gives fewer if the input ends first, and none once it has ended. Both read the same input, so a line `ask`
+reads is gone for `ask for`, and the other way round. n is a whole number from 0, as `n bytes` takes. Only a
+program moth builds reads its input so; on the playground's engines it's a mistake.
 `choose a file to open` (or `to save`) gives the file chosen, or nothing.
 
 ### 8.7 Files, folders, sites and programs

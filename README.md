@@ -569,6 +569,9 @@ say "area: " area(3, 4)             # use it inside a value with brackets
 to circle_area with r as a number   # an input can say what it is: each call checks
     return 3.14159 * r * r
 end
+to oldest with pets as a list of dogs gives a dog   # and say more, which moth check holds the code to
+    return item 1 of pets
+end
 
 to greet with person
     say "Hello, " person
@@ -704,6 +707,7 @@ set block to 4 bytes                        # memory: bytes from 0 to 255
 set byte 1 of block to 0xFF                 # numbers in hex and binary: 0xFF, 0b1010
 say block                                   # (4 bytes: 255, 0, 0, 0)
 say "hi" as bytes                           # (2 bytes: 104, 105); back again with: as text
+set header to ask for 64 bytes              # the input's next 64 bytes, not a line (fewer at its end; built programs only)
 say 12 bit and 10 " " shift 1 left by 4     # 8 16; also bit or, bit xor, shift right
 say 255 as hex " " 5 as binary              # ff 101
 
@@ -847,7 +851,14 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   bracket it: `(total of trips) in miles`.
 - **Inputs** can say what they are: `with name as text, age as a number` (also
   `yes or no`, `a list`, `a record`, `a dictionary`, `bytes`, `a function`), and
-  each call checks them.
+  each call checks them. They can say more: `a dog`, a record the kind dog
+  makes, and `a list of numbers` (or of `text`, `dogs`, `lists of numbers`...);
+  and a function can say what it `gives`: `gives a number`, `gives nothing`,
+  `gives a dog or nothing`. A run checks what it cheaply can (`a dog` is a
+  record, `a list of numbers` a list), and `moth check`, the playground and the
+  editors check the rest before the program runs: `doesn't fit: 'greet' needs
+  pet to be a dog, not a cat`. Code that says nothing is checked as it always
+  was.
 - **Libraries:** `use the library "sqlite3"` (or `"winsqlite3" or "sqlite3"`,
   for the first there is, and `as` a name), then a line for each function the
   program calls, with what it takes and `gives`, as C has it: `a number` is a
@@ -882,7 +893,7 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   program's variables, changes them only for itself, and `wait for` gives a
   copy of what it gave back, or fails with the mistake it ended with. Sharing
   nothing, workers can't race, and in a program `moth build` makes they run
-  Moth at the same moment, on as many cores as there are (DESIGN §108). In
+  Moth at the same moment, on as many cores as there are (DESIGN §111). In
   the playground a worker runs when it's started, as a task does.
 - **A record's own functions:** `rex's speak()`, where the program makes
   nothing else called `speak`, calls the function rex's `speak` field holds,
@@ -994,7 +1005,8 @@ moth remove json                         take a package away; moth packages list
 moth get --signed                        only packages signed by a key git trusts (also moth add and moth update)
 moth audit                               check the packages against the advisories in the package index
 moth tidy hello.moth                     write it the one way Moth writes code (--check only says which need it)
-moth check hello.moth                    find problems in it without running it
+moth check hello.moth                    find problems in it without running it, the types it says included
+moth lsp                                 the language server an editor starts: problems as you type, tidying, hovers...
 moth test hello.test.moth                run every test_ function in it, each in a run of its own
 moth test                                the same for every .test.moth file here and in the folders inside
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
@@ -1200,13 +1212,37 @@ Until 1.5 Moth also had a command line written for Node.js, with a shell and
 builds to JavaScript and web pages. Those went with the Rust engine; the
 debugger and finding problems as you type are the playground's.
 
-## In VS Code
+## In your editor
+
+`moth lsp` is Moth's language server, for any editor that speaks the Language
+Server Protocol: problems as you type, as `moth check` finds them (the types
+included), formatting as `moth tidy` writes code, the outline (functions, kinds
+and variables), go to definition, in the file or one it `use`s, hovers (what a
+name is, what a variable holds, what a function takes and gives) and
+completion, after `rex's` too. It goes on knowing a file while a line of it is
+half typed, and counts the changes not yet saved in the files it uses. And
+[`editors/vscode/debug-adapter.js`](editors/vscode/debug-adapter.js) gives an
+editor's debugger `moth debug`: breakpoints, stepping, the calls in progress
+and the variables, in VS Code, Neovim, Helix and JetBrains' IDEs.
+
+| Editor | How |
+|:--|:--|
+| VS Code | [`editors/vscode`](editors/vscode), an extension, below |
+| Neovim | [`editors/neovim`](editors/neovim), a plugin folder |
+| Helix | [`editors/helix/languages.toml`](editors/helix/languages.toml) |
+| Zed | [`editors/zed`](editors/zed), an extension |
+| IntelliJ IDEA, PyCharm, WebStorm... | the LSP4IJ plugin, with the VS Code extension's colours |
+
+Zed, Helix and Neovim colour Moth with its tree-sitter grammar,
+[`editors/tree-sitter-moth`](editors/tree-sitter-moth). How to set up each, and
+any other editor: [editors/README.md](editors/README.md).
 
 [`editors/vscode`](editors/vscode) is an extension for VS Code: colours,
 problems as you type from Moth's own checker (with a Quick Fix for a misspelled
 name or a symbol from another language), Format Document as `moth tidy` writes
-code, the file's functions in the outline and Go to Definition, snippets, and
-Run, Debug and Build, which start `moth` on the file. Make it and install it:
+code, snippets, a debugger (through `moth debug`), and Run and Build, which
+start `moth` on the file; and, where moth is installed, the outline, Go to
+Definition, hovers and completion from `moth lsp`. Make it and install it:
 
 ```text
 node editors/vscode/make-vsix.mjs
@@ -1275,6 +1311,9 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
 | [`moth-debugger.moth`](moth-debugger.moth) | The debugger `moth debug` builds into the program it debugs, in Moth; moth.exe carries it |
 | [`editors/vscode/`](editors/vscode) | The VS Code extension, and `make-vsix.mjs`, which packs it with Moth's engine inside |
+| [`editors/tree-sitter-moth/`](editors/tree-sitter-moth) | Moth's tree-sitter grammar, which Zed, Helix and Neovim colour it with |
+| [`editors/`](editors) | Neovim's plugin folder, Helix's settings, Zed's extension, and how to set up each editor with `moth lsp` |
+| [`checker-rules.moth`](checker-rules.moth) | What each of the checker's rules does with each type, for `moth check`: made by `make-checker-rules.mjs` |
 | [`versus/`](versus) | The same four programs in Moth, C, Rust and Python, and `npm run versus`, which times them |
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
@@ -1395,9 +1434,27 @@ calls that led there.
 - the VS Code extension: its colours, run through a TextMate tokenizer of the
   tests' own, on the words the playground colours, values in text and every
   example; its indenting; its problems, fixes, tidying, outline, definitions
-  and commands, against a stand-in for VS Code's API; the .vsix, unzipped and
-  compared with the files here; VS Code installing it; and, with
+  and commands, against a stand-in for VS Code's API, and what it asks of
+  `moth lsp` and does without it, against a stand-in for that; the .vsix,
+  unzipped and compared with the files here; VS Code installing it; and, with
   MOTH_VSCODE=1, the extension in VS Code's own extension host
+- the debug adapter, spoken to as an editor speaks to it, on moth.exe's `moth
+  debug`: breakpoints in two files, the calls in progress, variables, hovers,
+  the debug console, stepping, the program's question answered, a mistake
+  stopped at, and a program stopped while it runs, left tidy
+- `moth lsp`, spoken to as an editor speaks to it, each message's framing
+  checked: the problems as a file opens and as it's typed, against the
+  checker's; the outline; definitions in the file and the files it uses; every
+  kind of hover; completion; an unsaved change to a file it uses; tidying,
+  against `format()`; messages in pieces and two at once; and the VS Code
+  extension's own client against it
+- the other editors: the tree-sitter grammar's words and the colours' copies
+  for Zed, Helix and Neovim against VS Code's, their indenting, and the commit
+  Zed and Helix build the grammar from
+- types: each kind of input type, `gives`, and every message, word for word;
+  and no false alarm in code that says nothing of them, the checker's claims
+  held against runs of the lessons, the programs made into machine code, and
+  every file of the standard library
 - tasks: what they say, fail with and give back, against the JavaScript engine,
   with names shared, thousands of them, tasks starting tasks past the threads
   there are, five threads making far more than they keep, and files read and
@@ -1595,11 +1652,11 @@ Moth keeps its promises in writing, for anyone who builds on it:
   from: name one there as `./tool.exe`. A `.bat` or `.cmd` file runs in
   cmd.exe, so it can't be given an argument holding `" % ^ & | < > !` or a line
   break, which cmd.exe would read as part of a command.
-- `moth check` leaves out the checker's "will fail" warnings that come from the
-  types it works out (`"a" - 1`, `item 4 of (list of 1, 2)`), since those need
-  every one of Moth's operations again in Moth. It finds a name nothing ever
-  sets, a line that can never run, and a name set or made and never used, in
-  the checker's own words. The playground's Problems pane finds all of them.
+- `moth check` works the types out as the checker does, and says what it says
+  word for word, but leaves out the warnings that rest on a value written out
+  (`1 / 0`, `item 0 of x`, `repeat "x" times`), which need the value, not its
+  type. The playground's Problems pane, and the VS Code extension, find those
+  too.
 - JavaScript stops code nested more deeply than its stack allows (about 900
   brackets, or a list held 2,000 deep) with a mistake.
 

@@ -27670,7 +27670,7 @@ end
 # what each guarded routine claims: the input, programs, or sites, which on Linux are read through curl, a
 # program like any other
 to guard_flag with name, windows
-    if name is "rt_read_line"
+    if name is "rt_read_line" or name is "rt_input_bytes"
         return "in_busy"
     end
     if name is "rt_run_program" or not windows
@@ -28885,7 +28885,7 @@ to emit_runtime with st
         end
     end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
-    if workers of a # a worker's slots, what one was given, and what each gave: all of them values (DESIGN §108)
+    if workers of a # a worker's slots, what one was given, and what each gave: all of them values (DESIGN §111)
         reserve(a, "wk_slots", wk_max * wk_size, 8)
         reserve(a, "wk_given", 64, 8)
         reserve(a, "wk_given_fn", 8, 8)
@@ -29090,7 +29090,7 @@ to table_of_texts with a, name, labels
 end
 
 # ---------- the runtime: workers ----------
-# `start f(x) on another core` (DESIGN §108) makes the call on a worker: a thread of the system's with memory
+# `start f(x) on another core` (DESIGN §111) makes the call on a worker: a thread of the system's with memory
 # of its own, which shares nothing with the program. A worker runs a copy of the program's whole image -- its
 # code, its read-only data, its variables and the runtime's own memory -- taken as the worker starts. Every
 # address inside the image is written as a distance from the instruction using it, so the copy's code reads
@@ -30918,6 +30918,67 @@ to emit_input with a, target
         movi(a, rax, 0)
         ret(a)
     end
+
+    # rt_input_bytes: `ask for 64 bytes` (DESIGN §108): xmm0 how many, as `64 bytes` takes it; what's been said
+    # shown first, then as many bytes of the input as come before it ends, up to that many, without waiting for a
+    # line's end: bytes in xmm0 with rax 0; or rax 2 (rt_bytes_of's err_why). Keeps rbx and r12 to r15.
+    set ib_made to new_label(a)
+    set ib_loop to new_label(a)
+    set ib_have to new_label(a)
+    set ib_fewer to new_label(a)
+    set ib_done to new_label(a)
+    mark(a, guarded(a, "rt_input_bytes"))
+    call_to(a, "rt_bytes_of")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, ib_made)
+    ret(a)
+    mark(a, ib_made)
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    movq_rx(a, rbx, xmm0)
+    call_to(a, "rt_flush_out")
+    call_to(a, "rt_in_setup")
+    mov_rr(a, r13, rbx)
+    untag(a, r13) # the bytes: how many at 0, where they are at 8
+    movi(a, r12, 0) # how many have come
+    mark(a, ib_loop)
+    alu_load(a, "cmp", r12, mem(r13, 0))
+    jcc(a, cc_ae, ib_done)
+    load(a, rcx, rip("in_at"))
+    alu_load(a, "cmp", rcx, rip("in_end"))
+    jcc(a, cc_b, ib_have)
+    call_to(a, "rt_in_fill")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, ib_done) # the input has ended
+    jmp_to(a, ib_loop)
+    mark(a, ib_have) # what's waiting in in_buf, or what's still wanted if that's fewer
+    load(a, rax, rip("in_end"))
+    alu(a, "sub", rax, rcx)
+    load(a, rdx, mem(r13, 0))
+    alu(a, "sub", rdx, r12)
+    alu(a, "cmp", rax, rdx)
+    jcc(a, cc_be, ib_fewer)
+    mov_rr(a, rax, rdx)
+    mark(a, ib_fewer)
+    lea(a, rsi, rip("in_buf"))
+    alu(a, "add", rsi, rcx)
+    load(a, rdi, mem(r13, 8))
+    alu(a, "add", rdi, r12)
+    alu(a, "add", r12, rax)
+    alu(a, "add", rcx, rax)
+    store(a, rip("in_at"), rcx)
+    mov_rr(a, rcx, rax)
+    rep_movsb(a)
+    jmp_to(a, ib_loop)
+    mark(a, ib_done)
+    store(a, mem(r13, 0), r12) # as many as came
+    movq_xr(a, xmm0, rbx)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    movi(a, rax, 0)
+    ret(a)
 
     # rt_read_line: the next line of the input, without the "\n" or "\r\n" that ends it, as text in rax; rax 0
     # at the end of the input. What isn't UTF-8 in it becomes U+FFFD. Uses the builder; keeps rbx and r12 to r15.
@@ -39535,6 +39596,11 @@ to read_undefined with scope, wanted, call, statement
     return front's undefined_message(scope, wanted, call, statement)
 end
 
+# the name a misspelled one most likely meant, of those given, or nothing if none is close
+to read_closest with wanted, candidates
+    return front's closest(wanted, candidates)
+end
+
 to compile_machine with source, file_names, file_texts, target, program_name
     return compile_allowing(source, file_names, file_texts, target, program_name, empty list)
 end
@@ -42769,7 +42835,7 @@ set builtin_routines to dictionary where "position" is "rt_position", "split" is
     "uppercase" is "rt_upper", "lowercase" is "rt_lower", "text in box" is "rt_box_text", "ticked" is "rt_ticked",
     "choice in list" is "rt_choice", "slider value" is "rt_slider_value", "chosen file" is "rt_chosen_file",
     "power" is "rt_power", "rounded down" is "rt_round_down", "rounded up" is "rt_round_up", "rounded" is "rt_round_near",
-    "remainder" is "rt_remainder"
+    "remainder" is "rt_remainder", "input bytes" is "rt_input_bytes"
 
 # Each also gives what kind of value it is when it works: "whole", "number" or "value" (see the facts,
 # above). What a function call does to what's known happens here as well, in the order the code runs.
@@ -44183,7 +44249,7 @@ to gen_wk_cant_copy with fc, at
     jmp_to(a, "rt_e_end")
 end
 
-# `start f(x) on another core`: the call made on a worker, which has memory of its own (DESIGN §108); gives
+# `start f(x) on another core`: the call made on a worker, which has memory of its own (DESIGN §111); gives
 # the worker: a record of its number.
 to gen_worker_start with fc, e
     set a to a of fc
@@ -44396,7 +44462,7 @@ to place_absolutes with a, bases, image_base
     end
 end
 
-# For a program with workers (DESIGN §108): where each 8-byte address absolute() asked for is, as a distance
+# For a program with workers (DESIGN §111): where each 8-byte address absolute() asked for is, as a distance
 # from where the image starts, so a worker's copy of the image can have each say where its place is in the
 # copy (see rt_wk_image). Made when the read-only data is otherwise done, as every such address has been
 # asked for by then; filled in by wk_fixes_place once each has its place.

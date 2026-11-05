@@ -30,6 +30,24 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   settings, so a package's files, and their sum, are the same on Windows and Linux.
 - **Documents for depending on Moth:** a language specification ([SPEC.md](SPEC.md)), a stability promise
   ([VERSIONING.md](VERSIONING.md)), a security policy ([SECURITY.md](SECURITY.md)) and this changelog.
+- **Types you can add.** An input can be `a dog` (a record the kind dog makes) or `a list of numbers` (or of
+  `text`, `dogs`, `lists of numbers`...), and a function can say what it `gives`. A run checks what it
+  always could; `moth check`, the playground and the editors check the rest before the program runs, as
+  "doesn't fit", in red. They also know what a function returns, so `f() + 1`, where f gives nothing, will
+  fail. Code that says nothing is checked as it was, and `gives` stays a name.
+- **`moth check` works the types out**, as the playground's checker does, and says what it says word for
+  word, but for what rests on a value written out (`1 / 0`).
+- **`moth lsp`, a language server**, for any editor: problems as you type, formatting as `moth tidy` writes,
+  the outline, go to definition in the file or a file it uses, hovers that say what a variable holds and
+  what a function takes and gives, and completion, after `rex's` too.
+- **Every major editor.** The VS Code extension asks `moth lsp` for the outline, definitions, hovers and
+  completion where moth is installed. New: a plugin folder for Neovim, settings for Helix, an extension for
+  Zed, a tree-sitter grammar for their colours, and how to use JetBrains' IDEs through LSP4IJ
+  ([editors/README.md](editors/README.md)).
+- **`ask for 64 bytes`** gives the input's next 64 bytes without waiting for a line's end, in programs moth
+  builds.
+- **A debugger in your editor.** A debug adapter for `moth debug` gives VS Code (*Moth: Debug this file*, or
+  F5), Neovim, Helix and JetBrains' IDEs breakpoints, stepping, the calls in progress and the variables.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 
