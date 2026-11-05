@@ -26,6 +26,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   in it runs twice as fast, and `moth build` 5% faster.
 - **Fixed:** in a program `moth build` makes, `shift x left by n` of a number whole only to 15 digits (as
   `0.1 * 3 * 10` is) now shifts the number as it is, as the engines do, so it gives what they give.
+- **`moth --version` and `moth version`** say which Moth this is: one line with the release version,
+  taken from `package.json` and built into the standalone program.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
