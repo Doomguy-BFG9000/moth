@@ -27,6 +27,8 @@ try {
     "calls.moth": 'use "lib.moth"\nto outer\n    to inner\n        say 1\n    end\n    inner()\nend\nouter()\nsay twice(3)\n',
     "lib.moth": "# twice: n doubled\nto twice with n\n    return n * 2\nend\n",
     "hello.moth": 'set name to "Moth"\nsay "Hi {name}!"\nset n to 2\nsay n * 21\n',
+    "ask.moth": 'set name to ask "Who are you?"\nif name is "Sam"\n    say "Hi Sam!"\nelse\n    fail with "that was {name}"\nend\n',
+    ".vscode/tasks.json": JSON.stringify({ version: "2.0.0", tasks: [{ type: "moth", command: "run", file: "hello.moth", label: "say hello" }] }),
   });
   const moth = copyMoth(top);
   if (!moth) console.log("There's no moth here, so only the tests that need no moth run: make one with node bootstrap.mjs, or say where one is with MOTH.");

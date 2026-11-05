@@ -195,7 +195,7 @@ function makeDocument(fsPath, text, languageId = "moth") {
 // the stand-in, with moth.path and moth.languageServer as `settings` says; a warning's buttons go in
 // seen.buttons, and it's answered with seen.answer
 function standIn(settings = { path: fakeMoth, languageServer: false }) {
-  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [], buttons: [], answer: undefined, opened: [], output: [], triggers: {}, debugging: [], debug: {} };
+  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, tasks: [], messages: [], buttons: [], answer: undefined, opened: [], output: [], triggers: {}, debugging: [], debug: {} };
   const on = (kind) => (f) => ((seen.listeners[kind] = f), { dispose() {} });
   const provider = (kind) => (selector, p, ...triggers) => ((seen.providers[kind] = p), (seen.triggers[kind] = triggers), { dispose() {} });
   const vscode = {
@@ -209,11 +209,20 @@ function standIn(settings = { path: fakeMoth, languageServer: false }) {
     Hover: class { constructor(contents, range) { Object.assign(this, { contents, range }); } },
     MarkdownString: class { constructor(value) { this.value = value; } },
     CompletionItem: class { constructor(label, kind) { Object.assign(this, { label, kind }); } },
-    Uri: { parse: (text) => ({ scheme: text.split(":")[0], toString: () => text }) },
+    Uri: { parse: (text) => ({ scheme: text.split(":")[0], toString: () => text }), file: (fsPath) => ({ scheme: "file", fsPath, toString: () => `file://${fsPath}` }) },
     env: { openExternal: async (uri) => (seen.opened.push(uri.toString()), true) },
     TextEdit: { replace: (range, newText) => ({ range, newText }) },
     CodeAction: class { constructor(title, kind) { Object.assign(this, { title, kind }); } },
     CodeActionKind: { QuickFix: "quickfix" },
+    Task: class { constructor(definition, scope, name, source, execution, matchers) { Object.assign(this, { definition, scope, name, source, execution, matchers }); } },
+    ProcessExecution: class { constructor(process, args, options) { Object.assign(this, { process, args, options }); } },
+    TaskScope: { Workspace: 2 },
+    TaskRevealKind: { Always: 1 },
+    TaskPanelKind: { Dedicated: 2 },
+    tasks: {
+      executeTask: async (task) => (seen.tasks.push(task), {}),
+      registerTaskProvider: (type, provider) => ((seen.taskProvider = [type, provider]), { dispose() {} }),
+    },
     WorkspaceEdit: class { constructor() { this.edits = []; } replace(uri, range, text) { this.edits.push({ uri, range, text }); } },
     languages: {
       createDiagnosticCollection: () => ({ set: (uri, d) => seen.diagnostics.set(uri.toString(), d), delete: (uri) => seen.diagnostics.delete(uri.toString()), dispose() {} }),
@@ -230,12 +239,13 @@ function standIn(settings = { path: fakeMoth, languageServer: false }) {
       onDidChangeTextDocument: on("change"),
       onDidCloseTextDocument: on("close"),
       onDidChangeConfiguration: on("configuration"),
+      getWorkspaceFolder: () => undefined,
+      workspaceFolders: undefined,
       getConfiguration: () => ({ get: (key) => settings[key] }),
       isTrusted: true,
     },
     window: {
       activeTextEditor: null,
-      createTerminal: (options) => (seen.terminals.push(options), { show() {} }),
       createOutputChannel: () => ({ appendLine: (line) => seen.output.push(line), dispose() {} }),
       showInformationMessage: (m) => seen.messages.push(m),
       showWarningMessage: async (m, ...buttons) => (seen.messages.push(m), seen.buttons.push(buttons), seen.answer),
@@ -339,11 +349,20 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     assert.equal(await seen.providers.hover.provideHover(document, new Position(11, 10)), null); // hovers need the server
     assert.equal(await seen.providers.completion.provideCompletionItems(document, new Position(11, 10)), undefined);
 
-    // Run and Debug: moth, started on the file, from its folder
+    // Run: a task, moth started on the file, from its folder, its output kept in a terminal of the task's
     vscode.window.activeTextEditor = { document };
     await seen.commands["moth.run"]();
     await seen.commands["moth.debug"]();
-    assert.deepEqual(seen.terminals.map((t) => [t.shellPath, t.shellArgs, t.cwd]), [[fakeMoth, ["run", "main.moth"], folder]]);
+    assert.deepEqual(seen.tasks.map((t) => [t.name, t.source, t.definition, t.execution.process, t.execution.args, t.execution.options.cwd]),
+      [["run main.moth", "moth", { type: "moth", command: "run", file: join(folder, "main.moth") }, fakeMoth, ["run", "main.moth"], folder]]);
+    assert.deepEqual(seen.tasks[0].presentationOptions, { reveal: 1, focus: true, panel: 2, clear: true });
+    // and a moth task in tasks.json is made the same, from the workspace's folder
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: folder } }];
+    const [taskType, taskProvider] = seen.taskProvider;
+    const resolved = taskProvider.resolveTask({ definition: { type: "moth", command: "build", file: "main.moth" }, scope: 2, name: "build it" });
+    assert.deepEqual([taskType, resolved.name, resolved.execution.process, resolved.execution.args, resolved.execution.options.cwd], ["moth", "build it", fakeMoth, ["build", "main.moth"], folder]);
+    assert.equal(taskProvider.resolveTask({ definition: { type: "moth", command: "delete", file: "main.moth" }, scope: 2, name: "no" }), undefined);
+    vscode.workspace.workspaceFolders = undefined;
     // Debug: a debugging session on the file, its moth.path filled in, with the debug adapter inside the extension
     assert.deepEqual(seen.debugging, [{ type: "moth", request: "launch", name: "Debug main.moth", program: join(folder, "main.moth") }]);
     const [type, provider] = seen.debug.provider;
@@ -512,7 +531,7 @@ test("where there's no moth, the extension says so once, with a button to the re
     const [, provider] = seen.debug.provider;
     assert.equal(provider.resolveDebugConfiguration(undefined, {}), undefined);
     await new Promise((r) => setImmediate(r));
-    assert.deepEqual(seen.terminals, []);
+    assert.deepEqual(seen.tasks, []);
     assert.equal(seen.messages.length, 4);
     assert.deepEqual(seen.buttons.slice(1), [["Get Moth"], ["Get Moth"], ["Get Moth"]]);
     assert.equal(seen.opened.length, 4);

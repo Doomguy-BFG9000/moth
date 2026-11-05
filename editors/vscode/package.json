@@ -132,6 +132,29 @@
         }
       ]
     },
+    "taskDefinitions": [
+      {
+        "type": "moth",
+        "required": [
+          "command",
+          "file"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "run",
+              "build"
+            ],
+            "description": "moth run or moth build."
+          },
+          "file": {
+            "type": "string",
+            "description": "The Moth file, from the workspace's folder."
+          }
+        }
+      }
+    ],
     "configuration": {
       "title": "Moth",
       "properties": {

@@ -23,8 +23,7 @@ try {
   const vscodeExecutablePath = await downloadVSCode();
   const look = {
     "workbench.colorTheme": "Default Dark Modern",
-    "window.titleBarStyle": "native",
-    "window.menuBarVisibility": "hidden",
+    "window.commandCenter": false,
     "workbench.layoutControl.enabled": false,
     "workbench.secondarySideBar.defaultVisibility": "hidden",
     "chat.disableAIFeatures": true,
