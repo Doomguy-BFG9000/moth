@@ -1,5 +1,5 @@
 """A Moth library loaded with ctypes: its functions, called straight through the C ABI, and values converted
-both ways through its value API (see DESIGN §127 and §128 in Moth's repository)."""
+both ways through its value API (see DESIGN §128 and §129 in Moth's repository)."""
 
 from __future__ import annotations
 
