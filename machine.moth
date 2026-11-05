@@ -40126,9 +40126,10 @@ to c_input_place with windows, k
 end
 
 # What C calls: `count` 8-byte inputs, after a pointer for what it gives if `with_result`, in the system's
-# convention, put one after the other in this frame (the pointer first, or 0 for none), where rbx points;
-# then rt_lib_call makes `routine` do the work. What C keeps, kept.
-to library_stub with a, windows, label, routine, count, with_result
+# convention, put one after the other in this frame (the pointer first, or 0 for none), where rbx points,
+# with whether it's one of the program's functions just before them; then rt_lib_call makes `routine` do the
+# work. What C keeps, kept.
+to library_stub with a, windows, label, routine, count, with_result, program
     mark(a, label)
     push_r(a, rbp)
     mov_rr(a, rbp, rsp)
@@ -40143,7 +40144,12 @@ to library_stub with a, windows, label, routine, count, with_result
         end
         set kept to kept + 160
     end
-    alui(a, "sub", rsp, align_up(8 * (count + 1), 16))
+    alui(a, "sub", rsp, align_up(8 * (count + 1), 16) + 16)
+    storei(a, mem(rsp, 8), 0)
+    if program
+        storei(a, mem(rsp, 8), 1)
+    end
+    alui(a, "add", rsp, 16)
     set given to count
     set first_slot to 1
     if with_result
@@ -40163,6 +40169,7 @@ to library_stub with a, windows, label, routine, count, with_result
         end
     end
     mov_rr(a, rbx, rsp)
+    alui(a, "sub", rsp, 16)
     lea(a, r12, rip(routine))
     call_to(a, "rt_lib_call")
     if windows
@@ -40181,7 +40188,7 @@ end
 # a function of the library's own that C calls with what it gives in *result, as the program's are
 to library_api with a, windows, symbol, routine, count, with_result
     set label to "lxs_" + symbol
-    library_stub(a, windows, label, routine, count, with_result)
+    library_stub(a, windows, label, routine, count, with_result, no)
     set exported to exports of shipping of a
     add (list of symbol, label) to exported
 end
@@ -40275,7 +40282,7 @@ to gen_library with st, body
             lib_fail(a, "'" + name of ex + "' isn't a function any more")
         end
         set label to "lx_" + k
-        library_stub(a, windows, label, routine, n, yes)
+        library_stub(a, windows, label, routine, n, yes, yes)
         set exported to exports of shipping of a
         add (list of name of ex, label) to exported
         set described to described + name of ex
@@ -40376,8 +40383,11 @@ to emit_library_runtime with a, st
         lea(a, rcx, rip("lib_lock"))
         call_import(a, "imp_ReleaseSRWLockExclusive")
         win_leave(a)
-    else
+    else # the next ticket served, and the threads waiting woken, if any took one
         lock_inc(a, "lib_serving")
+        load(a, rax, rip("lib_next"))
+        alu_load(a, "cmp", rax, rip("lib_serving"))
+        jcc(a, cc_e, still_held)
         lea(a, rdi, rip("lib_serving"))
         movi(a, rsi, 129) # FUTEX_WAKE_PRIVATE: every waiting thread, each looking whose ticket it is
         movi(a, rdx, 2147483647)
@@ -40462,7 +40472,10 @@ to emit_library_runtime with a, st
     load(a, rax, rip("lib_state"))
     alui(a, "cmp", rax, 2)
     jcc(a, cc_ne, ready)
-    mark(a, init_failed)
+    mark(a, init_failed) # what the top level failed with, for each of the program's functions; the value API's go on
+    load(a, rcx, mem(rbx, -8))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, ready)
     load(a, rax, rip("lib_init_failure"))
     jmp_to(a, failed_with)
     mark(a, ready) # inside a try: [r15, rbp, where it goes, the try further out]
