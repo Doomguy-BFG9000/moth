@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "moth",
+      "camelcase": "Moth",
+      "scope": "source.moth",
+      "path": ".",
+      "file-types": ["moth"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "1.11.0",
+    "license": "Apache-2.0",
+    "description": "Moth, the language that reads like plain English, for tree-sitter",
+    "links": {
+      "repository": "https://github.com/samyyy2423/moth"
+    }
+  }
+}
