@@ -1,6 +1,17 @@
 # Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots,
 # logarithms and powers of any number.
 # Any program can have them with `use "math.moth"`, as neural.moth does.
+#
+#   use "math.moth" as math
+#   say math's sqrt(2)                     # 1.41421356237309
+#   say math's sine(math's pi / 6)         # 0.5; cosine and tangent too, of angles in radians
+#   say math's degrees(math's arctangent(1))   # 45; radians(45) the other way
+#   say math's floor(-2.5) " " math's ceiling(-2.5) " " math's round(2.5)   # -3 -2 3
+#   say math's rounded(3.14159)            # 3.142: at most 3 decimals, for saying
+#   say math's power(2, 0.5)               # any power of any number; exp, ln, log10 and log2
+#   say math's absolute(-7) " " math's whole(7.9)   # 7 7
+#   say math's random()                    # from 0 up to 1, the same each run: set seed to change them
+#   say math's between(1, 6)               # from 1 up to 6
 
 # ---------- random numbers (Park and Miller, 1988) ----------
 

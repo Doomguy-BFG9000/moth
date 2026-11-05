@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>windows.moth · Moth's standard library</title>
+  <meta name="description" content="Windows' own windows, buttons, text boxes, lists, menus and file boxes, as a program `moth build` makes can use them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>windows</em>.moth</h1>
+      <p>Windows' own windows, buttons, text boxes, lists, menus and file boxes, as a program <code>moth build</code> makes can use them.</p>
+      <p class="use"><code>use "windows.moth" as ui</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="windows.moth's functions">
+      <h2>64 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#window">window</a></li><li><a href="#button">button</a></li><li><a href="#label">label</a></li><li><a href="#text_box">text_box</a></li><li><a href="#text_area">text_area</a></li><li><a href="#on_change">on_change</a></li><li><a href="#checkbox">checkbox</a></li><li><a href="#list_box">list_box</a></li><li><a href="#dropdown">dropdown</a></li><li><a href="#text_of">text_of</a></li><li><a href="#set_text">set_text</a></li><li><a href="#ticked">ticked</a></li><li><a href="#set_ticked">set_ticked</a></li><li><a href="#add_item">add_item</a></li><li><a href="#clear_items">clear_items</a></li><li><a href="#remove_item">remove_item</a></li><li><a href="#count_of">count_of</a></li><li><a href="#chosen_place">chosen_place</a></li><li><a href="#choose">choose</a></li><li><a href="#chosen">chosen</a></li><li><a href="#enable">enable</a></li><li><a href="#focus">focus</a></li><li><a href="#place">place</a></li><li><a href="#on_resize">on_resize</a></li><li><a href="#on_close">on_close</a></li><li><a href="#menu_item">menu_item</a></li><li><a href="#timer">timer</a></li><li><a href="#message">message</a></li><li><a href="#ask_yes_no">ask_yes_no</a></li><li><a href="#choose_file_to_open">choose_file_to_open</a></li><li><a href="#choose_file_to_save">choose_file_to_save</a></li><li><a href="#close">close</a></li><li><a href="#run">run</a></li><li><a href="#progress">progress</a></li><li><a href="#set_progress">set_progress</a></li><li><a href="#picture">picture</a></li><li><a href="#set_picture">set_picture</a></li><li><a href="#tabs">tabs</a></li><li><a href="#tab">tab</a></li><li><a href="#chosen_tab">chosen_tab</a></li><li><a href="#choose_tab">choose_tab</a></li><li><a href="#table">table</a></li><li><a href="#add_row">add_row</a></li><li><a href="#clear_rows">clear_rows</a></li><li><a href="#chosen_row">chosen_row</a></li><li><a href="#choose_row">choose_row</a></li><li><a href="#drawing">drawing</a></li><li><a href="#on_click">on_click</a></li><li><a href="#redraw">redraw</a></li><li><a href="#colour">colour</a></li><li><a href="#rectangle">rectangle</a></li><li><a href="#circle">circle</a></li><li><a href="#line">line</a></li><li><a href="#words">words</a></li><li><a href="#set_icon">set_icon</a></li><li><a href="#key_down">key_down</a></li><li><a href="#mouse_x">mouse_x</a></li><li><a href="#mouse_y">mouse_y</a></li><li><a href="#mouse_down">mouse_down</a></li><li><a href="#load_image">load_image</a></li><li><a href="#draw_image">draw_image</a></li><li><a href="#draw_image_sized">draw_image_sized</a></li><li><a href="#play_sound">play_sound</a></li><li><a href="#on_key">on_key</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Windows' own windows, buttons, text boxes, lists, menus and file boxes, as a program <code>moth build</code> makes can use them: real ones, through user32.dll and the rest, which look and behave as every other program's.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> say_hello
+    ui's message(w, <span class="s">&quot;Hello, &quot;</span> + ui's text_of(name))
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's <span class="k">button</span>(w, <span class="s">&quot;Greet&quot;</span>, <span class="n">230</span>, <span class="n">20</span>, <span class="n">100</span>, <span class="n">28</span>, say_hello)
+ui's run()</code></pre></div>
+          <p>Places and sizes are in pixels as at 100% on the screen, made bigger for a screen set larger. What happens calls the function given for it, a function of the program's: a button's with nothing, a checkbox's with whether it's ticked, a list's or a dropdown's with the item chosen, a text box's with its text, a timer's with nothing, and a window's resizing with its new width and height. A program that uses it is built with --allow-libraries.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="window">
+          <h3><a href="#window"><code>ui's window(title, width, height)</code></a></h3>
+          <p>a new window, <code>width</code> by <code>height</code> inside, shown, with <code>title</code> at its top</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>title</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to window with title, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L332">windows.moth line 332</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="button">
+          <h3><a href="#button"><code>ui's button(parent, text, x, y, width, height, handler)</code></a></h3>
+          <p>a button that says <code>text</code>, at x, y in its window, <code>width</code> by <code>height</code>, which calls <code>handler</code> (with nothing) when it's pressed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>text</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to button with parent, text, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L382">windows.moth line 382</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> say_hello
+    ui's message(w, <span class="s">&quot;Hello, &quot;</span> + ui's text_of(name))
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)
+ui's <span class="k">button</span>(w, <span class="s">&quot;Greet&quot;</span>, <span class="n">230</span>, <span class="n">20</span>, <span class="n">100</span>, <span class="n">28</span>, say_hello)</code></pre></div>
+        </section>
+        <section class="fn" id="label">
+          <h3><a href="#label"><code>ui's label(parent, text, x, y, width, height)</code></a></h3>
+          <p>words that say <code>text</code>, at x, y in a window, <code>width</code> by <code>height</code>, which <a href="#set_text">set_text</a> can change</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>text</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to label with parent, text, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L387">windows.moth line 387</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's label(w, <span class="s">&quot;Name&quot;</span>, <span class="n">20</span>, <span class="n">20</span>, <span class="n">60</span>, <span class="n">24</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="text_box">
+          <h3><a href="#text_box"><code>ui's text_box(parent, x, y, width, height)</code></a></h3>
+          <p>a box for a line of text; <code>text_area</code> for many, with a scroll bar; <code>on_change</code> gives either a handler, for what's typed into it (not what <a href="#set_text">set_text</a> puts there)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to text_box with parent, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L393">windows.moth line 393</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="text_area">
+          <h3><a href="#text_area"><code>ui's text_area(parent, x, y, width, height)</code></a></h3>
+          <p>a box for many lines of text, with a scroll bar</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to text_area with parent, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L398">windows.moth line 398</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> notes <span class="k">to</span> ui's text_area(w, <span class="n">20</span>, <span class="n">56</span>, <span class="n">260</span>, <span class="n">80</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="on_change">
+          <h3><a href="#on_change"><code>ui's on_change(control, handler)</code></a></h3>
+          <p>a text box's or text area's handler for what's typed into it, given its text each time it changes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_change with control, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L409">windows.moth line 409</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">80</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's on_change(name, name_changed)                 <span class="c"># name_changed(text), as it's typed</span></code></pre></div>
+        </section>
+        <section class="fn" id="checkbox">
+          <h3><a href="#checkbox"><code>ui's checkbox(parent, text, x, y, width, height, handler)</code></a></h3>
+          <p>a box to tick, which says <code>text</code> beside it; <code>handler</code> is given yes or no each time it's ticked or unticked</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>text</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to checkbox with parent, text, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L414">windows.moth line 414</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> gift <span class="k">to</span> ui's <span class="k">checkbox</span>(w, <span class="s">&quot;A gift&quot;</span>, <span class="n">300</span>, <span class="n">56</span>, <span class="n">120</span>, <span class="n">24</span>, gift_ticked)    <span class="c"># gift_ticked(yes or no)</span></code></pre></div>
+        </section>
+        <section class="fn" id="list_box">
+          <h3><a href="#list_box"><code>ui's list_box(parent, x, y, width, height, handler)</code></a></h3>
+          <p>a list of items (<a href="#add_item">add_item</a>) of which one can be chosen; <code>handler</code> is given the chosen item each time the choice changes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to list_box with parent, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L420">windows.moth line 420</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span></code></pre></div>
+        </section>
+        <section class="fn" id="dropdown">
+          <h3><a href="#dropdown"><code>ui's dropdown(parent, x, y, width, height, handler)</code></a></h3>
+          <p>a list that drops down, of which one is chosen; <code>height</code> includes the list when it's open</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to dropdown with parent, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L425">windows.moth line 425</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> sizes <span class="k">to</span> ui's <span class="k">dropdown</span>(w, <span class="n">160</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">28</span>, size_chosen)      <span class="c"># size_chosen(item), as a list box's</span></code></pre></div>
+        </section>
+        <section class="fn" id="text_of">
+          <h3><a href="#text_of"><code>ui's text_of(control)</code></a></h3>
+          <p>what a control says: a text box's text, a button's label</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to text_of with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L430">windows.moth line 430</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> say_hello
+    ui's message(w, <span class="s">&quot;Hello, &quot;</span> + ui's text_of(name))
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's <span class="k">button</span>(w, <span class="s">&quot;Greet&quot;</span>, <span class="n">230</span>, <span class="n">20</span>, <span class="n">100</span>, <span class="n">28</span>, say_hello)
+ui's run()</code></pre></div>
+        </section>
+        <section class="fn" id="set_text">
+          <h3><a href="#set_text"><code>ui's set_text(control, text)</code></a></h3>
+          <p>what a control says changed: a text box's text, a label's or button's words, a window's title</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>text</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_text with control, text</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L438">windows.moth line 438</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">80</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's set_text(name, <span class="s">&quot;Sam&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="ticked">
+          <h3><a href="#ticked"><code>ui's ticked(control)</code></a></h3>
+          <p>whether a checkbox is ticked</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ticked with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L446">windows.moth line 446</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> gift <span class="k">to</span> ui's <span class="k">checkbox</span>(w, <span class="s">&quot;A gift&quot;</span>, <span class="n">300</span>, <span class="n">56</span>, <span class="n">120</span>, <span class="n">24</span>, gift_ticked)    <span class="c"># gift_ticked(yes or no)</span>
+<span class="k">say</span> ui's <span class="k">ticked</span>(gift)                              <span class="c"># yes</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_ticked">
+          <h3><a href="#set_ticked"><code>ui's set_ticked(control, tick)</code></a></h3>
+          <p>a checkbox ticked (yes) or unticked (no), without calling its handler</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>tick</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_ticked with control, tick</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L451">windows.moth line 451</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> gift <span class="k">to</span> ui's <span class="k">checkbox</span>(w, <span class="s">&quot;A gift&quot;</span>, <span class="n">300</span>, <span class="n">56</span>, <span class="n">120</span>, <span class="n">24</span>, gift_ticked)    <span class="c"># gift_ticked(yes or no)</span>
+ui's set_ticked(gift, <span class="k">yes</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="add_item">
+          <h3><a href="#add_item"><code>ui's add_item(control, text)</code></a></h3>
+          <p>an item at the end of a list box or a dropdown</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>text</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_item with control, text</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L468">windows.moth line 468</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+ui's add_item(fruits, <span class="s">&quot;apple&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="clear_items">
+          <h3><a href="#clear_items"><code>ui's clear_items(control)</code></a></h3>
+          <p>every item of a list box or a dropdown taken away</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to clear_items with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L473">windows.moth line 473</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+ui's clear_items(fruits)</code></pre></div>
+        </section>
+        <section class="fn" id="remove_item">
+          <h3><a href="#remove_item"><code>ui's remove_item(control, place)</code></a></h3>
+          <p>the item at a place, from 1, taken out of a list box or a dropdown</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to remove_item with control, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L478">windows.moth line 478</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+ui's remove_item(fruits, <span class="n">1</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="count_of">
+          <h3><a href="#count_of"><code>ui's count_of(control)</code></a></h3>
+          <p>how many items a list box or a dropdown has</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to count_of with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L483">windows.moth line 483</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+<span class="k">say</span> ui's chosen(fruits) <span class="s">&quot; &quot;</span> ui's chosen_place(fruits) <span class="s">&quot; of &quot;</span> ui's count_of(fruits)    <span class="c"># pear 2 of 2</span></code></pre></div>
+        </section>
+        <section class="fn" id="chosen_place">
+          <h3><a href="#chosen_place"><code>ui's chosen_place(control)</code></a></h3>
+          <p>where the chosen item is, from 1, or 0 for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chosen_place with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L491">windows.moth line 491</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+<span class="k">say</span> ui's chosen(fruits) <span class="s">&quot; &quot;</span> ui's chosen_place(fruits) <span class="s">&quot; of &quot;</span> ui's count_of(fruits)    <span class="c"># pear 2 of 2</span></code></pre></div>
+        </section>
+        <section class="fn" id="choose">
+          <h3><a href="#choose"><code>ui's choose(control, place)</code></a></h3>
+          <p>the item at a place, from 1, chosen in a list box or a dropdown, without calling its handler; 0 for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choose with control, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L503">windows.moth line 503</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+ui's <span class="k">choose</span>(fruits, <span class="n">2</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="chosen">
+          <h3><a href="#chosen"><code>ui's chosen(control)</code></a></h3>
+          <p>the chosen item, or nothing for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chosen with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L508">windows.moth line 508</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> fruits <span class="k">to</span> ui's list_box(w, <span class="n">20</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">100</span>, fruit_chosen)    <span class="c"># fruit_chosen(item)</span>
+<span class="k">say</span> ui's chosen(fruits) <span class="s">&quot; &quot;</span> ui's chosen_place(fruits) <span class="s">&quot; of &quot;</span> ui's count_of(fruits)    <span class="c"># pear 2 of 2</span></code></pre></div>
+        </section>
+        <section class="fn" id="enable">
+          <h3><a href="#enable"><code>ui's enable(control, on)</code></a></h3>
+          <p>a control made to work (yes), or greyed out so it doesn't (no)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>on</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to enable with control, on</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L520">windows.moth line 520</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> buy <span class="k">to</span> ui's <span class="k">button</span>(w, <span class="s">&quot;Buy&quot;</span>, <span class="n">300</span>, <span class="n">20</span>, <span class="n">80</span>, <span class="n">28</span>, bought)    <span class="c"># bought(), when it's pressed</span>
+ui's enable(buy, <span class="k">no</span>)                               <span class="c"># greyed out, until enable(buy, yes)</span></code></pre></div>
+        </section>
+        <section class="fn" id="focus">
+          <h3><a href="#focus"><code>ui's focus(control)</code></a></h3>
+          <p>the keys sent to a control: what's typed goes into it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to focus with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L525">windows.moth line 525</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">80</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's focus(name)                                   <span class="c"># what's typed goes into it</span></code></pre></div>
+        </section>
+        <section class="fn" id="place">
+          <h3><a href="#place"><code>ui's place(control, x, y, width, height)</code></a></h3>
+          <p>a control put somewhere else, or made another size, as when its window is resized</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to place with control, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L530">windows.moth line 530</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> sizes <span class="k">to</span> ui's <span class="k">dropdown</span>(w, <span class="n">160</span>, <span class="n">150</span>, <span class="n">120</span>, <span class="n">28</span>, size_chosen)      <span class="c"># size_chosen(item), as a list box's</span>
+ui's place(sizes, <span class="n">160</span>, <span class="n">190</span>, <span class="n">140</span>, <span class="n">28</span>)               <span class="c"># moved, or made another size</span></code></pre></div>
+        </section>
+        <section class="fn" id="on_resize">
+          <h3><a href="#on_resize"><code>ui's on_resize(parent, handler)</code></a></h3>
+          <p>a window's handler for a new size, given its width and height inside, as when the person drags its edge</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_resize with parent, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L536">windows.moth line 536</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's on_resize(w, resized)                         <span class="c"># resized(width, height)</span></code></pre></div>
+        </section>
+        <section class="fn" id="on_close">
+          <h3><a href="#on_close"><code>ui's on_close(parent, handler)</code></a></h3>
+          <p>a function that says whether the window may close, asked when someone closes it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_close with parent, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L541">windows.moth line 541</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's on_close(w, may_close)                        <span class="c"># may_close() gives yes to let it close</span></code></pre></div>
+        </section>
+        <section class="fn" id="menu_item">
+          <h3><a href="#menu_item"><code>ui's menu_item(parent, title, text, handler)</code></a></h3>
+          <p>an item at the end of the menu called <code>title</code> on the window's bar, made if it isn't there; &quot;-&quot; is a line. Keys after a tab, as in &quot;Save\tCtrl+S&quot;, are shown beside it and choose it too: Ctrl, Shift and Alt, then a letter, a digit, F1 to F12, Space, Delete, Insert, Home, End, PageUp or PageDown.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>title</code></li><li><code>text</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to menu_item with parent, title, text, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L548">windows.moth line 548</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's menu_item(w, <span class="s">&quot;File&quot;</span>, <span class="s">&quot;Save\tCtrl+S&quot;</span>, saved)  <span class="c"># saved(), when it's chosen or its keys pressed</span></code></pre></div>
+        </section>
+        <section class="fn" id="timer">
+          <h3><a href="#timer"><code>ui's timer(parent, milliseconds, handler)</code></a></h3>
+          <p>a handler called every so many milliseconds, while <a href="#run">run</a>() runs</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>milliseconds</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to timer with parent, milliseconds, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L638">windows.moth line 638</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's timer(w, <span class="n">1000</span>, every_second)                  <span class="c"># every_second(), each second</span></code></pre></div>
+        </section>
+        <section class="fn" id="message">
+          <h3><a href="#message"><code>ui's message(parent, text)</code></a></h3>
+          <p>a box with a message in it, over the window, and an OK button: it waits until it's pressed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>text</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to message with parent, text</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L646">windows.moth line 646</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> say_hello
+    ui's message(w, <span class="s">&quot;Hello, &quot;</span> + ui's text_of(name))
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Hello&quot;</span>, <span class="n">360</span>, <span class="n">140</span>)
+<span class="k">set</span> name <span class="k">to</span> ui's text_box(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">200</span>, <span class="n">26</span>)
+ui's <span class="k">button</span>(w, <span class="s">&quot;Greet&quot;</span>, <span class="n">230</span>, <span class="n">20</span>, <span class="n">100</span>, <span class="n">28</span>, say_hello)
+ui's run()</code></pre></div>
+        </section>
+        <section class="fn" id="ask_yes_no">
+          <h3><a href="#ask_yes_no"><code>ui's ask_yes_no(parent, question)</code></a></h3>
+          <p>a box asking a question, over the window, with Yes and No: whether Yes was pressed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>question</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ask_yes_no with parent, question</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L651">windows.moth line 651</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">say</span> ui's ask_yes_no(w, <span class="s">&quot;Buy it?&quot;</span>)                  <span class="c"># yes or no</span></code></pre></div>
+        </section>
+        <section class="fn" id="choose_file_to_open">
+          <h3><a href="#choose_file_to_open"><code>ui's choose_file_to_open(parent)</code></a></h3>
+          <p>Windows' own box for choosing a file: its name, or nothing if none was chosen</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choose_file_to_open with parent</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L656">windows.moth line 656</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">say</span> ui's choose_file_to_open(w)                    <span class="c"># a file's name, or nothing</span></code></pre></div>
+        </section>
+        <section class="fn" id="choose_file_to_save">
+          <h3><a href="#choose_file_to_save"><code>ui's choose_file_to_save(parent)</code></a></h3>
+          <p>the system's own box for choosing where to save a file: its name, or nothing if none was chosen</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choose_file_to_save with parent</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L661">windows.moth line 661</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">say</span> ui's choose_file_to_save(w)</code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>ui's close(parent)</code></a></h3>
+          <p>a window closed; closing the first window <a href="#run">run</a>() runs for ends run()</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with parent</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L696">windows.moth line 696</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's close(w)</code></pre></div>
+        </section>
+        <section class="fn" id="run">
+          <h3><a href="#run"><code>ui's run()</code></a></h3>
+          <p>what happens to the windows, to their handlers, until the first window is closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to run</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L701">windows.moth line 701</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+ui's run()</code></pre></div>
+        </section>
+        <section class="fn" id="progress">
+          <h3><a href="#progress"><code>ui's progress(parent, x, y, width, height)</code></a></h3>
+          <p>a bar that fills up as something gets done: <a href="#set_progress">set_progress</a> says how far, from 0 to 100</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to progress with parent, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L774">windows.moth line 774</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> bar <span class="k">to</span> ui's progress(w, <span class="n">20</span>, <span class="n">270</span>, <span class="n">260</span>, <span class="n">16</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="set_progress">
+          <h3><a href="#set_progress"><code>ui's set_progress(control, percent)</code></a></h3>
+          <p>how far a progress bar is, from 0 to 100</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>percent</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_progress with control, percent</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L779">windows.moth line 779</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> bar <span class="k">to</span> ui's progress(w, <span class="n">20</span>, <span class="n">270</span>, <span class="n">260</span>, <span class="n">16</span>)
+ui's set_progress(bar, <span class="n">40</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="picture">
+          <h3><a href="#picture"><code>ui's picture(parent, file, x, y, width, height)</code></a></h3>
+          <p>a picture from a file, a PNG, JPEG, GIF or BMP, made the size it's put at</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>file</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to picture with parent, file, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L784">windows.moth line 784</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> photo <span class="k">to</span> ui's <span class="k">picture</span>(w, <span class="s">&quot;apple.png&quot;</span>, <span class="n">300</span>, <span class="n">150</span>, <span class="n">100</span>, <span class="n">100</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="set_picture">
+          <h3><a href="#set_picture"><code>ui's set_picture(control, file)</code></a></h3>
+          <p>a picture control shows another file's picture</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_picture with control, file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L791">windows.moth line 791</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> photo <span class="k">to</span> ui's <span class="k">picture</span>(w, <span class="s">&quot;apple.png&quot;</span>, <span class="n">300</span>, <span class="n">150</span>, <span class="n">100</span>, <span class="n">100</span>)
+ui's set_picture(photo, <span class="s">&quot;pear.png&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="tabs">
+          <h3><a href="#tabs"><code>ui's tabs(parent, x, y, width, height, handler)</code></a></h3>
+          <p>tabs, each with a page of its own (see tab) for controls; <code>handler</code> is given a tab's title when the person chooses it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to tabs with parent, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L818">windows.moth line 818</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> pages <span class="k">to</span> ui's tabs(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">480</span>, <span class="n">360</span>, tab_chosen)      <span class="c"># tab_chosen(title)</span></code></pre></div>
+        </section>
+        <section class="fn" id="tab">
+          <h3><a href="#tab"><code>ui's tab(tabs_control, title)</code></a></h3>
+          <p>a page of the tabs, with <code>title</code> on its tab: what's put on it, as on a window, shows while its tab is chosen</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>tabs_control</code></li><li><code>title</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to tab with tabs_control, title</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L827">windows.moth line 827</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> pages <span class="k">to</span> ui's tabs(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">480</span>, <span class="n">360</span>, tab_chosen)      <span class="c"># tab_chosen(title)</span>
+<span class="k">set</span> first_page <span class="k">to</span> ui's tab(pages, <span class="s">&quot;First&quot;</span>)         <span class="c"># a page, to put controls on as on a window</span></code></pre></div>
+        </section>
+        <section class="fn" id="chosen_tab">
+          <h3><a href="#chosen_tab"><code>ui's chosen_tab(control)</code></a></h3>
+          <p>which tab is chosen, from 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chosen_tab with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L841">windows.moth line 841</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> pages <span class="k">to</span> ui's tabs(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">480</span>, <span class="n">360</span>, tab_chosen)      <span class="c"># tab_chosen(title)</span>
+<span class="k">say</span> ui's chosen_tab(pages)                         <span class="c"># 1</span></code></pre></div>
+        </section>
+        <section class="fn" id="choose_tab">
+          <h3><a href="#choose_tab"><code>ui's choose_tab(control, place)</code></a></h3>
+          <p>the tab at a place, from 1, chosen, as if the person had clicked it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choose_tab with control, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L846">windows.moth line 846</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> pages <span class="k">to</span> ui's tabs(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">480</span>, <span class="n">360</span>, tab_chosen)      <span class="c"># tab_chosen(title)</span>
+ui's choose_tab(pages, <span class="n">1</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="table">
+          <h3><a href="#table"><code>ui's table(parent, columns, x, y, width, height, handler)</code></a></h3>
+          <p>a table, with a column for each title in <code>columns</code>, and rows of values (<a href="#add_row">add_row</a>); <code>handler</code> is given a row's values when the person chooses it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>columns</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to table with parent, columns, x, y, width, height, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L868">windows.moth line 868</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> orders <span class="k">to</span> ui's <span class="k">table</span>(w, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Item&quot;</span>, <span class="s">&quot;Price&quot;</span>), <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, row_chosen)    <span class="c"># row_chosen(values)</span></code></pre></div>
+        </section>
+        <section class="fn" id="add_row">
+          <h3><a href="#add_row"><code>ui's add_row(control, values)</code></a></h3>
+          <p>a row at the end of the table: its values, each shown as <code>say</code> shows it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_row with control, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L883">windows.moth line 883</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> orders <span class="k">to</span> ui's <span class="k">table</span>(w, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Item&quot;</span>, <span class="s">&quot;Price&quot;</span>), <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, row_chosen)    <span class="c"># row_chosen(values)</span>
+ui's add_row(orders, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;apple&quot;</span>, <span class="n">0.5</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="clear_rows">
+          <h3><a href="#clear_rows"><code>ui's clear_rows(control)</code></a></h3>
+          <p>every row of a table taken away</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to clear_rows with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L900">windows.moth line 900</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> orders <span class="k">to</span> ui's <span class="k">table</span>(w, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Item&quot;</span>, <span class="s">&quot;Price&quot;</span>), <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, row_chosen)    <span class="c"># row_chosen(values)</span>
+ui's clear_rows(orders)</code></pre></div>
+        </section>
+        <section class="fn" id="chosen_row">
+          <h3><a href="#chosen_row"><code>ui's chosen_row(control)</code></a></h3>
+          <p>the chosen row's values, or nothing for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chosen_row with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L909">windows.moth line 909</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> orders <span class="k">to</span> ui's <span class="k">table</span>(w, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Item&quot;</span>, <span class="s">&quot;Price&quot;</span>), <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, row_chosen)    <span class="c"># row_chosen(values)</span>
+<span class="k">say</span> ui's chosen_row(orders)                        <span class="c"># [&quot;apple&quot;, 0.5]</span></code></pre></div>
+        </section>
+        <section class="fn" id="choose_row">
+          <h3><a href="#choose_row"><code>ui's choose_row(control, place)</code></a></h3>
+          <p>the row at a place, from 1, chosen in a table; 0 for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choose_row with control, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L918">windows.moth line 918</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> orders <span class="k">to</span> ui's <span class="k">table</span>(w, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Item&quot;</span>, <span class="s">&quot;Price&quot;</span>), <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, row_chosen)    <span class="c"># row_chosen(values)</span>
+ui's choose_row(orders, <span class="n">1</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="drawing">
+          <h3><a href="#drawing"><code>ui's drawing(parent, x, y, width, height, painter)</code></a></h3>
+          <p>A drawing: <code>painter</code> draws it whenever it must be drawn, and after redraw, given a canvas to draw on with colour, rectangle, circle, line and words, in pixels as at 100% from the drawing's top left</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li><li><code>painter</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to drawing with parent, x, y, width, height, painter</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L927">windows.moth line 927</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span></code></pre></div>
+        </section>
+        <section class="fn" id="on_click">
+          <h3><a href="#on_click"><code>ui's on_click(control, handler)</code></a></h3>
+          <p>a drawing's handler for a click on it, given where: x and y</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_click with control, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L941">windows.moth line 941</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+ui's on_click(board, <span class="k">clicked</span>)                      <span class="c"># clicked(x, y)</span></code></pre></div>
+        </section>
+        <section class="fn" id="redraw">
+          <h3><a href="#redraw"><code>ui's redraw(control)</code></a></h3>
+          <p>a drawing drawn again, by its painter, as soon as the program has a moment</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to redraw with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L946">windows.moth line 946</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+ui's redraw(board)                                 <span class="c"># paint is called again</span></code></pre></div>
+        </section>
+        <section class="fn" id="colour">
+          <h3><a href="#colour"><code>ui's colour(canvas, red, green, blue)</code></a></h3>
+          <p>what's drawn next is this colour: red, green and blue, each from 0 to 255</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>red</code></li><li><code>green</code></li><li><code>blue</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to colour with canvas, red, green, blue</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L978">windows.moth line 978</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="rectangle">
+          <h3><a href="#rectangle"><code>ui's rectangle(canvas, x, y, width, height)</code></a></h3>
+          <p>a filled rectangle, its top left at x, y, <code>width</code> by <code>height</code>, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rectangle with canvas, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L986">windows.moth line 986</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="circle">
+          <h3><a href="#circle"><code>ui's circle(canvas, x, y, radius)</code></a></h3>
+          <p>a filled circle, its middle at x, y, so many pixels across from the middle to the edge, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x</code></li><li><code>y</code></li><li><code>radius</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to circle with canvas, x, y, radius</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L992">windows.moth line 992</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="line">
+          <h3><a href="#line"><code>ui's line(canvas, x1, y1, x2, y2)</code></a></h3>
+          <p>a line from x1, y1 to x2, y2, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x1</code></li><li><code>y1</code></li><li><code>x2</code></li><li><code>y2</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to line with canvas, x1, y1, x2, y2</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L997">windows.moth line 997</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="words">
+          <h3><a href="#words"><code>ui's words(canvas, text, x, y)</code></a></h3>
+          <p>words with their top left at x, y, in the windows' own font</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>text</code></li><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to words with canvas, text, x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1003">windows.moth line 1003</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_icon">
+          <h3><a href="#set_icon"><code>ui's set_icon(parent, file)</code></a></h3>
+          <p>the window's icon, from a picture's file (a PNG, JPEG, GIF, BMP or ICO): in its title, and the taskbar's</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>parent</code></li><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_icon with parent, file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1009">windows.moth line 1009</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+ui's set_icon(w, <span class="s">&quot;shop.png&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="key_down">
+          <h3><a href="#key_down"><code>ui's key_down(control, name)</code></a></h3>
+          <p>whether a key is held down while the drawing has the keys (it takes them when it's clicked, or <a href="#focus">focus</a>()): &quot;Left&quot;, &quot;Right&quot;, &quot;Up&quot;, &quot;Down&quot;, &quot;Space&quot;, &quot;Enter&quot;, &quot;Escape&quot;, &quot;Shift&quot;, &quot;Ctrl&quot;, &quot;Alt&quot;, &quot;Tab&quot;, &quot;Backspace&quot;, &quot;Delete&quot;, a letter, a digit, or F1 to F12, small letters or capitals</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to key_down with control, name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1052">windows.moth line 1052</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+<span class="k">say</span> ui's key_down(board, <span class="s">&quot;Left&quot;</span>)                   <span class="c"># whether it's held down</span></code></pre></div>
+        </section>
+        <section class="fn" id="mouse_x">
+          <h3><a href="#mouse_x"><code>ui's mouse_x(control)</code></a></h3>
+          <p>where the mouse was last on the drawing, as at 100%, and whether its button is down</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_x with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1057">windows.moth line 1057</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+<span class="k">say</span> ui's mouse_x(board) <span class="s">&quot;, &quot;</span> ui's mouse_y(board) <span class="s">&quot; &quot;</span> ui's mouse_down(board)</code></pre></div>
+        </section>
+        <section class="fn" id="mouse_y">
+          <h3><a href="#mouse_y"><code>ui's mouse_y(control)</code></a></h3>
+          <p>how far down the drawing the mouse was last, as <a href="#mouse_x">mouse_x</a> says how far across</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_y with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1062">windows.moth line 1062</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+<span class="k">say</span> ui's mouse_x(board) <span class="s">&quot;, &quot;</span> ui's mouse_y(board) <span class="s">&quot; &quot;</span> ui's mouse_down(board)</code></pre></div>
+        </section>
+        <section class="fn" id="mouse_down">
+          <h3><a href="#mouse_down"><code>ui's mouse_down(control)</code></a></h3>
+          <p>whether the mouse's button is down on the drawing</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_down with control</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1067">windows.moth line 1067</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+<span class="k">say</span> ui's mouse_x(board) <span class="s">&quot;, &quot;</span> ui's mouse_y(board) <span class="s">&quot; &quot;</span> ui's mouse_down(board)</code></pre></div>
+        </section>
+        <section class="fn" id="load_image">
+          <h3><a href="#load_image"><code>ui's load_image(file)</code></a></h3>
+          <p>a picture from a file, or one built into the program (a PNG, JPEG, GIF or BMP), to draw with <a href="#draw_image">draw_image</a></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to load_image with file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1079">windows.moth line 1079</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> ship <span class="k">to</span> ui's load_image(<span class="s">&quot;ship.png&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="draw_image">
+          <h3><a href="#draw_image"><code>ui's draw_image(canvas, image, x, y)</code></a></h3>
+          <p>a picture drawn with its top left at x, y, at its own size (draw_image) or made <code>width</code> by <code>height</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>image</code></li><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to draw_image with canvas, image, x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1097">windows.moth line 1097</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="draw_image_sized">
+          <h3><a href="#draw_image_sized"><code>ui's draw_image_sized(canvas, image, x, y, width, height)</code></a></h3>
+          <p>a picture drawn with its top left at x, y, made <code>width</code> by <code>height</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>image</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to draw_image_sized with canvas, image, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1102">windows.moth line 1102</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">to</span> paint <span class="k">with</span> canvas
+    ui's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)                <span class="c"># red, green and blue, for what's drawn next</span>
+    ui's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">300</span>, <span class="n">200</span>)
+    ui's colour(canvas, <span class="n">255</span>, <span class="n">200</span>, <span class="n">80</span>)
+    ui's <span class="k">circle</span>(canvas, <span class="n">150</span>, <span class="n">100</span>, <span class="n">30</span>)              <span class="c"># its middle, and how far from it to its edge</span>
+    ui's line(canvas, <span class="n">0</span>, <span class="n">199</span>, <span class="n">300</span>, <span class="n">199</span>)
+    ui's words(canvas, <span class="s">&quot;Score: 3&quot;</span>, <span class="n">10</span>, <span class="n">10</span>)
+    ui's draw_image(canvas, ship, <span class="n">40</span>, <span class="n">60</span>)          <span class="c"># at its own size</span>
+    ui's draw_image_sized(canvas, ship, <span class="n">200</span>, <span class="n">60</span>, <span class="n">32</span>, <span class="n">32</span>)
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="play_sound">
+          <h3><a href="#play_sound"><code>ui's play_sound(file)</code></a></h3>
+          <p>a WAV file, or one built into the program, played while the program goes on (a new one stops the last)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to play_sound with file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1112">windows.moth line 1112</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+ui's play_sound(<span class="s">&quot;ping.wav&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="on_key">
+          <h3><a href="#on_key"><code>ui's on_key(control, handler)</code></a></h3>
+          <p>a drawing's handler for each key pressed while it has the keys, given the key's name, as <a href="#key_down">key_down</a> knows them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>control</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_key with control, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/windows.moth#L1128">windows.moth line 1128</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;windows.moth&quot;</span> <span class="k">as</span> ui
+<span class="k">set</span> w <span class="k">to</span> ui's window(<span class="s">&quot;Shop&quot;</span>, <span class="n">520</span>, <span class="n">400</span>)
+<span class="k">set</span> board <span class="k">to</span> ui's drawing(w, <span class="n">20</span>, <span class="n">20</span>, <span class="n">300</span>, <span class="n">200</span>, paint)        <span class="c"># paint(canvas), as below</span>
+ui's on_key(board, key_pressed)                    <span class="c"># key_pressed(name)</span></code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

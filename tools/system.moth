@@ -9,6 +9,14 @@
 #   say system's environment("PATH")
 #   say system's home_folder()
 #   system's append_to_file("log.txt", "one more line\n")
+#   if system's is_file("notes.txt")                 # is_folder for a folder; exists for either
+#       system's move_file("notes.txt", "old-notes.txt")   # or renamed
+#   end
+#   system's remove_file("old-notes.txt")
+#   system's remove_folder("backup/2026")            # once it's empty
+#   system's set_environment("MODE", "test")         # for this program, and those it starts
+#   say system's current_folder()                    # change_folder(path) to go into another
+#   say system's temporary_folder()
 #
 # modified() is seconds since 1 January 1970, as dates.moth's day_number counts days. A program that uses it
 # is built with --allow-libraries.

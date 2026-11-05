@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jwt.moth · Moth's standard library</title>
+  <meta name="description" content="JSON Web Tokens (RFC 7519), as Python's PyJWT has them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>jwt</em>.moth</h1>
+      <p>JSON Web Tokens (RFC 7519), as Python's PyJWT has them.</p>
+      <p class="use"><code>use "jwt.moth" as jwt</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="jwt.moth's functions">
+      <h2>5 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#make">make</a></li><li><a href="#decode">decode</a></li><li><a href="#verify">verify</a></li><li><a href="#now">now</a></li><li><a href="#read_key">read_key</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>JSON Web Tokens (RFC 7519), as Python's PyJWT has them: made and checked with a shared secret (HS256, HS384, HS512), and checked with an RSA public key (RS256, RS384, RS512), in PEM or as a JWK, as identity providers sign them. In Moth alone, so it works everywhere, but for the clock: <a href="#now">now</a>(), and verify when it isn't given <code>now</code>, ask the system's clock through its C library, so a program <code>moth build</code> makes that uses them is built with --allow-libraries; and in the playground, where no library loads, verify is given <code>now</code>.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> token <span class="k">to</span> jwt's make((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;sub&quot;</span> <span class="k">is</span> <span class="s">&quot;42&quot;</span>, <span class="s">&quot;exp&quot;</span> <span class="k">is</span> jwt's now() + <span class="n">3600</span>), <span class="s">&quot;a long random secret&quot;</span>)
+<span class="k">set</span> claims <span class="k">to</span> jwt's verify(token, <span class="s">&quot;a long random secret&quot;</span>)   <span class="c"># its claims, or a mistake if it isn't good</span>
+<span class="k">say</span> <span class="k">item</span> <span class="s">&quot;sub&quot;</span> <span class="k">of</span> claims
+<span class="k">set</span> claims <span class="k">to</span> jwt's verify(token, <span class="k">read</span> <span class="s">&quot;public.pem&quot;</span>, <span class="k">record</span> <span class="k">with</span> issuer <span class="s">&quot;https://id.example.com&quot;</span>, audience <span class="s">&quot;my-app&quot;</span>)
+<span class="k">set</span> claims <span class="k">to</span> jwt's verify(token, <span class="k">key</span>)        <span class="c"># a JWK: a dictionary with kty &quot;RSA&quot;, n and e, as a JWKS lists</span>
+<span class="k">set</span> token <span class="k">to</span> jwt's make(claims, secret, <span class="s">&quot;HS512&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;kid&quot;</span> <span class="k">is</span> <span class="s">&quot;2026-11&quot;</span>)   <span class="c"># another algorithm, a kid</span>
+<span class="k">set</span> parts <span class="k">to</span> jwt's decode(token)               <span class="c"># its header and claims, NOT checked: to look at, never to trust</span>
+<span class="k">set</span> <span class="k">key</span> <span class="k">to</span> jwt's read_key(<span class="k">read</span> <span class="s">&quot;public.pem&quot;</span>)   <span class="c"># an RSA key's n and e (as big.moth has them), and size in bytes</span></code></pre></div>
+          <p>verify checks the signature first, with an algorithm of the key's kind: a secret (text or bytes, or a JWK of kty &quot;oct&quot;) only with HS256, HS384 or HS512; an RSA key (a PEM public key, RSA public key or certificate, or a JWK of kty &quot;RSA&quot;) only with RS256, RS384 or RS512. So a token can't choose &quot;none&quot;, nor HMAC with a public key as its secret. Then its claims: exp (the moment it ends) and nbf (the moment it starts), in seconds since 1970, give or take <code>leeway</code> seconds for clocks that differ; iat isn't after now; iss is <code>issuer</code>, if one's given; and if the token has an aud, <code>audience</code> is one of them. Its options, a record or dictionary, can have any of issuer, audience (each text or a list), leeway (0), require (claims it must have, as list of &quot;exp&quot;, &quot;iss&quot;), algorithms (those allowed, as list of &quot;RS256&quot;) and now (the time to check against, for tests). A token that isn't good is a <code>fail with</code> that says why: catch it with <code>try</code>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="make">
+          <h3><a href="#make"><code>jwt's make(claims, key, algorithm, extra)</code></a></h3>
+          <p>a token of these claims (a dictionary or record), signed with a secret: HS256, or HS384 or HS512; <code>extra</code>, a dictionary of more header fields, as kid</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>claims</code></li><li><code>key</code></li><li><code>algorithm</code> <span class="optional">optional: &quot;HS256&quot; if it's left out</span></li><li><code>extra</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to make with claims, key, algorithm or &quot;HS256&quot;, extra or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth#L46">jwt.moth line 46</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> claims <span class="k">to</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;sub&quot;</span> <span class="k">is</span> <span class="s">&quot;42&quot;</span>, <span class="s">&quot;admin&quot;</span> <span class="k">is</span> <span class="k">yes</span>, <span class="s">&quot;exp&quot;</span> <span class="k">is</span> <span class="n">1700003600</span>
+<span class="k">say</span> jwt's make(claims, <span class="s">&quot;a long random secret&quot;</span>)</code></pre><pre class="says"><code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.cJ8nZPRsxGWXThFK6CXBZ9QWL1pmCi0KIWMVXG9-lRI</code></pre></div>
+        </section>
+        <section class="fn" id="decode">
+          <h3><a href="#decode"><code>jwt's decode(token)</code></a></h3>
+          <p>a token's parts, NOT checked: its header and claims (dictionaries), signature (bytes), and signed (the text its signature is of)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>token</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to decode with token</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth#L80">jwt.moth line 80</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> with_kid <span class="k">to</span> jwt's make((<span class="k">record</span> <span class="k">with</span> sub <span class="s">&quot;7&quot;</span>, exp <span class="n">1700003600</span>), <span class="s">&quot;a long random secret&quot;</span>, <span class="s">&quot;HS256&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;kid&quot;</span> <span class="k">is</span> <span class="s">&quot;2026-11&quot;</span>)
+<span class="k">say</span> header <span class="k">of</span> jwt's decode(with_kid)</code></pre><pre class="says"><code>(dictionary where &quot;alg&quot; is &quot;HS256&quot;, &quot;typ&quot; is &quot;JWT&quot;, &quot;kid&quot; is &quot;2026-11&quot;)</code></pre></div>
+        </section>
+        <section class="fn" id="verify">
+          <h3><a href="#verify"><code>jwt's verify(token, key, options)</code></a></h3>
+          <p>the token's claims, once its signature and claims are checked; else a mistake that says what's wrong</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>token</code></li><li><code>key</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to verify with token, key, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth#L117">jwt.moth line 117</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> <span class="k">key</span> <span class="k">to</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;kty&quot;</span> <span class="k">is</span> <span class="s">&quot;oct&quot;</span>, <span class="s">&quot;k&quot;</span> <span class="k">is</span> <span class="s">&quot;AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow&quot;</span>
+<span class="k">set</span> token <span class="k">to</span> <span class="s">&quot;eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&quot;</span>
+<span class="k">set</span> claims <span class="k">to</span> jwt's verify(token, <span class="k">key</span>, <span class="k">record</span> <span class="k">with</span> now <span class="n">1300819379</span>)
+<span class="k">say</span> claims</code></pre><pre class="says"><code>(dictionary where &quot;iss&quot; is &quot;joe&quot;, &quot;exp&quot; is 1300819380, &quot;http://example.com/is_root&quot; is yes)</code></pre></div>
+        </section>
+        <section class="fn" id="now">
+          <h3><a href="#now"><code>jwt's now()</code></a></h3>
+          <p>seconds since 1970 began, in UTC, as the system's clock has it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to now</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth#L221">jwt.moth line 221</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> token <span class="k">to</span> jwt's make((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;sub&quot;</span> <span class="k">is</span> <span class="s">&quot;42&quot;</span>, <span class="s">&quot;exp&quot;</span> <span class="k">is</span> jwt's now() + <span class="n">3600</span>), <span class="s">&quot;a long random secret&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="read_key">
+          <h3><a href="#read_key"><code>jwt's read_key(key)</code></a></h3>
+          <p>A key as jwt.moth reads one: a record with kind &quot;secret&quot;, and its bytes as secret; or kind &quot;rsa&quot;, with n and e (big.moth's whole numbers, as text) and size, n's length in bytes. For a PEM public key, RSA public key or certificate, a JWK, or a secret.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_key with key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/jwt.moth#L267">jwt.moth line 267</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;jwt.moth&quot;</span> <span class="k">as</span> jwt
+<span class="k">set</span> <span class="k">key</span> <span class="k">to</span> jwt's read_key(<span class="k">read</span> <span class="s">&quot;public.pem&quot;</span>)   <span class="c"># an RSA key's n and e (as big.moth has them), and size in bytes</span></code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

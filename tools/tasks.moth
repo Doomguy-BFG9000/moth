@@ -17,6 +17,11 @@
 #       tasks's pause(200)
 #   end
 #   say "the total is " + tasks's output_of(job)
+#   set zipping to tasks's start("zip", list of "-r", "backup.zip", "notes")   # another program
+#   tasks's wait_for(zipping)
+#   say tasks's code_of(zipping)                # 0 when it went well
+#   tasks's stop_task(job)                      # ended now, if it hasn't ended yet
+#   say tasks's own_program()                   # where this program is
 #
 # done() doesn't wait: it takes what the task has said so far, and says whether it has ended. wait_for() waits.
 # output_of() is all it said, to its output and its error output, as text; code_of() the number it ended with.

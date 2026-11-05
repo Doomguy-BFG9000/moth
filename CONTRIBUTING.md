@@ -41,9 +41,13 @@ keep it working:
 - **The compiler written in Moth matches the JIT byte for byte.** `compiler.moth` writes the same JavaScript
   as `jit.js`, so a change to what the JIT writes is made in both. Changes to the JIT's helpers and to
   `wasm.js` need nothing in `compiler.moth`.
-- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs`; after changing
-  `index.html` or an engine, `node make-web.mjs`; after changing `moth.moth` or `machine.moth`,
-  `node bootstrap.mjs`. The tests say when one is out of date.
+- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs` and
+  `node make-docs.mjs` (the standard library's reference, `docs/`); after changing `index.html` or an engine,
+  `node make-web.mjs`; after changing `moth.moth` or `machine.moth`, `node bootstrap.mjs`. The tests say when
+  one is out of date.
+- **A library's public functions say what they do,** in a comment just above each `to`, which the editors'
+  hovers and the reference show; a helper starts with the library's own prefix (`stats_`), or is named in
+  make-docs.mjs's `HELPERS`.
 - **Moth files are tidy.** `moth tidy --check file.moth` says whether a file is laid out the one way Moth
   writes code, and `moth tidy file.moth` lays it out.
 - **A name can't be a word Moth uses.** `set`, `item`, `list`, `to`, `every`, `number`, `bytes` and `read`

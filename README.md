@@ -12,6 +12,8 @@ Built from scratch, with no dependencies, into programs for Windows and Linux as
 &nbsp;·&nbsp;
 <a href="#the-language">The language</a>
 &nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/">The standard library</a>
+&nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
 <a href="https://github.com/samyyy2423/moth/releases/latest">Download</a>
@@ -351,6 +353,10 @@ bytes and dictionaries:
   example programs) are built into moth, so `use "json.moth"` works in any
   folder; a file of that name beside the program comes first.
   [`stdlib.moth`](stdlib.moth) holds them, made by `node make-stdlib.mjs`.
+  [The reference](https://samyyy2423.github.io/moth/docs/) has a page for
+  each, with every function, what it takes and an example with what it says,
+  and a search of them all, made from the libraries' own comments by
+  `node make-docs.mjs`.
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
   tests it, with Moth's own test runner, on every push.
@@ -1401,6 +1407,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests, SQLite, Windows' own controls, and a notepad made with them |
+| [`make-docs.mjs`](make-docs.mjs), [`docs/`](docs) | The standard library's reference on the site: a page for each library, made from its own comments |
 | [`bootstrap.mjs`](bootstrap.mjs) | Makes the first moth.exe from the source, with Node.js |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
@@ -1432,6 +1439,9 @@ calls that led there.
 - the compiler written in Moth against the JIT, byte for byte, on every example,
   every table program and 3,000 broken ones, and bootstrapping it three stages deep
 - the neural network and the handwriting reader, on all three engines
+- the standard library's reference ([`docs.test.js`](docs.test.js)): `docs/` is
+  what [`make-docs.mjs`](make-docs.mjs) makes of the libraries, every public
+  function has a comment, and each example ran and said what's shown under it
 - `stop`, the text helpers, `ask` and `use`, including that `ask` never asks
   twice when a run is handed over, and that a mistake in a used file names it
 - `try`, dictionaries, bytes and bits, files and arguments (a run handed over

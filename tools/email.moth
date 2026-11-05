@@ -21,6 +21,22 @@
 #       say sender of got + ": " + subject of got
 #   end
 #   mail's imap_close(box)                               # pop_open, pop_count, pop_get, pop_delete, pop_close
+#   say mail's imap_folders(box)                         # each folder's name
+#   mail's imap_mark(box, uid, "\\Seen")                 # a flag on a message
+#
+#   set pop_server to mail's server("pop.example.com", 995)
+#   mail's log_in(pop_server, "me@example.com", "an app password")
+#   set pop_box to mail's pop_open(pop_server)
+#   for each n from 1 to mail's pop_count(pop_box)       # how many messages there are
+#       say subject of mail's pop_get(pop_box, n)       # each read as read_message reads one
+#       mail's pop_delete(pop_box, n)                   # deleted when the box is closed
+#   end
+#   mail's pop_close(pop_box)
+#
+#   set text to mail's message_text(m)                   # the message as it's sent, in MIME
+#   say subject of mail's read_message(text)             # Hello
+#   mail's attach_bytes(m, "notes.txt", "milk, eggs" as bytes, "text/plain")
+#   say mail's base64_of("hi") " " mail's bytes_of_base64("aGk=") as text   # aGk= hi
 #
 # A server is a record: host, port, security ("tls" for 465, 993 and 995, else "starttls"; "none" in the
 # clear, for a server of one's own), user and password (nothing until log_in), name (what it says it is,

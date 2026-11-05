@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hash.moth · Moth's standard library</title>
+  <meta name="description" content="Hashes, as Python's hashlib and hmac have them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>hash</em>.moth</h1>
+      <p>Hashes, as Python's hashlib and hmac have them.</p>
+      <p class="use"><code>use "hash.moth" as hash</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="hash.moth's functions">
+      <h2>11 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#sha256">sha256</a></li><li><a href="#sha224">sha224</a></li><li><a href="#sha1">sha1</a></li><li><a href="#md5">md5</a></li><li><a href="#sha512">sha512</a></li><li><a href="#sha384">sha384</a></li><li><a href="#digest">digest</a></li><li><a href="#hmac">hmac</a></li><li><a href="#pbkdf2">pbkdf2</a></li><li><a href="#hex_of">hex_of</a></li><li><a href="#bytes_of_hex">bytes_of_hex</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Hashes, as Python's hashlib and hmac have them: a text's or bytes' SHA-256, SHA-224, SHA-512, SHA-384, SHA-1 or MD5, as the hex digits <code>sha256sum</code> and every other program give for the same bytes (a text's are its UTF-8); HMAC, a hash with a key, which says a message came from one who knows it; and PBKDF2, a key made from a password slowly, to keep passwords. In Moth alone, so it works everywhere. (SHA-1 and MD5 are broken for keeping secrets: they're here for checking files and talking to what still uses them.)</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha256(<span class="s">&quot;abc&quot;</span>)             <span class="c"># ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</span>
+<span class="k">say</span> hash's sha256(<span class="k">read</span> <span class="k">bytes</span> <span class="s">&quot;moth.exe&quot;</span>)
+<span class="k">say</span> hash's digest(<span class="s">&quot;sha512&quot;</span>, <span class="s">&quot;abc&quot;</span>)   <span class="c"># any of them by its name: md5, sha1, sha224, sha256, sha384, sha512</span>
+<span class="k">say</span> hash's sha224(<span class="s">&quot;abc&quot;</span>)             <span class="c"># and sha384, sha512; sha1 and md5 for what still uses them</span>
+<span class="k">say</span> hash's sha384(<span class="s">&quot;abc&quot;</span>)
+<span class="k">say</span> hash's sha512(<span class="s">&quot;abc&quot;</span>)
+<span class="k">say</span> hash's sha1(<span class="s">&quot;abc&quot;</span>)
+<span class="k">say</span> hash's md5(<span class="s">&quot;abc&quot;</span>)
+<span class="k">say</span> hash's hmac(<span class="s">&quot;sha256&quot;</span>, <span class="s">&quot;key&quot;</span>, <span class="s">&quot;The quick brown fox jumps over the lazy dog&quot;</span>)
+<span class="k">say</span> hash's pbkdf2(<span class="s">&quot;sha256&quot;</span>, <span class="s">&quot;password&quot;</span>, <span class="s">&quot;salt&quot;</span>, <span class="n">1000</span>, <span class="n">32</span>)   <span class="c"># 32 bytes, as hex</span>
+<span class="k">say</span> hash's bytes_of_hex(<span class="s">&quot;ff00&quot;</span>)      <span class="c"># (2 bytes: 255, 0); hex_of(bytes) back</span></code></pre></div>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="sha256">
+          <h3><a href="#sha256"><code>hash's sha256(data)</code></a></h3>
+          <p>the hash of a text or of bytes, as 64 hex digits</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sha256 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L147">hash.moth line 147</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha256(<span class="s">&quot;abc&quot;</span>)             <span class="c"># ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</span></code></pre><pre class="says"><code>ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad</code></pre></div>
+        </section>
+        <section class="fn" id="sha224">
+          <h3><a href="#sha224"><code>hash's sha224(data)</code></a></h3>
+          <p>as 56 hex digits: SHA-256 from other starting words, its first 7</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sha224 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L152">hash.moth line 152</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha224(<span class="s">&quot;abc&quot;</span>)             <span class="c"># and sha384, sha512; sha1 and md5 for what still uses them</span></code></pre><pre class="says"><code>23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7</code></pre></div>
+        </section>
+        <section class="fn" id="sha1">
+          <h3><a href="#sha1"><code>hash's sha1(data)</code></a></h3>
+          <p>the hash of a text or of bytes, as 40 hex digits</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sha1 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L221">hash.moth line 221</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha1(<span class="s">&quot;abc&quot;</span>)</code></pre><pre class="says"><code>a9993e364706816aba3e25717850c26c9cd0d89d</code></pre></div>
+        </section>
+        <section class="fn" id="md5">
+          <h3><a href="#md5"><code>hash's md5(data)</code></a></h3>
+          <p>the hash of a text or of bytes, as 32 hex digits</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to md5 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L278">hash.moth line 278</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's md5(<span class="s">&quot;abc&quot;</span>)</code></pre><pre class="says"><code>900150983cd24fb0d6963f7d28e17f72</code></pre></div>
+        </section>
+        <section class="fn" id="sha512">
+          <h3><a href="#sha512"><code>hash's sha512(data)</code></a></h3>
+          <p>the hash of a text or of bytes, as 128 hex digits</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sha512 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L357">hash.moth line 357</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha512(<span class="s">&quot;abc&quot;</span>)</code></pre><pre class="says"><code>ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f</code></pre></div>
+        </section>
+        <section class="fn" id="sha384">
+          <h3><a href="#sha384"><code>hash's sha384(data)</code></a></h3>
+          <p>as 96 hex digits: SHA-512 from other starting words, its first 6</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sha384 with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L362">hash.moth line 362</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's sha384(<span class="s">&quot;abc&quot;</span>)</code></pre><pre class="says"><code>cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7</code></pre></div>
+        </section>
+        <section class="fn" id="digest">
+          <h3><a href="#digest"><code>hash's digest(name, data)</code></a></h3>
+          <p>a hash by its name, &quot;md5&quot;, &quot;sha1&quot;, &quot;sha224&quot;, &quot;sha256&quot;, &quot;sha384&quot; or &quot;sha512&quot;, as hex</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to digest with name, data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L467">hash.moth line 467</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's digest(<span class="s">&quot;sha512&quot;</span>, <span class="s">&quot;abc&quot;</span>)   <span class="c"># any of them by its name: md5, sha1, sha224, sha256, sha384, sha512</span></code></pre><pre class="says"><code>ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f</code></pre></div>
+        </section>
+        <section class="fn" id="hmac">
+          <h3><a href="#hmac"><code>hash's hmac(name, key, data)</code></a></h3>
+          <p>HMAC (RFC 2104): the hash, by its name, of the key and the data together, as hex</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>key</code></li><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hmac with name, key, data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L486">hash.moth line 486</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's hmac(<span class="s">&quot;sha256&quot;</span>, <span class="s">&quot;key&quot;</span>, <span class="s">&quot;The quick brown fox jumps over the lazy dog&quot;</span>)</code></pre><pre class="says"><code>f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8</code></pre></div>
+        </section>
+        <section class="fn" id="pbkdf2">
+          <h3><a href="#pbkdf2"><code>hash's pbkdf2(name, password, salt, rounds, size)</code></a></h3>
+          <p>PBKDF2 (RFC 8018) with HMAC of the hash by its name: <code>size</code> bytes made from a password and salt over so many rounds, as hex; each round is two hashes, so more rounds make guessing a password slower too</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>password</code></li><li><code>salt</code></li><li><code>rounds</code></li><li><code>size</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pbkdf2 with name, password, salt, rounds, size</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L522">hash.moth line 522</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's pbkdf2(<span class="s">&quot;sha1&quot;</span>, <span class="s">&quot;password&quot;</span>, <span class="s">&quot;salt&quot;</span>, <span class="n">1</span>, <span class="n">20</span>)</code></pre><pre class="says"><code>0c60c80f961f0e71f3a9b524af6012062fe037a6</code></pre></div>
+        </section>
+        <section class="fn" id="hex_of">
+          <h3><a href="#hex_of"><code>hash's hex_of(data)</code></a></h3>
+          <p>bytes as hex, two digits each</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hex_of with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L560">hash.moth line 560</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's hex_of(hash's bytes_of_hex(<span class="s">&quot;00ff10Ab&quot;</span>))</code></pre><pre class="says"><code>00ff10ab</code></pre></div>
+        </section>
+        <section class="fn" id="bytes_of_hex">
+          <h3><a href="#bytes_of_hex"><code>hash's bytes_of_hex(digits)</code></a></h3>
+          <p>hex, as &quot;ff00&quot; or &quot;FF00&quot;, back to its bytes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>digits</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to bytes_of_hex with digits</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/hash.moth#L569">hash.moth line 569</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;hash.moth&quot;</span> <span class="k">as</span> hash
+<span class="k">say</span> hash's bytes_of_hex(<span class="s">&quot;ff00&quot;</span>)      <span class="c"># (2 bytes: 255, 0); hex_of(bytes) back</span></code></pre><pre class="says"><code>(2 bytes: 255, 0)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

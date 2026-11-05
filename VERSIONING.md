@@ -39,6 +39,7 @@ in the same places. In particular:
 - **The standard library**, used `as` a name (`use "json.moth" as json`): every function its opening
   comment shows, or README.md documents, keeps its name, its inputs and what it does. A new function, or a
   new input with an `or`, can be added. A file's other functions are its own helpers, which can change.
+  [The reference](https://samyyy2423.github.io/moth/docs/) shows each library's functions, its helpers left out.
   Used without `as`, a file's names are mixed in with the program's, and a name the file adds in a later
   release could collide with one of the program's, so use the standard library with `as`.
 - **The moth command.** Each command and flag keeps doing what it does, and keeps the numbers it ends with:
