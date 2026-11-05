@@ -94,3 +94,14 @@ test("wasm.moth reads the files a program uses, and points at mistakes in them",
   assert.equal(made((text) => compileWasm(text, files), 'use "broken.moth"'), made((text) => compileToWasmBytes(text, { files: lookup }), 'use "broken.moth"'));
   assert.match(made((text) => compileWasm(text, files), 'use "missing.moth"'), /missing\.moth/);
 });
+
+// The step before moth.wasm: wasm.moth, with compiler.moth, is a program like any other, so it compiles itself
+// into wasm.js's bytes, and that module, run, compiles a program into the same bytes again.
+test("wasm.moth compiles itself into wasm.js's bytes, and the module it makes compiles programs as it does", () => {
+  const files = { "compiler.moth": here("compiler.moth"), "wasm.moth": here("wasm.moth") };
+  const program = 'to f with n\n    return n * 2\nend\nsay "twice 21 is " f(21)';
+  const driver = `use "wasm.moth" as webassembly\nset made to webassembly's wasm_compile(${JSON.stringify(program)}, empty list, empty list)\nsay join code of made with ","\n`;
+  const itself = compileWasm(driver, files).bytes;
+  assert.ok(Buffer.compare(Buffer.from(itself), Buffer.from(compileToWasmBytes(driver, { files: (name) => files[name] }).bytes)) === 0);
+  assert.equal(onWasmMoth(driver, { files: (name) => files[name], wasmFiles: files, maxSteps: Infinity }).said[0], [...compileWasm(program).bytes].join(","));
+});
