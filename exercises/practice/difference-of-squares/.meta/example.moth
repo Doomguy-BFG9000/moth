@@ -1,0 +1,12 @@
+to square_of_sum with n
+    set sum to n * (n + 1) / 2
+    return sum * sum
+end
+
+to sum_of_squares with n
+    return n * (n + 1) * (2 * n + 1) / 6
+end
+
+to difference with n
+    return square_of_sum(n) - sum_of_squares(n)
+end

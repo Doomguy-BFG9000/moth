@@ -1,0 +1,7 @@
+to clock_at with hours, minutes
+    fail with "delete this line, and tell the time"
+end
+
+to plus_minutes with hours, minutes, more
+    fail with "delete this line, and move the clock on"
+end

@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "reverse_string.moth"
+    ],
+    "test": [
+      "reverse_string.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Give back text backwards."
+}

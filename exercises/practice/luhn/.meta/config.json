@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "luhn.moth"
+    ],
+    "test": [
+      "luhn.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Check a number with the Luhn algorithm, as card numbers are checked."
+}

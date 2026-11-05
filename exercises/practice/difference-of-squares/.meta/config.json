@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "difference_of_squares.moth"
+    ],
+    "test": [
+      "difference_of_squares.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "The square of a sum, the sum of squares, and the difference."
+}

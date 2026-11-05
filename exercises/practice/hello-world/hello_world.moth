@@ -1,0 +1,3 @@
+to hello
+    fail with "delete this line, and give back the greeting"
+end

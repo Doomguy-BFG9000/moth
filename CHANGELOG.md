@@ -11,6 +11,12 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
 - **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
   question, `wait`'s amount or `play note`'s note or time found it had no value.
+- **A cookbook, examples and exercises.** [The cookbook](https://samyyy2423.github.io/moth/docs/cookbook/) has
+  10 recipes for real work (CSV, JSON, web APIs, a web API with a database, the command line, statistics and
+  charts, dates, every core, tests and text), [the examples](https://samyyy2423.github.io/moth/docs/examples.html)
+  8 whole programs that open in the playground with a click, and [`exercises/`](exercises/) 20 problems to
+  practise on, with tests, in Exercism's track format. Every recipe and example is run, and every exercise's
+  tests checked, each time Moth changes.
 - **The standard library's reference**, at [samyyy2423.github.io/moth/docs/](https://samyyy2423.github.io/moth/docs/):
   a page for each library, with what it's for and each of its functions, what it takes and an example with
   what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,

@@ -1,0 +1,44 @@
+# Secret messages
+# Julius Caesar's cipher moves each letter a few places along the alphabet. Moving it back reads the message,
+# and trying all 25 shifts breaks it: the one with the most common English letters in it wins.
+
+set alphabet to "abcdefghijklmnopqrstuvwxyz"
+
+to shifted with message, by
+    set made to ""
+    for each c in split message by ""
+        set at to position of (lowercase of c) in alphabet
+        if at is 0
+            set made to made + c
+        else
+            set moved to item (remainder of (at - 1 + by) divided by 26 + 1) of alphabet
+            if c is not lowercase of c
+                set moved to uppercase of moved
+            end
+            set made to made + moved
+        end
+    end
+    return made
+end
+
+to score_of with message
+    set score to 0
+    for each c in split (lowercase of message) by ""
+        if c is in list of "e", "t", "a", "o", "i", "n", "s", "h", "r"
+            add 1 to score
+        end
+    end
+    return score
+end
+
+set secret to shifted("Meet me by the old lamp at nine.", 7)
+say "sent: " + secret
+say "read: " + shifted(secret, -7)
+
+set best to 0
+for each by from 1 to 25
+    if score_of(shifted(secret, -by)) is greater than score_of(shifted(secret, -best))
+        set best to by
+    end
+end
+say "broken: the shift was " + best + ", and it says " + shifted(secret, -best)

@@ -1,0 +1,13 @@
+to abbreviate with phrase
+    set made to ""
+    set starting to yes
+    for each c in split phrase by ""
+        if c is " " or c is "-"
+            set starting to yes
+        else if lowercase of c is in "abcdefghijklmnopqrstuvwxyz" and starting
+            set made to made + uppercase of c
+            set starting to no
+        end
+    end
+    return made
+end
