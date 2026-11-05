@@ -5901,3 +5901,22 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   whole numbers written on the right, in functions, loops and sums, and the
   mistakes with their lines and calls: in machine code against the
   JavaScript engine, and on the VM, the JIT and WebAssembly, which agree.
+## 139. Asking which Moth this is
+
+- **Why.** A bug report or an install check needs the release version of the
+  program actually running. `moth --version` and `moth version` each say one
+  line, `moth MAJOR.MINOR.PATCH`, on standard output and end with 0.
+- **One source, carried along.** `package.json` already has the release
+  version. bootstrap.mjs includes that file in the executable, and cli_main
+  reads it only for a version command. Built-in files are read before disk
+  files, so an installed moth needs no manifest beside it, and another
+  project's package.json cannot change its answer. Building moth with itself
+  includes package.json too, just as it includes moth-debugger.moth.
+- **Arguments.** Only a version command on its own takes this path. Extra
+  arguments use the usual wrong-usage message and exit code 2. The existing
+  `moth build --version` flag still sets the built program's version.
+- **Tested.** machine.test.js runs both commands from a renamed copy in a
+  folder without the source or manifest, then with a different manifest and
+  invalid JSON. It checks exact output, empty standard error and exit code 0,
+  rejects extra arguments, and checks that moth built by itself has the same
+  bytes and reports the release version away from the source folder.
