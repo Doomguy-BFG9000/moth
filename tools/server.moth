@@ -18,7 +18,7 @@
 # body, its type from its name). A mistake in it is sent as 500, and said to the error output, and the server
 # goes on.
 #
-# Many connections at once (DESIGN §107): the server waits for whichever of them has something to say, reads
+# Many connections at once (DESIGN §110): the server waits for whichever of them has something to say, reads
 # what has come and answers when a whole request is there, so one client that sends a byte at a time, or that
 # stops halfway, holds up nobody. A connection is kept open for the requests after the first (HTTP/1.1
 # keep-alive), and answers them in the order they came, even when they come together. Each request is given
@@ -38,7 +38,7 @@
 # serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. stop_serving()
 # ends serve() once the requests it's answering are sent. Built with --allow-libraries.
 #
-# Workers (DESIGN §108): set_workers(4), or serve_on_workers(8080, answer, 4), answers on 4 workers at once,
+# Workers (DESIGN §111): set_workers(4), or serve_on_workers(8080, answer, 4), answers on 4 workers at once,
 # each with a core, its own copy of the program's variables and its own connections, so a handler that does a
 # lot of work holds up only the connections of its own worker. A handler there changes its worker's copy of a
 # variable, which no other worker sees, so what is to be kept and shared goes in a database or a file.

@@ -33,7 +33,7 @@
 # wait_for_flag waits until it's raised. wait_for_all(jobs) gives what each task gave, and wait_for_any(jobs)
 # the first of them to end. `job has ended` asks without waiting.
 #
-# Workers (`start f(x) on another core`, DESIGN §108) share nothing: each is given copies, so a lock, flag or
+# Workers (`start f(x) on another core`, DESIGN §111) share nothing: each is given copies, so a lock, flag or
 # queue given to one, or among the program's variables it starts with, is its own, and keeps its own tasks in
 # step. wait_for_all and wait_for_any take workers as they take tasks.
 #

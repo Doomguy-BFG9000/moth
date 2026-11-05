@@ -794,6 +794,16 @@ export const BUILTINS = [
   { name: "has ended", needs: [["record"]], gives: "yes/no", run: ([task], error) => taskEnded(task, error) },
   // `start count(10) on another core`: each engine makes the call itself (see startWorker)
   { name: "start worker", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: (_, error) => error("a worker is started by the engine") },
+  // `ask for 64 bytes` (DESIGN §108): the next that many bytes of the input, or as many as come before it ends, waited
+  // for but not to a line's end, as a language server reads what an editor sends. Only machine code reads it so.
+  {
+    name: "input bytes", needs: [["number"]], gives: "bytes",
+    run: ([n], error) => {
+      if (typeof n === "number") n = canon(n);
+      if (!Number.isInteger(n) || n < 0) error(`'bytes' needs a whole number in front of it, not ${described(n)}`);
+      error("'ask for ... bytes' reads the input as it comes, which only a program moth builds can do");
+    },
+  },
 ];
 
 // `x to the power of n` (DESIGN §66): n a whole number to 15 digits, as an item's number is, and x multiplied by
@@ -905,7 +915,7 @@ function waitedFor(task, error) {
   return jobs().tasks.get(task.task);
 }
 
-// Workers (DESIGN §108): `start count(10) on another core` gives one, a record of its number. In a program moth
+// Workers (DESIGN §111): `start count(10) on another core` gives one, a record of its number. In a program moth
 // build makes, a worker is a thread with memory of its own: a copy of the program's variables as they were
 // when it started, and of its function's inputs, which it changes as it likes and no one else sees, and a copy
 // of what it gives back, or of the mistake it ended with, for `wait for`. Here it runs to its end when it's

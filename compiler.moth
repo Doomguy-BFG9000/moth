@@ -730,7 +730,8 @@ to parse with tokens, reading
         for each p in fn_params
             add -1 to fn_kinds
         end
-        add (record with kind "define", name named, params fn_params, kinds fn_kinds, body fn_body, at t, order 0, native nothing, defaults nothing) to hoisted
+        add (record with kind "define", name named, params fn_params, kinds fn_kinds, body fn_body, at t, order 0, native nothing, defaults nothing,
+            types nothing, gives nothing, made_kind nothing) to hoisted
         return named
     end
 
@@ -812,7 +813,7 @@ to parse with tokens, reading
         return record with kind "builtin", name "items", args slice_args, at t
     end
 
-    # `start count(10)`: the builtin, "start" or, `on another core`, "start worker" (DESIGN §108), and the call;
+    # `start count(10)`: the builtin, "start" or, `on another core`, "start worker" (DESIGN §111), and the call;
     # or nothing if what follows `start` isn't one (or, for a line of its own, if anything follows it)
     to start_rest with whole_line
         set started to primary()
@@ -1234,7 +1235,8 @@ to parse with tokens, reading
         set call to record with kind "builtin", name "library call", args (list of first_node), at t
         set body to list of (record with kind "return", value call, at t)
         set native to record with symbol symbol, types types, gives gives, libraries (list of first), structures nothing, callbacks nothing
-        return record with kind "define", name fn_name, params params, kinds kinds, body body, at t, order functions_made, native native
+        return record with kind "define", name fn_name, params params, kinds kinds, body body, at t, order functions_made, native native,
+            types nothing, gives nothing, made_kind nothing
     end
 
     # whether a type is `a ` and one of these names
@@ -1541,8 +1543,14 @@ to parse with tokens, reading
         if word("to")
             set fn_name to take_name("a function name")
             set fn_inputs to inputs_of()
+            set fn_gives to nothing
+            if word("gives") # `to area with w, h gives a number`
+                set fn_gives to gives_type()
+            end
             set made to func(fn_name, params of fn_inputs, t)
             set kinds of made to kinds of fn_inputs
+            set types of made to types of fn_inputs
+            set gives of made to fn_gives
             set defaults of made to nothing
             if any_fallback of fn_inputs
                 set defaults of made to fallbacks of fn_inputs
@@ -2057,8 +2065,14 @@ to parse with tokens, reading
     end
 
     # the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
-    # `a number`, `text`, `yes or no`...: what an input says it is, by its place in kind_phrases, after its `as`
-    to input_kind
+    # What an input says it is, after its `as`, as moth.js's inputType has it: a record of its place in
+    # kind_phrases (`kind`), which each call checks, and what it says beyond that, as written (`type`), which
+    # only the checker reads, or nothing: `a dog` is checked as a record, `a list of numbers` as a list
+    to input_type
+        if words_at(pos, list of "a", "list", "of")
+            set pos to pos + 3
+            return record with kind 3, type "a list of " + list_holds()
+        end
         set found to -1
         set n to 0
         for each phrase in kind_phrases
@@ -2076,11 +2090,52 @@ to parse with tokens, reading
             end
             add 1 to n
         end
-        if found is -1
-            expected("what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function')")
+        if found is not -1
+            set pos to pos + length of item (found + 1) of kind_phrases
+            return record with kind found, type nothing
         end
-        set pos to pos + length of item (found + 1) of kind_phrases
-        return found
+        set it_article to peek()
+        set it_named to item (pos + 1) of tokens
+        if (is_word("a") or is_word("an")) and not nl of it_named and type of it_named is "word" and not contains(reserved, value of it_named)
+            set pos to pos + 2
+            return record with kind 4, type value of it_article + " " + value of it_named
+        end
+        expected("what kind of value it is ('a number', 'text', 'yes or no', 'a list', 'a record', 'a dictionary', 'bytes' or 'a function', or a kind's name, like 'a dog')")
+    end
+
+    # what `a list of` holds, as moth.js's listHolds has it: `numbers`, `lists of numbers`, `dogs`...
+    to list_holds
+        if words_at(pos, list of "lists", "of")
+            set pos to pos + 2
+            return "lists of " + list_holds()
+        end
+        if words_at(pos, list of "yes", "or", "no")
+            set pos to pos + 3
+            return "yes or no"
+        end
+        set lh_t to peek()
+        if nl of lh_t or type of lh_t is not "word" or (contains(reserved, value of lh_t) and value of lh_t is not "bytes")
+            expected("what the list holds, like 'numbers', 'text' or 'dogs'")
+        end
+        set pos to pos + 1
+        return value of lh_t
+    end
+
+    # what a function says it gives, after its `gives`, as moth.js's givesType has it
+    to gives_type
+        if word("nothing")
+            return "nothing"
+        end
+        set gt_said to input_type()
+        set gt_text to type of gt_said
+        if gt_text is nothing
+            set gt_text to (join item (kind of gt_said + 1) of kind_phrases with " ")
+        end
+        if not words_at(pos, list of "or", "nothing")
+            return gt_text
+        end
+        set pos to pos + 2
+        return gt_text + " or nothing"
     end
 
     to func with fn_name, params, t
@@ -2092,7 +2147,8 @@ to parse with tokens, reading
         set body to block_end(t)
         set fn_depth to fn_depth - 1
         set loop_depth to outside_loops
-        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t, order order, native nothing
+        return record with kind "define", name fn_name, params params, kinds empty list, body body, at t, order order, native nothing,
+            types nothing, gives nothing, made_kind nothing
     end
 
     to if_rest with t
@@ -2417,6 +2473,13 @@ to parse with tokens, reading
             return record with kind "length", subject unary(), at t
         end
         if word("ask") # `ask "How old are you? "`
+            if word("for") # `ask for 64 bytes`: what follows is `64 bytes`, the builtin that makes bytes, with the count in it
+                set ask_count to additive()
+                if kind of ask_count is not "builtin" or name of ask_count is not "bytes"
+                    fail with problem(at of ask_count, "say how many bytes, as in 'ask for 64 bytes'")
+                end
+                return record with kind "builtin", name "input bytes", args args of ask_count, at t
+            end
             return record with kind "ask", question additive(), at t
         end
         if word("read") # `read "notes.txt"`, `read bytes "photo.png"`, `read table "sales.csv"`
@@ -2918,6 +2981,8 @@ to parse with tokens, reading
     to inputs_of
         set in_params to empty list
         set in_kinds to empty list
+        set in_types to empty list
+        set in_typed to no
         set in_fallbacks to empty list
         set in_any to no
         if word("with")
@@ -2926,9 +2991,15 @@ to parse with tokens, reading
                 set input_at to peek()
                 add take_name("an input name") to in_params
                 if word("as")
-                    add input_kind() to in_kinds
+                    set in_said to input_type()
+                    add kind of in_said to in_kinds
+                    add type of in_said to in_types
+                    if type of in_said is not nothing
+                        set in_typed to yes
+                    end
                 else
                     add -1 to in_kinds
+                    add nothing to in_types
                 end
                 set in_fallback to nothing
                 if word("or")
@@ -2944,7 +3015,10 @@ to parse with tokens, reading
                 set in_another to match(",") or word("and")
             end
         end
-        return record with params in_params, kinds in_kinds, fallbacks in_fallbacks, any_fallback in_any
+        if not in_typed
+            set in_types to nothing # what the inputs say beyond kind_phrases, for the checker, if any says more
+        end
+        return record with params in_params, kinds in_kinds, types in_types, fallbacks in_fallbacks, any_fallback in_any
     end
 
     # whether `kind` starts a kind: a name after it, then `with` or `from` on the same line, or the line's end
@@ -3013,7 +3087,8 @@ to parse with tokens, reading
             add (record with kind "setField", name own of mk_o, target (record with kind "name", name mk_made, at t), value mk_fn_value, at t) to mk_body
         end
         add (record with kind "return", value (record with kind "name", name mk_made, at t), at t) to mk_body
-        set mk_maker to record with kind "define", name mk_name, params mk_params, kinds kinds of mk_inputs, body mk_body, at t, order 0, native nothing, defaults nothing
+        set mk_maker to record with kind "define", name mk_name, params mk_params, kinds kinds of mk_inputs, body mk_body, at t, order 0, native nothing, defaults nothing,
+            types types of mk_inputs, gives nothing, made_kind mk_name
         if any_fallback of mk_inputs
             set defaults of mk_maker to fallbacks of mk_inputs
         end
@@ -3195,7 +3270,8 @@ to own_calls with reading, body
                 add (record with kind "name", name p, at t) to inputs
             end
             set gave to record with kind "return", value (record with kind "call", name own, args inputs, at t), at t
-            add (record with kind "define", name helper, params params, kinds kinds, body (list of tried, gave), at t, order 0, native nothing, defaults nothing) to helpers
+            add (record with kind "define", name helper, params params, kinds kinds, body (list of tried, gave), at t, order 0, native nothing, defaults nothing,
+                types nothing, gives nothing, made_kind nothing) to helpers
             set name of call to helper
         end
     end
