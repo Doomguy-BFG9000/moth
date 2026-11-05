@@ -6,6 +6,17 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **Installers.** `irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex` on
+  Windows and `curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh` on
+  Linux install the latest release, checked against its `SHA256SUMS.txt`, and put `moth` on PATH. Scoop
+  installs it from `packaging/scoop/moth.json`, and winget's manifests for `samyyy2423.Moth` are ready to
+  submit. Each release now has `moth_<version>_amd64.deb` for Debian and Ubuntu, and an image,
+  `ghcr.io/samyyy2423/moth`, on distroless Debian.
+- **Signed releases.** Every file of a release is signed with Sigstore (a `.sigstore.json` bundle, a `.sig`
+  and a `.pem` each), attested by GitHub, and described by an SBOM, `moth-<version>.cdx.json`.
+  [docs/verifying-releases.md](docs/verifying-releases.md) says how to check them with `cosign verify-blob`
+  and `gh attestation verify`. Before signing, the release workflow builds moth from the tag's source and
+  checks the release's programs are those bytes, and the fixed point, on Linux and on Windows.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.

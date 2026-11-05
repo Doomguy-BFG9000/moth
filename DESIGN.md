@@ -5221,3 +5221,192 @@ engines stay: as the fallback, and as what the tests compare against.
   the package's names), built as a WebAssembly module and run, and tested
   with `moth test`; a json.moth in the package beating moth's; and a name
   the library hasn't, still a mistake.
+
+## 128. Installers
+
+- **Why.** A release was two programs to download, rename and put on PATH by
+  hand, and nothing a package manager could install. People on Windows reach
+  for winget or Scoop, on Debian and Ubuntu for a .deb, in CI for an image, and
+  everyone for one line to paste.
+- **The release's bytes, everywhere.** Every installer takes `moth-windows.exe`
+  or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
+  the image's are `moth-linux` byte for byte, and winget, Scoop and the two
+  scripts install the release's own download. So each is checked by the
+  release's own sums and signatures (§129), and the fixed point (§25) holds for
+  what people install, not only for what they download.
+- **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
+  installer and the en-US locale) are written to schema 1.28.0, the one
+  winget-pkgs' pull request checklist asks for: `InstallerType: portable` and
+  `Commands: [moth]`, so winget links the download as the command `moth`. They
+  live in `packaging/winget/manifests/s/samyyy2423/Moth/<version>/`, as in
+  winget-pkgs, so a submission is that folder copied in. Submitting is
+  Samyak's, by hand (docs/installers.md).
+- **Scoop.** `packaging/scoop/moth.json` installs straight from its raw URL on
+  `main`. `checkver: github` finds the newest release, and `autoupdate` names
+  its program and `SHA256SUMS.txt`, where Scoop finds the sum by the file's
+  name, so Scoop's own `checkver.ps1 -Update`, or a bucket's bot, writes the
+  next version.
+- **One generator.** `packaging/manifests.mjs` writes both from a version, the
+  Windows program's SHA-256 and a day. The files here are its output for 1.11.0
+  (a test holds them to it), and the release workflow writes the next
+  version's into its `manifests` artifact, so nothing is typed twice.
+- **The .deb.** `packaging/debian/build-deb.sh` builds it with `dpkg-deb`
+  alone: `/usr/bin/moth`, a machine-readable copyright file (Apache 2.0 with
+  the NOTICE, and DejaVu's license in full, since its letters are in
+  `machine.moth`), `md5sums`, and `Installed-Size` counted as
+  dpkg-gencontrol counts it. moth is static, so it depends on nothing; it
+  suggests git and curl (`moth add` and `moth search` run them) and OpenSSL 3
+  (a program moth builds loads it for a secure connection). It refuses a file
+  that isn't an x86-64 ELF, so the Windows program can't be packaged by
+  mistake. Every file's time is `SOURCE_DATE_EPOCH` and the owner root, so the
+  same `moth-linux` gives the same .deb, on one CPU or four.
+- **The image: distroless, because moth allows it.** `moth-linux` has no
+  dynamic section, so it would run on an empty image. But a program moth builds
+  that says `use the library` is a dynamic ELF, which needs glibc's loader, and
+  `http.moth` and `sockets.moth` load OpenSSL 3, so `static` would break `moth
+  run` for them. `gcr.io/distroless/base-debian13` adds only glibc, OpenSSL, CA
+  certificates and time zones: about 15 MB compressed with moth. It runs as
+  distroless's nonroot user, and `--user "$(id -u):$(id -g)"` lets it write into
+  the folder it's given. It has no shell, git or curl, so `moth add` and `moth
+  search` don't work in it, and it can't be a CI job's container; `COPY --from`
+  puts moth into an image that can. Debian 13's slim image with git, curl and
+  OpenSSL is 71.7 MB compressed, about five times the size, for those two
+  commands. The base is
+  pinned by its digest, so it changes only when someone changes that line.
+- **install.sh** is POSIX `sh`, every line inside `main`, which runs only once
+  the whole script has arrived, so a download cut short does nothing. It needs
+  curl or wget, and `sha256sum`, `shasum` or `openssl`. It installs nothing
+  unless `moth-linux`'s SHA-256 is the one `SHA256SUMS.txt` gives, copies it in
+  beside the old one and renames it over it (so a moth that's running carries
+  on), and adds one `export PATH` line to `~/.profile` and the shell's own file
+  (`.bashrc`, `.zshrc`, or fish's `conf.d`) if the folder isn't on PATH, and
+  never twice. With curl it takes only HTTPS, redirects included.
+- **install.ps1** works in Windows PowerShell 5.1 (asking for TLS 1.2, which
+  5.1 may not offer by itself) and in PowerShell 7. Run through `irm | iex`, it
+  runs in the caller's session, so all of it, its options too, is inside one
+  script block: no variable, function, strict mode or `$ErrorActionPreference`
+  of its own stays behind (its options were first a `param` block at the top,
+  which `iex` set in the caller's session, and the test found it). It adds the
+  folder to the user's PATH as the registry keeps it, leaving `%USERPROFILE%`
+  and the like unexpanded, then sets and removes a variable through .NET so
+  Windows tells new terminals PATH changed. A `moth.exe` that's running can't
+  be written over, but it can be renamed out of the way, so that's what
+  happens.
+- **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
+  same place as the program, so they catch a broken download, not a changed
+  release. Checking a signature would mean installing cosign first; the
+  signatures are for people who want to check who made it (§129).
+- **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
+  `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
+  with its fields, and comes out the same twice; and install.sh, given a
+  release on the disk, installs it once its sum matches, puts it on PATH once
+  however often it runs, and installs nothing when the sum is wrong or
+  missing. In CI (`.github/workflows/packaging.yml`), on each change: the
+  winget and Scoop manifests against their schemas, from winget-cli and Scoop
+  at a fixed commit, and their URLs downloaded and summed; on Windows, `winget
+  validate` and `winget install` from the manifests, `scoop install` from
+  `moth.json`, and checkver and autoupdate turning a 1.10.0 manifest into the
+  newest release's, with the sum from its `SHA256SUMS.txt`; install.ps1 in
+  PowerShell 7 and 5.1, from GitHub, run twice, through `iex` in a session of
+  its own, and refusing a wrong sum; install.sh from GitHub on Ubuntu, piped
+  into `sh`, and on Alpine with BusyBox; the .deb installed, run and removed on
+  the runner and on Debian 12 and 13 and Ubuntu 22.04 and 24.04; the image
+  running a program, building one, and loading C's library and OpenSSL.
+  shellcheck reads the shell scripts. winget 1.11, on the runner, validates the
+  1.28 manifests but warns it doesn't know their schema header's address, and
+  that warning alone is let through.
+
+## 129. Signed releases, attested, with an SBOM
+
+- **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
+  comes from the same place as the program, so anyone who could change one
+  could change the other. A company also asks what's in a program (an SBOM)
+  and where it was built (provenance), and wants to check both without
+  trusting a key it has to find.
+- **The release stays a fixed point.** A release is still made by hand. The
+  workflow signs what's there and adds files beside it, and changes no byte of
+  `moth-windows.exe`, `moth-linux` or `SHA256SUMS.txt`. Before it signs
+  anything, it builds moth from the tag's source with
+  `packaging/release-build.sh`: Node.js makes the first moth, which builds
+  itself into the same bytes and the Windows moth into the bytes Node.js makes
+  of it, and the release's two programs must be exactly those. A Windows job
+  then has `moth-windows.exe` build itself and the Linux moth, byte for byte.
+  So GitHub's provenance, "built by this workflow from this commit", is true
+  of the very bytes Samyak uploaded, even though he built them by hand.
+- **It would have stopped 1.11.0.** Run on the v1.11.0 tag, the script finds
+  the release's programs aren't what its source builds: they were built
+  without `--include moth-debugger.moth`, so they're the fixed point of
+  `moth build moth.moth --allow-read --allow-write --allow-run` (the
+  release's Linux moth builds both that way, byte for byte), not of the
+  documented command or `node bootstrap.mjs`, and their `moth debug` needs
+  `moth-debugger.moth` in the folder. Making a release with the script
+  leaves no way to forget it.
+- **Sigstore, keyless.** cosign signs each file with a certificate Fulcio gives
+  to this workflow, through GitHub's OIDC token, for a few minutes, and the
+  signature goes into Rekor, Sigstore's public log. There's no key to keep or
+  lose, and the certificate names the workflow and the tag, so a user checks
+  the identity
+  `https://github.com/samyyy2423/moth/.github/workflows/release.yml@refs/tags/v<version>`:
+  a copy of the workflow elsewhere, or a run on a branch, has another.
+- **.sig, .pem, and a bundle.** cosign 3 checks only Sigstore bundles, and
+  cosign 2 the signature and certificate as files too. So each file gets
+  `.sig` (base64), `.pem` (the certificate, decoded to plain PEM, which
+  `openssl` reads) and `.sigstore.json`, the bundle, which has both and the
+  log's proof and can be checked offline. The workflow signs with cosign
+  2.6.5, which writes all three at once. Sigstore's public instance still logs
+  to Rekor 1, which cosign 2 can search by a signature, so `.sig` and `.pem`
+  alone work too.
+- **GitHub's attestations.** `actions/attest-build-provenance` attests every
+  file (SLSA provenance: the repository, commit, workflow and run), and
+  `actions/attest` attests the SBOM of the two programs, so `gh attestation
+  verify` checks both. They're kept by GitHub for the repository, and signed
+  through Sigstore too.
+- **The SBOM** is CycloneDX 1.6 JSON, written by `packaging/sbom.mjs` with no
+  dependencies. It lists the release's files with SHA-256 and SHA-512, then
+  what each program is built from: the files `moth.moth` is compiled with (a
+  test holds the list to `bootstrap.mjs`'s), the files the standard library
+  and the `--web` page are made from (from `make-stdlib.mjs`'s and
+  `make-web.mjs`'s own lists), each with its sum, and DejaVu's letters in
+  `machine.moth`, under Bitstream Vera's license. moth links no library, so a
+  composition says the list is complete. Its time is the commit's and its
+  serial number is made from what it says, so the same release gives the same
+  SBOM.
+- **The image** is pushed as `<version>` and `latest`, then attested (with the
+  attestation pushed to the registry) and signed by its digest. A pre-release
+  (`v1.12.0-rc.1`) isn't `latest`, and its .deb's version is `1.12.0~rc.1`,
+  which Debian puts before `1.12.0`.
+- **A dry run sends nothing anywhere.** A dry run does every step, into the
+  run's artifacts, with three changes. It builds from the commit's source,
+  since there's no release (on a tag, it checks that release's files). It
+  signs through Sigstore's staging instance (`fulcio.sigstage.dev`,
+  `rekor.sigstage.dev`, trusted from staging's TUF root, pinned by its sum),
+  which is kept for trying things, so nothing reaches the log people verify
+  against. And it skips the attestations, the push and the upload, since
+  GitHub's attestations would be kept for the repository for all to see. The
+  last job lists what it would have uploaded. A push that changes `packaging/`,
+  `release.yml` or `bootstrap.mjs` does one, and so does Run workflow.
+- **Least privilege.** The workflow's token has no permissions by default.
+  Building and checking read the repository; only signing can get an OIDC
+  token; only the image job can write packages; and only the last job, which
+  uploads to the release, can write to the repository. Each job checks the
+  files it's given against the sums the build job gave as an output, not as an
+  artifact, so a file changed between jobs isn't signed or uploaded. Actions
+  are pinned to commits, and cosign to a version the installer checks against
+  Sigstore's own signature.
+- **Release by hand, again.** With dry-run off, Run workflow on a release's tag
+  does that release's run again, replacing what it uploaded; run anywhere else,
+  it refuses, since its signatures would name a branch.
+- **Not yet:** immutable releases. GitHub can lock a release's files once it's
+  published, which would stop this workflow adding to it. Turning that on means
+  publishing the release from the workflow, which is a change to how releases
+  are made, so it's Samyak's to decide.
+- **Tested.** Dry runs of the whole workflow on this branch: the build and the
+  fixed point on Linux, then on Windows; the SBOM and the new manifests against
+  CycloneDX's, winget's and Scoop's schemas; the .deb installed and run; every
+  file signed through Sigstore's staging instance and checked both ways (the
+  bundle, and the `.sig` with the `.pem`) against the workflow's identity on
+  the branch; the image built and run. The release's own run (attestations,
+  `gh attestation verify`, the push, the image's signature and the upload)
+  runs only on a real release, so it's checked step by step against the
+  actions' documentation, and its first run is the next release's. The script
+  was also run on the v1.11.0 tag, where it stopped as above.
