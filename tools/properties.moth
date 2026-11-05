@@ -64,6 +64,7 @@ to properties_none with raw
     return empty list
 end
 
+# whole numbers from low to high: near 0 (or the end nearer it) first, and the two ends now and then
 to whole_number with low, high
     properties_check_range("whole_number", low, high)
     if (low rounded) is not low or (high rounded) is not high
@@ -73,6 +74,7 @@ to whole_number with low, high
     return properties_generator((function with state, size gives properties_whole_made(state, size, low, high, target)), (function with raw gives properties_toward(raw, target)), properties_same)
 end
 
+# numbers with up to 3 decimals, from low to high
 to decimal with low, high
     properties_check_range("decimal", low, high)
     set bottom to ((low * 1000) rounded up)
@@ -84,14 +86,17 @@ to decimal with low, high
     return properties_generator((function with state, size gives properties_whole_made(state, size * 10, bottom, top, target)), (function with raw gives properties_decimal_shrinks(raw, target, bottom, top)), (function with raw gives raw / 1000))
 end
 
+# yes or no
 to yes_or_no
     return properties_generator((function with state, size gives properties_below(state, 2) is 1), properties_yes_shrinks, properties_same)
 end
 
+# text of letters, digits, spaces, punctuation, tabs and new lines, and some letters beyond ASCII
 to any_text
     return text_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'-_()+=*/<>@#$%&\"\\\n\téßλ中")
 end
 
+# text of only those letters, up to 40 of them: text_of("ab") makes "", "b", "ab", "abba" and the rest
 to text_of with letters
     set pool to split letters by ""
     if length of pool is 0
@@ -102,6 +107,7 @@ to text_of with letters
     return properties_generator((function with state, size gives properties_list_made(state, size, one_letter, 40)), (function with raw gives properties_list_shrinks(raw, one_letter)), (function with raw gives join raw with ""))
 end
 
+# one of the list's values; the first is the simplest
 to one_of with values
     if length of values is 0
         fail with "one_of needs a list with at least one value in it"
@@ -109,6 +115,7 @@ to one_of with values
     return properties_generator((function with state, size gives properties_below(state, length of values) + 1), properties_earlier, (function with raw gives item raw of values))
 end
 
+# a value one of the generators makes
 to either_of with generators
     if length of generators is 0
         fail with "either_of needs a list with at least one generator in it"
@@ -116,29 +123,36 @@ to either_of with generators
     return properties_generator((function with state, size gives properties_either_made(state, size, generators)), (function with raw gives properties_either_shrinks(raw, generators)), (function with raw gives properties_view(item (which of raw) of generators, inner of raw)))
 end
 
+# lists of up to 20 of what the generator makes
 to list_of with generator
     return properties_generator((function with state, size gives properties_list_made(state, size, generator, 20)), (function with raw gives properties_list_shrinks(raw, generator)), (function with raw gives properties_views(generator, raw)))
 end
 
+# dictionaries of up to 10 keys, each made by key_maker, and their values by value_maker
 to dictionary_of with key_maker, value_maker
     set pair to properties_pair(key_maker, value_maker)
     return properties_generator((function with state, size gives properties_list_made(state, size, pair, 10)), (function with raw gives properties_list_shrinks(raw, pair)), (function with raw gives properties_dictionary(raw, key_maker, value_maker)))
 end
 
+# what change makes of each value the generator makes
 to mapped with generator, change
     return properties_generator(make of generator, shrink of generator, (function with raw gives change(properties_view(generator, raw))))
 end
 
+# only the values the generator makes that test says yes to
 to kept with generator, test
     return properties_generator((function with state, size gives properties_kept_made(state, size, generator, test)), (function with raw gives properties_kept_shrinks(raw, generator, test)), view of generator)
 end
 
 # ----- trying a property -----
 
+# Tries the property on 100 values the generator makes, small ones first, and if one shows it doesn't hold
+# (it gives no, or makes a mistake), makes that value as simple as it can and fails with it and the seed
 to for_all with generator, property
     for_all_with(empty dictionary, generator, property)
 end
 
+# for_all, with a dictionary of "tries" (100 if it isn't given) and "seed" (one at random if it isn't)
 to for_all_with with settings, generator, property
     set tries to 100
     if "tries" is in settings
@@ -158,6 +172,7 @@ to for_all_with with settings, generator, property
     end
 end
 
+# count values the generator makes from the seed, to see what it makes
 to sample with generator, seed, count
     set state to properties_state(seed)
     set made to empty list
