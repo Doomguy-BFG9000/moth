@@ -1063,6 +1063,8 @@ moth run hello.moth Sam 3                build it beside itself, run it with tho
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
 moth coverage hello.moth Sam 3           the same, then how many of its lines ran, and which didn't, file by file
+moth coverage hello.test.moth            run its tests as moth test does, then which lines of the files they test ran
+moth coverage --lcov                     every .test.moth file's here, and lcov.info too, for CI services and editors
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth kernel                              run cells for Jupyter's Moth kernel (editors/jupyter), each with what the ones before made
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
@@ -1233,6 +1235,27 @@ $ moth test tools/json.test.moth
 ✓ test_escapes
 ✓ test_mistakes
 5 passed
+```
+
+`moth coverage` runs a file's tests the same way, or with no file every
+`.test.moth` file here and in the folders inside, and then says which lines of
+the files they test ran: every test's runs added up, each file's share, and
+the lines no test ran, so a branch never taken or a function never called
+shows. It leaves out the test files themselves, moth's own copies of the
+standard library, and packages. `--lcov` writes the same to `lcov.info`, which
+Codecov, Coveralls and editors' coverage views read. Given a program instead,
+it runs the program and says the same of its run.
+
+```text
+$ moth coverage tools/json.test.moth
+✓ test_values
+✓ test_lists_and_objects
+✓ test_spaces_and_lines
+✓ test_escapes
+✓ test_mistakes
+5 passed
+moth coverage: 141 of 151 lines run (93.4%)
+  tools/json.moth: 141 of 151 (93.4%), not run: 73, 136-137, 139, 150, 173, 177, 179, 199, 216
 ```
 
 A program moth makes asks before it reads a file, writes one, goes online,
@@ -1511,7 +1534,10 @@ calls that led there.
   against the checker, its own problems word for word; `moth test` on the
   tests in Moth here, said exactly as `test()` says them; and `moth test` on
   its own, finding the tests in a folder in the order the Node.js command line
-  found them; and `moth debug` stopping where it's told, its arguments passed on
+  found them; `moth debug` stopping where it's told, its arguments passed on;
+  and `moth coverage` of a program and of tests, a file's and a folder's, a
+  branch never taken, a function never called and a failing test among them,
+  added up and written as LCOV word for word
 - the debugger: three sessions word for word, on Windows and Linux, stepping
   into and out of calls, breakpoints in the program and a file it uses, a
   closure's variables, the calls in progress through recursion and a caught
