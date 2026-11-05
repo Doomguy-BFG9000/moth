@@ -2724,12 +2724,15 @@ export function mothCompiler(compilerSource, using = compileToJs) {
 // `name` is the program's own, for its mistakes, and `allow` the --allow flags built into it, which say what it
 // may do without asking.
 export function machineCompiler(machineSource, compilerSource) {
-  const { compile_shipping: compileMachine, compile_debugging: compileDebugging } = loadProgram(compileToJs(machineSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "machine.moth" }));
+  const { compile_shipping: compileMachine, compile_debugging: compileDebugging, compile_library: compileLibrary, library_header: libraryHeader } = loadProgram(compileToJs(machineSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "machine.moth" }));
   // `icon`, an .ico or .png file's bytes, and `version`, as "1.2.0", for a Windows program; `include`, files built
   // into the program, as { "logo.png": bytes }, which its `read`s find there first; `debug`, a build for `moth debug`,
-  // which needs the debugger, moth-debugger.moth, among the files
-  return (source, { files = {}, target, name = "program.moth", allow = [], icon = null, version = null, include = {}, debug = false } = {}) => {
+  // which needs the debugger, moth-debugger.moth, among the files; `library`, a shared library of the program's
+  // functions for C (DESIGN §125), and `header`, the C header for one, as text
+  return (source, { files = {}, target, name = "program.moth", allow = [], icon = null, version = null, include = {}, debug = false, library = false, header = false } = {}) => {
     try {
+      if (header) return libraryHeader(source, Object.keys(files), Object.values(files), name);
+      if (library) return Uint8Array.from(compileLibrary(source, Object.keys(files), Object.values(files), target, name, allow));
       if (debug) return Uint8Array.from(compileDebugging(source, Object.keys(files), Object.values(files), target, name, allow));
       return Uint8Array.from(compileMachine(source, Object.keys(files), Object.values(files), target, name, allow, icon, version,
         Object.keys(include), Object.values(include).map((b) => Uint8Array.from(b))));
