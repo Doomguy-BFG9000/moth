@@ -146,6 +146,11 @@ test("build-deb.sh packages moth-linux as /usr/bin/moth, the same bytes each tim
     const badVersion = spawnSync("sh", [path("packaging/debian/build-deb.sh"), join(dir, "moth-linux"), "9.8.x", join(dir, "c")], { encoding: "utf8" });
     assert.match(badVersion.stderr, /isn't a version/);
     assert.ok(!existsSync(join(dir, "c")));
+    // a pre-release's version is Debian's, with ~, so it comes before the release; its file keeps the release's
+    const rc = spawnSync("sh", [path("packaging/debian/build-deb.sh"), join(dir, "moth-linux"), "9.8.7-rc.1", join(dir, "rc")], { encoding: "utf8" });
+    assert.equal(rc.status, 0, rc.stderr);
+    assert.equal(spawnSync("dpkg-deb", ["--field", join(dir, "rc", "moth_9.8.7-rc.1_amd64.deb"), "Version"], { encoding: "utf8" }).stdout.trim(), "9.8.7~rc.1");
+    assert.equal(spawnSync("dpkg", ["--compare-versions", "9.8.7~rc.1", "lt", "9.8.7"]).status, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
