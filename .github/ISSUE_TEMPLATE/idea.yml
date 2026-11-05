@@ -1,0 +1,28 @@
+name: An idea
+description: Something Moth could do, say more clearly, or have in its standard library
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you'd like
+      description: What you were trying to do, and what got in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: reads
+    attributes:
+      label: How it might read in Moth
+      description: A few lines of Moth as you'd like to write them. Moth should read like plain English.
+      render: text
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change
+      options:
+        - The language itself
+        - The standard library
+        - A package (could live in its own repository)
+        - The playground, the site or the docs
+        - Editors and tools
+        - Not sure

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Learn Moth
+    url: https://samyyy2423.github.io/moth/learn.html
+    about: The lessons, from a first program up.
+  - name: A security problem
+    url: https://github.com/samyyy2423/moth/security/advisories/new
+    about: Please report it privately, not in an issue.
