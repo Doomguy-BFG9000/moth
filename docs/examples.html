@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moth examples</title>
+  <meta name="description" content="Small complete Moth programs, each ready to run in the playground.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html" aria-current="page">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow">Examples</p>
+      <h1>Whole programs, <em>ready to run</em>.</h1>
+      <p>Small complete programs that show what Moth is like to write: each runs in the playground with a click,
+        and each is run every time Moth changes. To practise, the <a href="https://github.com/samyyy2423/moth/tree/main/exercises">exercises</a>
+        have tests to make pass, from hello world up.</p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="The examples">
+      <h2>8 programs</h2>
+      <ol><li><a href="#hanoi">The towers of Hanoi</a></li><li><a href="#life">The game of life</a></li><li><a href="#words">The words a text uses most</a></li><li><a href="#bank">A bank account</a></li><li><a href="#caesar">Secret messages</a></li><li><a href="#roman">Roman numerals</a></li><li><a href="#mandelbrot">The Mandelbrot set, in text</a></li><li><a href="#snowflake">A snowflake, drawn</a></li></ol>
+      <p class="more"><a href="cookbook/">The cookbook</a> · <a href="https://github.com/samyyy2423/moth/tree/main/exercises">Exercises</a></p>
+    </nav>
+    <main class="prose">
+      <section class="fn example" id="hanoi">
+        <h2><a href="#hanoi">The towers of Hanoi</a></h2>
+        <p>Moves a stack of discs from one peg to another, one disc at a time, never a bigger disc on a smaller one. A function that calls itself does the whole puzzle in a few lines: move all but the bottom disc out of the way, move the bottom one, then move the rest back on top of it.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20The%20towers%20of%20Hanoi%0A%23%20Moves%20a%20stack%20of%20discs%20from%20one%20peg%20to%20another%2C%20one%20disc%20at%20a%20time%2C%20never%20a%20bigger%20disc%20on%20a%20smaller%20one.%20A%0A%23%20function%20that%20calls%20itself%20does%20the%20whole%20puzzle%20in%20a%20few%20lines%3A%20move%20all%20but%20the%20bottom%20disc%20out%20of%20the%20way%2C%0A%23%20move%20the%20bottom%20one%2C%20then%20move%20the%20rest%20back%20on%20top%20of%20it.%0A%0Aset%20moves%20to%200%0A%0Ato%20hanoi%20with%20discs%2C%20from_peg%2C%20to_peg%2C%20spare_peg%2C%20show%0A%20%20%20%20if%20discs%20is%200%0A%20%20%20%20%20%20%20%20return%0A%20%20%20%20end%0A%20%20%20%20hanoi(discs%20-%201%2C%20from_peg%2C%20spare_peg%2C%20to_peg%2C%20show)%0A%20%20%20%20add%201%20to%20moves%0A%20%20%20%20if%20show%0A%20%20%20%20%20%20%20%20say%20%22move%20disc%20%22%20%2B%20discs%20%2B%20%22%20from%20%22%20%2B%20from_peg%20%2B%20%22%20to%20%22%20%2B%20to_peg%0A%20%20%20%20end%0A%20%20%20%20hanoi(discs%20-%201%2C%20spare_peg%2C%20to_peg%2C%20from_peg%2C%20show)%0Aend%0A%0Ahanoi(3%2C%20%22A%22%2C%20%22C%22%2C%20%22B%22%2C%20yes)%0Asay%20moves%20%2B%20%22%20moves%20for%203%20discs%22%0A%0Afor%20each%20discs%20in%20list%20of%205%2C%2010%2C%2015%0A%20%20%20%20set%20moves%20to%200%0A%20%20%20%20hanoi(discs%2C%20%22A%22%2C%20%22C%22%2C%20%22B%22%2C%20no)%0A%20%20%20%20say%20moves%20%2B%20%22%20moves%20for%20%22%20%2B%20discs%20%2B%20%22%20discs%22%0Aend">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/01-hanoi.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># The towers of Hanoi</span>
+<span class="c"># Moves a stack of discs from one peg to another, one disc at a time, never a bigger disc on a smaller one. A</span>
+<span class="c"># function that calls itself does the whole puzzle in a few lines: move all but the bottom disc out of the way,</span>
+<span class="c"># move the bottom one, then move the rest back on top of it.</span>
+
+<span class="k">set</span> moves <span class="k">to</span> <span class="n">0</span>
+
+<span class="k">to</span> hanoi <span class="k">with</span> discs, from_peg, to_peg, spare_peg, show
+    <span class="k">if</span> discs <span class="k">is</span> <span class="n">0</span>
+        <span class="k">return</span>
+    <span class="k">end</span>
+    hanoi(discs - <span class="n">1</span>, from_peg, spare_peg, to_peg, show)
+    <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> moves
+    <span class="k">if</span> show
+        <span class="k">say</span> <span class="s">&quot;move disc &quot;</span> + discs + <span class="s">&quot; from &quot;</span> + from_peg + <span class="s">&quot; to &quot;</span> + to_peg
+    <span class="k">end</span>
+    hanoi(discs - <span class="n">1</span>, spare_peg, to_peg, from_peg, show)
+<span class="k">end</span>
+
+hanoi(<span class="n">3</span>, <span class="s">&quot;A&quot;</span>, <span class="s">&quot;C&quot;</span>, <span class="s">&quot;B&quot;</span>, <span class="k">yes</span>)
+<span class="k">say</span> moves + <span class="s">&quot; moves for 3 discs&quot;</span>
+
+<span class="k">for</span> <span class="k">each</span> discs <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="n">5</span>, <span class="n">10</span>, <span class="n">15</span>
+    <span class="k">set</span> moves <span class="k">to</span> <span class="n">0</span>
+    hanoi(discs, <span class="s">&quot;A&quot;</span>, <span class="s">&quot;C&quot;</span>, <span class="s">&quot;B&quot;</span>, <span class="k">no</span>)
+    <span class="k">say</span> moves + <span class="s">&quot; moves for &quot;</span> + discs + <span class="s">&quot; discs&quot;</span>
+<span class="k">end</span></code></pre></div>
+      </section>
+      <section class="fn example" id="life">
+        <h2><a href="#life">The game of life</a></h2>
+        <p>Conway's cellular automaton: on a grid, a live cell with two or three live neighbours lives on, and a dead cell with exactly three comes alive. A glider, five cells that walk across the grid, shown for four generations.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20The%20game%20of%20life%0A%23%20Conway's%20cellular%20automaton%3A%20on%20a%20grid%2C%20a%20live%20cell%20with%20two%20or%20three%20live%20neighbours%20lives%20on%2C%20and%20a%20dead%0A%23%20cell%20with%20exactly%20three%20comes%20alive.%20A%20glider%2C%20five%20cells%20that%20walk%20across%20the%20grid%2C%20shown%20for%20four%0A%23%20generations.%0A%0Aset%20size%20to%208%0Aset%20alive%20to%20empty%20dictionary%0A%0Ato%20key_of%20with%20row%2C%20column%0A%20%20%20%20return%20row%20%2B%20%22%2C%22%20%2B%20column%0Aend%0A%0Ato%20is_alive%20with%20row%2C%20column%0A%20%20%20%20return%20key_of(row%2C%20column)%20is%20in%20alive%0Aend%0A%0Ato%20neighbours%20with%20row%2C%20column%0A%20%20%20%20set%20count%20to%200%0A%20%20%20%20for%20each%20dr%20in%20list%20of%20-1%2C%200%2C%201%0A%20%20%20%20%20%20%20%20for%20each%20dc%20in%20list%20of%20-1%2C%200%2C%201%0A%20%20%20%20%20%20%20%20%20%20%20%20if%20not%20(dr%20is%200%20and%20dc%20is%200)%20and%20is_alive(row%20%2B%20dr%2C%20column%20%2B%20dc)%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20add%201%20to%20count%0A%20%20%20%20%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20count%0Aend%0A%0Ato%20show_grid%20with%20generation%0A%20%20%20%20say%20%22generation%20%22%20%2B%20generation%0A%20%20%20%20for%20each%20row%20from%201%20to%20size%0A%20%20%20%20%20%20%20%20set%20line%20to%20%22%22%0A%20%20%20%20%20%20%20%20for%20each%20column%20from%201%20to%20size%0A%20%20%20%20%20%20%20%20%20%20%20%20if%20is_alive(row%2C%20column)%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20set%20line%20to%20line%20%2B%20%22%23%22%0A%20%20%20%20%20%20%20%20%20%20%20%20else%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20set%20line%20to%20line%20%2B%20%22.%22%0A%20%20%20%20%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20say%20line%0A%20%20%20%20end%0Aend%0A%0Afor%20each%20cell%20in%20list%20of%20(list%20of%201%2C%202)%2C%20(list%20of%202%2C%203)%2C%20(list%20of%203%2C%201)%2C%20(list%20of%203%2C%202)%2C%20(list%20of%203%2C%203)%0A%20%20%20%20set%20item%20key_of(item%201%20of%20cell%2C%20item%202%20of%20cell)%20of%20alive%20to%20yes%0Aend%0A%0Afor%20each%20generation%20from%201%20to%204%0A%20%20%20%20show_grid(generation)%0A%20%20%20%20set%20next%20to%20empty%20dictionary%0A%20%20%20%20for%20each%20row%20from%201%20to%20size%0A%20%20%20%20%20%20%20%20for%20each%20column%20from%201%20to%20size%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20n%20to%20neighbours(row%2C%20column)%0A%20%20%20%20%20%20%20%20%20%20%20%20if%20n%20is%203%20or%20(n%20is%202%20and%20is_alive(row%2C%20column))%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20set%20item%20key_of(row%2C%20column)%20of%20next%20to%20yes%0A%20%20%20%20%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20set%20alive%20to%20next%0Aend">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/02-life.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># The game of life</span>
+<span class="c"># Conway's cellular automaton: on a grid, a live cell with two or three live neighbours lives on, and a dead</span>
+<span class="c"># cell with exactly three comes alive. A glider, five cells that walk across the grid, shown for four</span>
+<span class="c"># generations.</span>
+
+<span class="k">set</span> size <span class="k">to</span> <span class="n">8</span>
+<span class="k">set</span> alive <span class="k">to</span> <span class="k">empty</span> <span class="k">dictionary</span>
+
+<span class="k">to</span> key_of <span class="k">with</span> row, column
+    <span class="k">return</span> row + <span class="s">&quot;,&quot;</span> + column
+<span class="k">end</span>
+
+<span class="k">to</span> is_alive <span class="k">with</span> row, column
+    <span class="k">return</span> key_of(row, column) <span class="k">is</span> <span class="k">in</span> alive
+<span class="k">end</span>
+
+<span class="k">to</span> neighbours <span class="k">with</span> row, column
+    <span class="k">set</span> count <span class="k">to</span> <span class="n">0</span>
+    <span class="k">for</span> <span class="k">each</span> dr <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> -<span class="n">1</span>, <span class="n">0</span>, <span class="n">1</span>
+        <span class="k">for</span> <span class="k">each</span> dc <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> -<span class="n">1</span>, <span class="n">0</span>, <span class="n">1</span>
+            <span class="k">if</span> <span class="k">not</span> (dr <span class="k">is</span> <span class="n">0</span> <span class="k">and</span> dc <span class="k">is</span> <span class="n">0</span>) <span class="k">and</span> is_alive(row + dr, column + dc)
+                <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> count
+            <span class="k">end</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> count
+<span class="k">end</span>
+
+<span class="k">to</span> show_grid <span class="k">with</span> generation
+    <span class="k">say</span> <span class="s">&quot;generation &quot;</span> + generation
+    <span class="k">for</span> <span class="k">each</span> row <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> size
+        <span class="k">set</span> line <span class="k">to</span> <span class="s">&quot;&quot;</span>
+        <span class="k">for</span> <span class="k">each</span> column <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> size
+            <span class="k">if</span> is_alive(row, column)
+                <span class="k">set</span> line <span class="k">to</span> line + <span class="s">&quot;#&quot;</span>
+            <span class="k">else</span>
+                <span class="k">set</span> line <span class="k">to</span> line + <span class="s">&quot;.&quot;</span>
+            <span class="k">end</span>
+        <span class="k">end</span>
+        <span class="k">say</span> line
+    <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">for</span> <span class="k">each</span> cell <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">2</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">3</span>)
+    <span class="k">set</span> <span class="k">item</span> key_of(<span class="k">item</span> <span class="n">1</span> <span class="k">of</span> cell, <span class="k">item</span> <span class="n">2</span> <span class="k">of</span> cell) <span class="k">of</span> alive <span class="k">to</span> <span class="k">yes</span>
+<span class="k">end</span>
+
+<span class="k">for</span> <span class="k">each</span> generation <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="n">4</span>
+    show_grid(generation)
+    <span class="k">set</span> next <span class="k">to</span> <span class="k">empty</span> <span class="k">dictionary</span>
+    <span class="k">for</span> <span class="k">each</span> row <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> size
+        <span class="k">for</span> <span class="k">each</span> column <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> size
+            <span class="k">set</span> n <span class="k">to</span> neighbours(row, column)
+            <span class="k">if</span> n <span class="k">is</span> <span class="n">3</span> <span class="k">or</span> (n <span class="k">is</span> <span class="n">2</span> <span class="k">and</span> is_alive(row, column))
+                <span class="k">set</span> <span class="k">item</span> key_of(row, column) <span class="k">of</span> next <span class="k">to</span> <span class="k">yes</span>
+            <span class="k">end</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">set</span> alive <span class="k">to</span> next
+<span class="k">end</span></code></pre></div>
+      </section>
+      <section class="fn example" id="words">
+        <h2><a href="#words">The words a text uses most</a></h2>
+        <p>Counts every word in a paragraph with a dictionary, leaves out the little ones, and puts the rest in order by how often each comes up: what a search engine's first step looks like.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20The%20words%20a%20text%20uses%20most%0A%23%20Counts%20every%20word%20in%20a%20paragraph%20with%20a%20dictionary%2C%20leaves%20out%20the%20little%20ones%2C%20and%20puts%20the%20rest%20in%20order%0A%23%20by%20how%20often%20each%20comes%20up%3A%20what%20a%20search%20engine's%20first%20step%20looks%20like.%0A%0Aset%20paragraph%20to%20%22The%20moth%20flew%20to%20the%20lamp%2C%20and%20the%20lamp%20burned%20bright.%20The%20night%20was%20long%2C%20and%20the%20moth%20%22%0Aset%20paragraph%20to%20paragraph%20%2B%20%22was%20patient%3B%20it%20waited%20by%20the%20lamp%20until%20the%20night%20was%20over%20and%20the%20light%20was%20gone.%22%0A%0Ato%20letters_of%20with%20word%0A%20%20%20%20set%20kept%20to%20%22%22%0A%20%20%20%20for%20each%20c%20in%20split%20word%20by%20%22%22%0A%20%20%20%20%20%20%20%20if%20not%20(c%20is%20in%20list%20of%20%22%2C%22%2C%20%22.%22%2C%20%22%3B%22)%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20kept%20to%20kept%20%2B%20c%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20kept%0Aend%0A%0Aset%20little%20to%20list%20of%20%22the%22%2C%20%22and%22%2C%20%22to%22%2C%20%22a%22%2C%20%22it%22%2C%20%22by%22%2C%20%22was%22%2C%20%22of%22%0Aset%20counts%20to%20empty%20dictionary%0Afor%20each%20word%20in%20split%20(lowercase%20of%20paragraph)%20by%20%22%20%22%0A%20%20%20%20set%20word%20to%20letters_of(word)%0A%20%20%20%20if%20word%20is%20not%20%22%22%20and%20not%20(word%20is%20in%20little)%0A%20%20%20%20%20%20%20%20if%20word%20is%20in%20counts%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20item%20word%20of%20counts%20to%20item%20word%20of%20counts%20%2B%201%0A%20%20%20%20%20%20%20%20else%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20item%20word%20of%20counts%20to%201%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0Aend%0A%0Aset%20ranked%20to%20empty%20list%0Afor%20each%20word%20in%20keys%20of%20counts%0A%20%20%20%20add%20(record%20with%20word%20word%2C%20times%20item%20word%20of%20counts)%20to%20ranked%0Aend%0Aset%20ranked%20to%20ranked%20in%20order%20by%20times%0Afor%20each%20k%20from%201%20to%205%0A%20%20%20%20set%20r%20to%20item%20(length%20of%20ranked%20-%20k%20%2B%201)%20of%20ranked%0A%20%20%20%20say%20word%20of%20r%20%2B%20%22%3A%20%22%20%2B%20times%20of%20r%0Aend">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/03-words.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># The words a text uses most</span>
+<span class="c"># Counts every word in a paragraph with a dictionary, leaves out the little ones, and puts the rest in order</span>
+<span class="c"># by how often each comes up: what a search engine's first step looks like.</span>
+
+<span class="k">set</span> paragraph <span class="k">to</span> <span class="s">&quot;The moth flew to the lamp, and the lamp burned bright. The night was long, and the moth &quot;</span>
+<span class="k">set</span> paragraph <span class="k">to</span> paragraph + <span class="s">&quot;was patient; it waited by the lamp until the night was over and the light was gone.&quot;</span>
+
+<span class="k">to</span> letters_of <span class="k">with</span> word
+    <span class="k">set</span> kept <span class="k">to</span> <span class="s">&quot;&quot;</span>
+    <span class="k">for</span> <span class="k">each</span> c <span class="k">in</span> <span class="k">split</span> word <span class="k">by</span> <span class="s">&quot;&quot;</span>
+        <span class="k">if</span> <span class="k">not</span> (c <span class="k">is</span> <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;,&quot;</span>, <span class="s">&quot;.&quot;</span>, <span class="s">&quot;;&quot;</span>)
+            <span class="k">set</span> kept <span class="k">to</span> kept + c
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> kept
+<span class="k">end</span>
+
+<span class="k">set</span> little <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;the&quot;</span>, <span class="s">&quot;and&quot;</span>, <span class="s">&quot;to&quot;</span>, <span class="s">&quot;a&quot;</span>, <span class="s">&quot;it&quot;</span>, <span class="s">&quot;by&quot;</span>, <span class="s">&quot;was&quot;</span>, <span class="s">&quot;of&quot;</span>
+<span class="k">set</span> counts <span class="k">to</span> <span class="k">empty</span> <span class="k">dictionary</span>
+<span class="k">for</span> <span class="k">each</span> word <span class="k">in</span> <span class="k">split</span> (<span class="k">lowercase</span> <span class="k">of</span> paragraph) <span class="k">by</span> <span class="s">&quot; &quot;</span>
+    <span class="k">set</span> word <span class="k">to</span> letters_of(word)
+    <span class="k">if</span> word <span class="k">is</span> <span class="k">not</span> <span class="s">&quot;&quot;</span> <span class="k">and</span> <span class="k">not</span> (word <span class="k">is</span> <span class="k">in</span> little)
+        <span class="k">if</span> word <span class="k">is</span> <span class="k">in</span> counts
+            <span class="k">set</span> <span class="k">item</span> word <span class="k">of</span> counts <span class="k">to</span> <span class="k">item</span> word <span class="k">of</span> counts + <span class="n">1</span>
+        <span class="k">else</span>
+            <span class="k">set</span> <span class="k">item</span> word <span class="k">of</span> counts <span class="k">to</span> <span class="n">1</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">set</span> ranked <span class="k">to</span> <span class="k">empty</span> <span class="k">list</span>
+<span class="k">for</span> <span class="k">each</span> word <span class="k">in</span> <span class="k">keys</span> <span class="k">of</span> counts
+    <span class="k">add</span> (<span class="k">record</span> <span class="k">with</span> word word, <span class="k">times</span> <span class="k">item</span> word <span class="k">of</span> counts) <span class="k">to</span> ranked
+<span class="k">end</span>
+<span class="k">set</span> ranked <span class="k">to</span> ranked <span class="k">in</span> order <span class="k">by</span> <span class="k">times</span>
+<span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="n">5</span>
+    <span class="k">set</span> r <span class="k">to</span> <span class="k">item</span> (<span class="k">length</span> <span class="k">of</span> ranked - k + <span class="n">1</span>) <span class="k">of</span> ranked
+    <span class="k">say</span> word <span class="k">of</span> r + <span class="s">&quot;: &quot;</span> + <span class="k">times</span> <span class="k">of</span> r
+<span class="k">end</span></code></pre></div>
+      </section>
+      <section class="fn example" id="bank">
+        <h2><a href="#bank">A bank account</a></h2>
+        <p>A kind is a sort of record with functions of its own. An account keeps its balance and a history, refuses to go below nothing, and says what it is with <code>shown</code>, which <code>say</code> uses.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20A%20bank%20account%0A%23%20A%20kind%20is%20a%20sort%20of%20record%20with%20functions%20of%20its%20own.%20An%20account%20keeps%20its%20balance%20and%20a%20history%2C%20refuses%20to%0A%23%20go%20below%20nothing%2C%20and%20says%20what%20it%20is%20with%20%60shown%60%2C%20which%20%60say%60%20uses.%0A%0Akind%20account%20with%20owner%2C%20balance%20or%200%0A%20%20%20%20to%20deposit%20with%20self%2C%20amount%0A%20%20%20%20%20%20%20%20if%20amount%20is%20at%20most%200%0A%20%20%20%20%20%20%20%20%20%20%20%20fail%20with%20%22a%20deposit%20has%20to%20be%20more%20than%20nothing%2C%20not%20%22%20%2B%20amount%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20set%20self's%20balance%20to%20self's%20balance%20%2B%20amount%0A%20%20%20%20end%0A%20%20%20%20to%20withdraw%20with%20self%2C%20amount%0A%20%20%20%20%20%20%20%20if%20amount%20is%20greater%20than%20self's%20balance%0A%20%20%20%20%20%20%20%20%20%20%20%20fail%20with%20self's%20owner%20%2B%20%22%20has%20only%20%22%20%2B%20self's%20balance%20%2B%20%22%2C%20not%20%22%20%2B%20amount%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20set%20self's%20balance%20to%20self's%20balance%20-%20amount%0A%20%20%20%20end%0A%20%20%20%20to%20shown%20with%20self%0A%20%20%20%20%20%20%20%20return%20self's%20owner%20%2B%20%22's%20account%3A%20%22%20%2B%20self's%20balance%0A%20%20%20%20end%0Aend%0A%0Aset%20ada%20to%20account(%22Ada%22)%0Aada's%20deposit(120.50)%0Aada's%20withdraw(20.25)%0Asay%20ada%0A%0Atry%0A%20%20%20%20ada's%20withdraw(500)%0Aif%20it%20fails%20with%20why%0A%20%20%20%20say%20%22refused%3A%20%22%20%2B%20why%0Aend%0A%0Aset%20bank%20to%20list%20of%20ada%2C%20account(%22Lee%22%2C%2040)%2C%20account(%22Sam%22%2C%20310)%0Aset%20total%20to%200%0Afor%20each%20a%20in%20bank%0A%20%20%20%20set%20total%20to%20total%20%2B%20balance%20of%20a%0Aend%0Asay%20%22the%20bank%20holds%20%22%20%2B%20total">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/04-bank.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># A bank account</span>
+<span class="c"># A kind is a sort of record with functions of its own. An account keeps its balance and a history, refuses to</span>
+<span class="c"># go below nothing, and says what it is with `shown`, which `say` uses.</span>
+
+<span class="k">kind</span> account <span class="k">with</span> owner, balance <span class="k">or</span> <span class="n">0</span>
+    <span class="k">to</span> deposit <span class="k">with</span> self, amount
+        <span class="k">if</span> amount <span class="k">is</span> <span class="k">at</span> <span class="k">most</span> <span class="n">0</span>
+            <span class="k">fail</span> <span class="k">with</span> <span class="s">&quot;a deposit has to be more than nothing, not &quot;</span> + amount
+        <span class="k">end</span>
+        <span class="k">set</span> self's balance <span class="k">to</span> self's balance + amount
+    <span class="k">end</span>
+    <span class="k">to</span> withdraw <span class="k">with</span> self, amount
+        <span class="k">if</span> amount <span class="k">is</span> greater <span class="k">than</span> self's balance
+            <span class="k">fail</span> <span class="k">with</span> self's owner + <span class="s">&quot; has only &quot;</span> + self's balance + <span class="s">&quot;, not &quot;</span> + amount
+        <span class="k">end</span>
+        <span class="k">set</span> self's balance <span class="k">to</span> self's balance - amount
+    <span class="k">end</span>
+    <span class="k">to</span> shown <span class="k">with</span> self
+        <span class="k">return</span> self's owner + <span class="s">&quot;'s account: &quot;</span> + self's balance
+    <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">set</span> ada <span class="k">to</span> account(<span class="s">&quot;Ada&quot;</span>)
+ada's deposit(<span class="n">120.50</span>)
+ada's withdraw(<span class="n">20.25</span>)
+<span class="k">say</span> ada
+
+<span class="k">try</span>
+    ada's withdraw(<span class="n">500</span>)
+<span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+    <span class="k">say</span> <span class="s">&quot;refused: &quot;</span> + why
+<span class="k">end</span>
+
+<span class="k">set</span> bank <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> ada, account(<span class="s">&quot;Lee&quot;</span>, <span class="n">40</span>), account(<span class="s">&quot;Sam&quot;</span>, <span class="n">310</span>)
+<span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> a <span class="k">in</span> bank
+    <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="k">total</span> + balance <span class="k">of</span> a
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;the bank holds &quot;</span> + <span class="k">total</span></code></pre></div>
+      </section>
+      <section class="fn example" id="caesar">
+        <h2><a href="#caesar">Secret messages</a></h2>
+        <p>Julius Caesar's cipher moves each letter a few places along the alphabet. Moving it back reads the message, and trying all 25 shifts breaks it: the one with the most common English letters in it wins.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20Secret%20messages%0A%23%20Julius%20Caesar's%20cipher%20moves%20each%20letter%20a%20few%20places%20along%20the%20alphabet.%20Moving%20it%20back%20reads%20the%20message%2C%0A%23%20and%20trying%20all%2025%20shifts%20breaks%20it%3A%20the%20one%20with%20the%20most%20common%20English%20letters%20in%20it%20wins.%0A%0Aset%20alphabet%20to%20%22abcdefghijklmnopqrstuvwxyz%22%0A%0Ato%20shifted%20with%20message%2C%20by%0A%20%20%20%20set%20made%20to%20%22%22%0A%20%20%20%20for%20each%20c%20in%20split%20message%20by%20%22%22%0A%20%20%20%20%20%20%20%20set%20at%20to%20position%20of%20(lowercase%20of%20c)%20in%20alphabet%0A%20%20%20%20%20%20%20%20if%20at%20is%200%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20made%20to%20made%20%2B%20c%0A%20%20%20%20%20%20%20%20else%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20moved%20to%20item%20(remainder%20of%20(at%20-%201%20%2B%20by)%20divided%20by%2026%20%2B%201)%20of%20alphabet%0A%20%20%20%20%20%20%20%20%20%20%20%20if%20c%20is%20not%20lowercase%20of%20c%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20set%20moved%20to%20uppercase%20of%20moved%0A%20%20%20%20%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20made%20to%20made%20%2B%20moved%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20made%0Aend%0A%0Ato%20score_of%20with%20message%0A%20%20%20%20set%20score%20to%200%0A%20%20%20%20for%20each%20c%20in%20split%20(lowercase%20of%20message)%20by%20%22%22%0A%20%20%20%20%20%20%20%20if%20c%20is%20in%20list%20of%20%22e%22%2C%20%22t%22%2C%20%22a%22%2C%20%22o%22%2C%20%22i%22%2C%20%22n%22%2C%20%22s%22%2C%20%22h%22%2C%20%22r%22%0A%20%20%20%20%20%20%20%20%20%20%20%20add%201%20to%20score%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20score%0Aend%0A%0Aset%20secret%20to%20shifted(%22Meet%20me%20by%20the%20old%20lamp%20at%20nine.%22%2C%207)%0Asay%20%22sent%3A%20%22%20%2B%20secret%0Asay%20%22read%3A%20%22%20%2B%20shifted(secret%2C%20-7)%0A%0Aset%20best%20to%200%0Afor%20each%20by%20from%201%20to%2025%0A%20%20%20%20if%20score_of(shifted(secret%2C%20-by))%20is%20greater%20than%20score_of(shifted(secret%2C%20-best))%0A%20%20%20%20%20%20%20%20set%20best%20to%20by%0A%20%20%20%20end%0Aend%0Asay%20%22broken%3A%20the%20shift%20was%20%22%20%2B%20best%20%2B%20%22%2C%20and%20it%20says%20%22%20%2B%20shifted(secret%2C%20-best)">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/05-caesar.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># Secret messages</span>
+<span class="c"># Julius Caesar's cipher moves each letter a few places along the alphabet. Moving it back reads the message,</span>
+<span class="c"># and trying all 25 shifts breaks it: the one with the most common English letters in it wins.</span>
+
+<span class="k">set</span> alphabet <span class="k">to</span> <span class="s">&quot;abcdefghijklmnopqrstuvwxyz&quot;</span>
+
+<span class="k">to</span> shifted <span class="k">with</span> message, <span class="k">by</span>
+    <span class="k">set</span> made <span class="k">to</span> <span class="s">&quot;&quot;</span>
+    <span class="k">for</span> <span class="k">each</span> c <span class="k">in</span> <span class="k">split</span> message <span class="k">by</span> <span class="s">&quot;&quot;</span>
+        <span class="k">set</span> <span class="k">at</span> <span class="k">to</span> <span class="k">position</span> <span class="k">of</span> (<span class="k">lowercase</span> <span class="k">of</span> c) <span class="k">in</span> alphabet
+        <span class="k">if</span> <span class="k">at</span> <span class="k">is</span> <span class="n">0</span>
+            <span class="k">set</span> made <span class="k">to</span> made + c
+        <span class="k">else</span>
+            <span class="k">set</span> <span class="k">moved</span> <span class="k">to</span> <span class="k">item</span> (<span class="k">remainder</span> <span class="k">of</span> (<span class="k">at</span> - <span class="n">1</span> + <span class="k">by</span>) <span class="k">divided</span> <span class="k">by</span> <span class="n">26</span> + <span class="n">1</span>) <span class="k">of</span> alphabet
+            <span class="k">if</span> c <span class="k">is</span> <span class="k">not</span> <span class="k">lowercase</span> <span class="k">of</span> c
+                <span class="k">set</span> <span class="k">moved</span> <span class="k">to</span> <span class="k">uppercase</span> <span class="k">of</span> <span class="k">moved</span>
+            <span class="k">end</span>
+            <span class="k">set</span> made <span class="k">to</span> made + <span class="k">moved</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> made
+<span class="k">end</span>
+
+<span class="k">to</span> score_of <span class="k">with</span> message
+    <span class="k">set</span> score <span class="k">to</span> <span class="n">0</span>
+    <span class="k">for</span> <span class="k">each</span> c <span class="k">in</span> <span class="k">split</span> (<span class="k">lowercase</span> <span class="k">of</span> message) <span class="k">by</span> <span class="s">&quot;&quot;</span>
+        <span class="k">if</span> c <span class="k">is</span> <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;e&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;a&quot;</span>, <span class="s">&quot;o&quot;</span>, <span class="s">&quot;i&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;s&quot;</span>, <span class="s">&quot;h&quot;</span>, <span class="s">&quot;r&quot;</span>
+            <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> score
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> score
+<span class="k">end</span>
+
+<span class="k">set</span> secret <span class="k">to</span> shifted(<span class="s">&quot;Meet me by the old lamp at nine.&quot;</span>, <span class="n">7</span>)
+<span class="k">say</span> <span class="s">&quot;sent: &quot;</span> + secret
+<span class="k">say</span> <span class="s">&quot;read: &quot;</span> + shifted(secret, -<span class="n">7</span>)
+
+<span class="k">set</span> best <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> <span class="k">by</span> <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="n">25</span>
+    <span class="k">if</span> score_of(shifted(secret, -<span class="k">by</span>)) <span class="k">is</span> greater <span class="k">than</span> score_of(shifted(secret, -best))
+        <span class="k">set</span> best <span class="k">to</span> <span class="k">by</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;broken: the shift was &quot;</span> + best + <span class="s">&quot;, and it says &quot;</span> + shifted(secret, -best)</code></pre></div>
+      </section>
+      <section class="fn example" id="roman">
+        <h2><a href="#roman">Roman numerals</a></h2>
+        <p>Writes whole numbers the way Rome did and reads them back, with a pair of lists that walk down from the biggest value; then checks every number from 1 to 3,999 comes back as itself.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20Roman%20numerals%0A%23%20Writes%20whole%20numbers%20the%20way%20Rome%20did%20and%20reads%20them%20back%2C%20with%20a%20pair%20of%20lists%20that%20walk%20down%20from%20the%0A%23%20biggest%20value%3B%20then%20checks%20every%20number%20from%201%20to%203%2C999%20comes%20back%20as%20itself.%0A%0Aset%20values%20to%20list%20of%201000%2C%20900%2C%20500%2C%20400%2C%20100%2C%2090%2C%2050%2C%2040%2C%2010%2C%209%2C%205%2C%204%2C%201%0Aset%20numerals%20to%20list%20of%20%22M%22%2C%20%22CM%22%2C%20%22D%22%2C%20%22CD%22%2C%20%22C%22%2C%20%22XC%22%2C%20%22L%22%2C%20%22XL%22%2C%20%22X%22%2C%20%22IX%22%2C%20%22V%22%2C%20%22IV%22%2C%20%22I%22%0A%0Ato%20roman%20with%20n%0A%20%20%20%20set%20made%20to%20%22%22%0A%20%20%20%20for%20each%20k%20from%201%20to%20length%20of%20values%0A%20%20%20%20%20%20%20%20repeat%20while%20n%20is%20at%20least%20item%20k%20of%20values%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20made%20to%20made%20%2B%20item%20k%20of%20numerals%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20n%20to%20n%20-%20item%20k%20of%20values%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20made%0Aend%0A%0A%23%20whether%20the%20numeral%20is%20in%20the%20written%20number%2C%20starting%20at%20%60at%60%0Ato%20starts_at%20with%20written%2C%20at%2C%20numeral%0A%20%20%20%20set%20last%20to%20at%20%2B%20length%20of%20numeral%20-%201%0A%20%20%20%20if%20last%20is%20greater%20than%20length%20of%20written%0A%20%20%20%20%20%20%20%20return%20no%0A%20%20%20%20end%0A%20%20%20%20return%20items%20at%20to%20last%20of%20written%20is%20numeral%0Aend%0A%0Ato%20number_from%20with%20written%0A%20%20%20%20set%20total%20to%200%0A%20%20%20%20set%20at%20to%201%0A%20%20%20%20for%20each%20k%20from%201%20to%20length%20of%20values%0A%20%20%20%20%20%20%20%20set%20numeral%20to%20item%20k%20of%20numerals%0A%20%20%20%20%20%20%20%20repeat%20while%20starts_at(written%2C%20at%2C%20numeral)%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20total%20to%20total%20%2B%20item%20k%20of%20values%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20at%20to%20at%20%2B%20length%20of%20numeral%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20end%0A%20%20%20%20return%20total%0Aend%0A%0Afor%20each%20year%20in%20list%20of%201066%2C%201492%2C%201969%2C%202026%0A%20%20%20%20say%20year%20%2B%20%22%20is%20%22%20%2B%20roman(year)%0Aend%0Asay%20%22MMXXVI%20is%20%22%20%2B%20number_from(%22MMXXVI%22)%0A%0Aset%20wrong%20to%200%0Afor%20each%20n%20from%201%20to%203999%0A%20%20%20%20if%20number_from(roman(n))%20is%20not%20n%0A%20%20%20%20%20%20%20%20add%201%20to%20wrong%0A%20%20%20%20end%0Aend%0Asay%20%22checked%201%20to%203999%3A%20%22%20%2B%20wrong%20%2B%20%22%20wrong%22">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/06-roman.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># Roman numerals</span>
+<span class="c"># Writes whole numbers the way Rome did and reads them back, with a pair of lists that walk down from the</span>
+<span class="c"># biggest value; then checks every number from 1 to 3,999 comes back as itself.</span>
+
+<span class="k">set</span> values <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1000</span>, <span class="n">900</span>, <span class="n">500</span>, <span class="n">400</span>, <span class="n">100</span>, <span class="n">90</span>, <span class="n">50</span>, <span class="n">40</span>, <span class="n">10</span>, <span class="n">9</span>, <span class="n">5</span>, <span class="n">4</span>, <span class="n">1</span>
+<span class="k">set</span> numerals <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;M&quot;</span>, <span class="s">&quot;CM&quot;</span>, <span class="s">&quot;D&quot;</span>, <span class="s">&quot;CD&quot;</span>, <span class="s">&quot;C&quot;</span>, <span class="s">&quot;XC&quot;</span>, <span class="s">&quot;L&quot;</span>, <span class="s">&quot;XL&quot;</span>, <span class="s">&quot;X&quot;</span>, <span class="s">&quot;IX&quot;</span>, <span class="s">&quot;V&quot;</span>, <span class="s">&quot;IV&quot;</span>, <span class="s">&quot;I&quot;</span>
+
+<span class="k">to</span> roman <span class="k">with</span> n
+    <span class="k">set</span> made <span class="k">to</span> <span class="s">&quot;&quot;</span>
+    <span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="k">length</span> <span class="k">of</span> values
+        <span class="k">repeat</span> <span class="k">while</span> n <span class="k">is</span> <span class="k">at</span> <span class="k">least</span> <span class="k">item</span> k <span class="k">of</span> values
+            <span class="k">set</span> made <span class="k">to</span> made + <span class="k">item</span> k <span class="k">of</span> numerals
+            <span class="k">set</span> n <span class="k">to</span> n - <span class="k">item</span> k <span class="k">of</span> values
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> made
+<span class="k">end</span>
+
+<span class="c"># whether the numeral is in the written number, starting at `at`</span>
+<span class="k">to</span> starts_at <span class="k">with</span> written, <span class="k">at</span>, numeral
+    <span class="k">set</span> last <span class="k">to</span> <span class="k">at</span> + <span class="k">length</span> <span class="k">of</span> numeral - <span class="n">1</span>
+    <span class="k">if</span> last <span class="k">is</span> greater <span class="k">than</span> <span class="k">length</span> <span class="k">of</span> written
+        <span class="k">return</span> <span class="k">no</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">items</span> <span class="k">at</span> <span class="k">to</span> last <span class="k">of</span> written <span class="k">is</span> numeral
+<span class="k">end</span>
+
+<span class="k">to</span> number_from <span class="k">with</span> written
+    <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="n">0</span>
+    <span class="k">set</span> <span class="k">at</span> <span class="k">to</span> <span class="n">1</span>
+    <span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="k">length</span> <span class="k">of</span> values
+        <span class="k">set</span> numeral <span class="k">to</span> <span class="k">item</span> k <span class="k">of</span> numerals
+        <span class="k">repeat</span> <span class="k">while</span> starts_at(written, <span class="k">at</span>, numeral)
+            <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="k">total</span> + <span class="k">item</span> k <span class="k">of</span> values
+            <span class="k">set</span> <span class="k">at</span> <span class="k">to</span> <span class="k">at</span> + <span class="k">length</span> <span class="k">of</span> numeral
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">total</span>
+<span class="k">end</span>
+
+<span class="k">for</span> <span class="k">each</span> year <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1066</span>, <span class="n">1492</span>, <span class="n">1969</span>, <span class="n">2026</span>
+    <span class="k">say</span> year + <span class="s">&quot; is &quot;</span> + roman(year)
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;MMXXVI is &quot;</span> + number_from(<span class="s">&quot;MMXXVI&quot;</span>)
+
+<span class="k">set</span> wrong <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="n">3999</span>
+    <span class="k">if</span> number_from(roman(n)) <span class="k">is</span> <span class="k">not</span> n
+        <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> wrong
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;checked 1 to 3999: &quot;</span> + wrong + <span class="s">&quot; wrong&quot;</span></code></pre></div>
+      </section>
+      <section class="fn example" id="mandelbrot">
+        <h2><a href="#mandelbrot">The Mandelbrot set, in text</a></h2>
+        <p>For each point of the plane, a number that starts at 0 is squared and the point added, over and over; the points where it never runs away are the set. Each character is a point, darker the longer it held out.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20The%20Mandelbrot%20set%2C%20in%20text%0A%23%20For%20each%20point%20of%20the%20plane%2C%20a%20number%20that%20starts%20at%200%20is%20squared%20and%20the%20point%20added%2C%20over%20and%20over%3B%20the%0A%23%20points%20where%20it%20never%20runs%20away%20are%20the%20set.%20Each%20character%20is%20a%20point%2C%20darker%20the%20longer%20it%20held%20out.%0A%0Aset%20shades%20to%20%22%20.%3A-%3D%2B*%23%25%40%22%0Afor%20each%20row%20from%200%20to%2020%0A%20%20%20%20set%20line%20to%20%22%22%0A%20%20%20%20set%20y%20to%20row%20%2F%2010%20-%201%0A%20%20%20%20for%20each%20column%20from%200%20to%2060%0A%20%20%20%20%20%20%20%20set%20x%20to%20column%20%2F%2024%20-%202%0A%20%20%20%20%20%20%20%20set%20zx%20to%200%0A%20%20%20%20%20%20%20%20set%20zy%20to%200%0A%20%20%20%20%20%20%20%20set%20steps%20to%200%0A%20%20%20%20%20%20%20%20repeat%20while%20steps%20is%20less%20than%2030%20and%20zx%20*%20zx%20%2B%20zy%20*%20zy%20is%20at%20most%204%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20next_x%20to%20zx%20*%20zx%20-%20zy%20*%20zy%20%2B%20x%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20zy%20to%202%20*%20zx%20*%20zy%20%2B%20y%0A%20%20%20%20%20%20%20%20%20%20%20%20set%20zx%20to%20next_x%0A%20%20%20%20%20%20%20%20%20%20%20%20add%201%20to%20steps%0A%20%20%20%20%20%20%20%20end%0A%20%20%20%20%20%20%20%20set%20line%20to%20line%20%2B%20item%20(((steps%20*%209%20%2F%2030)%20rounded%20down)%20%2B%201)%20of%20shades%0A%20%20%20%20end%0A%20%20%20%20say%20line%0Aend">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/07-mandelbrot.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># The Mandelbrot set, in text</span>
+<span class="c"># For each point of the plane, a number that starts at 0 is squared and the point added, over and over; the</span>
+<span class="c"># points where it never runs away are the set. Each character is a point, darker the longer it held out.</span>
+
+<span class="k">set</span> shades <span class="k">to</span> <span class="s">&quot; .:-=+*#%@&quot;</span>
+<span class="k">for</span> <span class="k">each</span> row <span class="k">from</span> <span class="n">0</span> <span class="k">to</span> <span class="n">20</span>
+    <span class="k">set</span> line <span class="k">to</span> <span class="s">&quot;&quot;</span>
+    <span class="k">set</span> y <span class="k">to</span> row / <span class="n">10</span> - <span class="n">1</span>
+    <span class="k">for</span> <span class="k">each</span> column <span class="k">from</span> <span class="n">0</span> <span class="k">to</span> <span class="n">60</span>
+        <span class="k">set</span> x <span class="k">to</span> column / <span class="n">24</span> - <span class="n">2</span>
+        <span class="k">set</span> zx <span class="k">to</span> <span class="n">0</span>
+        <span class="k">set</span> zy <span class="k">to</span> <span class="n">0</span>
+        <span class="k">set</span> steps <span class="k">to</span> <span class="n">0</span>
+        <span class="k">repeat</span> <span class="k">while</span> steps <span class="k">is</span> less <span class="k">than</span> <span class="n">30</span> <span class="k">and</span> zx * zx + zy * zy <span class="k">is</span> <span class="k">at</span> <span class="k">most</span> <span class="n">4</span>
+            <span class="k">set</span> next_x <span class="k">to</span> zx * zx - zy * zy + x
+            <span class="k">set</span> zy <span class="k">to</span> <span class="n">2</span> * zx * zy + y
+            <span class="k">set</span> zx <span class="k">to</span> next_x
+            <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> steps
+        <span class="k">end</span>
+        <span class="k">set</span> line <span class="k">to</span> line + <span class="k">item</span> (((steps * <span class="n">9</span> / <span class="n">30</span>) <span class="k">rounded</span> <span class="k">down</span>) + <span class="n">1</span>) <span class="k">of</span> shades
+    <span class="k">end</span>
+    <span class="k">say</span> line
+<span class="k">end</span></code></pre></div>
+      </section>
+      <section class="fn example" id="snowflake">
+        <h2><a href="#snowflake">A snowflake, drawn</a></h2>
+        <p>Koch's snowflake: each side of a triangle becomes four sides a third as long, with a point in the middle, and so on, as deep as asked. The turtle starts in the middle, facing up, and draws wherever it moves.</p>
+        <p class="written"><a class="run" href="../index.html#code=%23%20A%20snowflake%2C%20drawn%0A%23%20Koch's%20snowflake%3A%20each%20side%20of%20a%20triangle%20becomes%20four%20sides%20a%20third%20as%20long%2C%20with%20a%20point%20in%20the%20middle%2C%20and%0A%23%20so%20on%2C%20as%20deep%20as%20asked.%20The%20turtle%20starts%20in%20the%20middle%2C%20facing%20up%2C%20and%20draws%20wherever%20it%20moves.%0A%0Ato%20side%20with%20long%2C%20depth%0A%20%20%20%20if%20depth%20is%200%0A%20%20%20%20%20%20%20%20move%20forward%20long%0A%20%20%20%20%20%20%20%20return%0A%20%20%20%20end%0A%20%20%20%20side(long%20%2F%203%2C%20depth%20-%201)%0A%20%20%20%20turn%20left%2060%0A%20%20%20%20side(long%20%2F%203%2C%20depth%20-%201)%0A%20%20%20%20turn%20right%20120%0A%20%20%20%20side(long%20%2F%203%2C%20depth%20-%201)%0A%20%20%20%20turn%20left%2060%0A%20%20%20%20side(long%20%2F%203%2C%20depth%20-%201)%0Aend%0A%0Apen%20up%0Amove%20back%2090%0Aturn%20left%2090%0Amove%20forward%20160%0Aturn%20right%20120%0Apen%20down%0Apen%20color%20%22skyblue%22%0Apen%20width%202%0Afor%20each%20k%20from%201%20to%203%0A%20%20%20%20side(320%2C%204)%0A%20%20%20%20turn%20right%20120%0Aend%0Asay%20%22a%20snowflake%20of%20%22%20%2B%203%20*%204%20*%204%20*%204%20*%204%20%2B%20%22%20sides%22">Run it in the playground</a> · <a href="https://github.com/samyyy2423/moth/blob/main/guides/examples/08-snowflake.moth">The source</a></p>
+        <div class="code"><pre><code><span class="c"># A snowflake, drawn</span>
+<span class="c"># Koch's snowflake: each side of a triangle becomes four sides a third as long, with a point in the middle, and</span>
+<span class="c"># so on, as deep as asked. The turtle starts in the middle, facing up, and draws wherever it moves.</span>
+
+<span class="k">to</span> side <span class="k">with</span> long, depth
+    <span class="k">if</span> depth <span class="k">is</span> <span class="n">0</span>
+        <span class="k">move</span> <span class="k">forward</span> long
+        <span class="k">return</span>
+    <span class="k">end</span>
+    side(long / <span class="n">3</span>, depth - <span class="n">1</span>)
+    <span class="k">turn</span> <span class="k">left</span> <span class="n">60</span>
+    side(long / <span class="n">3</span>, depth - <span class="n">1</span>)
+    <span class="k">turn</span> <span class="k">right</span> <span class="n">120</span>
+    side(long / <span class="n">3</span>, depth - <span class="n">1</span>)
+    <span class="k">turn</span> <span class="k">left</span> <span class="n">60</span>
+    side(long / <span class="n">3</span>, depth - <span class="n">1</span>)
+<span class="k">end</span>
+
+<span class="k">pen</span> <span class="k">up</span>
+<span class="k">move</span> <span class="k">back</span> <span class="n">90</span>
+<span class="k">turn</span> <span class="k">left</span> <span class="n">90</span>
+<span class="k">move</span> <span class="k">forward</span> <span class="n">160</span>
+<span class="k">turn</span> <span class="k">right</span> <span class="n">120</span>
+<span class="k">pen</span> <span class="k">down</span>
+<span class="k">pen</span> <span class="k">color</span> <span class="s">&quot;skyblue&quot;</span>
+<span class="k">pen</span> <span class="k">width</span> <span class="n">2</span>
+<span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="n">3</span>
+    side(<span class="n">320</span>, <span class="n">4</span>)
+    <span class="k">turn</span> <span class="k">right</span> <span class="n">120</span>
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;a snowflake of &quot;</span> + <span class="n">3</span> * <span class="n">4</span> * <span class="n">4</span> * <span class="n">4</span> * <span class="n">4</span> + <span class="s">&quot; sides&quot;</span></code></pre></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,11 @@
+to square_of_sum with n
+    fail with "delete this line, and square the sum"
+end
+
+to sum_of_squares with n
+    fail with "delete this line, and add up the squares"
+end
+
+to difference with n
+    fail with "delete this line, and take one from the other"
+end

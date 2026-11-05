@@ -1,0 +1,21 @@
+use "acronym.moth" as exercise
+
+to test_basic
+    expect exercise's abbreviate("Portable Network Graphics") is "PNG"
+end
+
+to test_small_words
+    expect exercise's abbreviate("Ruby on Rails") is "ROR"
+end
+
+to test_hyphens
+    expect exercise's abbreviate("Complementary metal-oxide semiconductor") is "CMOS"
+end
+
+to test_punctuation
+    expect exercise's abbreviate("Something - I made up from thin air") is "SIMUFTA"
+end
+
+to test_underscores
+    expect exercise's abbreviate("The Road _Not_ Taken") is "TRNT"
+end

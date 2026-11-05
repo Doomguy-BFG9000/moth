@@ -30,7 +30,7 @@ export const HELPERS = {
   "server.moth": /^web_/, "sockets.moth": /^net_/, "stats.moth": /^stats_/, "system.moth": /^system_/,
   "toml.moth": /^toml_(?!of$)/, "ui.moth": /^ui_/, "websocket.moth": /^ws_/, "windows.moth": /^ui_/, "yaml.moth": /^yaml_(?!of$)/,
   "zones.moth": /^zones_/, "dates.moth": /^dates_/, "game.moth": /^game_/, "http.moth": /^http_/,
-  "tasks.moth": /^task_/, "wire.moth": /^wire_/, "text.moth": [/^text_/, "find_all_from", "csv_value"], "python.moth": /^python_/,
+  "tasks.moth": /^task_/, "wire.moth": /^wire_/, "properties.moth": /^properties_/, "text.moth": [/^text_/, "find_all_from", "csv_value"], "python.moth": /^python_/,
   "mysql.moth": [/^my_/, "native_scramble", "sha2_scramble", "rsa_oaep"],
   "postgres.moth": [/^pg_/, "scram_first", "scram_final"],
   "big.moth": ["read_big", "made_big", "written_big", "compare_parts", "add_parts", "take_parts", "times_parts", "scaled_parts",
@@ -183,7 +183,7 @@ export function readLibrary(file, read = here) {
 
 // ---------- examples ----------
 
-const libraryFiles = new Map(STANDARD.map((file) => [file.split("/").at(-1), file]));
+export const libraryFiles = new Map(STANDARD.map((file) => [file.split("/").at(-1), file]));
 const MOTH_WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item of "
   + "record dictionary where remove keys byte bytes as text number in from with by each use expect fail try it fails times than at least "
   + "most read write save load round rounded split join uppercase lowercase position kind give stop start wait arguments json random").split(" "));
@@ -365,7 +365,7 @@ const callOf = (lib, fn) => `${lib.alias}'s ${fn.name}(${fn.inputs.map((i) => i.
 
 // ---------- the pages ----------
 
-const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+export const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // Moth's words, coloured as the playground colours them (highlight() in index.html)
 const WORDS = new Set(("set add say if else end repeat while for to return and or not is yes no nothing list empty length item "
@@ -394,7 +394,7 @@ export function highlight(source) {
 
 // prose, with `code` as code, and the first mention of another of the library's functions linked to it: a
 // name with a _ in it, or one written as a call, `size()`, so a plain word like "line" stays a word
-function prose(text, links = new Map()) {
+export function prose(text, links = new Map()) {
   const seen = new Set();
   return escape(text).split(/(`[^`]+`)/).map((piece) => (piece.startsWith("`") && piece.length > 1 ? `<code>${piece.slice(1, -1)}</code>`
     : piece.replace(/(?<![\w'#.-])([a-z][a-z0-9]*(?:_[a-z0-9]+)+|[a-z][a-z0-9]*(?=\())(\(\))?(?![\w'-])/g, (all, name, call) => {
@@ -468,11 +468,11 @@ ${script}</body>
 `;
 }
 // the pages the site has, for its navigation: more as they come
-export const SITE_PAGES = ["Playground", "Learn", "Docs"];
+export const SITE_PAGES = ["Playground", "Learn", "Docs", "Cookbook", "Examples"];
 const GITHUB = "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z";
 
 // a block of Moth, coloured, and what it says under it if it's known
-const codeBlock = (code, says) => `<div class="code"><pre><code>${highlight(code)}</code></pre>${says === null || says === undefined ? "" : `<pre class="says"><code>${escape(says)}</code></pre>`}</div>`;
+export const codeBlock = (code, says) => `<div class="code"><pre><code>${highlight(code)}</code></pre>${says === null || says === undefined ? "" : `<pre class="says"><code>${escape(says)}</code></pre>`}</div>`;
 
 // the first sentence of some prose, for a list: up to its first full stop; one too long for a card is cut at
 // its first colon or semicolon, or else at a word, with an ellipsis

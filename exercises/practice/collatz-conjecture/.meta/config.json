@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "collatz_conjecture.moth"
+    ],
+    "test": [
+      "collatz_conjecture.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Count the steps the Collatz rule takes to reach 1."
+}

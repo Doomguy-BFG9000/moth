@@ -1,0 +1,29 @@
+use "luhn.moth" as exercise
+
+to test_one_digit
+    expect not exercise's is_valid("1")
+end
+
+to test_zero_alone
+    expect not exercise's is_valid("0")
+end
+
+to test_a_valid_canadian_sin
+    expect exercise's is_valid("055 444 285")
+end
+
+to test_a_valid_card
+    expect exercise's is_valid("4539 3195 0343 6467")
+end
+
+to test_an_invalid_card
+    expect not exercise's is_valid("8273 1232 7352 0569")
+end
+
+to test_a_letter
+    expect not exercise's is_valid("055a 444 285")
+end
+
+to test_punctuation
+    expect not exercise's is_valid("055-444-285")
+end

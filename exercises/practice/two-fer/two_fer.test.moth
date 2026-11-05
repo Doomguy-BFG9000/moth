@@ -1,0 +1,13 @@
+use "two_fer.moth" as exercise
+
+to test_no_name
+    expect exercise's two_fer() is "One for you, one for me."
+end
+
+to test_a_name
+    expect exercise's two_fer("Alice") is "One for Alice, one for me."
+end
+
+to test_another_name
+    expect exercise's two_fer("Bob") is "One for Bob, one for me."
+end

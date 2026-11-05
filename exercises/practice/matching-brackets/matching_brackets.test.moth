@@ -1,0 +1,29 @@
+use "matching_brackets.moth" as exercise
+
+to test_paired_square_brackets
+    expect exercise's is_paired("[]")
+end
+
+to test_empty
+    expect exercise's is_paired("")
+end
+
+to test_unpaired
+    expect not exercise's is_paired("[[")
+end
+
+to test_wrong_order
+    expect not exercise's is_paired("}\{")
+end
+
+to test_nested
+    expect exercise's is_paired("\{[()]}")
+end
+
+to test_crossed
+    expect not exercise's is_paired("\{[(])}")
+end
+
+to test_a_math_expression
+    expect exercise's is_paired("(((185 + 223.85) * 15) - 543)/2")
+end
