@@ -11,6 +11,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
 - **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
   question, `wait`'s amount or `play note`'s note or time found it had no value.
+- **Moth from Python.** `pip install mothlang` (a wheel for Windows and one for Linux, each with `moth` in
+  it): `moth.load("fast.moth")` builds the file into a library once, caches it, and calls its functions
+  through ctypes, with Python's own values going across and Moth's mistakes raised as `MothError`;
+  `moth.run(source)` runs a program; and the wheel gives you the `moth` command. fib(30) runs 14 times as fast
+  as in Python.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
