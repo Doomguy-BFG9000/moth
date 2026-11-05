@@ -3,7 +3,9 @@
 # Scoop's, and, given one, an SBOM against CycloneDX's. The schemas come from those projects at a fixed commit.
 #
 #     pip install pyyaml jsonschema referencing
-#     python packaging/check-schemas.py [--sbom moth.cdx.json]
+#     python packaging/check-schemas.py [--manifests <folder>] [--sbom moth.cdx.json]
+#
+# --manifests checks the winget/ and scoop/ in another folder, as packaging/manifests.mjs writes them.
 import argparse
 import json
 import sys
@@ -57,22 +59,24 @@ def check(name, validator, document):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--manifests", default=str(here), help="the folder with winget/ and scoop/ (else packaging/)")
     parser.add_argument("--sbom", help="a CycloneDX 1.6 SBOM to check too")
     args = parser.parse_args()
+    folder = Path(args.manifests).resolve()
     good = True
 
-    manifests = sorted((here / "winget" / "manifests").rglob("*.yaml"))
+    manifests = sorted((folder / "winget" / "manifests").rglob("*.yaml"))
     if not manifests:
-        print("no winget manifests in packaging/winget/manifests")
+        print(f"no winget manifests in {folder / 'winget' / 'manifests'}")
         good = False
     for path in manifests:
         document = yaml.load(path.read_text(encoding="utf-8"), Loader=WingetLoader)
         kind, version = document.get("ManifestType"), document.get("ManifestVersion")
         schema = fetch(f"{WINGET}/v{version}/manifest.{kind}.{version}.json")
-        good &= check(path.relative_to(here.parent).as_posix(), Draft7Validator(schema, format_checker=FormatChecker()), document)
+        good &= check(path.relative_to(folder).as_posix(), Draft7Validator(schema, format_checker=FormatChecker()), document)
 
-    scoop = here / "scoop" / "moth.json"
-    good &= check(scoop.relative_to(here.parent).as_posix(), Draft7Validator(fetch(SCOOP), format_checker=FormatChecker()),
+    scoop = folder / "scoop" / "moth.json"
+    good &= check(scoop.relative_to(folder).as_posix(), Draft7Validator(fetch(SCOOP), format_checker=FormatChecker()),
                   json.loads(scoop.read_text(encoding="utf-8")))
 
     if args.sbom:

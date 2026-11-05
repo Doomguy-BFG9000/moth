@@ -1,0 +1,427 @@
+name: release
+
+# Signs a release and adds what installs and checks it (DESIGN.md §125). When a release is published, with
+# moth-windows.exe, moth-linux and SHA256SUMS.txt made by hand, it:
+#
+#   - builds moth from the tag's source and checks the release's two programs are those bytes, and the fixed
+#     point: each builds itself, and the other, byte for byte (on Linux and on Windows);
+#   - builds moth_<version>_amd64.deb, and the SBOM (CycloneDX), and winget's and Scoop's manifests;
+#   - signs every file with Sigstore's cosign, keyless, as this workflow (a .sig, a .pem and a .sigstore.json
+#     bundle each), and adds GitHub's attestations: where each was built, and the SBOM of the programs;
+#   - pushes the image to ghcr.io/samyyy2423/moth as <version> and latest, attested and signed;
+#   - uploads the .deb, the SBOM, the signatures, certificates and bundles to the release.
+#
+# A dry run does all of it into this run's artifacts and sends nothing anywhere: it builds from this commit's
+# source (or, run on a release's tag, checks that release's files), signs with Sigstore's staging instance, the
+# one kept for trying things, and attests, pushes and uploads nothing. Every push that changes the release's
+# own files does a dry run; from the Actions tab, "Run workflow" does one on any branch, and with dry-run off,
+# run on a release's tag, it does that release for real again (if its run failed, say).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run: everything into this run's artifacts; nothing attested, pushed or uploaded"
+        type: boolean
+        default: true
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - bootstrap.mjs
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/samyyy2423/moth
+  COSIGN_RELEASE: v2.6.5
+  OIDC_ISSUER: https://token.actions.githubusercontent.com
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      dry-run: ${{ steps.run.outputs.dry-run }}
+      tag: ${{ steps.run.outputs.tag }}
+      version: ${{ steps.run.outputs.version }}
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: what this run is
+        id: run
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry-run }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          tag=
+          case $EVENT in
+            release) dry=false; tag=$RELEASE_TAG ;;
+            workflow_dispatch)
+              dry=$DRY_RUN_INPUT
+              case $REF in refs/tags/v*) tag=$REF_NAME ;; esac ;;
+            *) dry=true ;;
+          esac
+          if [ "$dry" = false ] && [ -z "$tag" ]; then
+            echo "::error::To do a release for real by hand, run this on the release's tag (Use workflow from: Tags)."
+            exit 1
+          fi
+          if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
+            echo "::error::The release is $tag, but package.json says $version."
+            exit 1
+          fi
+          echo "dry-run=$dry" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          echo "### moth $version: $([ "$dry" = true ] && echo 'a dry run' || echo "the release $tag")" >> "$GITHUB_STEP_SUMMARY"
+      - name: the release's files
+        if: steps.run.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.run.outputs.tag }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern moth-linux --pattern moth-windows.exe --pattern SHA256SUMS.txt
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt | cut -c1-10 > release/date
+      - name: build moth from the source, and check the fixed point (and the release's files)
+        run: |
+          if [ -d release ]; then
+            packaging/release-build.sh built release
+            mkdir dist
+            cp release/moth-linux release/moth-windows.exe release/SHA256SUMS.txt dist/
+          else
+            packaging/release-build.sh dist
+          fi
+      - name: the .deb
+        run: packaging/debian/build-deb.sh dist/moth-linux "${{ steps.run.outputs.version }}" dist
+      - name: the SBOM
+        run: node packaging/sbom.mjs dist "${{ steps.run.outputs.version }}" "$GITHUB_SHA"
+      - name: winget's and Scoop's manifests for this version
+        run: |
+          date=$(cat release/date 2> /dev/null || date -u +%F)
+          sum=$(sha256sum dist/moth-windows.exe | cut -d ' ' -f 1)
+          node packaging/manifests.mjs "${{ steps.run.outputs.version }}" "$sum" "$date" manifests
+      - name: the sums the later jobs check what they're given against
+        id: sums
+        run: |
+          (cd dist && sha256sum -- *) | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo 'sums<<END'; (cd dist && sha256sum -- *); echo END; } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifests
+          path: manifests/
+          if-no-files-found: error
+
+  # the Windows moth builds itself and the Linux moth byte for byte, and installs and runs from the .deb
+  windows:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: the Windows moth builds itself, and the Linux moth, into the same bytes
+        shell: pwsh
+        run: |
+          $first = Join-Path $env:RUNNER_TEMP 'moth-first.exe'
+          Copy-Item dist\moth-windows.exe $first
+          $self = 'moth.moth', '--allow-read', '--allow-write', '--allow-run', '--include', 'moth-debugger.moth'
+          & $first build @self
+          if ($LASTEXITCODE) { throw 'moth.exe failed to build itself' }
+          & $first build @self --target linux
+          if ($LASTEXITCODE) { throw 'moth.exe failed to build the Linux moth' }
+          foreach ($pair in @(@('moth.exe', 'dist\moth-windows.exe'), @('moth', 'dist\moth-linux'))) {
+            $made = (Get-FileHash $pair[0] -Algorithm SHA256).Hash
+            $given = (Get-FileHash $pair[1] -Algorithm SHA256).Hash
+            if ($made -ne $given) { throw "moth-windows.exe built $($pair[0]) as $made, not $given" }
+            Write-Host "$($pair[0]): $made, the same bytes"
+          }
+
+  # the SBOM and the manifests fit their schemas, and the .deb installs and runs
+  check:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: manifests
+          path: manifests
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: the SBOM, and this version's winget and Scoop manifests, against their schemas
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0 referencing==0.37.0
+          python packaging/check-schemas.py --manifests manifests --sbom "dist/moth-$VERSION.cdx.json"
+      - name: the .deb installs, runs a program, and is removed
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          dpkg-deb --info "dist/moth_${VERSION}_amd64.deb"
+          sudo apt-get install -y -q "./dist/moth_${VERSION}_amd64.deb"
+          printf 'say "Hello from " "the .deb"\n' > "$RUNNER_TEMP/hello.moth"
+          (cd "$RUNNER_TEMP" && test "$(moth run hello.moth)" = "Hello from the .deb")
+          sudo apt-get remove -y -q moth
+          ! test -e /usr/bin/moth
+
+  sign:
+    needs: [build, windows, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # for Sigstore's certificate, which names this workflow
+      attestations: write
+    env:
+      DRY_RUN: ${{ needs.build.outputs.dry-run }}
+      FULCIO: ${{ needs.build.outputs.dry-run == 'true' && 'https://fulcio.sigstage.dev' || 'https://fulcio.sigstore.dev' }}
+      REKOR: ${{ needs.build.outputs.dry-run == 'true' && 'https://rekor.sigstage.dev' || 'https://rekor.sigstore.dev' }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: the files are the ones the build made
+        env:
+          SUMS: ${{ needs.build.outputs.sums }}
+        run: |
+          printf '%s\n' "$SUMS" > "$RUNNER_TEMP/sums"
+          (cd dist && sha256sum --check --strict "$RUNNER_TEMP/sums")
+          test "$(ls dist | wc -l)" = "$(wc -l < "$RUNNER_TEMP/sums")"
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: ${{ env.COSIGN_RELEASE }}
+      - name: Sigstore's staging instance, for a dry run
+        if: env.DRY_RUN == 'true'
+        run: |
+          cosign initialize --mirror https://tuf-repo-cdn.sigstage.dev --root https://tuf-repo-cdn.sigstage.dev/1.root.json \
+            --root-checksum 7265186ba2802b373160f0814fe51990945adccd8ea180580c8118e3645125a6
+      - name: sign each file, keyless, as this workflow
+        run: |
+          mkdir signed
+          for path in dist/*; do
+            file=${path#dist/}
+            cosign sign-blob --yes --fulcio-url "$FULCIO" --rekor-url "$REKOR" \
+              --new-bundle-format --bundle "signed/$file.sigstore.json" \
+              --output-signature "signed/$file.sig" --output-certificate "signed/$file.pem.b64" "$path"
+            base64 -d "signed/$file.pem.b64" > "signed/$file.pem"
+            rm "signed/$file.pem.b64"
+          done
+          ls -l signed
+      - name: check each signature, as docs/verifying-releases.md does
+        env:
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          openssl x509 -in signed/moth-linux.pem -noout -subject -issuer -ext subjectAltName
+          for path in dist/*; do
+            file=${path#dist/}
+            cosign verify-blob --new-bundle-format --bundle "signed/$file.sigstore.json" \
+              --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" "$path"
+            cosign verify-blob --signature "signed/$file.sig" --certificate "signed/$file.pem" --rekor-url "$REKOR" \
+              --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" "$path"
+          done
+      - name: attest where each file was built
+        if: env.DRY_RUN == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: attest the programs' SBOM
+        if: env.DRY_RUN == 'false'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/moth-linux
+            dist/moth-windows.exe
+          sbom-path: dist/moth-${{ needs.build.outputs.version }}.cdx.json
+      - name: check the attestations, as docs/verifying-releases.md does
+        if: env.DRY_RUN == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          for path in dist/*; do
+            gh attestation verify "$path" --repo "$GITHUB_REPOSITORY" --source-ref "refs/tags/$TAG" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+          gh attestation verify dist/moth-linux --repo "$GITHUB_REPOSITORY" --predicate-type https://cyclonedx.org/bom
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signatures
+          path: signed/
+          if-no-files-found: error
+
+  image:
+    needs: [build, windows, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      DRY_RUN: ${{ needs.build.outputs.dry-run }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: moth-linux is the one the build made, alone in the image's folder
+        env:
+          SUMS: ${{ needs.build.outputs.sums }}
+        run: |
+          printf '%s\n' "$SUMS" | grep ' moth-linux$' > "$RUNNER_TEMP/sums"
+          (cd dist && sha256sum --check --strict "$RUNNER_TEMP/sums")
+          mkdir context && cp dist/moth-linux context/
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: context
+          file: packaging/docker/Dockerfile
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest
+          load: true
+      - name: the image runs a program
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" && cd "$RUNNER_TEMP/work"
+          printf 'say "Hello from " "the image"\n' > hello.moth
+          ran=$(docker run --rm -v "$PWD:/work" --user "$(id -u):$(id -g)" "$IMAGE:$VERSION" run hello.moth)
+          test "$ran" = "Hello from the image"
+          docker image ls "$IMAGE"
+      - name: keep the image, in a dry run
+        if: env.DRY_RUN == 'true'
+        run: docker save "$IMAGE:$VERSION" | gzip > "moth-image-$VERSION.tar.gz"
+      - if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image
+          path: moth-image-*.tar.gz
+          if-no-files-found: error
+      - name: sign in to ghcr.io
+        if: env.DRY_RUN == 'false'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: push the image
+        id: push
+        if: env.DRY_RUN == 'false'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: context
+          file: packaging/docker/Dockerfile
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest
+          push: true
+      - name: attest where the image was built
+        if: env.DRY_RUN == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        if: env.DRY_RUN == 'false'
+        with:
+          cosign-release: ${{ env.COSIGN_RELEASE }}
+      - name: sign the image, and check the signature
+        if: env.DRY_RUN == 'false'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          cosign sign --yes "$IMAGE@$DIGEST"
+          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          echo "pushed $IMAGE:$VERSION and :latest, $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  # the only job that changes the release; a dry run says what it would have uploaded instead
+  publish:
+    needs: [build, sign, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DRY_RUN: ${{ needs.build.outputs.dry-run }}
+      VERSION: ${{ needs.build.outputs.version }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signatures
+          path: signed
+      - name: the files are the ones the build made
+        env:
+          SUMS: ${{ needs.build.outputs.sums }}
+        run: |
+          printf '%s\n' "$SUMS" > "$RUNNER_TEMP/sums"
+          (cd dist && sha256sum --check --strict "$RUNNER_TEMP/sums")
+      - name: upload the .deb, the SBOM, and every signature, certificate and bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=("dist/moth_${VERSION}_amd64.deb" "dist/moth-${VERSION}.cdx.json" signed/*)
+          {
+            echo "#### $([ "$DRY_RUN" = true ] && echo 'What a release would have uploaded' || echo "Uploaded to $TAG")"
+            printf -- '- %s\n' "${files[@]##*/}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DRY_RUN" = true ]; then
+            printf 'a dry run uploads nothing; it would have uploaded:\n'
+            printf '  %s\n' "${files[@]}"
+            exit 0
+          fi
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
