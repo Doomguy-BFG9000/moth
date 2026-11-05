@@ -1,4 +1,4 @@
-// The VS Code extension (editors/vscode, DESIGN §61, §108 and §123): its colours, run through a small TextMate
+// The VS Code extension (editors/vscode, DESIGN §61, §108 and §125): its colours, run through a small TextMate
 // tokenizer; its indenting; the extension itself, against a stand-in for VS Code's API, with and without a
 // stand-in for moth lsp; finding moth; and the .vsix it's packed in. Its tests in VS Code itself are
 // editors/vscode/e2e, which CI runs on the .vsix vsce makes.

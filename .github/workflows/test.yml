@@ -57,7 +57,7 @@ jobs:
           docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=moth-root -e MYSQL_DATABASE=moth mysql:8.4 --mysql-native-password=ON
           for i in $(seq 1 90); do docker exec mysql mysqladmin ping -h 127.0.0.1 -uroot -pmoth-root --silent 2> /dev/null && break; sleep 2; done
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:9000/minio/health/live > /dev/null && break; sleep 2; done
-      # the VS Code extension (DESIGN §123), first, as it takes a minute or two: packed by vsce, as it's published,
+      # the VS Code extension (DESIGN §125), first, as it takes a minute or two: packed by vsce, as it's published,
       # what's packed checked, and its tests run in VS Code itself on that .vsix, with moth and without, in the
       # newest VS Code and in 1.75, the oldest it says it works in
       - name: pack the VS Code extension, and check the package
