@@ -15,7 +15,8 @@ things that are released together, as one `moth` program:
   with.
 
 A release is tagged `vMAJOR.MINOR.PATCH` on GitHub (`v1.11.0`), with `moth-windows.exe`, `moth-linux` and
-their SHA-256 sums. `package.json` has the same number.
+their SHA-256 sums, and, after 1.11.0, a .deb, an SBOM and a Sigstore signature for each file
+([docs/verifying-releases.md](docs/verifying-releases.md)). `package.json` has the same number.
 
 | Release | What it can have | Example |
 |:--|:--|:--|
