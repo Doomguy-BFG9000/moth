@@ -584,6 +584,10 @@ test("once moth.path is changed, the language server is started again with the m
   assert.deepEqual([api.moth, api.languageServer, server.seen.started.map((s) => s.command)], [fakeMoth, true, [fakeMoth]]);
   await seen.listeners.configuration({ affectsConfiguration: (key) => key === "editor.fontSize" }); // not Moth's
   assert.equal(server.seen.started.length, 1);
+  // two changes at once start one server, not two
+  const changed = { affectsConfiguration: (key) => key === "moth.path" };
+  await Promise.all([seen.listeners.configuration(changed), seen.listeners.configuration(changed)]);
+  assert.deepEqual([server.seen.started.length, server.seen.stopped, api.languageServer], [2, true, true]);
   settings.languageServer = false;
   await seen.listeners.configuration({ affectsConfiguration: (key) => key === "moth.languageServer" });
   assert.deepEqual([server.seen.stopped, api.languageServer], [true, false]);
