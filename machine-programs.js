@@ -11,6 +11,42 @@ const ODD = ["nothing", "yes", "no"];
 const TEXTS = ['""', '"a"', '"Sam"', '"é😀"', '"a,b"', '"x\\ny"', '"tab\\there"', '"q\\"uote"', '"10"', '"Zz"'];
 const COMPARE = ["is", "is not", "is less than", "is greater than", "is at least", "is at most", "is divisible by"];
 
+// `bit and`, `bit or`, `bit xor` and the shifts, which machine code does right where they are for whole numbers
+// from 0 to 2^53 - 1 (DESIGN §127): each with every kind of value on each side, numbers whole only to 15
+// digits, infinities and 2^53 among them; a whole number written on the right, which goes in the instruction;
+// shifts as far as they go and further; in functions, loops and sums; and the mistakes, with their lines
+function bitCases() {
+  const values = ["0", "-0", "1", "255", "256", "4294967295", "4294967296", "9007199254740991", "9007199254740992", "-1", "1.5",
+    "0.1 * 3 * 10", "2.9999999999999996", "10 to the power of 400", "0 - 10 to the power of 400", '"7"', "nothing", "yes",
+    "list of 1", "0x1f", "2 to the power of 60"];
+  const all = `set vs to list of ${values.map((v) => `(${v})`).join(", ")}`;
+  const tried = (line) => ["        try", `            say ${line}`, "        if it fails with why", "            say why", "        end"];
+  return [
+    ...["bit and", "bit or", "bit xor"].map((op) => [all, "for each x in vs", "    for each y in vs", ...tried(`x ${op} y`), "    end", "end"].join("\n")),
+    ...["left", "right"].map((way) => [all, 'set ns to list of 0, 1, 8, 31, 32, 51, 52, 53, 63, 64, 70, 1023, 1024, -1, 1.5, "2", nothing',
+      "for each x in vs", "    for each n in ns", ...tried(`shift x ${way} by n`), "    end", "end"].join("\n")),
+    ...values.map((v) => [`set x to ${v}`, "try", ...["x bit and 255", "x bit or 0xff00", "x bit xor 0b1010", "x bit and 0", "x bit and 2147483647",
+      "x bit and 2147483648", "shift x right by 8", "shift x right by 0", "shift x right by 63", "shift x right by 64", "shift x left by 0",
+      "shift x left by 1", "shift x left by 52", "shift x left by 53", "x bit and 1.5"].map((line) => `    say ${line}`),
+    "if it fails with why", "    say why", "end"].join("\n")),
+    "set x to 3\nsay x bit and 5\nsay -1 bit and x",
+    "to f with a, b\n    return a bit or b\nend\nsay f(1, 2)\nsay f(1.5, 2)",
+    "to f with a\n    return shift a left by 40\nend\nsay f(1)\nsay f(10000)",
+    "to f with a, n\n    return shift a right by n\nend\nsay f(1024, 3)\nsay f(1024, \"x\")",
+    "say shift 1 left by 53",
+    "say 0 bit xor \"a\"",
+    "set n to 0\nfor each i from 1 to 100\n    set n to n + (i bit and 7) + (shift i left by 2) + (shift i right by 1) + (i bit xor 5)\nend\nsay n",
+    "set total to 0\nfor each i from 1 to 1000\n    add i bit and 1023 to total\nend\nsay total\nsay total bit and 1",
+    "set u to 123456789\nset out to empty list\nrepeat 4 times\n    add u bit and 255 to out\n    set u to shift u right by 8\nend\nsay out",
+    "set x to 5\nset x to x bit and 3\nsay x + 0.5\nsay x * 2",
+    "set big to 9007199254740991\nsay big bit and big\nsay big bit or 0\nsay big bit xor big\nsay shift big right by 52\nsay shift 1 left by 52",
+    // a left shift is x as it is times 2^n, so a number whole only to 15 digits stays one
+    "set k to 0.1 * 3 * 10\nset s to shift k left by 2\nsay s\nsay s is 12\nsay s - 12\nsay (shift k left by 51) - 6755399441055744\nsay shift k left by 1 is divisible by 2\nset w to 3\nsay shift w left by 2 is 12",
+    "to g with v\n    return v bit and 255\nend\nset t to 0\nfor each i from 1 to 300\n    add g(i) to t\nend\nsay t\nsay g(-3)",
+    "say 255 bit and 15\nset y to 6\nsay 3 bit or y\nsay (1 + 2) bit and (y - 1)",
+  ];
+}
+
 // Programs written by hand for what is easy to get wrong: how numbers show, 15-digit comparisons, every
 // mistake the machine code can make, and long trails of calls.
 export const MACHINE_CASES = [
@@ -392,6 +428,7 @@ export const MACHINE_CASES = [
   "say 5 without repeats",
   // a text a letter at a time: past one byte, views of one text's bytes, and the collector in between
   "set words to \"aé😀b, ça va? ✓ plain ascii too\"\nset made to \"\"\nfor each k from 1 to length of words\n    add item k of words to made\nend\nsay made is words\nsay item 3 of words \" \" item 1 of words \" \" item (length of words) of words \" \" item 2 of words\nsay items 2 to 4 of words\nsay items 5 to 9 of words \" \" item 6 of words \" \" items 1 to 2 of words\nset other to \"x😀y\"\nsay item 2 of words \" \" item 2 of other \" \" item 3 of words \" \" item 3 of other\nset ascii to \"hello\"\nsay item 5 of ascii \" \" item 1 of ascii\nset big to \"\"\nrepeat 3000 times\n    add \"é\" to big\nend\nadd \"!\" to big\nsay item (length of big) of big\nset counted to 0\nfor each k from 1 to length of big\n    if item k of big is \"é\"\n        add 1 to counted\n    end\nend\nsay counted\nsay item 1 of big \" \" item 2999 of big",
+  ...bitCases(),
 ];
 
 export function machinePrograms(seed, count) {
