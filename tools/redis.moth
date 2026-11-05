@@ -1,0 +1,600 @@
+# Redis (and the servers that speak its protocol: Valkey, KeyDB, Dragonfly), as Python's redis package has it:
+# keys with values that can end, numbers counted up, lists, hashes, publishing and subscribing, many commands
+# sent at once (pipelining) or all or none (MULTI and EXEC), logged in and over TLS, in RESP2 or RESP3, on
+# sockets.moth. A program `moth build` makes can use it, built with --allow-libraries.
+#
+#   use "redis.moth" as redis
+#   set r to redis's connect("localhost", 6379)        # connect_secure for TLS; connect_url("rediss://:pw@host:6380/2")
+#   redis's log_in(r, "a password")                    # or log_in(r, "a password", "a user"), for Redis 6's users
+#   redis's put(r, "greeting", "hello")                # SET
+#   redis's put_for(r, "session:42", "data", 3600)     # gone in an hour
+#   say redis's get(r, "greeting")                     # hello; nothing if there's no such key
+#   say redis's increment(r, "visits")                 # 1, then 2, ...
+#   redis's expire(r, "greeting", 60)
+#   say redis's time_left(r, "greeting")               # seconds: -1 if it never ends, -2 if there's no such key
+#   redis's push(r, "jobs", "first")                   # to the end; push_front; pop and pop_back take one off
+#   say redis's list_items(r, "jobs")                  # every item; list_length counts them
+#   redis's hash_put(r, "user:7", "name", "Sam")       # hash_get, hash_all (a dictionary), hash_remove
+#   say redis's command(r, list of "SET", "k", "v", "NX", "EX", 10)   # any command, as its words
+#   say redis's pipeline(r, list of (list of "INCR", "a"), (list of "GET", "a"))   # sent at once: each reply
+#   say redis's transaction(r, list of (list of "INCR", "a"), (list of "INCR", "b"))   # MULTI ... EXEC
+#   redis's publish(r, "news", "hello")                # how many got it
+#   redis's subscribe(r, list of "news")               # a connection of its own, then:
+#   set m to redis's next_message(r)                   # (record with channel "news", message "hello", pattern nothing)
+#   redis's use_resp3(r)                               # RESP3: maps come back as dictionaries, doubles as numbers
+#
+# Replies are Moth's own values: text, numbers, nothing, lists, and in RESP3 dictionaries, yes and no. Bulk
+# strings come back as text; get_bytes and command_bytes keep them as bytes. What's sent is text (its UTF-8),
+# bytes, or numbers. An error the server sends is a `fail with`, as "Redis said WRONGTYPE Operation against a
+# key holding the wrong kind of value".
+
+use "sockets.moth" as redis_net
+use "wire.moth" as redis_wire
+
+set redis_crlf to (list of 13, 10) as bytes
+
+# ---------- connecting ----------
+
+to connect with host, port or 6379
+    return redis_client(redis_net's connect(host, port))
+end
+
+# over TLS, the server's certificate checked for its name
+to connect_secure with host, port or 6380
+    return redis_client(redis_net's connect_secure(host, port))
+end
+
+to redis_client with c
+    return record with connection c, reader redis_wire's reader(c), protocol 2, subscribed no
+end
+
+# a connection from a URL: redis://host:port/db, rediss:// for TLS, with user:password@ before the host to log in
+to connect_url with url
+    set parts to redis_url(url)
+    set r to nothing
+    if secure of parts
+        set r to connect_secure(host of parts, port of parts)
+    else
+        set r to connect(host of parts, port of parts)
+    end
+    if password of parts is not nothing
+        log_in(r, password of parts, user of parts)
+    end
+    if database of parts is not 0
+        select_database(r, database of parts)
+    end
+    return r
+end
+
+# a URL's parts: secure, host, port, user, password (each nothing if it has none) and database
+to redis_url with url
+    set secure to no
+    set rest to url
+    if items 1 to 8 of (rest + "        ") is "redis://"
+        set rest to items 9 to (length of rest) of rest
+    else if items 1 to 9 of (rest + "         ") is "rediss://"
+        set secure to yes
+        set rest to items 10 to (length of rest) of rest
+    else
+        fail with "a Redis URL starts redis:// or rediss://, not " + url
+    end
+    set user to nothing
+    set password to nothing
+    set at to position of "@" in rest
+    if at is greater than 0
+        set login to items 1 to (at - 1) of rest
+        set rest to items (at + 1) to (length of rest) of rest
+        set colon to position of ":" in login
+        if colon is 0
+            set password to redis_decoded(login)
+        else
+            if colon is greater than 1
+                set user to redis_decoded(items 1 to (colon - 1) of login)
+            end
+            set password to redis_decoded(items (colon + 1) to (length of login) of login)
+        end
+    end
+    set database to 0
+    set slash to position of "/" in rest
+    if slash is greater than 0
+        set db_text to items (slash + 1) to (length of rest) of rest
+        set rest to items 1 to (slash - 1) of rest
+        if db_text is not ""
+            set database to number of db_text
+        end
+    end
+    set port to 6379
+    set host to rest
+    if ":" is in rest
+        set pieces to split rest by ":"
+        set host to item 1 of pieces
+        set port to number of item 2 of pieces
+    end
+    if host is ""
+        set host to "localhost"
+    end
+    return record with secure secure, host host, port port, user user, password password, database database
+end
+
+# %XX in a URL's user or password, as the byte it stands for
+to redis_decoded with words
+    set hex to "0123456789abcdef"
+    set made to empty list
+    set b to words as bytes
+    set k to 1
+    repeat while k is at most length of b
+        if byte k of b is 37 and k + 2 is at most length of b
+            set high to position of lowercase of ((list of byte (k + 1) of b) as bytes as text) in hex
+            set low to position of lowercase of ((list of byte (k + 2) of b) as bytes as text) in hex
+            add (high - 1) * 16 + low - 1 to made
+            set k to k + 3
+        else
+            add byte k of b to made
+            set k to k + 1
+        end
+    end
+    return made as bytes as text
+end
+
+to log_in with r, password, user or nothing
+    if user is nothing
+        command(r, list of "AUTH", password)
+    else
+        command(r, list of "AUTH", user, password)
+    end
+end
+
+to select_database with r, n
+    command(r, list of "SELECT", n)
+end
+
+# RESP3, through HELLO 3: replies with maps, sets, doubles, yes and no; what the server says of itself
+to use_resp3 with r
+    set said to command(r, list of "HELLO", 3)
+    set protocol of r to 3
+    return said
+end
+
+# a reply that takes longer than this many milliseconds fails
+to wait_at_most with r, milliseconds
+    redis_net's wait_at_most(connection of r, milliseconds)
+end
+
+to close with r
+    redis_net's close(connection of r)
+end
+
+# ---------- commands ----------
+
+# any command, as a list of its words; its reply
+to command with r, words
+    redis_send(r, list of words)
+    return redis_value(redis_reply(reader of r, no))
+end
+
+# the same, with bulk strings kept as bytes
+to command_bytes with r, words
+    redis_send(r, list of words)
+    return redis_value(redis_reply(reader of r, yes))
+end
+
+# commands sent at once, then each reply read, in order; a mistake if any was an error
+to pipeline with r, commands
+    redis_send(r, commands)
+    set replies to empty list
+    for each one in commands
+        add redis_reply(reader of r, no) to replies
+    end
+    set made to empty list
+    for each reply in replies
+        add redis_value(reply) to made
+    end
+    return made
+end
+
+# commands done all or none, between MULTI and EXEC: each one's reply; nothing if a key WATCHed changed
+to transaction with r, commands
+    set all to list of (list of "MULTI")
+    for each one in commands
+        add one to all
+    end
+    add (list of "EXEC") to all
+    set replies to pipeline(r, all)
+    return item (length of replies) of replies
+end
+
+to get with r, key
+    return command(r, list of "GET", key)
+end
+
+to get_bytes with r, key
+    return command_bytes(r, list of "GET", key)
+end
+
+to put with r, key, value
+    command(r, list of "SET", key, value)
+end
+
+# a value that's gone after this many seconds
+to put_for with r, key, value, seconds
+    command(r, list of "SET", key, value, "EX", seconds)
+end
+
+# how many of these keys (one, or a list) there were to delete
+to delete with r, keys_given
+    set words to list of "DEL"
+    for each key in redis_listed(keys_given)
+        add key to words
+    end
+    return command(r, words)
+end
+
+to exists with r, key
+    return command(r, list of "EXISTS", key) is 1
+end
+
+# the key's value ends in this many seconds: yes, or no if there's no such key
+to expire with r, key, seconds
+    return command(r, list of "EXPIRE", key, seconds) is 1
+end
+
+# seconds until the key's value ends: -1 if it never does, -2 if there's no such key
+to time_left with r, key
+    return command(r, list of "TTL", key)
+end
+
+# the number at the key, made `by` more (1): what it is now
+to increment with r, key, by or 1
+    if by is 1
+        return command(r, list of "INCR", key)
+    end
+    return command(r, list of "INCRBY", key, by)
+end
+
+# every key like a pattern ("user:*"), found a page at a time with SCAN, so a big database isn't held up
+to keys_like with r, pattern
+    set made to empty list
+    set cursor to "0"
+    repeat while yes
+        set reply to command(r, list of "SCAN", cursor, "MATCH", pattern, "COUNT", 500)
+        set cursor to item 1 of reply
+        for each key in item 2 of reply
+            if not (key is in made)
+                add key to made
+            end
+        end
+        if cursor is "0"
+            return made
+        end
+    end
+end
+
+# ---------- lists ----------
+
+# a value (or a list of them) on the end of the list at the key: its length now
+to push with r, key, values
+    return command(r, redis_words("RPUSH", key, values))
+end
+
+to push_front with r, key, values
+    return command(r, redis_words("LPUSH", key, values))
+end
+
+# the list's first value, taken off it, or nothing if it's empty
+to pop with r, key
+    return command(r, list of "LPOP", key)
+end
+
+to pop_back with r, key
+    return command(r, list of "RPOP", key)
+end
+
+# the first value of any of these lists (one, or a list of them), taken off, waiting up to `seconds` (0 for as
+# long as it takes) for one: a record with key and value, or nothing if none came in time
+to pop_waiting with r, keys_given, seconds
+    set words to list of "BLPOP"
+    for each key in redis_listed(keys_given)
+        add key to words
+    end
+    add seconds to words
+    set reply to command(r, words)
+    if reply is nothing
+        return nothing
+    end
+    return record with key item 1 of reply, value item 2 of reply
+end
+
+to list_items with r, key
+    return command(r, list of "LRANGE", key, 0, -1)
+end
+
+to list_length with r, key
+    return command(r, list of "LLEN", key)
+end
+
+# ---------- hashes ----------
+
+to hash_put with r, key, field, value
+    return command(r, list of "HSET", key, field, value)
+end
+
+to hash_get with r, key, field
+    return command(r, list of "HGET", key, field)
+end
+
+# every field of the hash and its value, as a dictionary
+to hash_all with r, key
+    set reply to command(r, list of "HGETALL", key)
+    if redis_is_dictionary(reply) # RESP3's map
+        return reply
+    end
+    set made to empty dictionary
+    for each k from 1 to (length of reply) / 2
+        set item (item (2 * k - 1) of reply) of made to item (2 * k) of reply
+    end
+    return made
+end
+
+to hash_remove with r, key, field
+    return command(r, list of "HDEL", key, field)
+end
+
+# ---------- publishing and subscribing ----------
+
+# a message to everyone subscribed to a channel: how many got it
+to publish with r, channel, message
+    return command(r, list of "PUBLISH", channel, message)
+end
+
+# this connection subscribed to these channels (one, or a list): it can only wait for messages after, and
+# (un)subscribe, until unsubscribe(); `patterns` subscribes to channels like them, as "news.*"
+to subscribe with r, channels
+    redis_subscribing(r, "SUBSCRIBE", channels)
+end
+
+to subscribe_like with r, patterns
+    redis_subscribing(r, "PSUBSCRIBE", patterns)
+end
+
+to redis_subscribing with r, verb, names
+    set words to list of verb
+    for each name in redis_listed(names)
+        add name to words
+    end
+    redis_send(r, list of words)
+    set subscribed of r to yes
+    for each name in redis_listed(names) # each is said back
+        redis_reply(reader of r, no)
+    end
+end
+
+# the next message on a channel subscribed to, waiting for it: a record with channel, message and pattern
+# (the pattern it came by, or nothing); or, with `milliseconds`, nothing if none comes in that time
+to next_message with r, milliseconds or nothing
+    repeat while yes
+        if milliseconds is not nothing and redis_wire's waiting(reader of r) is 0
+            if length of redis_net's ready((list of connection of r), milliseconds) is 0
+                return nothing
+            end
+        end
+        set reply to redis_value(redis_reply(reader of r, no))
+        if redis_is_list(reply) and length of reply is at least 3
+            set kind to item 1 of reply
+            if kind is "message"
+                return record with channel item 2 of reply, message item 3 of reply, pattern nothing
+            else if kind is "pmessage"
+                return record with channel item 3 of reply, message item 4 of reply, pattern item 2 of reply
+            end
+        end
+    end
+end
+
+# no more channels: the connection is for commands again
+to unsubscribe with r
+    redis_send(r, list of (list of "UNSUBSCRIBE"), (list of "PUNSUBSCRIBE"))
+    set done to no
+    repeat while not done # each says how many are left, PUNSUBSCRIBE's last none; messages may come before
+        set reply to redis_value(redis_reply(reader of r, no))
+        if redis_is_list(reply) and length of reply is 3 and item 1 of reply is "punsubscribe" and item 3 of reply is 0
+            set done to yes
+        end
+    end
+    set subscribed of r to no
+end
+
+# ---------- the protocol ----------
+
+# commands, each a list of words, as RESP arrays of bulk strings, sent at once
+to redis_send with r, commands
+    redis_net's send(connection of r, redis_encoded(commands))
+end
+
+to redis_encoded with commands
+    set w to redis_wire's writer()
+    for each words in commands
+        redis_wire's add_text(w, "*" + length of words)
+        redis_wire's add_bytes(w, redis_crlf)
+        for each word in words
+            set b to redis_word_bytes(word)
+            redis_wire's add_text(w, "$" + length of b)
+            redis_wire's add_bytes(w, redis_crlf)
+            redis_wire's add_bytes(w, b)
+            redis_wire's add_bytes(w, redis_crlf)
+        end
+    end
+    return redis_wire's bytes_of(w)
+end
+
+# a word of a command as bytes: text's UTF-8, bytes as they are, a number written out, yes and no as 1 and 0
+to redis_word_bytes with word
+    if word is yes
+        return "1" as bytes
+    else if word is no
+        return "0" as bytes
+    else if word is nothing
+        fail with "a Redis command's words can't be nothing"
+    end
+    try
+        return redis_bytes_check(word)
+    if it fails
+        return ("" + word) as bytes
+    end
+end
+
+to redis_bytes_check with word as bytes
+    return word
+end
+
+# One reply, read: text, a number, nothing, yes or no, a list, a dictionary, or an error, which is a record
+# with kind "redis error"; bulk strings as bytes, if `raw`
+to redis_reply with reader, raw
+    set mark to redis_wire's take_byte(reader)
+    if mark is 43 # + a simple string
+        return redis_wire's line(reader)
+    else if mark is 45 # - an error
+        return record with kind "redis error", message redis_wire's line(reader)
+    else if mark is 58 # : an integer
+        return number of redis_wire's line(reader)
+    else if mark is 36 # $ a bulk string
+        set size to number of redis_wire's line(reader)
+        if size is -1
+            return nothing
+        end
+        set b to redis_wire's take(reader, size)
+        redis_wire's take(reader, 2)
+        if raw
+            return b
+        end
+        return b as text
+    else if mark is 42 or mark is 126 or mark is 62 # * an array, ~ a set, > a push
+        set count to number of redis_wire's line(reader)
+        if count is -1
+            return nothing
+        end
+        set made to empty list
+        repeat count times
+            add redis_reply(reader, raw) to made
+        end
+        return made
+    else if mark is 37 # % a map
+        set count to number of redis_wire's line(reader)
+        set made to empty dictionary
+        repeat count times
+            set key to redis_reply(reader, no)
+            set item key of made to redis_reply(reader, raw)
+        end
+        return made
+    else if mark is 124 # | attributes, before the reply they're about: passed over
+        set count to number of redis_wire's line(reader)
+        repeat count * 2 times
+            redis_reply(reader, raw)
+        end
+        return redis_reply(reader, raw)
+    else if mark is 95 # _ null
+        redis_wire's line(reader)
+        return nothing
+    else if mark is 35 # # a boolean
+        return redis_wire's line(reader) is "t"
+    else if mark is 44 # , a double
+        set words to redis_wire's line(reader)
+        if words is "inf"
+            return 10 to the power of 400
+        else if words is "-inf"
+            return -1 * (10 to the power of 400)
+        end
+        return redis_number(words)
+    else if mark is 40 # ( a big number, kept as text, as big.moth has them
+        return redis_wire's line(reader)
+    else if mark is 33 or mark is 61 # ! a blob error, = a verbatim string, its format first ("txt:")
+        set size to number of redis_wire's line(reader)
+        set words to redis_wire's take(reader, size) as text
+        redis_wire's take(reader, 2)
+        if mark is 33
+            return record with kind "redis error", message words
+        end
+        return items 5 to (length of words) of words
+    end
+    fail with "Redis sent a reply that isn't RESP: it starts with byte " + mark
+end
+
+# a reply as its value: an error, here or inside, a mistake
+to redis_value with reply
+    if redis_is_record(reply)
+        fail with "Redis said " + message of reply
+    end
+    if redis_is_list(reply)
+        for each one in reply
+            redis_value(one)
+        end
+    end
+    return reply
+end
+
+# a double's text, "3.14" or "1e+300", as a number
+to redis_number with words
+    set lower to lowercase of words
+    if not ("e" is in lower)
+        return number of words
+    end
+    set halves to split lower by "e"
+    set power_text to item 2 of halves
+    if items 1 to 1 of power_text is "+"
+        set power_text to items 2 to (length of power_text) of power_text
+    end
+    set p to number of power_text
+    if p is at least 0
+        return number of item 1 of halves * (10 to the power of p)
+    end
+    return number of item 1 of halves / (10 to the power of (0 - p))
+end
+
+to redis_words with verb, key, values
+    set words to list of verb, key
+    for each v in redis_listed(values)
+        add v to words
+    end
+    return words
+end
+
+to redis_listed with value
+    if redis_is_list(value)
+        return value
+    end
+    return list of value
+end
+
+to redis_list_check with value as a list
+    return yes
+end
+
+to redis_is_list with value
+    try
+        return redis_list_check(value)
+    if it fails
+        return no
+    end
+end
+
+to redis_dictionary_check with value as a dictionary
+    return yes
+end
+
+to redis_is_dictionary with value
+    try
+        return redis_dictionary_check(value)
+    if it fails
+        return no
+    end
+end
+
+to redis_record_check with value as a record
+    return yes
+end
+
+to redis_is_record with value
+    try
+        return redis_record_check(value)
+    if it fails
+        return no
+    end
+end

@@ -404,6 +404,38 @@ bytes and dictionaries:
   (`pop_open`, `pop_count`, `pop_get`, `pop_delete`) and IMAP
   (`imap_open`, `imap_folders`, `imap_select`, `imap_search`, `imap_get`,
   `imap_mark`).
+- [`postgres.moth`](tools/postgres.moth) talks to PostgreSQL as Python's
+  `psycopg` does, over its own protocol: logged in with SCRAM-SHA-256 or MD5,
+  over TLS where asked for, `pg's query(db, "select name from people where
+  age > $1", list of 21)` with each value sent apart from the SQL, so none is
+  ever read as SQL, rows as dictionaries with each column's type (numbers,
+  yes and no, bytes, JSON, arrays), `execute`, `in_transaction(db, work)` and
+  `run_script`. [`mysql.moth`](tools/mysql.moth) does the same for MySQL and
+  MariaDB, as `PyMySQL` does: `caching_sha2_password` or `sha256_password`
+  (the password sent RSA-encrypted where there's no TLS) or
+  `mysql_native_password`, and prepared statements with `?`. Both are tested
+  against real servers.
+- [`redis.moth`](tools/redis.moth) talks to Redis (and Valkey) as Python's
+  `redis` does: `get`, `put`, `put_for` a time, `increment`, lists, hashes,
+  `keys_like`, any `command`, a `pipeline` of many sent at once, `transaction`
+  (MULTI and EXEC), `publish`, `subscribe` and `next_message`, logged in and
+  over TLS, in RESP2 or RESP3. All three speak through
+  [`wire.moth`](tools/wire.moth): bytes read from a connection a line, a count
+  or a number at a time, and written the same way.
+- [`s3.moth`](tools/s3.moth) keeps objects in Amazon S3 and the stores that
+  speak its language (MinIO, Cloudflare R2, Backblaze B2), as `boto3` does:
+  `put_object`, `get_object`, `head_object`, `list_objects` (every page),
+  `delete_object`, buckets made and removed, and `presigned_url`s anyone can
+  use for a while, each request signed with AWS Signature Version 4, checked
+  against AWS's own published signatures and a real MinIO.
+- [`jwt.moth`](tools/jwt.moth) makes and checks JSON Web Tokens as `PyJWT`
+  does: HS256, HS384 and HS512, and RS256, RS384 and RS512 checked with a PEM
+  key, a certificate or a JWK; expiry, not-before, issuer and audience
+  checked; and a token's `none` or a switch from RSA to HMAC turned down.
+  [`oauth.moth`](tools/oauth.moth) is an OAuth 2 client: `sign_in` with the
+  authorization code flow and PKCE, a server of the program's own on
+  127.0.0.1 for the browser to come back to, as command-line tools do;
+  `client_credentials`; `refresh`; and `discover` for OpenID Connect.
 - [`zip.moth`](tools/zip.moth) squeezes bytes and back as gzip and .zip files
   do (DEFLATE, with codes made for each block as zlib's are), and makes and
   reads zip archives, in Moth alone: what it makes, zlib, Python and `tar`
@@ -459,6 +491,11 @@ bytes and dictionaries:
   `zoneinfo` does: what time it is in "Asia/Kolkata", with summer time,
   and the moment a time in a zone is, from Windows' own zones or Linux's
   zoneinfo files.
+- [`yaml.moth`](tools/yaml.moth) reads the YAML that CI, Kubernetes and
+  Docker Compose files are written in, as `yaml.safe_load` does, with YAML
+  1.2's types: block and flow style, quotes and escapes, `|` and `>` text,
+  comments, documents, anchors, aliases and `<<` merges; and `yaml_of` writes
+  it back. It reads the YAML spec's own examples as PyYAML does.
 - [`toml.moth`](tools/toml.moth) reads TOML settings files (pyproject.toml,
   Cargo.toml) as Python's `tomllib` does, and writes them;
   [`options.moth`](tools/options.moth) reads a program's command line as
@@ -893,7 +930,7 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   program's variables, changes them only for itself, and `wait for` gives a
   copy of what it gave back, or fails with the mistake it ended with. Sharing
   nothing, workers can't race, and in a program `moth build` makes they run
-  Moth at the same moment, on as many cores as there are (DESIGN §111). In
+  Moth at the same moment, on as many cores as there are (DESIGN §119). In
   the playground a worker runs when it's started, as a task does.
 - **A record's own functions:** `rex's speak()`, where the program makes
   nothing else called `speak`, calls the function rex's `speak` field holds,
@@ -1398,6 +1435,15 @@ calls that led there.
   `tools/system.moth` saying the same, word for word, on Windows and Linux; and
   `tools/game.moth` playing itself, a key held and let go and the mouse clicked
   by the system's own messages, at 30 frames a second or more, on both
+- the libraries for companies' work: `tools/yaml.test.moth` against the YAML
+  spec's examples and PyYAML; `tools/jwt.test.moth` against RFC 7515's tokens
+  and PyJWT's, with `none` and HMAC-with-the-public-key turned down;
+  `tools/s3.test.moth` against the signatures AWS publishes; SCRAM-SHA-256
+  against RFC 7677; and each protocol's messages, byte for byte as Python's
+  `struct` makes them, all on the engines and in machine code; then, where CI
+  starts them in containers, real PostgreSQL 16, MySQL 8.4, Redis 7 and MinIO
+  servers, and an OAuth sign-in with PKCE through a provider and a browser
+  the test plays
 - machine code against the JavaScript engine: 400 random programs made
   from the part of Moth it takes ([`machine-programs.js`](machine-programs.js)),
   with awkward numbers, every comparison and mistakes on purpose, 120 written for

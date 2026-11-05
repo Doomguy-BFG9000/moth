@@ -813,7 +813,7 @@ to parse with tokens, reading
         return record with kind "builtin", name "items", args slice_args, at t
     end
 
-    # `start count(10)`: the builtin, "start" or, `on another core`, "start worker" (DESIGN §111), and the call;
+    # `start count(10)`: the builtin, "start" or, `on another core`, "start worker" (DESIGN §119), and the call;
     # or nothing if what follows `start` isn't one (or, for a line of its own, if anything follows it)
     to start_rest with whole_line
         set started to primary()

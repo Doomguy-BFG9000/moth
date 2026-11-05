@@ -1,0 +1,433 @@
+# Amazon S3 and the stores that speak its language (MinIO, Cloudflare R2, Backblaze B2, Ceph and more), as
+# Python's boto3 has them: objects put, got, listed and deleted, buckets made and removed, and presigned URLs
+# that let anyone with one get (or put) an object for a while, each request signed with AWS Signature
+# Version 4, over http.moth. A program `moth build` makes can use it, built with --allow-libraries.
+#
+#   use "s3.moth" as s3
+#   set store to s3's client("https://s3.eu-west-1.amazonaws.com", "eu-west-1", access_key, secret_key)
+#   set store to s3's client("http://localhost:9000", "us-east-1", "minioadmin", "minioadmin")   # MinIO
+#   set store to s3's from_environment()     # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, ...
+#   s3's put_object(store, "photos", "2026/cat.png", read bytes "cat.png", "image/png")
+#   set data to s3's get_object(store, "photos", "2026/cat.png")       # bytes
+#   for each found in s3's list_objects(store, "photos", "2026/")       # every one, page after page
+#       say key of found " " size of found " " modified of found
+#   end
+#   say s3's head_object(store, "photos", "2026/cat.png")   # its size, type, etag and modified; nothing if none
+#   s3's delete_object(store, "photos", "2026/cat.png")
+#   say s3's presigned_url(store, "GET", "photos", "2026/cat.png", 3600)   # good for an hour
+#   s3's create_bucket(store, "photos")       # and delete_bucket; list_buckets says each one's name
+#
+# A client is a record: endpoint, region, access_key, secret_key, token (a session's, from temporary
+# credentials, or nothing), path_style (buckets in the path, as MinIO and most stores want, yes; or in the
+# host's name, as AWS wants, no: client() picks by the endpoint) and sign_payload (yes: each body's SHA-256 is
+# signed; no sends UNSIGNED-PAYLOAD, which is quicker for big objects over HTTPS). A store that says no is a
+# `fail with` with its code and message, as "S3 said NoSuchKey (404): The specified key does not exist.".
+# sign() is Signature Version 4 itself, for any AWS service's requests.
+
+use "http.moth" as s3_http
+use "hash.moth" as s3_hash
+use "xml.moth" as s3_xml
+use "dates.moth" as s3_dates
+use "system.moth" as s3_system
+
+use the library "msvcrt"
+    "_time64" as s3_windows_time(a pointer) gives a long whole number
+end
+use the library "c"
+    "time" as s3_unix_time(a pointer) gives a long whole number
+end
+
+set s3_hex to "0123456789ABCDEF"
+set s3_unreserved to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+set s3_empty_hash to "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+# ---------- clients ----------
+
+# a client for the store at this endpoint ("https://s3.us-east-1.amazonaws.com", "http://localhost:9000")
+to client with endpoint, region, access_key, secret_key
+    set base to endpoint
+    repeat while length of base is greater than 0 and item (length of base) of base is "/"
+        set base to items 1 to (length of base - 1) of base
+    end
+    set parts to s3_endpoint(base)
+    set aws to s3_ends_with(host of parts, ".amazonaws.com")
+    return record with endpoint base, region region, access_key access_key, secret_key secret_key, token nothing,
+        path_style (not aws), sign_payload yes
+end
+
+# a client from the environment, as the AWS command line and SDKs read it: AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION (or AWS_DEFAULT_REGION, else us-east-1) and
+# AWS_ENDPOINT_URL (or AWS_ENDPOINT_URL_S3; else AWS's own for the region)
+to from_environment
+    set access_key to s3_system's environment("AWS_ACCESS_KEY_ID")
+    set secret_key to s3_system's environment("AWS_SECRET_ACCESS_KEY")
+    if access_key is nothing or secret_key is nothing
+        fail with "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY aren't both set"
+    end
+    set region to s3_system's environment("AWS_REGION")
+    if region is nothing
+        set region to s3_system's environment("AWS_DEFAULT_REGION")
+    end
+    if region is nothing
+        set region to "us-east-1"
+    end
+    set endpoint to s3_system's environment("AWS_ENDPOINT_URL_S3")
+    if endpoint is nothing
+        set endpoint to s3_system's environment("AWS_ENDPOINT_URL")
+    end
+    if endpoint is nothing
+        set endpoint to "https://s3." + region + ".amazonaws.com"
+    end
+    set made to client(endpoint, region, access_key, secret_key)
+    set token of made to s3_system's environment("AWS_SESSION_TOKEN")
+    return made
+end
+
+# ---------- objects ----------
+
+# text (its UTF-8) or bytes, as an object; `type` its Content-Type
+to put_object with store, bucket, key, data, type or "application/octet-stream"
+    s3_request(store, "PUT", bucket, key, empty dictionary, data as bytes, dictionary where "content-type" is type)
+end
+
+# an object's bytes
+to get_object with store, bucket, key
+    return body of s3_request(store, "GET", bucket, key, empty dictionary, nothing, empty dictionary)
+end
+
+# what an object is, without its bytes: a record with its size, type, etag and modified (as the store says it,
+# "Wed, 04 Nov 2026 10:15:00 GMT"); or nothing if there's no such object
+to head_object with store, bucket, key
+    set r to s3_send(store, "HEAD", bucket, key, empty dictionary, nothing, empty dictionary)
+    if status of r is 404
+        return nothing
+    end
+    s3_check(r, bucket, key)
+    set h to headers of r
+    return record with size number of s3_header(h, "content-length", "0"), type s3_header(h, "content-type", ""),
+        etag s3_unquoted(s3_header(h, "etag", "")), modified s3_header(h, "last-modified", "")
+end
+
+to delete_object with store, bucket, key
+    s3_request(store, "DELETE", bucket, key, empty dictionary, nothing, empty dictionary)
+end
+
+# Every object whose key starts with `prefix`, page after page: each a record with its key, size, etag and
+# modified ("2026-11-04T10:15:00.000Z")
+to list_objects with store, bucket, prefix or ""
+    set made to empty list
+    set after to nothing
+    repeat while yes
+        set query to dictionary where "list-type" is "2"
+        if prefix is not ""
+            set item "prefix" of query to prefix
+        end
+        if after is not nothing
+            set item "continuation-token" of query to after
+        end
+        set answer to s3_xml's parse(text of s3_request(store, "GET", bucket, nothing, query, nothing, empty dictionary))
+        for each found in s3_xml's all_named(answer, "Contents")
+            add record with key s3_field(found, "Key"), size number of s3_field(found, "Size"), etag s3_unquoted(s3_field(found, "ETag")),
+                modified s3_field(found, "LastModified") to made
+        end
+        if s3_field(answer, "IsTruncated") is not "true"
+            return made
+        end
+        set after to s3_field(answer, "NextContinuationToken")
+    end
+end
+
+# ---------- buckets ----------
+
+to create_bucket with store, bucket
+    set body to nothing
+    if region of store is not "us-east-1"
+        set body to "<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><LocationConstraint>" + region of store + "</LocationConstraint></CreateBucketConfiguration>"
+        set body to body as bytes
+    end
+    s3_request(store, "PUT", bucket, nothing, empty dictionary, body, empty dictionary)
+end
+
+# a bucket removed: it must have no objects
+to delete_bucket with store, bucket
+    s3_request(store, "DELETE", bucket, nothing, empty dictionary, nothing, empty dictionary)
+end
+
+# the name of each bucket these credentials own
+to list_buckets with store
+    set answer to s3_xml's parse(text of s3_request(store, "GET", nothing, nothing, empty dictionary, nothing, empty dictionary))
+    set made to empty list
+    for each found in s3_xml's all_named(answer, "Bucket")
+        add s3_field(found, "Name") to made
+    end
+    return made
+end
+
+# ---------- presigned URLs ----------
+
+# a URL anyone can use, for `seconds` (up to 604800, a week), to GET (or PUT, or DELETE) one object, with no
+# credentials of their own
+to presigned_url with store, method, bucket, key, seconds
+    if seconds is less than 1 or seconds is greater than 604800
+        fail with "a presigned URL lasts from 1 second to 604800 (a week), not " + seconds
+    end
+    return s3_presigned(store, uppercase of method, bucket, key, seconds, s3_now())
+end
+
+to s3_presigned with store, method, bucket, key, seconds, moment
+    set where to s3_where(store, bucket, key)
+    set stamp to s3_stamp(moment)
+    set query to dictionary where "X-Amz-Algorithm" is "AWS4-HMAC-SHA256",
+        "X-Amz-Credential" is access_key of store + "/" + s3_scope(store, stamp), "X-Amz-Date" is stamp,
+        "X-Amz-Expires" is "" + seconds, "X-Amz-SignedHeaders" is "host"
+    if token of store is not nothing
+        set item "X-Amz-Security-Token" of query to token of store
+    end
+    set signed to sign(store, method, path of where, query, (dictionary where "host" is host of where), "UNSIGNED-PAYLOAD", stamp)
+    return base of where + path of where + "?" + s3_query(query) + "&X-Amz-Signature=" + signature of signed
+end
+
+# ---------- Signature Version 4 ----------
+
+# A request signed: its method, path (as it's sent, already encoded), query (a dictionary, not encoded),
+# headers (a dictionary, host among them, and x-amz-date), the hex SHA-256 of its body (or "UNSIGNED-PAYLOAD")
+# and the time as "20130524T000000Z". A record: canonical_request, string_to_sign, signature and
+# authorization (the Authorization header's value).
+to sign with store, method, path, query, headers, payload_hash, stamp
+    set names to empty list
+    set values to empty dictionary
+    for each name in headers
+        set lower to lowercase of name
+        add lower to names
+        set item lower of values to s3_spaces_folded("" + item name of headers)
+    end
+    set names to names in order
+    set header_lines to empty list
+    for each name in names
+        add name + ":" + item name of values to header_lines
+    end
+    set signed_names to join names with ";"
+    set canonical_lines to list of method, path, s3_query(query), (join header_lines with "\n") + "\n", signed_names, payload_hash
+    set canonical to join canonical_lines with "\n"
+    set scope to s3_scope(store, stamp)
+    set to_sign to "AWS4-HMAC-SHA256\n" + stamp + "\n" + scope + "\n" + s3_hash's sha256(canonical)
+    set k to s3_hash's bytes_of_hex(s3_hash's hmac("sha256", "AWS4" + secret_key of store, items 1 to 8 of stamp))
+    set k to s3_hash's bytes_of_hex(s3_hash's hmac("sha256", k, region of store))
+    set k to s3_hash's bytes_of_hex(s3_hash's hmac("sha256", k, s3_service(store)))
+    set k to s3_hash's bytes_of_hex(s3_hash's hmac("sha256", k, "aws4_request"))
+    set signature to s3_hash's hmac("sha256", k, to_sign)
+    set authorization to "AWS4-HMAC-SHA256 Credential=" + access_key of store + "/" + scope + ",SignedHeaders=" + signed_names + ",Signature=" + signature
+    return record with canonical_request canonical, string_to_sign to_sign, signature signature, authorization authorization
+end
+
+# 20130524/us-east-1/s3/aws4_request
+to s3_scope with store, stamp
+    return items 1 to 8 of stamp + "/" + region of store + "/" + s3_service(store) + "/aws4_request"
+end
+
+# s3, unless the client says another service
+to s3_service with store
+    try
+        return service of store
+    if it fails
+        return "s3"
+    end
+end
+
+# a query as SigV4 has it: each name and value encoded, sorted by name, then value
+to s3_query with query
+    set pairs to empty list
+    for each name in query
+        set value to item name of query
+        if value is nothing
+            set value to ""
+        end
+        add s3_encoded("" + name, no) + "=" + s3_encoded("" + value, no) to pairs
+    end
+    return join (pairs in order) with "&"
+end
+
+# text as SigV4 encodes it: its UTF-8, every byte but letters, digits and -._~ as %XX, and / too unless kept
+to s3_encoded with words, keep_slash
+    set made to empty list
+    for each b in words as bytes
+        set c to (list of b) as bytes as text
+        if b is less than 128 and (c is in s3_unreserved or (keep_slash and c is "/"))
+            add c to made
+        else
+            add "%" + item ((shift b right by 4) + 1) of s3_hex + item ((b bit and 15) + 1) of s3_hex to made
+        end
+    end
+    return join made with ""
+end
+
+# a header's value with the spaces around it gone, and each run of spaces inside it one
+to s3_spaces_folded with words
+    set pieces to empty list
+    for each piece in split words by " "
+        if piece is not ""
+            add piece to pieces
+        end
+    end
+    return join pieces with " "
+end
+
+# seconds since 1970 as SigV4's time: 20130524T000000Z
+to s3_stamp with moment
+    set whole to moment rounded down
+    set rest to remainder of whole divided by 86400
+    set d to s3_dates's date_of_day((whole - rest) / 86400)
+    set second to remainder of rest divided by 60
+    set minutes to (rest - second) / 60
+    set minute to remainder of minutes divided by 60
+    set hour to (minutes - minute) / 60
+    return "" + year of d + s3_two(month of d) + s3_two(day of d) + "T" + s3_two(hour) + s3_two(minute) + s3_two(second) + "Z"
+end
+
+to s3_two with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+# seconds since 1970 began, in UTC, as the system's clock has it
+to s3_now
+    try
+        return s3_windows_time(nothing)
+    if it fails
+        return s3_unix_time(nothing)
+    end
+end
+
+# ---------- requests ----------
+
+# where a bucket's object is: base (scheme, host and port), host (as the Host header has it) and path, encoded
+to s3_where with store, bucket, key
+    set parts to s3_endpoint(endpoint of store)
+    set host to host of parts
+    set path to ""
+    if bucket is not nothing
+        if path_style of store
+            set path to "/" + s3_encoded(bucket, no)
+        else
+            set host to bucket + "." + host
+        end
+    end
+    if key is not nothing
+        set path to path + "/" + s3_encoded(key, yes)
+    end
+    if path is ""
+        set path to "/"
+    end
+    set host_line to host
+    if port of parts is not nothing
+        set host_line to host + ":" + port of parts
+    end
+    return record with base (scheme of parts + "://" + host_line), host host_line, path path
+end
+
+# an endpoint's scheme, host and port (nothing for the scheme's own)
+to s3_endpoint with endpoint
+    set rest to endpoint
+    set scheme to "https"
+    set at to position of "://" in rest
+    if at is greater than 0
+        set scheme to lowercase of items 1 to (at - 1) of rest
+        set rest to items (at + 3) to (length of rest) of rest
+    end
+    set slash to position of "/" in rest
+    if slash is greater than 0
+        set rest to items 1 to (slash - 1) of rest
+    end
+    set host to lowercase of rest
+    set port to nothing
+    if ":" is in rest and not s3_ends_with(rest, "]")
+        set pieces to split rest by ":"
+        set host to lowercase of join (items 1 to (length of pieces - 1) of pieces) with ":"
+        set port to item (length of pieces) of pieces
+        if (scheme is "https" and port is "443") or (scheme is "http" and port is "80")
+            set port to nothing
+        end
+    end
+    return record with scheme scheme, host host, port port
+end
+
+# a request signed and sent; a mistake if the store says no
+to s3_request with store, method, bucket, key, query, body, extra
+    set r to s3_send(store, method, bucket, key, query, body, extra)
+    s3_check(r, bucket, key)
+    return r
+end
+
+to s3_send with store, method, bucket, key, query, body, extra
+    set where to s3_where(store, bucket, key)
+    set payload to s3_empty_hash
+    if body is not nothing
+        if sign_payload of store
+            set payload to s3_hash's sha256(body)
+        else
+            set payload to "UNSIGNED-PAYLOAD"
+        end
+    end
+    set stamp to s3_stamp(s3_now())
+    set headers to dictionary where "host" is host of where, "x-amz-content-sha256" is payload, "x-amz-date" is stamp
+    if token of store is not nothing
+        set item "x-amz-security-token" of headers to token of store
+    end
+    for each name in extra
+        set item (lowercase of name) of headers to item name of extra
+    end
+    set signed to sign(store, method, path of where, query, headers, payload, stamp)
+    set item "authorization" of headers to authorization of signed
+    set url to base of where + path of where
+    if length of query is greater than 0
+        set url to url + "?" + s3_query(query)
+    end
+    return s3_http's request(method, url, body, headers)
+end
+
+# a mistake, with the store's code and message, if it said no
+to s3_check with r, bucket, key
+    if status of r is less than 300
+        return nothing
+    end
+    set code to "" + status of r
+    set message to reason of r
+    try
+        set answer to s3_xml's parse(text of r)
+        set code to s3_field(answer, "Code")
+        set message to s3_field(answer, "Message")
+    if it fails
+        set code to code
+    end
+    fail with "S3 said " + code + " (" + status of r + "): " + message
+end
+
+# the text of the first element of this name inside another, or "" if it has none
+to s3_field with element, name
+    set found to s3_xml's first_named(element, name)
+    if found is nothing
+        return ""
+    end
+    return s3_xml's text_of(found)
+end
+
+to s3_header with h, name, otherwise
+    if name is in h
+        return item name of h
+    end
+    return otherwise
+end
+
+# an etag without the quotes around it
+to s3_unquoted with words
+    if length of words is at least 2 and item 1 of words is "\"" and item (length of words) of words is "\""
+        return items 2 to (length of words - 1) of words
+    end
+    return words
+end
+
+to s3_ends_with with words, ending
+    return length of words is at least length of ending and items (length of words - length of ending + 1) to (length of words) of words is ending
+end

@@ -1169,6 +1169,27 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
   }
 });
 
+// The company libraries' own tests (DESIGN §110-§117), those that ask nothing of the system: yaml.moth, wire.moth,
+// redis.moth and s3.moth on all three engines, and jwt.moth, postgres.moth and mysql.moth, whose RSA, SCRAM and
+// PBKDF2 take the slower engines a while, on the JIT; machine.test.js runs them all in machine code, oauth.moth's too
+test("yaml.moth, wire.moth, redis.moth, s3.moth, jwt.moth, postgres.moth and mysql.moth pass their own tests on the engines", () => {
+  const cases = [
+    ["yaml.test.moth", ENGINES, ["test_spec_examples", "test_invoice", "test_config_files", "test_scalars", "test_block_scalars", "test_flow_and_anchors", "test_writing", "test_mistakes"]],
+    ["wire.test.moth", ENGINES, ["test_reading", "test_numbers", "test_doubles", "test_writing"]],
+    ["redis.test.moth", ENGINES, ["test_commands_sent", "test_resp2_replies", "test_resp3_replies", "test_urls"]],
+    ["s3.test.moth", ENGINES, ["test_s3_guide_examples", "test_presigned_url", "test_signature_suite", "test_where_requests_go", "test_store_mistakes"]],
+    ["jwt.test.moth", ["jit"], ["test_rfc_examples", "test_making", "test_rsa_keys", "test_claims", "test_attacks"]],
+    ["postgres.test.moth", ["jit"], ["test_scram", "test_md5_password", "test_query_messages", "test_reading_answers", "test_errors", "test_urls", "test_values"]],
+    ["mysql.test.moth", ["jit"], ["test_handshake", "test_scrambles", "test_rsa_oaep", "test_statements_sent", "test_reading_answers", "test_errors", "test_urls"]],
+  ];
+  for (const [file, engines, names] of cases) {
+    for (const engine of engines) {
+      const results = testMoth(tool(file), { engine, files: tool });
+      assert.deepEqual(results.map((r) => [r.name, r.error?.message]), names.map((n) => [n, undefined]), `${file} on ${engine}`);
+    }
+  }
+});
+
 // the language's own functions (DESIGN §97): moth.js's LANGUAGE and compiler.moth's language_text, the same
 test("moth.js and compiler.moth have the same text for the language's own functions", () => {
   const written = /\nset language_text to "((?:[^"\\]|\\.)*)"\n/.exec(COMPILER)[1];
