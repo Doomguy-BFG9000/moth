@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- The extension's icon, from the site's top: its lantern on a cord, and the moth, from docs/moth.svg,
+       flying to its light, on the page's night. icon.png is this, drawn 128 by 128 by Chromium. -->
+  <defs>
+    <radialGradient id="night" cx="50%" cy="58%" r="72%">
+      <stop offset="0" stop-color="#2c1b0d"/>
+      <stop offset="0.6" stop-color="#17110b"/>
+      <stop offset="1" stop-color="#0c0a08"/>
+    </radialGradient>
+    <radialGradient id="light" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff2bf" stop-opacity="0.95"/>
+      <stop offset="0.25" stop-color="#ffd98a" stop-opacity="0.7"/>
+      <stop offset="0.6" stop-color="#ff9a3d" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#ff7a2f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glass" cx="50%" cy="55%" r="65%">
+      <stop offset="0" stop-color="#fff7e0"/><stop offset="0.35" stop-color="#ffd98a"/><stop offset="0.75" stop-color="#ff9a3d"/><stop offset="1" stop-color="#c8561a"/>
+    </radialGradient>
+    <linearGradient id="metal" x1="0" x2="1">
+      <stop offset="0" stop-color="#2e1d0f"/><stop offset="0.5" stop-color="#8a5c34"/><stop offset="1" stop-color="#24160b"/>
+    </linearGradient>
+    <linearGradient id="fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+    <linearGradient id="hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+    <filter id="halo" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feFlood flood-color="#ffb84d" flood-opacity="0.55"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="128" height="128" rx="26" fill="url(#night)"/>
+
+  <!-- the lantern, hanging on its cord, and its light -->
+  <circle cx="45" cy="80" r="54" fill="url(#light)"/>
+  <path d="M45 0v47" stroke="#8a5c34" stroke-width="1.4"/>
+  <g transform="translate(26.6 46) scale(0.46)">
+    <path d="M33 14v-4a7 7 0 0 1 14 0v4" fill="none" stroke="url(#metal)" stroke-width="2.6"/>
+    <path d="M18 26 40 13l22 13z" fill="url(#metal)"/>
+    <rect x="17" y="25" width="46" height="6" rx="2" fill="url(#metal)"/>
+    <path d="M21 31h38l-4 78H25z" fill="url(#glass)"/>
+    <path d="M33 31l-1.5 78M47 31l1.5 78" stroke="#2a1a0c" stroke-opacity="0.5" stroke-width="2"/>
+    <path d="M21 31h38l-4 78H25z" fill="none" stroke="url(#metal)" stroke-width="2.6" stroke-linejoin="round"/>
+    <rect x="21" y="109" width="38" height="7" rx="2" fill="url(#metal)"/>
+    <path d="M29 116h22l-4 9H33z" fill="url(#metal)"/>
+  </g>
+
+  <!-- the moth, drawn to it -->
+  <g transform="translate(88 44) rotate(-58) scale(1.02) translate(-32 -32)" filter="url(#halo)">
+    <path fill="url(#hind)" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+    <path fill="url(#fore)" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+    <circle fill="#7a4512" cx="15" cy="21" r="2.6"/><circle fill="#7a4512" cx="49" cy="21" r="2.6"/>
+    <ellipse fill="#ffe7b5" cx="32" cy="35" rx="2.6" ry="11"/>
+    <circle fill="#ffe7b5" cx="32" cy="23" r="2.8"/>
+    <path fill="none" stroke="#ffe7b5" stroke-width="1.6" stroke-linecap="round" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+  </g>
+</svg>
