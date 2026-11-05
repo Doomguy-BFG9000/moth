@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mysql.moth · Moth's standard library</title>
+  <meta name="description" content="MySQL and MariaDB, as Python's PyMySQL has them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>mysql</em>.moth</h1>
+      <p>MySQL and MariaDB, as Python's PyMySQL has them.</p>
+      <p class="use"><code>use "mysql.moth" as mysql</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="mysql.moth's functions">
+      <h2>12 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#connect">connect</a></li><li><a href="#connect_url">connect_url</a></li><li><a href="#query">query</a></li><li><a href="#query_one">query_one</a></li><li><a href="#execute">execute</a></li><li><a href="#run">run</a></li><li><a href="#run_script">run_script</a></li><li><a href="#begin">begin</a></li><li><a href="#commit">commit</a></li><li><a href="#rollback">rollback</a></li><li><a href="#in_transaction">in_transaction</a></li><li><a href="#close">close</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>MySQL and MariaDB, as Python's PyMySQL has them: connected over their own protocol, logged in with caching_sha2_password (MySQL 8's), sha256_password or mysql_native_password, over TLS where asked for; prepared statements with their values as parameters, sent apart from the SQL so no value is ever read as SQL; rows as dictionaries, each value as Moth has it; and transactions. On sockets.moth: a program <code>moth build</code> makes can use it, built with --allow-libraries.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">3306</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> mysql's query(db, <span class="s">&quot;select id, name from people where age &gt; ? and city = ?&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">21</span>, <span class="s">&quot;Pune&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;id&quot;</span> <span class="k">of</span> row <span class="s">&quot; &quot;</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+<span class="k">say</span> mysql's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)     <span class="c"># the first row, or nothing if none</span>
+<span class="k">say</span> mysql's execute(db, <span class="s">&quot;update people set name = ? where id = ?&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span>
+<span class="k">set</span> done <span class="k">to</span> mysql's run(db, <span class="s">&quot;insert into people (name) values (?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Ana&quot;</span>)
+<span class="k">say</span> last_id <span class="k">of</span> done                             <span class="c"># the AUTO_INCREMENT it made; rows, count and columns too</span>
+mysql's in_transaction(db, move_money)          <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span>
+mysql's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)       <span class="c"># many statements, with no parameters</span>
+mysql's close(db)</code></pre></div>
+          <p>connect's record has host, port (3306), user, password, database (or none), tls (&quot;prefer&quot;: TLS if the server has it and its certificate can be checked, &quot;require&quot;: checked TLS or a mistake, &quot;disable&quot;: never) and trust (a PEM file of certificates to trust besides the system's); each but user can be left out. Without TLS, caching_sha2_password and sha256_password send the password encrypted with the server's RSA key. Parameters are ? in the SQL: text, numbers, yes and no, nothing (NULL), bytes, and lists, dictionaries and records (as JSON). Values come back as text, numbers (integers, floats and decimals), nothing, bytes (binary columns), and what JSON says (JSON columns); dates and times are text, as &quot;2026-11-04 10:15:00&quot;. A statement MySQL refuses is a <code>fail with</code> with its message, code and state, as &quot;MySQL said: Table 'shop.nowhere' doesn't exist (1146, 42S02)&quot;.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="connect">
+          <h3><a href="#connect"><code>mysql's connect(options)</code></a></h3>
+          <p>a connection to MySQL or MariaDB, logged in, from a record of host, port (3306), user, password, database, tls and trust, as postgres.moth's connect has them; each but user can be left out</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>options</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect with options</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L44">mysql.moth line 44</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">3306</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="connect_url">
+          <h3><a href="#connect_url"><code>mysql's connect_url(url)</code></a></h3>
+          <p>a connection from a URL: mysql://user:password@host:port/database?ssl-mode=REQUIRED</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>url</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect_url with url</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L81">mysql.moth line 81</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">3306</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="query">
+          <h3><a href="#query"><code>mysql's query(db, sql, values)</code></a></h3>
+          <p>the rows a query gives, each a dictionary of its columns' values; ?s in the SQL are <code>values</code>, sent apart from it as a prepared statement's</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L351">mysql.moth line 351</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">3306</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> mysql's query(db, <span class="s">&quot;select id, name from people where age &gt; ? and city = ?&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">21</span>, <span class="s">&quot;Pune&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;id&quot;</span> <span class="k">of</span> row <span class="s">&quot; &quot;</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+<span class="k">say</span> mysql's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)     <span class="c"># the first row, or nothing if none</span>
+<span class="k">say</span> mysql's execute(db, <span class="s">&quot;update people set name = ? where id = ?&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span>
+<span class="k">set</span> done <span class="k">to</span> mysql's run(db, <span class="s">&quot;insert into people (name) values (?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Ana&quot;</span>)
+<span class="k">say</span> last_id <span class="k">of</span> done                             <span class="c"># the AUTO_INCREMENT it made; rows, count and columns too</span>
+mysql's in_transaction(db, move_money)          <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span>
+mysql's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)       <span class="c"># many statements, with no parameters</span>
+mysql's close(db)</code></pre></div>
+        </section>
+        <section class="fn" id="query_one">
+          <h3><a href="#query_one"><code>mysql's query_one(db, sql, values)</code></a></h3>
+          <p>the first row a query gives, or nothing if it gives none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query_one with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L356">mysql.moth line 356</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+<span class="k">say</span> mysql's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)     <span class="c"># the first row, or nothing if none</span></code></pre></div>
+        </section>
+        <section class="fn" id="execute">
+          <h3><a href="#execute"><code>mysql's execute(db, sql, values)</code></a></h3>
+          <p>how many rows a statement changed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to execute with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L365">mysql.moth line 365</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+<span class="k">say</span> mysql's execute(db, <span class="s">&quot;update people set name = ? where id = ?&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span></code></pre></div>
+        </section>
+        <section class="fn" id="run">
+          <h3><a href="#run"><code>mysql's run(db, sql, values)</code></a></h3>
+          <p>A statement, prepared (once for each SQL) and run with these values: a record with rows, count (rows changed, or given), columns (their names, in order) and last_id (the AUTO_INCREMENT an INSERT made, or 0)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L371">mysql.moth line 371</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+<span class="k">set</span> done <span class="k">to</span> mysql's run(db, <span class="s">&quot;insert into people (name) values (?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Ana&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="run_script">
+          <h3><a href="#run_script"><code>mysql's run_script(db, sql)</code></a></h3>
+          <p>Many statements at once, with no parameters, as a file of SQL has them: the first result with rows, or else the last one's</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_script with db, sql</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L383">mysql.moth line 383</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)       <span class="c"># many statements, with no parameters</span></code></pre></div>
+        </section>
+        <section class="fn" id="begin">
+          <h3><a href="#begin"><code>mysql's begin(db)</code></a></h3>
+          <p>a transaction begun: what follows is kept only once commit is called (<a href="#in_transaction">in_transaction</a> does all three)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to begin with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L755">mysql.moth line 755</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's begin(db)</code></pre></div>
+        </section>
+        <section class="fn" id="commit">
+          <h3><a href="#commit"><code>mysql's commit(db)</code></a></h3>
+          <p>the transaction's changes kept</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to commit with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L760">mysql.moth line 760</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's commit(db)</code></pre></div>
+        </section>
+        <section class="fn" id="rollback">
+          <h3><a href="#rollback"><code>mysql's rollback(db)</code></a></h3>
+          <p>the transaction's changes undone</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rollback with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L765">mysql.moth line 765</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's rollback(db)</code></pre></div>
+        </section>
+        <section class="fn" id="in_transaction">
+          <h3><a href="#in_transaction"><code>mysql's in_transaction(db, work)</code></a></h3>
+          <p>work(db) done all or none: COMMIT if it ends well; ROLLBACK, and its mistake again, if it doesn't</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>work</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to in_transaction with db, work</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L770">mysql.moth line 770</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's in_transaction(db, move_money)          <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span></code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>mysql's close(db)</code></a></h3>
+          <p>the connection closed, after telling the server</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/mysql.moth#L788">mysql.moth line 788</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;mysql.moth&quot;</span> <span class="k">as</span> mysql
+<span class="k">set</span> db <span class="k">to</span> mysql's connect_url(<span class="s">&quot;mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED&quot;</span>)
+mysql's close(db)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

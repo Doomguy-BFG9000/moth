@@ -4,6 +4,7 @@
 # is there; anything else stays a Python object, which can be called and asked for its attributes.
 #
 #   use "python.moth" as python
+#   say python's start(nothing)                      # where Python was found; or a library's path to use that one
 #   python's run("import math\nx = math.factorial(10)")
 #   say python's evaluate("x // 3")                  # 1209600
 #   set math to python's import_module("math")
@@ -13,6 +14,13 @@
 #   say python's call(np, "round", (list of 2.567), dictionary where "decimals" is 1)   # inputs by name
 #   python's set_variable("data", list of 3, 1, 2)
 #   say python's evaluate("sorted(data)")            # [1, 2, 3]
+#   say python's variable("x")                       # 3628800, set by the run above
+#   set pi_object to python's attribute(math, "pi")  # a Python object, held by Moth
+#   say python's from_python(pi_object)              # 3.14159265358979, as Moth's own
+#   set three to python's to_python(3)
+#   set sqrt to python's attribute(math, "sqrt")
+#   say python's call_object(sqrt, list of three)    # 1.73205080756888
+#   python's release(three)                          # let go of, once Moth is done with it
 #
 # Python is found where the PYTHON_LIBRARY variable says (its DLL, or .so on Linux, or the folder it's in),
 # else beside each folder in PATH (python3*.dll on Windows), else as Linux installs it (libpython3.*.so.1.0).
@@ -719,6 +727,7 @@ to set_variable with name, value
     end
 end
 
+# a name in __main__'s value, as a Moth value; a mistake if Python has no variable called that
 to variable with name
     set state to python_enter()
     try

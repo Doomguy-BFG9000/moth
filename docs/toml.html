@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>toml.moth · Moth's standard library</title>
+  <meta name="description" content="TOML (v1.0), the settings files Python's tomllib reads (pyproject.toml, Cargo.toml and many more): read into dictionaries and lists, and written back.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>toml</em>.moth</h1>
+      <p>TOML (v1.0), the settings files Python's tomllib reads (pyproject.toml, Cargo.toml and many more): read into dictionaries and lists, and written back.</p>
+      <p class="use"><code>use "toml.moth" as toml</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="toml.moth's functions">
+      <h2>2 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#read_toml">read_toml</a></li><li><a href="#toml_of">toml_of</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/toml.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>TOML (v1.0), the settings files Python's tomllib reads (pyproject.toml, Cargo.toml and many more): read into dictionaries and lists, and written back. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;toml.moth&quot;</span> <span class="k">as</span> toml
+<span class="k">set</span> settings <span class="k">to</span> toml's read_toml(<span class="k">read</span> <span class="s">&quot;settings.toml&quot;</span>)
+<span class="k">say</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> <span class="k">item</span> <span class="s">&quot;package&quot;</span> <span class="k">of</span> settings
+<span class="k">write</span> toml's toml_of(settings) <span class="k">to</span> <span class="s">&quot;settings.toml&quot;</span></code></pre></div>
+          <p>Tables are dictionaries; arrays are lists; strings, numbers, true and false are text, numbers, yes and no; dates and times stay text, as written (&quot;1979-05-27T07:32:00Z&quot;). A file that isn't TOML is a <code>fail with</code> that says which line, and why: catch it with <code>try</code>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="read_toml">
+          <h3><a href="#read_toml"><code>toml's read_toml(words)</code></a></h3>
+          <p>the settings TOML text holds, as a dictionary: tables as dictionaries, arrays as lists, and dates and times as text; a mistake is a <code>fail with</code> that says which line</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_toml with words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/toml.moth#L23">toml.moth line 23</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;toml.moth&quot;</span> <span class="k">as</span> toml
+<span class="k">set</span> d <span class="k">to</span> toml's read_toml(<span class="s">&quot;a = \&quot;tab\\there \\u00e9 \\U0001F600\&quot;\nb = 'C:\\path\\x'\nc = 0xff\nd = 0o17\ne = 0b101\nf = 1_000\ng = -3.5\nh = 5e3\ni = 1.5E-2\nj = true\nk = false\nl = 1979-05-27T07:32:00Z\nm = 07:32:00\nn = [1, [2, 3], \&quot;x\&quot;,]\no = { x = 1, y.z = 2 }\n&quot;</span>)
+<span class="k">say</span> d</code></pre><pre class="says"><code>(dictionary where &quot;a&quot; is &quot;tab\there é 😀&quot;, &quot;b&quot; is &quot;C:\\path\\x&quot;, &quot;c&quot; is 255, &quot;d&quot; is 15, &quot;e&quot; is 5, &quot;f&quot; is 1000, &quot;g&quot; is -3.5, &quot;h&quot; is 5000, &quot;i&quot; is 0.015, &quot;j&quot; is yes, &quot;k&quot; is no, &quot;l&quot; is &quot;1979-05-27T07:32:00Z&quot;, &quot;m&quot; is &quot;07:32:00&quot;, &quot;n&quot; is [1, [2, 3], &quot;x&quot;], &quot;o&quot; is (dictionary where &quot;x&quot; is 1, &quot;y&quot; is (dictionary where &quot;z&quot; is 2)))</code></pre></div>
+        </section>
+        <section class="fn" id="toml_of">
+          <h3><a href="#toml_of"><code>toml's toml_of(table)</code></a></h3>
+          <p>a dictionary as TOML: its plain values, then its tables, then its arrays of tables, each under its own header</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>table</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to toml_of with table</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/toml.moth#L665">toml.moth line 665</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;toml.moth&quot;</span> <span class="k">as</span> toml
+<span class="k">set</span> settings <span class="k">to</span> toml's read_toml(<span class="k">read</span> <span class="s">&quot;settings.toml&quot;</span>)
+<span class="k">write</span> toml's toml_of(settings) <span class="k">to</span> <span class="s">&quot;settings.toml&quot;</span></code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

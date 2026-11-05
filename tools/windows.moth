@@ -377,10 +377,13 @@ to ui_control with parent, class, text, style, outer, x, y, width, height, kind,
     return made
 end
 
+# a button that says `text`, at x, y in its window, `width` by `height`, which calls `handler` (with nothing)
+# when it's pressed
 to button with parent, text, x, y, width, height, handler
     return ui_control(parent, "BUTTON", text, 65536, 0, x, y, width, height, "button", handler)
 end
 
+# words that say `text`, at x, y in a window, `width` by `height`, which set_text can change
 to label with parent, text, x, y, width, height
     return ui_control(parent, "STATIC", text, 0, 0, x, y, width, height, "label", nothing)
 end
@@ -391,6 +394,7 @@ to text_box with parent, x, y, width, height
     return ui_text(parent, 65536 + 128, x, y, width, height)
 end
 
+# a box for many lines of text, with a scroll bar
 to text_area with parent, x, y, width, height
     return ui_text(parent, 65536 + 4 + 64 + 4096 + 2097152, x, y, width, height)
 end
@@ -401,14 +405,18 @@ to ui_text with parent, style, x, y, width, height
     return made
 end
 
+# a text box's or text area's handler for what's typed into it, given its text each time it changes
 to on_change with control, handler
     set on of control to handler
 end
 
+# a box to tick, which says `text` beside it; `handler` is given yes or no each time it's ticked or unticked
 to checkbox with parent, text, x, y, width, height, handler
     return ui_control(parent, "BUTTON", text, 65536 + 3, 0, x, y, width, height, "checkbox", handler)
 end
 
+# a list of items (add_item) of which one can be chosen; `handler` is given the chosen item each time the
+# choice changes
 to list_box with parent, x, y, width, height, handler
     return ui_control(parent, "LISTBOX", "", 65536 + 1 + 256 + 2097152, 512, x, y, width, height, "list", handler)
 end
@@ -426,6 +434,7 @@ to text_of with control
     return join (split wide_in(room, "") by ui_return) with ""
 end
 
+# what a control says changed: a text box's text, a label's or button's words, a window's title
 to set_text with control, text
     set lines to split (join (split text by ui_return) with "") by "\n"
     set ui_quiet to yes
@@ -433,10 +442,12 @@ to set_text with control, text
     set ui_quiet to no
 end
 
+# whether a checkbox is ticked
 to ticked with control
     return ui_number(SendMessageW(handle of control, 240, 0, 0)) is 1 # BM_GETCHECK
 end
 
+# a checkbox ticked (yes) or unticked (no), without calling its handler
 to set_ticked with control, tick
     if tick
         SendMessageW(handle of control, 241, 1, 0)
@@ -453,18 +464,22 @@ to ui_list_message with control, list_one, dropdown_one
     return list_one
 end
 
+# an item at the end of a list box or a dropdown
 to add_item with control, text
     send_text(handle of control, ui_list_message(control, 384, 323), 0, text)
 end
 
+# every item of a list box or a dropdown taken away
 to clear_items with control
     SendMessageW(handle of control, ui_list_message(control, 388, 331), 0, 0)
 end
 
+# the item at a place, from 1, taken out of a list box or a dropdown
 to remove_item with control, place
     SendMessageW(handle of control, ui_list_message(control, 386, 324), place - 1, 0)
 end
 
+# how many items a list box or a dropdown has
 to count_of with control
     if kind of control is "table"
         return length of rows of control
@@ -484,6 +499,7 @@ to chosen_place with control
     return at + 1
 end
 
+# the item at a place, from 1, chosen in a list box or a dropdown, without calling its handler; 0 for none
 to choose with control, place
     SendMessageW(handle of control, ui_list_message(control, 390, 334), place - 1, 0)
 end
@@ -500,10 +516,12 @@ to chosen with control
     return wide_in(room, "")
 end
 
+# a control made to work (yes), or greyed out so it doesn't (no)
 to enable with control, on
     EnableWindow(handle of control, on)
 end
 
+# the keys sent to a control: what's typed goes into it
 to focus with control
     SetFocus(handle of control)
 end
@@ -514,6 +532,7 @@ to place with control, x, y, width, height
         ui_scaled(height), yes)
 end
 
+# a window's handler for a new size, given its width and height inside, as when the person drags its edge
 to on_resize with parent, handler
     set resized of parent to handler
 end
@@ -623,10 +642,12 @@ to timer with parent, milliseconds, handler
     SetTimer(handle of parent, id, milliseconds, nothing)
 end
 
+# a box with a message in it, over the window, and an OK button: it waits until it's pressed
 to message with parent, text
     MessageBoxW(handle of parent, text, title of parent, 64)
 end
 
+# a box asking a question, over the window, with Yes and No: whether Yes was pressed
 to ask_yes_no with parent, question
     return MessageBoxW(handle of parent, question, title of parent, 36) is 6
 end
@@ -636,6 +657,7 @@ to choose_file_to_open with parent
     return ui_choose_file(parent, yes)
 end
 
+# the system's own box for choosing where to save a file: its name, or nothing if none was chosen
 to choose_file_to_save with parent
     return ui_choose_file(parent, no)
 end
@@ -670,6 +692,7 @@ to ui_choose_file with parent, opening
     return wide_in(name, "")
 end
 
+# a window closed; closing the first window run() runs for ends run()
 to close with parent
     PostMessageW(handle of parent, 16, 0, 0)
 end
@@ -752,6 +775,7 @@ to progress with parent, x, y, width, height
     return ui_control(parent, "msctls_progress32", "", 0, 0, x, y, width, height, "progress", nothing)
 end
 
+# how far a progress bar is, from 0 to 100
 to set_progress with control, percent
     SendMessageW(handle of control, 1026, ui_whole(percent, 0, 100), 0) # PBM_SETPOS
 end
@@ -763,6 +787,7 @@ to picture with parent, file, x, y, width, height
     return made
 end
 
+# a picture control shows another file's picture
 to set_picture with control, file
     if not ui_gdiplus
         GdiplusStartup(8 bytes, (record with version 1), nothing)
@@ -817,6 +842,7 @@ to chosen_tab with control
     return ui_number(SendMessageW(handle of control, 4875, 0, 0)) + 1 # TCM_GETCURSEL
 end
 
+# the tab at a place, from 1, chosen, as if the person had clicked it
 to choose_tab with control, place
     SendMessageW(handle of control, 4876, place - 1, 0) # TCM_SETCURSEL
     ui_show_page(control)
@@ -870,6 +896,7 @@ to add_row with control, values
     set ui_quiet to no
 end
 
+# every row of a table taken away
 to clear_rows with control
     set ui_quiet to yes
     SendMessageW(handle of control, 4105, 0, 0) # LVM_DELETEALLITEMS
@@ -887,6 +914,7 @@ to chosen_row with control
     return item at of rows of control
 end
 
+# the row at a place, from 1, chosen in a table; 0 for none
 to choose_row with control, place
     set ui_quiet to yes
     send_item(handle of control, 4139, place - 1, record with state 3, state_mask 3) # LVM_SETITEMSTATE: chosen
@@ -914,6 +942,7 @@ to on_click with control, handler
     set clicked of control to handler
 end
 
+# a drawing drawn again, by its painter, as soon as the program has a moment
 to redraw with control
     InvalidateRect(handle of control, nothing, no)
 end
@@ -953,14 +982,18 @@ to colour with canvas, red, green, blue
     SetTextColor(dc of canvas, made)
 end
 
+# a filled rectangle, its top left at x, y, `width` by `height`, in the colour chosen last
 to rectangle with canvas, x, y, width, height
     fill_box(dc of canvas, ui_px(x), ui_px(y), ui_px(x + width), ui_px(y + height))
 end
 
+# a filled circle, its middle at x, y, so many pixels across from the middle to the edge, in the colour chosen
+# last
 to circle with canvas, x, y, radius
     fill_ellipse(dc of canvas, ui_px(x - radius), ui_px(y - radius), ui_px(x + radius), ui_px(y + radius))
 end
 
+# a line from x1, y1 to x2, y2, in the colour chosen last
 to line with canvas, x1, y1, x2, y2
     MoveToEx(dc of canvas, ui_px(x1), ui_px(y1), nothing)
     LineTo(dc of canvas, ui_px(x2), ui_px(y2))
@@ -1025,10 +1058,12 @@ to mouse_x with control
     return mouse_x of control
 end
 
+# how far down the drawing the mouse was last, as mouse_x says how far across
 to mouse_y with control
     return mouse_y of control
 end
 
+# whether the mouse's button is down on the drawing
 to mouse_down with control
     return pressed of control
 end
@@ -1063,6 +1098,7 @@ to draw_image with canvas, image, x, y
     draw_image_sized(canvas, image, x, y, width of image, height of image)
 end
 
+# a picture drawn with its top left at x, y, made `width` by `height`
 to draw_image_sized with canvas, image, x, y, width, height
     set got to 8 bytes
     GdipCreateFromHDC(dc of canvas, got)

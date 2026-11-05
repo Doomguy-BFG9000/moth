@@ -1,0 +1,16 @@
+use "rna_transcription.moth" as exercise
+
+to test_empty
+    expect exercise's to_rna("") is ""
+end
+
+to test_each_one
+    expect exercise's to_rna("C") is "G"
+    expect exercise's to_rna("G") is "C"
+    expect exercise's to_rna("T") is "A"
+    expect exercise's to_rna("A") is "U"
+end
+
+to test_a_strand
+    expect exercise's to_rna("ACGTGGTCTTAA") is "UGCACCAGAAUU"
+end

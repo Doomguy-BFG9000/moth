@@ -17,14 +17,20 @@
 # can catch: its why is the usage, then a line that says what's wrong; and given a --help, it gives the
 # dictionary with "help" set to yes. help_text(p) is what --help says. A short name can be "", for none.
 
+# a parser for a program's command line: its name and what it does, for --help; option, flag, positional and
+# rest say what it takes
 to parser with name, description
     return record with name name, description description, options empty list, positionals empty list, rest nothing
 end
 
+# an option with a value: its name (--name), a short name (-n, or "" for none), what it's for, and its value
+# when it isn't given, whose kind (a number, say) the value given is read as
 to option with p, name, short, help, default
     options_add(p, record with kind "option", name name, short short, help help, default default)
 end
 
+# an option with no value: its name (--loud), a short name (-l, or "" for none) and what it's for; yes if it's
+# given, no if not
 to flag with p, name, short, help
     options_add(p, record with kind "flag", name name, short short, help help, default no)
 end
@@ -40,12 +46,16 @@ to options_add with p, made
     set options of p to kept
 end
 
+# a name the command line must have, in order after the options: its name in what parse gives, and what it's
+# for
 to positional with p, name, help
     set kept to positionals of p
     add (record with name name, help help) to kept
     set positionals of p to kept
 end
 
+# every name left after the positional ones, as a list (which can be empty): its name in what parse gives, and
+# what it's for
 to rest with p, name, help
     set rest of p to record with name name, help help
 end
@@ -66,6 +76,8 @@ to parse with p, given_arguments
     return made
 end
 
+# the command line read, as parse reads it, or a `fail with` whose why is the usage and what's wrong; for
+# --help, the dictionary with "help" set to yes
 to parse_or_fail with p, given_arguments
     set made to dictionary where "help" is no
     for each o in options of p

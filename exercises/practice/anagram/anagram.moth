@@ -1,0 +1,3 @@
+to find_anagrams with word, candidates
+    fail with "delete this line, and find the anagrams"
+end

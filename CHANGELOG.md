@@ -6,11 +6,37 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **Installers.** `irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex` on
+  Windows and `curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh` on
+  Linux install the latest release, checked against its `SHA256SUMS.txt`, and put `moth` on PATH. Scoop
+  installs it from `packaging/scoop/moth.json`, and winget's manifests for `samyyy2423.Moth` are ready to
+  submit. Each release now has `moth_<version>_amd64.deb` for Debian and Ubuntu, and an image,
+  `ghcr.io/samyyy2423/moth`, on distroless Debian.
+- **Signed releases.** Every file of a release is signed with Sigstore (a `.sigstore.json` bundle, a `.sig`
+  and a `.pem` each), attested by GitHub, and described by an SBOM, `moth-<version>.cdx.json`.
+  [docs/verifying-releases.md](docs/verifying-releases.md) says how to check them with `cosign verify-blob`
+  and `gh attestation verify`. Before signing, the release workflow builds moth from the tag's source and
+  checks the release's programs are those bytes, and the fixed point, on Linux and on Windows.
+- **Property-based testing.** `properties.moth` tries what should hold for every value of a sort on a hundred
+  made at random, small first, from `whole_number`, `decimal`, `yes_or_no`, `any_text`, `text_of`, `one_of`,
+  `either_of`, `list_of`, `dictionary_of`, `mapped` and `kept`. A value that shows it doesn't hold is made as
+  simple as it can be, and the mistake says it, with the seed that makes the same values again.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
 - **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
   question, `wait`'s amount or `play note`'s note or time found it had no value.
+- **A cookbook, examples and exercises.** [The cookbook](https://samyyy2423.github.io/moth/docs/cookbook/) has
+  10 recipes for real work (CSV, JSON, web APIs, a web API with a database, the command line, statistics and
+  charts, dates, every core, tests and text), [the examples](https://samyyy2423.github.io/moth/docs/examples.html)
+  8 whole programs that open in the playground with a click, and [`exercises/`](exercises/) 20 problems to
+  practise on, with tests, in Exercism's track format. Every recipe and example is run, and every exercise's
+  tests checked, each time Moth changes.
+- **The standard library's reference**, at [samyyy2423.github.io/moth/docs/](https://samyyy2423.github.io/moth/docs/):
+  a page for each library, with what it's for and each of its functions, what it takes and an example with
+  what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,
+  and the tests fail when it's behind them. Every public function now has a comment, so the editors' hovers
+  say what each does too.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
@@ -72,6 +98,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
 - **Fixes.** A package can use the standard library: `use "text.moth"` in a package, or in a file it uses,
   is moth's own `text.moth` unless the package has one, so a package no longer needs copies of its own.
+- **`moth coverage` of tests.** `moth coverage x.test.moth`, or `moth coverage` for every `.test.moth` file
+  here, runs the tests as `moth test` does and says which lines of the files they test ran, every test's runs
+  added up: each file's share, and the lines no test ran. `--lcov` writes `lcov.info` for CI services and
+  editors, for a program's run too. It no longer counts moth's own copies of the standard library, nor
+  packages.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 

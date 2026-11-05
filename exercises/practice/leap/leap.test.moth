@@ -1,0 +1,25 @@
+use "leap.moth" as exercise
+
+to test_a_year_not_divisible_by_4
+    expect not exercise's is_leap(2015)
+end
+
+to test_a_year_divisible_by_2_not_4
+    expect not exercise's is_leap(1970)
+end
+
+to test_a_year_divisible_by_4_not_100
+    expect exercise's is_leap(1996)
+end
+
+to test_a_year_divisible_by_100_not_400
+    expect not exercise's is_leap(2100)
+end
+
+to test_a_year_divisible_by_400
+    expect exercise's is_leap(2000)
+end
+
+to test_a_year_divisible_by_200_not_400
+    expect not exercise's is_leap(1800)
+end

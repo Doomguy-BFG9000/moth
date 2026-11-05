@@ -49,6 +49,7 @@ to open with path
     return database
 end
 
+# the database closed, once it's no longer needed
 to close with database
     sqlite3_close(database)
 end
@@ -77,6 +78,7 @@ to query with database, sql
     return query_with(database, sql, empty list)
 end
 
+# the rows SQL gives, with values for its ?s, each a dictionary of its columns by their names
 to query_with with database, sql, values
     set statement to prepared(database, sql, values)
     set rows to empty list

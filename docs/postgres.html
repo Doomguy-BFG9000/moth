@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>postgres.moth · Moth's standard library</title>
+  <meta name="description" content="PostgreSQL, as Python's psycopg has it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>postgres</em>.moth</h1>
+      <p>PostgreSQL, as Python's psycopg has it.</p>
+      <p class="use"><code>use "postgres.moth" as pg</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="postgres.moth's functions">
+      <h2>13 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#connect">connect</a></li><li><a href="#connect_url">connect_url</a></li><li><a href="#query">query</a></li><li><a href="#query_one">query_one</a></li><li><a href="#execute">execute</a></li><li><a href="#run">run</a></li><li><a href="#run_script">run_script</a></li><li><a href="#begin">begin</a></li><li><a href="#commit">commit</a></li><li><a href="#rollback">rollback</a></li><li><a href="#in_transaction">in_transaction</a></li><li><a href="#transaction_status">transaction_status</a></li><li><a href="#close">close</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>PostgreSQL, as Python's psycopg has it: connected over its own protocol (version 3), logged in with SCRAM-SHA-256 or MD5, over TLS where asked for; queries with their values as parameters, sent apart from the SQL so no value is ever read as SQL; rows as dictionaries, each value as Moth has it; and transactions. On sockets.moth: a program <code>moth build</code> makes can use it, built with --allow-libraries.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">5432</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> pg's query(db, <span class="s">&quot;select id, name from people where age &gt; $1 and city = $2&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">21</span>, <span class="s">&quot;Pune&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;id&quot;</span> <span class="k">of</span> row <span class="s">&quot; &quot;</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+<span class="k">say</span> pg's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)    <span class="c"># the first row, or nothing if none</span>
+<span class="k">say</span> pg's execute(db, <span class="s">&quot;update people set name = $1 where id = $2&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span>
+<span class="k">to</span> move_money <span class="k">with</span> db
+    pg's execute(db, <span class="s">&quot;update accounts set total = total - 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>)
+    pg's execute(db, <span class="s">&quot;update accounts set total = total + 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>)
+<span class="k">end</span>
+pg's in_transaction(db, move_money)           <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span>
+pg's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)         <span class="c"># many statements, with no parameters</span>
+pg's close(db)</code></pre></div>
+          <p>connect's record has host, port (5432), user, password, database (the user's name), tls (&quot;prefer&quot;: TLS if the server has it and its certificate can be checked, &quot;require&quot;: checked TLS or a mistake, &quot;disable&quot;: never) and trust (a PEM file of certificates to trust besides the system's, as a cloud's own CA, or nothing); each but user can be left out. TLS always checks the server's certificate, for its name. Parameters are $1, $2 ... in the SQL: text, numbers, yes and no, nothing (NULL), bytes (bytea), and lists, dictionaries and records (as JSON). Values come back as text, numbers (integers, floats and numeric), yes and no, nothing, bytes (bytea), what JSON says (json and jsonb), and lists (arrays of those); dates and times stay text, as PostgreSQL writes them (&quot;2026-11-04 10:15:00&quot;). A query PostgreSQL refuses is a <code>fail with</code> with its message and code, as &quot;PostgreSQL said: relation \&quot;nowhere\&quot; does not exist (42P01)&quot;.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="connect">
+          <h3><a href="#connect"><code>pg's connect(options)</code></a></h3>
+          <p>a connection to PostgreSQL, logged in, from a record of host, port, user, password, database, tls and trust, as at the top of this file; each but user can be left out</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>options</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect with options</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L42">postgres.moth line 42</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">5432</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="connect_url">
+          <h3><a href="#connect_url"><code>pg's connect_url(url)</code></a></h3>
+          <p>a connection from a URL: postgres://user:password@host:port/database?sslmode=require</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>url</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect_url with url</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L85">postgres.moth line 85</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">5432</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="query">
+          <h3><a href="#query"><code>pg's query(db, sql, values)</code></a></h3>
+          <p>the rows a query gives, each a dictionary of its columns' values; $1, $2 ... in the SQL are <code>values</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L293">postgres.moth line 293</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect(<span class="k">record</span> <span class="k">with</span> host <span class="s">&quot;localhost&quot;</span>, port <span class="n">5432</span>, user <span class="s">&quot;app&quot;</span>, password <span class="s">&quot;secret&quot;</span>, database <span class="s">&quot;shop&quot;</span>)
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> pg's query(db, <span class="s">&quot;select id, name from people where age &gt; $1 and city = $2&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">21</span>, <span class="s">&quot;Pune&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;id&quot;</span> <span class="k">of</span> row <span class="s">&quot; &quot;</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+<span class="k">say</span> pg's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)    <span class="c"># the first row, or nothing if none</span>
+<span class="k">say</span> pg's execute(db, <span class="s">&quot;update people set name = $1 where id = $2&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span>
+<span class="k">to</span> move_money <span class="k">with</span> db
+    pg's execute(db, <span class="s">&quot;update accounts set total = total - 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>)
+    pg's execute(db, <span class="s">&quot;update accounts set total = total + 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>)
+<span class="k">end</span>
+pg's in_transaction(db, move_money)           <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span>
+pg's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)         <span class="c"># many statements, with no parameters</span>
+pg's close(db)</code></pre></div>
+        </section>
+        <section class="fn" id="query_one">
+          <h3><a href="#query_one"><code>pg's query_one(db, sql, values)</code></a></h3>
+          <p>the first row, or nothing if there are none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query_one with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L298">postgres.moth line 298</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+<span class="k">say</span> pg's query_one(db, <span class="s">&quot;select count(*) as n from people&quot;</span>)    <span class="c"># the first row, or nothing if none</span></code></pre></div>
+        </section>
+        <section class="fn" id="execute">
+          <h3><a href="#execute"><code>pg's execute(db, sql, values)</code></a></h3>
+          <p>how many rows a statement changed (or gave)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to execute with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L307">postgres.moth line 307</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+<span class="k">say</span> pg's execute(db, <span class="s">&quot;update people set name = $1 where id = $2&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">7</span>)   <span class="c"># how many it changed</span></code></pre></div>
+        </section>
+        <section class="fn" id="run">
+          <h3><a href="#run"><code>pg's run(db, sql, values)</code></a></h3>
+          <p>A statement done, with parameters: a record with rows, count, columns (their names, in order) and tag (what PostgreSQL says it did, as &quot;INSERT 0 1&quot;)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li><li><code>values</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run with db, sql, values or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L313">postgres.moth line 313</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's run(db, sql, values)</code></pre></div>
+        </section>
+        <section class="fn" id="run_script">
+          <h3><a href="#run_script"><code>pg's run_script(db, sql)</code></a></h3>
+          <p>Many statements at once, with no parameters, as a file of SQL has them (the simple query protocol): the last one's result</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>sql</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_script with db, sql</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L368">postgres.moth line 368</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's run_script(db, <span class="k">read</span> <span class="s">&quot;schema.sql&quot;</span>)         <span class="c"># many statements, with no parameters</span></code></pre></div>
+        </section>
+        <section class="fn" id="begin">
+          <h3><a href="#begin"><code>pg's begin(db)</code></a></h3>
+          <p>a transaction begun: what follows is kept only once commit is called (<a href="#in_transaction">in_transaction</a> does all three)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to begin with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L534">postgres.moth line 534</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's begin(db)</code></pre></div>
+        </section>
+        <section class="fn" id="commit">
+          <h3><a href="#commit"><code>pg's commit(db)</code></a></h3>
+          <p>the transaction's changes kept</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to commit with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L539">postgres.moth line 539</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's commit(db)</code></pre></div>
+        </section>
+        <section class="fn" id="rollback">
+          <h3><a href="#rollback"><code>pg's rollback(db)</code></a></h3>
+          <p>the transaction's changes undone</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rollback with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L544">postgres.moth line 544</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's rollback(db)</code></pre></div>
+        </section>
+        <section class="fn" id="in_transaction">
+          <h3><a href="#in_transaction"><code>pg's in_transaction(db, work)</code></a></h3>
+          <p>work(db) done all or none: COMMIT if it ends well; ROLLBACK, and its mistake again, if it doesn't. What work gives back.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li><li><code>work</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to in_transaction with db, work</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L550">postgres.moth line 550</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">to</span> move_money <span class="k">with</span> db
+    pg's execute(db, <span class="s">&quot;update accounts set total = total - 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>)
+    pg's execute(db, <span class="s">&quot;update accounts set total = total + 10 where id = $1&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>)
+<span class="k">end</span>
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's in_transaction(db, move_money)           <span class="c"># all or none: COMMIT, or ROLLBACK and the mistake again</span></code></pre></div>
+        </section>
+        <section class="fn" id="transaction_status">
+          <h3><a href="#transaction_status"><code>pg's transaction_status(db)</code></a></h3>
+          <p>whether a transaction is open: &quot;I&quot; none, &quot;T&quot; one, &quot;E&quot; one that failed and must be rolled back</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to transaction_status with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L568">postgres.moth line 568</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">to</span> answered <span class="k">with</span> <span class="k">hex</span>
+    <span class="k">return</span> <span class="k">record</span> <span class="k">with</span> connection <span class="k">nothing</span>, reader wire's reader_of(hash's bytes_of_hex(<span class="k">hex</span>)), status <span class="s">&quot;I&quot;</span>, settings <span class="k">empty</span> <span class="k">dictionary</span>, process <span class="n">0</span>, notices <span class="k">empty</span> <span class="k">list</span>
+<span class="k">end</span>
+<span class="k">set</span> db <span class="k">to</span> answered(<span class="s">&quot;3100000004320000000454000000e9000a69640000000000000000000017ffffffffffff00006e616d650000000000000000000019ffffffffffff00006f6b0000000000000000000010ffffffffffff0000707269636500000000000000000006a4ffffffffffff0000646174610000000000000000000011ffffffffffff0000646f630000000000000000000edaffffffffffff00007461677300000000000000000003f1ffffffffffff00006e756d7300000000000000000003efffffffffffff00007768656e00000000000000000004a0ffffffffffff0000726174696f00000000000000000002bdffffffffffff00004400000091000a00000001370000000353616d00000001740000000531322e3530000000085c78303066663431000000167b2261223a205b312c20747275652c206e756c6c5d7d000000157b782c22612062222c22715c2274222c4e554c4c7d000000087b312c2d322c337d00000016323032362d31312d30342031303a31353a30302b3030000000082d312e35652b32304400000045000a0000000138ffffffff0000000166000000062d302e303031000000025c780000000133000000027b7d000000027b7dffffffff00000008496e66696e697479430000000d53454c4543542032005a0000000549&quot;</span>)
+<span class="k">say</span> pg's transaction_status(db)</code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>pg's close(db)</code></a></h3>
+          <p>the connection closed, after telling the server</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>db</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with db</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/postgres.moth#L573">postgres.moth line 573</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;postgres.moth&quot;</span> <span class="k">as</span> pg
+<span class="k">set</span> db <span class="k">to</span> pg's connect_url(<span class="s">&quot;postgres://app:secret@db.example.com/shop?sslmode=require&quot;</span>)
+pg's close(db)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

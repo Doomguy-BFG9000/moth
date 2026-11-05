@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>server.moth · Moth's standard library</title>
+  <meta name="description" content="A web server, as a program `moth build` makes can be one, on Windows and Linux.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>server</em>.moth</h1>
+      <p>A web server, as a program <code>moth build</code> makes can be one, on Windows and Linux.</p>
+      <p class="use"><code>use "server.moth" as web</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="server.moth's functions">
+      <h2>13 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#serve">serve</a></li><li><a href="#serve_everywhere">serve_everywhere</a></li><li><a href="#serve_on_workers">serve_on_workers</a></li><li><a href="#stop_serving">stop_serving</a></li><li><a href="#set_timeout">set_timeout</a></li><li><a href="#set_idle_timeout">set_idle_timeout</a></li><li><a href="#set_most_bytes">set_most_bytes</a></li><li><a href="#set_most_connections">set_most_connections</a></li><li><a href="#set_most_requests">set_most_requests</a></li><li><a href="#set_keep_alive">set_keep_alive</a></li><li><a href="#set_workers">set_workers</a></li><li><a href="#serve_secure">serve_secure</a></li><li><a href="#serve_secure_everywhere">serve_secure_everywhere</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>A web server, as a program <code>moth build</code> makes can be one, on Windows and Linux: each request a browser (or any other program) makes is given to a function of the program's, which says what to send back.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+<span class="k">to</span> answer <span class="k">with</span> request
+    <span class="k">if</span> path <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;/&quot;</span>
+        <span class="k">return</span> <span class="s">&quot;&lt;h1&gt;Hello from Moth&lt;/h1&gt;&quot;</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">record</span> <span class="k">with</span> status <span class="n">404</span>, body <span class="s">&quot;There's nothing at &quot;</span> + path <span class="k">of</span> request
+<span class="k">end</span>
+web's serve(<span class="n">8080</span>, answer)</code></pre></div>
+          <p>A request is a record: its method (&quot;GET&quot;, &quot;POST&quot; and the rest), path (&quot;/notes&quot;), query (a dictionary of what came after the ?, decoded), version (&quot;HTTP/1.1&quot;), headers (a dictionary, each name in small letters) and body (text; body_bytes has its bytes). The function gives back text, sent as a page if it starts with &quot;&lt;&quot; and as plain text if not; a list or a dictionary, sent as JSON; or a record with any of status (200 if it has none), body (text or bytes), type (as &quot;text/css&quot;), headers (a dictionary) and file (a file's name, whose bytes are the body, its type from its name). A mistake in it is sent as 500, and said to the error output, and the server goes on.</p>
+          <p>Many connections at once (DESIGN §123): the server waits for whichever of them has something to say, reads what has come and answers when a whole request is there, so one client that sends a byte at a time, or that stops halfway, holds up nobody. A connection is kept open for the requests after the first (HTTP/1.1 keep-alive), and answers them in the order they came, even when they come together. Each request is given <code>timeout</code> milliseconds to arrive once it has begun, and a kept connection <code>idle_timeout</code> to begin the next; one that goes over is answered 408 and closed. An answer the other end takes none of for <code>timeout</code> is cut off. A request bigger than <code>most_bytes</code> is answered 413, headers over 64 KB 431, and one that can't be read 400. Only <code>most_connections</code> are held at once, and while they are, the rest wait in the system's own queue.</p>
+          <div class="code"><pre><code>web's set_timeout(<span class="n">30000</span>)          <span class="c"># how long a request has to arrive, once begun, or an answer can wait</span>
+web's set_idle_timeout(<span class="n">5000</span>)      <span class="c"># how long a kept connection may sit with nothing on it</span>
+web's set_most_bytes(<span class="n">16777216</span>)    <span class="c"># the biggest request, headers and body together</span>
+web's set_most_connections(<span class="n">1024</span>)  <span class="c"># how many are held at once (by each worker)</span>
+web's set_most_requests(<span class="n">1000</span>)     <span class="c"># how many a connection answers before it's closed</span>
+web's set_keep_alive(<span class="k">no</span>)          <span class="c"># a connection closed after each request, as HTTP/1.0 had it</span>
+web's set_workers(<span class="n">4</span>)              <span class="c"># answered on 4 workers; 0 for one a core</span>
+web's serve_everywhere(<span class="n">8080</span>, answer)              <span class="c"># from every network the computer is on</span>
+web's serve_on_workers(<span class="n">8080</span>, answer, <span class="n">4</span>)           <span class="c"># on 4 workers at once, each a core of its own</span>
+web's serve_secure(<span class="n">8443</span>, answer, <span class="s">&quot;cert.pem&quot;</span>, <span class="s">&quot;key.pem&quot;</span>)   <span class="c"># HTTPS</span>
+web's stop_serving()              <span class="c"># in a handler: serve returns once what's being sent is sent</span></code></pre></div>
+          <p><a href="#serve">serve</a>() answers this computer alone (127.0.0.1); <a href="#serve_everywhere">serve_everywhere</a>() every network it's on. <a href="#stop_serving">stop_serving</a>() ends serve() once the requests it's answering are sent. Built with --allow-libraries.</p>
+          <p>Workers (DESIGN §124): <a href="#set_workers">set_workers</a>(4), or <a href="#serve_on_workers">serve_on_workers</a>(8080, answer, 4), answers on 4 workers at once, each with a core, its own copy of the program's variables and its own connections, so a handler that does a lot of work holds up only the connections of its own worker. A handler there changes its worker's copy of a variable, which no other worker sees, so what is to be kept and shared goes in a database or a file. <a href="#stop_serving">stop_serving</a>() ends the worker it's called on, and <a href="#serve">serve</a>() ends once every worker has.</p>
+          <p><a href="#serve_secure">serve_secure</a>(443, answer, &quot;cert.pem&quot;, &quot;key.pem&quot;) answers with HTTPS instead, through OpenSSL 3, with a certificate (and the chain after it) and its key, each in a PEM file; <a href="#serve_secure_everywhere">serve_secure_everywhere</a>() as well. Linux has OpenSSL; on Windows, OpenSSL's two DLLs go beside the program: libssl-3.dll and libcrypto-3.dll, as Python has them in its DLLs folder, or libssl-3-x64.dll and libcrypto-3-x64.dll, as Git for Windows has them in its mingw64 folder, and the Win64 OpenSSL installer too.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="serve">
+          <h3><a href="#serve"><code>web's serve(port, handler)</code></a></h3>
+          <p>answers requests to this computer alone, on <code>port</code>, with <code>handler</code>, until <a href="#stop_serving">stop_serving</a>()</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>port</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to serve with port, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L140">server.moth line 140</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+<span class="k">to</span> answer <span class="k">with</span> request
+    <span class="k">if</span> path <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;/&quot;</span>
+        <span class="k">return</span> <span class="s">&quot;&lt;h1&gt;Hello from Moth&lt;/h1&gt;&quot;</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">record</span> <span class="k">with</span> status <span class="n">404</span>, body <span class="s">&quot;There's nothing at &quot;</span> + path <span class="k">of</span> request
+<span class="k">end</span>
+web's serve(<span class="n">8080</span>, answer)</code></pre></div>
+        </section>
+        <section class="fn" id="serve_everywhere">
+          <h3><a href="#serve_everywhere"><code>web's serve_everywhere(port, handler)</code></a></h3>
+          <p>answers requests from every network the computer is on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>port</code></li><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to serve_everywhere with port, handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L145">server.moth line 145</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's serve_everywhere(<span class="n">8080</span>, answer)              <span class="c"># from every network the computer is on</span></code></pre></div>
+        </section>
+        <section class="fn" id="serve_on_workers">
+          <h3><a href="#serve_on_workers"><code>web's serve_on_workers(port, handler, workers)</code></a></h3>
+          <p>answers on <code>workers</code> workers at once, 0 for one a core</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>port</code></li><li><code>handler</code></li><li><code>workers</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to serve_on_workers with port, handler, workers</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L150">server.moth line 150</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's serve_on_workers(<span class="n">8080</span>, answer, <span class="n">4</span>)           <span class="c"># on 4 workers at once, each a core of its own</span></code></pre></div>
+        </section>
+        <section class="fn" id="stop_serving">
+          <h3><a href="#stop_serving"><code>web's stop_serving()</code></a></h3>
+          <p>serve, and the rest, return once what's being sent is sent: called from a handler, or a task</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to stop_serving</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L156">server.moth line 156</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's stop_serving()              <span class="c"># in a handler: serve returns once what's being sent is sent</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_timeout">
+          <h3><a href="#set_timeout"><code>web's set_timeout(milliseconds)</code></a></h3>
+          <p>how long a request has to arrive, in milliseconds, once its first byte has come</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>milliseconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_timeout with milliseconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L161">server.moth line 161</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_timeout(<span class="n">30000</span>)          <span class="c"># how long a request has to arrive, once begun, or an answer can wait</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_idle_timeout">
+          <h3><a href="#set_idle_timeout"><code>web's set_idle_timeout(milliseconds)</code></a></h3>
+          <p>how long a connection kept for another request may sit with nothing on it, in milliseconds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>milliseconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_idle_timeout with milliseconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L166">server.moth line 166</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_idle_timeout(<span class="n">5000</span>)      <span class="c"># how long a kept connection may sit with nothing on it</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_most_bytes">
+          <h3><a href="#set_most_bytes"><code>web's set_most_bytes(how_many)</code></a></h3>
+          <p>the biggest request, headers and body together, in bytes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>how_many</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_most_bytes with how_many</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L171">server.moth line 171</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_most_bytes(<span class="n">16777216</span>)    <span class="c"># the biggest request, headers and body together</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_most_connections">
+          <h3><a href="#set_most_connections"><code>web's set_most_connections(how_many)</code></a></h3>
+          <p>how many connections are held at once (by each worker); while they are, the rest wait in the system's queue</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>how_many</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_most_connections with how_many</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L176">server.moth line 176</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_most_connections(<span class="n">1024</span>)  <span class="c"># how many are held at once (by each worker)</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_most_requests">
+          <h3><a href="#set_most_requests"><code>web's set_most_requests(how_many)</code></a></h3>
+          <p>how many requests one connection answers before it's closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>how_many</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_most_requests with how_many</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L181">server.moth line 181</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_most_requests(<span class="n">1000</span>)     <span class="c"># how many a connection answers before it's closed</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_keep_alive">
+          <h3><a href="#set_keep_alive"><code>web's set_keep_alive(keeping)</code></a></h3>
+          <p>whether a connection is kept open for the requests after the first</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>keeping</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_keep_alive with keeping</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L186">server.moth line 186</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_keep_alive(<span class="k">no</span>)          <span class="c"># a connection closed after each request, as HTTP/1.0 had it</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_workers">
+          <h3><a href="#set_workers"><code>web's set_workers(how_many)</code></a></h3>
+          <p>how many workers answer requests at once, each on a core of its own; 0 for one a core</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>how_many</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_workers with how_many</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L191">server.moth line 191</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's set_workers(<span class="n">4</span>)              <span class="c"># answered on 4 workers; 0 for one a core</span></code></pre></div>
+        </section>
+        <section class="fn" id="serve_secure">
+          <h3><a href="#serve_secure"><code>web's serve_secure(port, handler, certificate, key)</code></a></h3>
+          <p>with HTTPS: the certificate's PEM file (the chain after it, if it has one) and its key's</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>port</code></li><li><code>handler</code></li><li><code>certificate</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to serve_secure with port, handler, certificate, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L199">server.moth line 199</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's serve_secure(<span class="n">8443</span>, answer, <span class="s">&quot;cert.pem&quot;</span>, <span class="s">&quot;key.pem&quot;</span>)   <span class="c"># HTTPS</span></code></pre></div>
+        </section>
+        <section class="fn" id="serve_secure_everywhere">
+          <h3><a href="#serve_secure_everywhere"><code>web's serve_secure_everywhere(port, handler, certificate, key)</code></a></h3>
+          <p>answers requests with HTTPS, as <a href="#serve_secure">serve_secure</a> does, from every network the computer is on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>port</code></li><li><code>handler</code></li><li><code>certificate</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to serve_secure_everywhere with port, handler, certificate, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/server.moth#L204">server.moth line 204</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+web's serve_secure_everywhere(port, handler, certificate, <span class="k">key</span>)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>arrays.moth · Moth's standard library</title>
+  <meta name="description" content="Arrays of numbers, as NumPy has them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>arrays</em>.moth</h1>
+      <p>Arrays of numbers, as NumPy has them.</p>
+      <p class="use"><code>use "arrays.moth" as arrays</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="arrays.moth's functions">
+      <h2>53 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#array">array</a></li><li><a href="#shaped">shaped</a></li><li><a href="#filled">filled</a></li><li><a href="#zeros">zeros</a></li><li><a href="#ones">ones</a></li><li><a href="#random">random</a></li><li><a href="#random_normal">random_normal</a></li><li><a href="#counting">counting</a></li><li><a href="#evenly">evenly</a></li><li><a href="#identity">identity</a></li><li><a href="#copy_of">copy_of</a></li><li><a href="#size">size</a></li><li><a href="#rank">rank</a></li><li><a href="#value_at">value_at</a></li><li><a href="#set_value_at">set_value_at</a></li><li><a href="#to_list">to_list</a></li><li><a href="#numbers_of">numbers_of</a></li><li><a href="#plus">plus</a></li><li><a href="#minus">minus</a></li><li><a href="#times">times</a></li><li><a href="#divided_by">divided_by</a></li><li><a href="#maximum">maximum</a></li><li><a href="#minimum">minimum</a></li><li><a href="#negate">negate</a></li><li><a href="#absolute">absolute</a></li><li><a href="#relu">relu</a></li><li><a href="#square">square</a></li><li><a href="#apply">apply</a></li><li><a href="#sqrt">sqrt</a></li><li><a href="#exp">exp</a></li><li><a href="#ln">ln</a></li><li><a href="#tanh">tanh</a></li><li><a href="#sigmoid">sigmoid</a></li><li><a href="#power">power</a></li><li><a href="#reshape">reshape</a></li><li><a href="#flatten">flatten</a></li><li><a href="#transpose">transpose</a></li><li><a href="#slice">slice</a></li><li><a href="#row">row</a></li><li><a href="#stack">stack</a></li><li><a href="#join_along">join_along</a></li><li><a href="#use_blas">use_blas</a></li><li><a href="#stop_using_blas">stop_using_blas</a></li><li><a href="#matmul">matmul</a></li><li><a href="#dot">dot</a></li><li><a href="#sum">sum</a></li><li><a href="#mean">mean</a></li><li><a href="#max">max</a></li><li><a href="#min">min</a></li><li><a href="#argmax">argmax</a></li><li><a href="#softmax">softmax</a></li><li><a href="#close">close</a></li><li><a href="#same">same</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Arrays of numbers, as NumPy has them: a shape, and the numbers row after row, with maths on all of them at once, matrix multiplication, sums, means and the largest along an axis, reshaping, slicing and broadcasting. A program <code>moth build</code> makes does the work in machine code, loops of Moth's own (DESIGN §118) over the numbers where they are, one after another in memory; anywhere else, the same in Moth, with the same answers.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> a's shape                               <span class="c"># [2, 3]</span>
+<span class="k">say</span> arrays's plus(a, <span class="n">10</span>)                    <span class="c"># [[11, 12, 13], [14, 15, 16]]: a number goes with every one</span>
+<span class="k">say</span> arrays's <span class="k">times</span>(a, arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">0</span>, -<span class="n">1</span>))   <span class="c"># each row times [1, 0, -1] (broadcasting)</span>
+<span class="k">set</span> b <span class="k">to</span> arrays's transpose(a)              <span class="c"># 3 by 2</span>
+<span class="k">say</span> arrays's matmul(a, b)                   <span class="c"># [[14, 32], [32, 77]]</span>
+<span class="k">say</span> arrays's sum(a)                         <span class="c"># 21; sum(a, 1) adds down axis 1: [5, 7, 9]</span>
+<span class="k">say</span> arrays's mean(a, <span class="n">2</span>)                     <span class="c"># [2, 5]; also max, min, argmax</span>
+<span class="k">say</span> arrays's reshape(a, <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">2</span>)       <span class="c"># the same numbers, 3 by 2; -1 for one axis works it out</span>
+<span class="k">say</span> arrays's slice(a, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)              <span class="c"># axis 2, from its 2nd to its 3rd: [[2, 3], [5, 6]]</span>
+<span class="k">say</span> arrays's value_at(a, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">3</span>)      <span class="c"># 6: places count from 1, as items do</span></code></pre></div>
+          <p>Made with <a href="#array">array</a>(nested lists), <a href="#shaped">shaped</a>(numbers, shape), <a href="#zeros">zeros</a>(shape), <a href="#ones">ones</a>(shape), <a href="#filled">filled</a>(shape, x), <a href="#random">random</a>(shape) (from 0 up to 1), <a href="#random_normal">random_normal</a>(shape), <a href="#counting">counting</a>(first, last, step), <a href="#evenly">evenly</a>(first, last, n) and <a href="#identity">identity</a>(n). Element by element: plus, minus, times, <a href="#divided_by">divided_by</a>, maximum, minimum (each of two arrays, or an array and a number), negate, absolute, square, relu, sqrt, exp, ln, tanh, sigmoid, <a href="#power">power</a>(t, p) and <a href="#apply">apply</a>(t, f). Then matmul, dot, transpose, flatten, row, stack, <a href="#join_along">join_along</a>, softmax, <a href="#to_list">to_list</a>, <a href="#numbers_of">numbers_of</a>, <a href="#copy_of">copy_of</a>, size, rank, <a href="#close">close</a>(a, b) and <a href="#same">same</a>(a, b). Axes and places count from 1. A shape that can't be, shapes that don't go together, or a place outside an array is a <code>fail with</code> that says so.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="array">
+          <h3><a href="#array"><code>arrays's array(values)</code></a></h3>
+          <p>an array of a list's numbers, or of lists of them, each as long as the others: its shape from how they nest</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to array with values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L72">arrays.moth line 72</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> a</code></pre><pre class="says"><code>[[1, 2, 3], [4, 5, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="shaped">
+          <h3><a href="#shaped"><code>arrays's shaped(values, shape)</code></a></h3>
+          <p>an array of this shape, from a list of its numbers in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>values</code></li><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to shaped with values, shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L110">arrays.moth line 110</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's shaped((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">2</span>))'s shape</code></pre><pre class="says"><code>[3, 2]</code></pre></div>
+        </section>
+        <section class="fn" id="filled">
+          <h3><a href="#filled"><code>arrays's filled(shape, value)</code></a></h3>
+          <p>an array of a shape (a list of how long each axis is, or a number for one axis) with every number <code>value</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>shape</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to filled with shape, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L127">arrays.moth line 127</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's filled((<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">1</span>), <span class="n">7.5</span>))</code></pre><pre class="says"><code>[7.5, 7.5]</code></pre></div>
+        </section>
+        <section class="fn" id="zeros">
+          <h3><a href="#zeros"><code>arrays's zeros(shape)</code></a></h3>
+          <p>an array of a shape with every number 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to zeros with shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L140">arrays.moth line 140</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's zeros(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">2</span>))</code></pre><pre class="says"><code>[0, 0, 0, 0]</code></pre></div>
+        </section>
+        <section class="fn" id="ones">
+          <h3><a href="#ones"><code>arrays's ones(shape)</code></a></h3>
+          <p>an array of a shape with every number 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ones with shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L145">arrays.moth line 145</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's ones(<span class="n">3</span>))</code></pre><pre class="says"><code>[1, 1, 1]</code></pre></div>
+        </section>
+        <section class="fn" id="random">
+          <h3><a href="#random"><code>arrays's random(shape)</code></a></h3>
+          <p>numbers from 0 up to 1, from math.moth's random numbers</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to random with shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L150">arrays.moth line 150</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> r <span class="k">to</span> arrays's <span class="k">random</span>(<span class="k">list</span> <span class="k">of</span> <span class="n">50</span>, <span class="n">40</span>)
+<span class="k">say</span> r</code></pre><pre class="says"><code>[[0.000328707508895876, 0.524587102012982, 0.735423532191396, ..., 0.769240409959685, 0.623570192429968, 0.344224170476303], [0.375633195217528, 0.267112020993192, 0.351736832573887, ..., 0.103527315940488, 0.983599011778645, 0.348590963682435], [0.768326610684547, 0.265345775180192, 0.666443453480696, ..., 0.935563623409515, 0.0178186437198048, 0.477944998758819], ..., [0.332507196968658, 0.448459452226972, 0.258013578717603, ..., 0.18222456853009, 0.648323285229655, 0.3694548548057], [0.42774471939902, 0.105498939336044, 0.120673420895205, ..., 0.643201441337914, 0.286624566319689, 0.299086135020054], [0.740671282047718, 0.462237376003637, 0.823578493121815, ..., 0.481574428026366, 0.821411839137511, 0.468780384151628]]</code></pre></div>
+        </section>
+        <section class="fn" id="random_normal">
+          <h3><a href="#random_normal"><code>arrays's random_normal(shape)</code></a></h3>
+          <p>numbers of a normal distribution, with a mean of 0 and a standard deviation of 1 (Box and Muller's way)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to random_normal with shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L160">arrays.moth line 160</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> g <span class="k">to</span> arrays's random_normal(<span class="n">10000</span>)
+<span class="k">say</span> g</code></pre><pre class="says"><code>[-0.0253368362564267, -0.00394560750920294, -0.13617142032599, ..., 0.737760350513246, -0.239317404054956, 0.150096278496285]</code></pre></div>
+        </section>
+        <section class="fn" id="counting">
+          <h3><a href="#counting"><code>arrays's counting(first, last, step)</code></a></h3>
+          <p>first, first + step and on, as far as last, as <code>for each i from 1 to 10 by 2</code> counts</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>first</code></li><li><code>last</code></li><li><code>step</code> <span class="optional">optional: 1 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to counting with first, last, step or 1</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L177">arrays.moth line 177</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's counting(<span class="n">1</span>, <span class="n">10</span>, <span class="n">3</span>))</code></pre><pre class="says"><code>[1, 4, 7, 10]</code></pre></div>
+        </section>
+        <section class="fn" id="evenly">
+          <h3><a href="#evenly"><code>arrays's evenly(first, last, n)</code></a></h3>
+          <p>n numbers from first to last, evenly apart</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>first</code></li><li><code>last</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to evenly with first, last, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L193">arrays.moth line 193</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's evenly(<span class="n">0</span>, <span class="n">1</span>, <span class="n">5</span>))</code></pre><pre class="says"><code>[0, 0.25, 0.5, 0.75, 1]</code></pre></div>
+        </section>
+        <section class="fn" id="identity">
+          <h3><a href="#identity"><code>arrays's identity(n)</code></a></h3>
+          <p>n by n, 1 on its diagonal and 0 elsewhere</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to identity with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L205">arrays.moth line 205</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's to_list(arrays's identity(<span class="n">3</span>))</code></pre><pre class="says"><code>[[1, 0, 0], [0, 1, 0], [0, 0, 1]]</code></pre></div>
+        </section>
+        <section class="fn" id="copy_of">
+          <h3><a href="#copy_of"><code>arrays's copy_of(t)</code></a></h3>
+          <p>an array of its own with the same shape and numbers, so changing one leaves the other as it was</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to copy_of with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L215">arrays.moth line 215</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> c <span class="k">to</span> arrays's copy_of(a)
+<span class="k">say</span> c</code></pre><pre class="says"><code>[[1, 2, 3], [4, 5, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="size">
+          <h3><a href="#size"><code>arrays's size(t)</code></a></h3>
+          <p>how many numbers the array holds: its shape's lengths multiplied together</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to size with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L223">arrays.moth line 223</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's size(a)</code></pre><pre class="says"><code>6</code></pre></div>
+        </section>
+        <section class="fn" id="rank">
+          <h3><a href="#rank"><code>arrays's rank(t)</code></a></h3>
+          <p>how many axes the array has: 1 for a row of numbers, 2 for a table</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rank with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L228">arrays.moth line 228</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's rank(a)</code></pre><pre class="says"><code>2</code></pre></div>
+        </section>
+        <section class="fn" id="value_at">
+          <h3><a href="#value_at"><code>arrays's value_at(t, place)</code></a></h3>
+          <p>a number in it, at a place: a list of where on each axis, from 1, or a number for an array of one axis</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to value_at with t, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L233">arrays.moth line 233</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's value_at(a, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">3</span>)      <span class="c"># 6: places count from 1, as items do</span></code></pre><pre class="says"><code>6</code></pre></div>
+        </section>
+        <section class="fn" id="set_value_at">
+          <h3><a href="#set_value_at"><code>arrays's set_value_at(t, place, value)</code></a></h3>
+          <p>the number at a place changed to <code>value</code>: a list of where on each axis, from 1, or a number for an array of one axis</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>place</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_value_at with t, place, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L240">arrays.moth line 240</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> c <span class="k">to</span> arrays's copy_of(a)
+arrays's set_value_at(c, (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">1</span>), <span class="n">100</span>)
+<span class="k">say</span> arrays's value_at(c, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">1</span>)</code></pre><pre class="says"><code>100</code></pre></div>
+        </section>
+        <section class="fn" id="to_list">
+          <h3><a href="#to_list"><code>arrays's to_list(t)</code></a></h3>
+          <p>its numbers as lists, nested as its axes are</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to to_list with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L250">arrays.moth line 250</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's to_list(arrays's identity(<span class="n">3</span>))</code></pre><pre class="says"><code>[[1, 0, 0], [0, 1, 0], [0, 0, 1]]</code></pre></div>
+        </section>
+        <section class="fn" id="numbers_of">
+          <h3><a href="#numbers_of"><code>arrays's numbers_of(t)</code></a></h3>
+          <p>its numbers, in order, as a list of its own</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to numbers_of with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L275">arrays.moth line 275</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's numbers_of(a)</code></pre><pre class="says"><code>[1, 2, 3, 4, 5, 6]</code></pre></div>
+        </section>
+        <section class="fn" id="plus">
+          <h3><a href="#plus"><code>arrays's plus(a, b)</code></a></h3>
+          <p>a + b, number by number: each an array or a number, and two arrays of shapes that go together (broadcasting)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to plus with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L286">arrays.moth line 286</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's plus(a, <span class="n">10</span>)                    <span class="c"># [[11, 12, 13], [14, 15, 16]]: a number goes with every one</span></code></pre><pre class="says"><code>[[11, 12, 13], [14, 15, 16]]</code></pre></div>
+        </section>
+        <section class="fn" id="minus">
+          <h3><a href="#minus"><code>arrays's minus(a, b)</code></a></h3>
+          <p>a - b, number by number, broadcasting as plus does</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to minus with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L291">arrays.moth line 291</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's to_list(arrays's minus(<span class="n">10</span>, a))</code></pre><pre class="says"><code>[[9, 8, 7], [6, 5, 4]]</code></pre></div>
+        </section>
+        <section class="fn" id="times">
+          <h3><a href="#times"><code>arrays's times(a, b)</code></a></h3>
+          <p>a times b, number by number (not matmul), broadcasting as plus does</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to times with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L296">arrays.moth line 296</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's <span class="k">times</span>(a, arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">0</span>, -<span class="n">1</span>))   <span class="c"># each row times [1, 0, -1] (broadcasting)</span></code></pre><pre class="says"><code>[[1, 0, -3], [4, 0, -6]]</code></pre></div>
+        </section>
+        <section class="fn" id="divided_by">
+          <h3><a href="#divided_by"><code>arrays's divided_by(a, b)</code></a></h3>
+          <p>a divided by b, number by number, broadcasting as plus does</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to divided_by with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L301">arrays.moth line 301</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's divided_by(a, <span class="n">2</span>))</code></pre><pre class="says"><code>[0.5, 1, 1.5, 2, 2.5, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="maximum">
+          <h3><a href="#maximum"><code>arrays's maximum(a, b)</code></a></h3>
+          <p>the larger of each two, or NaN if either is; minimum the smaller</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to maximum with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L306">arrays.moth line 306</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> b <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">3</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">7</span>, -<span class="n">1</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's maximum(a, b))</code></pre><pre class="says"><code>[3, 3, 3, 4, 7, 6]</code></pre></div>
+        </section>
+        <section class="fn" id="minimum">
+          <h3><a href="#minimum"><code>arrays's minimum(a, b)</code></a></h3>
+          <p>the smaller of each two, or NaN if either is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to minimum with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L311">arrays.moth line 311</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> b <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">3</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">7</span>, -<span class="n">1</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's minimum(a, b))</code></pre><pre class="says"><code>[1, 2, 3, 3, 5, -1]</code></pre></div>
+        </section>
+        <section class="fn" id="negate">
+          <h3><a href="#negate"><code>arrays's negate(t)</code></a></h3>
+          <p>each number with its sign the other way</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to negate with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L316">arrays.moth line 316</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> m <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> -<span class="n">2</span>, -<span class="n">0.5</span>, <span class="n">0</span>, <span class="n">3</span>)
+<span class="k">say</span> arrays's numbers_of(arrays's negate(m))</code></pre><pre class="says"><code>[2, 0.5, 0, -3]</code></pre></div>
+        </section>
+        <section class="fn" id="absolute">
+          <h3><a href="#absolute"><code>arrays's absolute(t)</code></a></h3>
+          <p>each number without its sign</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to absolute with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L321">arrays.moth line 321</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> m <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> -<span class="n">2</span>, -<span class="n">0.5</span>, <span class="n">0</span>, <span class="n">3</span>)
+<span class="k">say</span> arrays's numbers_of(arrays's absolute(m))</code></pre><pre class="says"><code>[2, 0.5, 0, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="relu">
+          <h3><a href="#relu"><code>arrays's relu(t)</code></a></h3>
+          <p>each number below 0 made 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to relu with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L326">arrays.moth line 326</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> m <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> -<span class="n">2</span>, -<span class="n">0.5</span>, <span class="n">0</span>, <span class="n">3</span>)
+<span class="k">say</span> arrays's numbers_of(arrays's relu(m))</code></pre><pre class="says"><code>[0, 0, 0, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="square">
+          <h3><a href="#square"><code>arrays's square(t)</code></a></h3>
+          <p>each number times itself</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to square with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L331">arrays.moth line 331</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's square(a))</code></pre><pre class="says"><code>[1, 4, 9, 16, 25, 36]</code></pre></div>
+        </section>
+        <section class="fn" id="apply">
+          <h3><a href="#apply"><code>arrays's apply(t, f)</code></a></h3>
+          <p>f of each number, a function of one input that gives a number</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>f</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to apply with t, f</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L336">arrays.moth line 336</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's apply(a, <span class="k">function</span> <span class="k">with</span> x <span class="k">gives</span> x * <span class="n">2</span> + <span class="n">1</span>))</code></pre><pre class="says"><code>[3, 5, 7, 9, 11, 13]</code></pre></div>
+        </section>
+        <section class="fn" id="sqrt">
+          <h3><a href="#sqrt"><code>arrays's sqrt(t)</code></a></h3>
+          <p>each number's square root</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sqrt with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L350">arrays.moth line 350</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's sqrt(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">9</span>, <span class="n">2</span>)))</code></pre><pre class="says"><code>[2, 3, 1.41421356237309]</code></pre></div>
+        </section>
+        <section class="fn" id="exp">
+          <h3><a href="#exp"><code>arrays's exp(t)</code></a></h3>
+          <p>e to the power of each number</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to exp with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L355">arrays.moth line 355</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's exp(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">1</span>)))</code></pre><pre class="says"><code>[1, 2.71828182845904]</code></pre></div>
+        </section>
+        <section class="fn" id="ln">
+          <h3><a href="#ln"><code>arrays's ln(t)</code></a></h3>
+          <p>each number's natural logarithm</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ln with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L360">arrays.moth line 360</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's ln(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2.718281828459045</span>)))</code></pre><pre class="says"><code>[0, 1]</code></pre></div>
+        </section>
+        <section class="fn" id="tanh">
+          <h3><a href="#tanh"><code>arrays's tanh(t)</code></a></h3>
+          <p>each number's hyperbolic tangent, from -1 to 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to tanh with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L365">arrays.moth line 365</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's tanh(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">1</span>, -<span class="n">100</span>)))</code></pre><pre class="says"><code>[0, 0.761594155955765, -1]</code></pre></div>
+        </section>
+        <section class="fn" id="sigmoid">
+          <h3><a href="#sigmoid"><code>arrays's sigmoid(t)</code></a></h3>
+          <p>1 / (1 + e^-x) for each number x, from 0 to 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sigmoid with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L370">arrays.moth line 370</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's sigmoid(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">2</span>, -<span class="n">2</span>)))</code></pre><pre class="says"><code>[0.5, 0.880797077977883, 0.119202922022118]</code></pre></div>
+        </section>
+        <section class="fn" id="power">
+          <h3><a href="#power"><code>arrays's power(t, p)</code></a></h3>
+          <p>each number to the power p, any number (math.moth's power)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>p</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to power with t, p</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L375">arrays.moth line 375</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's numbers_of(arrays's <span class="k">power</span>(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">9</span>), <span class="n">0.5</span>))</code></pre><pre class="says"><code>[1.41421356237309, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="reshape">
+          <h3><a href="#reshape"><code>arrays's reshape(t, shape)</code></a></h3>
+          <p>the same numbers in another shape, with as many; one axis of -1 is as long as it needs to be</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>shape</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to reshape with t, shape</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L406">arrays.moth line 406</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's reshape(a, <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">2</span>)       <span class="c"># the same numbers, 3 by 2; -1 for one axis works it out</span></code></pre><pre class="says"><code>[[1, 2], [3, 4], [5, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="flatten">
+          <h3><a href="#flatten"><code>arrays's flatten(t)</code></a></h3>
+          <p>the same numbers as an array of one axis, row after row</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to flatten with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L443">arrays.moth line 443</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's flatten(a)'s shape</code></pre><pre class="says"><code>[6]</code></pre></div>
+        </section>
+        <section class="fn" id="transpose">
+          <h3><a href="#transpose"><code>arrays's transpose(t)</code></a></h3>
+          <p>its axes the other way round: rows become columns</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to transpose with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L448">arrays.moth line 448</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> b <span class="k">to</span> arrays's transpose(a)
+<span class="k">say</span> b</code></pre><pre class="says"><code>[[1, 4], [2, 5], [3, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="slice">
+          <h3><a href="#slice"><code>arrays's slice(t, axis, first, last)</code></a></h3>
+          <p>along an axis, from one place to another, both counted from 1 and both kept</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code></li><li><code>first</code></li><li><code>last</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to slice with t, axis, first, last</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L466">arrays.moth line 466</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's slice(a, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)              <span class="c"># axis 2, from its 2nd to its 3rd: [[2, 3], [5, 6]]</span></code></pre><pre class="says"><code>[[2, 3], [5, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="row">
+          <h3><a href="#row"><code>arrays's row(t, place)</code></a></h3>
+          <p>the place-th along axis 1: an array of one axis fewer, or a number</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>place</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to row with t, place</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L482">arrays.moth line 482</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's numbers_of(arrays's row(a, <span class="n">2</span>))</code></pre><pre class="says"><code>[4, 5, 6]</code></pre></div>
+        </section>
+        <section class="fn" id="stack">
+          <h3><a href="#stack"><code>arrays's stack(arrays)</code></a></h3>
+          <p>arrays of one shape, each a place along a new first axis</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>arrays</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to stack with arrays</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L495">arrays.moth line 495</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> two <span class="k">to</span> arrays's stack(<span class="k">list</span> <span class="k">of</span> a, arrays's <span class="k">times</span>(a, <span class="n">2</span>))
+<span class="k">say</span> two</code></pre><pre class="says"><code>[[[1, 2, 3], [4, 5, 6]], [[2, 4, 6], [8, 10, 12]]]</code></pre></div>
+        </section>
+        <section class="fn" id="join_along">
+          <h3><a href="#join_along"><code>arrays's join_along(arrays, axis)</code></a></h3>
+          <p>arrays one after another along an axis, the same shape but for that axis</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>arrays</code></li><li><code>axis</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to join_along with arrays, axis</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L518">arrays.moth line 518</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's to_list(arrays's join_along((<span class="k">list</span> <span class="k">of</span> a, a), <span class="n">1</span>))</code></pre><pre class="says"><code>[[1, 2, 3], [4, 5, 6], [1, 2, 3], [4, 5, 6]]</code></pre></div>
+        </section>
+        <section class="fn" id="use_blas">
+          <h3><a href="#use_blas"><code>arrays's use_blas()</code></a></h3>
+          <p>Has matmul use BLAS from now on, for all but the smallest: OpenBLAS (libopenblas.dll on Windows, from github.com/OpenMathLib/OpenBLAS/releases, beside the program; libopenblas.so.0 on Linux, from its packages), or NumPy's own (numpy.libs/libscipy_openblas64_-*.dll, copied beside the program as libscipy_openblas64_.dll). Gives which it found, &quot;openblas&quot; or &quot;openblas64&quot;, or nothing, when matmul stays as it was. A program that uses it is built with --allow-libraries. BLAS adds in its own order, so its answers can differ from Moth's in the last digits, as NumPy's do.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to use_blas</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L562">arrays.moth line 562</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+arrays's use_blas()</code></pre></div>
+        </section>
+        <section class="fn" id="stop_using_blas">
+          <h3><a href="#stop_using_blas"><code>arrays's stop_using_blas()</code></a></h3>
+          <p>matmul back to Moth's own, without BLAS</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to stop_using_blas</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L579">arrays.moth line 579</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+arrays's stop_using_blas()</code></pre></div>
+        </section>
+        <section class="fn" id="matmul">
+          <h3><a href="#matmul"><code>arrays's matmul(a, b)</code></a></h3>
+          <p>a by b as matrices: m by k times k by n is m by n. An array of one axis is a row on the left and a column on the right, and two of them give a number; an array of more axes is matrices one after another, times one matrix or as many</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to matmul with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L586">arrays.moth line 586</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> b <span class="k">to</span> arrays's transpose(a)              <span class="c"># 3 by 2</span>
+<span class="k">say</span> arrays's matmul(a, b)                   <span class="c"># [[14, 32], [32, 77]]</span></code></pre><pre class="says"><code>[[14, 32], [32, 77]]</code></pre></div>
+        </section>
+        <section class="fn" id="dot">
+          <h3><a href="#dot"><code>arrays's dot(a, b)</code></a></h3>
+          <p>the sum of the products of two arrays' numbers, one with the other: of one axis each, as long as each other</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to dot with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L644">arrays.moth line 644</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">say</span> arrays's dot(arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), arrays's array(<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))</code></pre><pre class="says"><code>32</code></pre></div>
+        </section>
+        <section class="fn" id="sum">
+          <h3><a href="#sum"><code>arrays's sum(t, axis)</code></a></h3>
+          <p>all its numbers added, or along an axis: an array of one axis fewer (a number for an array of one axis)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sum with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L656">arrays.moth line 656</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's sum(a)                         <span class="c"># 21; sum(a, 1) adds down axis 1: [5, 7, 9]</span></code></pre><pre class="says"><code>21</code></pre></div>
+        </section>
+        <section class="fn" id="mean">
+          <h3><a href="#mean"><code>arrays's mean(t, axis)</code></a></h3>
+          <p>the average of all its numbers, or along an axis: an array of one axis fewer</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mean with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L661">arrays.moth line 661</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's mean(a, <span class="n">2</span>)                     <span class="c"># [2, 5]; also max, min, argmax</span></code></pre><pre class="says"><code>[2, 5]</code></pre></div>
+        </section>
+        <section class="fn" id="max">
+          <h3><a href="#max"><code>arrays's max(t, axis)</code></a></h3>
+          <p>the largest, or NaN if any is NaN; min the smallest</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to max with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L678">arrays.moth line 678</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> r <span class="k">to</span> arrays's <span class="k">random</span>(<span class="k">list</span> <span class="k">of</span> <span class="n">50</span>, <span class="n">40</span>)
+<span class="k">say</span> arrays's max(r)</code></pre><pre class="says"><code>0.999997731298207</code></pre></div>
+        </section>
+        <section class="fn" id="min">
+          <h3><a href="#min"><code>arrays's min(t, axis)</code></a></h3>
+          <p>the smallest, or along an axis; NaN if any is NaN</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to min with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L683">arrays.moth line 683</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> r <span class="k">to</span> arrays's <span class="k">random</span>(<span class="k">list</span> <span class="k">of</span> <span class="n">50</span>, <span class="n">40</span>)
+<span class="k">say</span> arrays's min(r)</code></pre><pre class="says"><code>0.000132887158604752</code></pre></div>
+        </section>
+        <section class="fn" id="argmax">
+          <h3><a href="#argmax"><code>arrays's argmax(t, axis)</code></a></h3>
+          <p>where the largest is, from 1: in all of it (as if it were flat), or along an axis; the first if there are several</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to argmax with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L689">arrays.moth line 689</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's argmax(a)</code></pre><pre class="says"><code>6</code></pre></div>
+        </section>
+        <section class="fn" id="softmax">
+          <h3><a href="#softmax"><code>arrays's softmax(t, axis)</code></a></h3>
+          <p>e to the power of each number over their sum along an axis (the last if none is given), each from the largest there, so none is too big</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li><li><code>axis</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to softmax with t, axis or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L725">arrays.moth line 725</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> probabilities <span class="k">to</span> arrays's softmax(arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">1000</span>, <span class="n">1000</span>, <span class="n">1000</span>)))
+<span class="k">say</span> probabilities</code></pre><pre class="says"><code>[[0.0900305731703804, 0.244728471054798, 0.665240955774822], [0.333333333333333, 0.333333333333333, 0.333333333333333]]</code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>arrays's close(a, b, tolerance)</code></a></h3>
+          <p>whether two arrays have one shape and their numbers are each within tolerance of each other</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li><li><code>tolerance</code> <span class="optional">optional: 0.000000001 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with a, b, tolerance or 0.000000001</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L752">arrays.moth line 752</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">set</span> b <span class="k">to</span> arrays's transpose(a)              <span class="c"># 3 by 2</span>
+arrays's close(a, b, tolerance)</code></pre></div>
+        </section>
+        <section class="fn" id="same">
+          <h3><a href="#same"><code>arrays's same(a, b)</code></a></h3>
+          <p>whether two arrays have the same shape and exactly the same numbers (close allows a little difference)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to same with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/arrays.moth#L771">arrays.moth line 771</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;arrays.moth&quot;</span> <span class="k">as</span> arrays
+<span class="k">set</span> a <span class="k">to</span> arrays's array(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>))
+<span class="k">say</span> arrays's same(arrays's matmul(a, arrays's identity(<span class="n">3</span>)), a)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

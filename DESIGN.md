@@ -5022,6 +5022,7 @@ hold them to agreeing.
   four workers taking far less time than four calls; and a Windows program's
   imports. server.moth with three workers: twenty requests answered while one
   handler works for a second and a half.
+
 ## 125. A WebAssembly back end written in Moth
 
 Moth's web side is about 18,000 lines of JavaScript, and even a program the
@@ -5383,3 +5384,372 @@ engines stay: as the fallback, and as what the tests compare against.
   library can't be built with; `moth build --library` with gcc linking C
   to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
   CI runs the same C program against the DLL.
+
+## 130. Installers
+
+- **Why.** A release was two programs to download, rename and put on PATH by
+  hand, and nothing a package manager could install. People on Windows reach
+  for winget or Scoop, on Debian and Ubuntu for a .deb, in CI for an image, and
+  everyone for one line to paste.
+- **The release's bytes, everywhere.** Every installer takes `moth-windows.exe`
+  or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
+  the image's are `moth-linux` byte for byte, and winget, Scoop and the two
+  scripts install the release's own download. So each is checked by the
+  release's own sums and signatures (§131), and the fixed point (§25) holds for
+  what people install, not only for what they download.
+- **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
+  installer and the en-US locale) are written to schema 1.28.0, the one
+  winget-pkgs' pull request checklist asks for: `InstallerType: portable` and
+  `Commands: [moth]`, so winget links the download as the command `moth`. They
+  live in `packaging/winget/manifests/s/samyyy2423/Moth/<version>/`, as in
+  winget-pkgs, so a submission is that folder copied in. Submitting is
+  Samyak's, by hand (docs/installers.md).
+- **Scoop.** `packaging/scoop/moth.json` installs straight from its raw URL on
+  `main`. `checkver: github` finds the newest release, and `autoupdate` names
+  its program and `SHA256SUMS.txt`, where Scoop finds the sum by the file's
+  name, so Scoop's own `checkver.ps1 -Update`, or a bucket's bot, writes the
+  next version.
+- **One generator.** `packaging/manifests.mjs` writes both from a version, the
+  Windows program's SHA-256 and a day. The files here are its output for 1.11.0
+  (a test holds them to it), and the release workflow writes the next
+  version's into its `manifests` artifact, so nothing is typed twice.
+- **The .deb.** `packaging/debian/build-deb.sh` builds it with `dpkg-deb`
+  alone: `/usr/bin/moth`, a machine-readable copyright file (Apache 2.0 with
+  the NOTICE, and DejaVu's license in full, since its letters are in
+  `machine.moth`), `md5sums`, and `Installed-Size` counted as
+  dpkg-gencontrol counts it. moth is static, so it depends on nothing; it
+  suggests git and curl (`moth add` and `moth search` run them) and OpenSSL 3
+  (a program moth builds loads it for a secure connection). It refuses a file
+  that isn't an x86-64 ELF, so the Windows program can't be packaged by
+  mistake. Every file's time is `SOURCE_DATE_EPOCH` and the owner root, so the
+  same `moth-linux` gives the same .deb, on one CPU or four.
+- **The image: distroless, because moth allows it.** `moth-linux` has no
+  dynamic section, so it would run on an empty image. But a program moth builds
+  that says `use the library` is a dynamic ELF, which needs glibc's loader, and
+  `http.moth` and `sockets.moth` load OpenSSL 3, so `static` would break `moth
+  run` for them. `gcr.io/distroless/base-debian13` adds only glibc, OpenSSL, CA
+  certificates and time zones: about 15 MB compressed with moth. It runs as
+  distroless's nonroot user, and `--user "$(id -u):$(id -g)"` lets it write into
+  the folder it's given. It has no shell, git or curl, so `moth add` and `moth
+  search` don't work in it, and it can't be a CI job's container; `COPY --from`
+  puts moth into an image that can. Debian 13's slim image with git, curl and
+  OpenSSL is 71.7 MB compressed, about five times the size, for those two
+  commands. The base is
+  pinned by its digest, so it changes only when someone changes that line.
+- **install.sh** is POSIX `sh`, every line inside `main`, which runs only once
+  the whole script has arrived, so a download cut short does nothing. It needs
+  curl or wget, and `sha256sum`, `shasum` or `openssl`. It installs nothing
+  unless `moth-linux`'s SHA-256 is the one `SHA256SUMS.txt` gives, copies it in
+  beside the old one and renames it over it (so a moth that's running carries
+  on), and adds one `export PATH` line to `~/.profile` and the shell's own file
+  (`.bashrc`, `.zshrc`, or fish's `conf.d`) if the folder isn't on PATH, and
+  never twice. With curl it takes only HTTPS, redirects included.
+- **install.ps1** works in Windows PowerShell 5.1 (asking for TLS 1.2, which
+  5.1 may not offer by itself) and in PowerShell 7. Run through `irm | iex`, it
+  runs in the caller's session, so all of it, its options too, is inside one
+  script block: no variable, function, strict mode or `$ErrorActionPreference`
+  of its own stays behind (its options were first a `param` block at the top,
+  which `iex` set in the caller's session, and the test found it). It adds the
+  folder to the user's PATH as the registry keeps it, leaving `%USERPROFILE%`
+  and the like unexpanded, then sets and removes a variable through .NET so
+  Windows tells new terminals PATH changed. A `moth.exe` that's running can't
+  be written over, but it can be renamed out of the way, so that's what
+  happens.
+- **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
+  same place as the program, so they catch a broken download, not a changed
+  release. Checking a signature would mean installing cosign first; the
+  signatures are for people who want to check who made it (§131).
+- **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
+  `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
+  with its fields, and comes out the same twice; and install.sh, given a
+  release on the disk, installs it once its sum matches, puts it on PATH once
+  however often it runs, and installs nothing when the sum is wrong or
+  missing. In CI (`.github/workflows/packaging.yml`), on each change: the
+  winget and Scoop manifests against their schemas, from winget-cli and Scoop
+  at a fixed commit, and their URLs downloaded and summed; on Windows, `winget
+  validate` and `winget install` from the manifests, `scoop install` from
+  `moth.json`, and checkver and autoupdate turning a 1.10.0 manifest into the
+  newest release's, with the sum from its `SHA256SUMS.txt`; install.ps1 in
+  PowerShell 7 and 5.1, from GitHub, run twice, through `iex` in a session of
+  its own, and refusing a wrong sum; install.sh from GitHub on Ubuntu, piped
+  into `sh`, and on Alpine with BusyBox; the .deb installed, run and removed on
+  the runner and on Debian 12 and 13 and Ubuntu 22.04 and 24.04; the image
+  running a program, building one, and loading C's library and OpenSSL.
+  shellcheck reads the shell scripts. winget 1.11, on the runner, validates the
+  1.28 manifests but warns it doesn't know their schema header's address, and
+  that warning alone is let through.
+
+## 131. Signed releases, attested, with an SBOM
+
+- **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
+  comes from the same place as the program, so anyone who could change one
+  could change the other. A company also asks what's in a program (an SBOM)
+  and where it was built (provenance), and wants to check both without
+  trusting a key it has to find.
+- **The release stays a fixed point.** A release is still made by hand. The
+  workflow signs what's there and adds files beside it, and changes no byte of
+  `moth-windows.exe`, `moth-linux` or `SHA256SUMS.txt`. Before it signs
+  anything, it builds moth from the tag's source with
+  `packaging/release-build.sh`: Node.js makes the first moth, which builds
+  itself into the same bytes and the Windows moth into the bytes Node.js makes
+  of it, and the release's two programs must be exactly those. A Windows job
+  then has `moth-windows.exe` build itself and the Linux moth, byte for byte.
+  So GitHub's provenance, "built by this workflow from this commit", is true
+  of the very bytes Samyak uploaded, even though he built them by hand.
+- **It would have stopped 1.11.0.** Run on the v1.11.0 tag, the script finds
+  the release's programs aren't what its source builds: they were built
+  without `--include moth-debugger.moth`, so they're the fixed point of
+  `moth build moth.moth --allow-read --allow-write --allow-run` (the
+  release's Linux moth builds both that way, byte for byte), not of the
+  documented command or `node bootstrap.mjs`, and their `moth debug` needs
+  `moth-debugger.moth` in the folder. Making a release with the script
+  leaves no way to forget it.
+- **Sigstore, keyless.** cosign signs each file with a certificate Fulcio gives
+  to this workflow, through GitHub's OIDC token, for a few minutes, and the
+  signature goes into Rekor, Sigstore's public log. There's no key to keep or
+  lose, and the certificate names the workflow and the tag, so a user checks
+  the identity
+  `https://github.com/samyyy2423/moth/.github/workflows/release.yml@refs/tags/v<version>`:
+  a copy of the workflow elsewhere, or a run on a branch, has another.
+- **.sig, .pem, and a bundle.** cosign 3 checks only Sigstore bundles, and
+  cosign 2 the signature and certificate as files too. So each file gets
+  `.sig` (base64), `.pem` (the certificate, decoded to plain PEM, which
+  `openssl` reads) and `.sigstore.json`, the bundle, which has both and the
+  log's proof and can be checked offline. The workflow signs with cosign
+  2.6.5, which writes all three at once. Sigstore's public instance still logs
+  to Rekor 1, which cosign 2 can search by a signature, so `.sig` and `.pem`
+  alone work too.
+- **GitHub's attestations.** `actions/attest-build-provenance` attests every
+  file (SLSA provenance: the repository, commit, workflow and run), and
+  `actions/attest` attests the SBOM of the two programs, so `gh attestation
+  verify` checks both. They're kept by GitHub for the repository, and signed
+  through Sigstore too.
+- **The SBOM** is CycloneDX 1.6 JSON, written by `packaging/sbom.mjs` with no
+  dependencies. It lists the release's files with SHA-256 and SHA-512, then
+  what each program is built from: the files `moth.moth` is compiled with (a
+  test holds the list to `bootstrap.mjs`'s), the files the standard library
+  and the `--web` page are made from (from `make-stdlib.mjs`'s and
+  `make-web.mjs`'s own lists), each with its sum, and DejaVu's letters in
+  `machine.moth`, under Bitstream Vera's license. moth links no library, so a
+  composition says the list is complete. Its time is the commit's and its
+  serial number is made from what it says, so the same release gives the same
+  SBOM.
+- **The image** is pushed as `<version>` and `latest`, then attested (with the
+  attestation pushed to the registry) and signed by its digest. A pre-release
+  (`v1.12.0-rc.1`) isn't `latest`, and its .deb's version is `1.12.0~rc.1`,
+  which Debian puts before `1.12.0`.
+- **A dry run sends nothing anywhere.** A dry run does every step, into the
+  run's artifacts, with three changes. It builds from the commit's source,
+  since there's no release (on a tag, it checks that release's files). It
+  signs through Sigstore's staging instance (`fulcio.sigstage.dev`,
+  `rekor.sigstage.dev`, trusted from staging's TUF root, pinned by its sum),
+  which is kept for trying things, so nothing reaches the log people verify
+  against. And it skips the attestations, the push and the upload, since
+  GitHub's attestations would be kept for the repository for all to see. The
+  last job lists what it would have uploaded. A push that changes `packaging/`,
+  `release.yml` or `bootstrap.mjs` does one, and so does Run workflow.
+- **Least privilege.** The workflow's token has no permissions by default.
+  Building and checking read the repository; only signing can get an OIDC
+  token; only the image job can write packages; and only the last job, which
+  uploads to the release, can write to the repository. Each job checks the
+  files it's given against the sums the build job gave as an output, not as an
+  artifact, so a file changed between jobs isn't signed or uploaded. Actions
+  are pinned to commits, and cosign to a version the installer checks against
+  Sigstore's own signature.
+- **Release by hand, again.** With dry-run off, Run workflow on a release's tag
+  does that release's run again, replacing what it uploaded; run anywhere else,
+  it refuses, since its signatures would name a branch.
+- **Not yet:** immutable releases. GitHub can lock a release's files once it's
+  published, which would stop this workflow adding to it. Turning that on means
+  publishing the release from the workflow, which is a change to how releases
+  are made, so it's Samyak's to decide.
+- **Tested.** Dry runs of the whole workflow on this branch: the build and the
+  fixed point on Linux, then on Windows; the SBOM and the new manifests against
+  CycloneDX's, winget's and Scoop's schemas; the .deb installed and run; every
+  file signed through Sigstore's staging instance and checked both ways (the
+  bundle, and the `.sig` with the `.pem`) against the workflow's identity on
+  the branch; the image built and run. The release's own run (attestations,
+  `gh attestation verify`, the push, the image's signature and the upload)
+  runs only on a real release, so it's checked step by step against the
+  actions' documentation, and its first run is the next release's. The script
+  was also run on the v1.11.0 tag, where it stopped as above.
+## 132. The standard library's reference
+
+- **Why.** The standard library had grown to 49 libraries and 800 public functions, and the only way to learn
+  one was to read its source: its opening comment, then the comment above each `to`, where there was one.
+  353 public functions had none, ui.moth's 64 among them. A language people learn needs a reference: each
+  function, what it takes, what it gives, and an example.
+- **Made from the code.** There was no `moth doc`, but the language server already reads a library's own
+  words: `cli_lsp_file_comment` takes a file's opening comment as what it's for, and `cli_lsp_comment_above`
+  the comment lines just above a `to` as what that function does. make-docs.mjs reads the same, so the hover
+  in an editor and the page on the site say the same thing, and there's one place to write it. A comment's
+  lines three spaces in past the `#` are code, as every opening comment already wrote its examples.
+- **Public and helpers.** VERSIONING.md keeps a library's public functions and lets its helpers change, but
+  Moth has no word for which is which. Most libraries name their helpers with a prefix (`stats_`, `web_`,
+  `mail_`); a few (json, xml, zip, images, charts, big, crypto) use plain names. make-docs.mjs's `HELPERS`
+  says, for each library, its prefix and any helpers with plain names; everything else at its top level is
+  public. A new function is public unless it's named as a helper, so it shows up in the reference, and
+  docs.test.js fails until it has a comment: a function can't be added without saying what it does.
+- **Examples that run.** A function's example is the first of: code in its own comment; a line of the
+  opening comment that calls it; a line of its tests that does, `expect a is b` said as `say a`, a call
+  inside another (`close(math's ln(2), ...)`) said on its own, and a call made as a statement followed by
+  the next `expect` about what it changed. Each is cut down to what it needs: the `use` line, and the lines
+  before it at its own depth that set or change a name it uses (`set q to c's queue()`, `c's push(q, 1)`),
+  and those they need, and the test file's own functions it calls. Then it's run on the JavaScript engine
+  with the standard library, and the first that runs, says something, and stays under 3,000,000 steps is
+  shown with what it said. 301 of the 807 do. The rest need a network, a file, a C library or a window, and
+  are shown as they're written; a function that no line calls is shown as its call, with the opening
+  comment's `set`s of the names it takes (`set r to redis's connect(...)` for `redis's get(r, key)`).
+  linux.moth and windows.moth have ui.moth's functions, and borrow its examples.
+- **Writing what was missing.** Every public function now has a comment, written from its code, and each
+  library whose functions had no line calling them got more lines in its opening comment: ui.moth every
+  control and drawing call, in context; math.moth an opening example, which it had none of; hash, system,
+  http, email, python, tasks, log, game and server the calls they left out. Two comments were wrong:
+  zip.moth's deflate said how it works and not what it gives, and xml.moth's element pointed at text_of for
+  the texts inside an element, where text_node, now public, makes them.
+- **The pages.** docs/index.html lists the libraries in eight groups, each a card with the first sentence of
+  its opening comment, and searches every function by its name, its library and what it does (`?q=` in the
+  address keeps a search). A library's page has what it's for, its opening example, and each function: how
+  it's called (`stats's mean(numbers)`, with the name the opening comment uses), what it does, its inputs
+  with their kinds where they're typed and what they are when left out, what it gives where it says, the
+  line it's written on, and its example. Code is coloured as the playground colours it. They share
+  docs/site.css, the colours, type, header and footer of index.html and learn.html, and need no script but
+  the search's and a filter of the function list; the site's navigation has a Docs link.
+- **Tested.** docs.test.js: docs/ is what make-docs.mjs makes of the libraries as they are, with no page for
+  one that's gone; every public function has a comment; and on a library made up for the test, a helper has
+  no entry, inputs with kinds and defaults are read (`with on as yes or no or no`), and an example from the
+  tests keeps the `set` and the `add` it needs, leaves out what it doesn't, and shows what it said.
+
+## 133. Coverage of tests, and LCOV
+
+- **Why.** `moth coverage` (§93) said which lines of one run of a program
+  ran. What people measure is their tests, as coverage.py does under pytest:
+  which lines of the code under test the tests ran, and where they're
+  missing it, said in CI and shown in an editor.
+- **Which engine.** Machine code, built to be watched as `moth debug` and
+  `moth profile` build it, with moth-coverage.moth in the debugger's place.
+  The other way was the JavaScript VM, whose debugger stops before each
+  statement too, but moth, the command, has no JavaScript in it, and the
+  tests would then run on another engine from `moth test`'s: one without
+  C libraries, sockets, other programs or workers on cores, where a
+  program's file and network use are pretend, and whose `wait` doesn't
+  wait. Coverage run on a different engine from the one the tests pass on
+  measures something else. In machine code the tests run as `moth test`
+  runs them, each in a run of its own, on what the program ships on; the
+  call before each statement is made whatever the compiler does (a watched
+  build guesses nothing about calls and puts no function in line, so each
+  of a function's lines is its own, §59 and §63), so
+  a statement that runs is counted, in the program and every file it uses;
+  and the watcher's last word comes however the run ends (§81): passing, an
+  `expect` that fails, a mistake or `stop the program`. The JIT, which makes
+  one JavaScript function of many lines, can't say which ran at all.
+- **Adding runs up.** wants() now counts how many times each line runs.
+  moth puts lines at the end of moth-coverage.moth when it builds it in
+  (cli_coverage_asking), which set what it's asked for: a test's run is
+  asked to keep its counts, and says them on the error output after a line
+  that marks them, each file's line by line; moth takes them off what the
+  test said, which moth test shows unchanged for a test that fails, and
+  adds them to every other test's, by each file's path from the folder moth
+  runs in, so a file two folders' tests use is one. Then it says the
+  summary §93's coverage says, with moth-coverage.moth's own functions,
+  which moth uses as cli_coverage: the lines run of all, each file's share
+  in the order of its path, and the lines that never ran, as runs. A branch
+  never taken is its lines; a function never called, its body's (its `to`
+  line ran: making a function is a statement).
+- **What's counted.** The files the tests use, not the test files, nor
+  moth's own copies of the standard library (§74), nor packages: as
+  coverage.py leaves out the standard library and site-packages, it's the
+  program's own code that's measured. A program's run leaves out the same.
+  A file the tests use counts once it has run once, with all its lines.
+- **LCOV.** `--lcov` writes lcov.info, as geninfo writes it: for each file
+  its path (SF), each line with a statement on it and how many times it ran
+  (DA), and how many there are and ran (LF, LH), which Codecov, Coveralls,
+  GitLab and editors' coverage views read. For a program's run the watcher
+  writes it, and the program is built with --allow-write=lcov.info, so it
+  isn't asked; for tests moth does, after the last.
+- **The command line.** `moth coverage x.test.moth`, any number of them, or
+  none for every .test.moth file here and in the folders inside, as moth
+  test finds them; a file ending in .test.moth is tests, anything else a
+  program, after which everything is the program's own. With tests,
+  `--lcov` and the --allow flags can come after the files too, as with
+  moth test. It ends with 1 if a test failed, as moth test does.
+- **Limits.** A worker (§124) runs on a copy of the program, the watcher's
+  counts too, which end with it: its lines aren't counted, though a task's
+  are. A line run within 16 calls of the most there can be (100,000) isn't
+  counted, as the debugger doesn't stop there either.
+- **Tested.** Through moth.exe: a program's run, its summary on the error
+  output and its lcov.info, from another folder; a file's tests, and a
+  folder's, two files of tests in two folders, with a branch never taken, a
+  function never called, a line run in a loop, moth's json.moth and a
+  package left out, and a test that fails and says something, which moth
+  coverage shows as moth test does and still counts; the same files named,
+  with --lcov after them; lcov.info word for word; nothing left behind; and
+  moth test as it was.
+
+## 134. Property-based testing
+
+A test says what one example gives. A property says what holds for every value of a sort: sorting twice is
+sorting once, JSON reads back what `as json` wrote, splitting text by commas and joining it with them gives it
+back. `properties.moth` tries a property on many values made at random, as Python's Hypothesis and Haskell's
+QuickCheck do, and when one shows it doesn't hold, makes that value as simple as it can.
+
+- **What it is.** `for_all(generator, property)` makes 100 values and gives each to the property, which holds
+  if it gives yes or nothing (so a property can use `expect`, as a test does) and doesn't if it gives no or
+  makes a mistake. `for_all_with(settings, ...)` takes `"tries"` and `"seed"`; `sample(generator, seed,
+  count)` shows what a generator makes. Generators: `whole_number(low, high)`, `decimal(low, high)` (3
+  decimals), `yes_or_no()`, `any_text()`, `text_of(letters)`, `one_of(values)`, `either_of(generators)`,
+  `list_of(generator)` (up to 20), `dictionary_of(keys, values)` (up to 10), `mapped(generator, change)` and
+  `kept(generator, test)`.
+- **Small first.** The k-th try has size k, up to 100: a whole number comes from a window around 0 (or the end
+  of the range nearer it) as wide as size squared, and one time in ten is an end of the range, where mistakes
+  gather; a list or text is up to size long. Small values that show a mistake are found before big ones.
+- **Shrinking.** A generator is three functions: make(state, size) gives a value's raw form, shrink(raw) the
+  simpler raw forms to try in its place, and view(raw) the value. Shrinking works on raw forms, so a list of
+  what `mapped` makes shrinks item by item, and a `kept` value only to ones its test still allows. Whole
+  numbers try the target, halfway there and one step nearer; decimals the whole number too; lists and text
+  empty, each half, each item left out, then each item simpler; `one_of` its first value; yes becomes no. The
+  first simpler value that still shows the mistake is taken, and shrinking goes on from it, until none does or
+  after 5,000 tries. `n is less than 10` over 0 to 1,000 always ends at 10; a list with a number above 5 at
+  `[6]`; text with a "b" in it at `"b"`.
+- **Seeds.** Values come from Park and Miller's minimal standard generator (multiplier 48271, modulus 2^31 -
+  1). Each step is a whole number below 2^53, which every engine keeps exactly, so a seed makes the same
+  values on the VM, the JIT, WebAssembly and in machine code; the tests pin the first 12 of seed 42. A
+  mistake says its seed, and `for_all_with((dictionary where "seed" is s), ...)` makes the same values again.
+  Without a seed, one is picked at random.
+- **Showing values.** A value in a mistake is shown `as json`, so text is in quotes and `"1"` isn't `1`; one
+  JSON can't show is shown as `say` would.
+- **Tested.** properties.test.moth, on the three JS engines (moth.test.js) and in machine code (`moth test`):
+  what each generator makes, its range and mistakes; the same seed giving the same values, and seed 42's
+  pinned; properties that hold, with a function, a property using expect, and settings; the simplest value
+  for whole numbers, decimals, lists, text and dictionaries; a mistake inside a property; and two of the
+  standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
+  text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
+  text.moth's split_by joining back.
+## 135. A cookbook, examples and exercises
+
+- **Why.** The reference (§132) says what each function does, and the Learn page teaches the language a lesson at
+  a time; neither shows a whole task done end to end, nor gives a learner problems to solve. Those are what a
+  person new to a language looks for next, and what keeps documentation honest is running it.
+- **The cookbook** (`docs/cookbook/`) is made by `make-guides.mjs` from `guides/cookbook/*.md`: a `# title`, prose,
+  ` ```moth ` blocks, and ` ```output ` blocks after the ones that can run here, which say what the code says. Ten
+  recipes: CSV, JSON, a web API, a web API with a database, the command line, statistics and a chart, dates,
+  every core, tests, and finding and changing text. A block that needs a site, a server, a database or a window
+  has no output block, and is held to having no problem `moth check` finds instead.
+- **The examples** (`docs/examples.html`) are `guides/examples/*.moth`, whole programs whose opening comment's
+  first line is the title and the rest what they are: the towers of Hanoi, the game of life, word counts, a
+  bank account (a kind), Caesar's cipher, Roman numerals both ways, the Mandelbrot set in text, and Koch's
+  snowflake drawn by the turtle. Each links to the playground with its code in the address (`#code=`, as the
+  Share button makes it).
+- **The exercises** (`exercises/`) are twenty practice exercises in Exercism's track format (a `config.json`;
+  for each, `.docs/instructions.md`, `.meta/config.json`, `.meta/example.moth`, the starting file and its
+  tests), written for Moth from Exercism's open problem descriptions: hello-world, two-fer, leap, raindrops,
+  bob, isogram, pangram, word-count, anagram, acronym, hamming, rna-transcription, difference-of-squares,
+  collatz-conjecture, armstrong-numbers, reverse-string, matching-brackets, clock, sieve and luhn. grains is
+  left out: its 2^64 is past what 15 digits keep. The starting file has each function's first line and a
+  `fail with` saying what to do, so `moth test` fails every test until it's written.
+- **The site.** The pages share the reference's frame (`page()` in make-docs.mjs), and the navigation of every
+  page under docs/ now has Cookbook and Examples.
+- **Tested** (guides.test.js): the pages are what make-guides.mjs makes; every recipe block with an output says
+  exactly that on the JavaScript engine (files in memory), and every other has no problems; every example runs,
+  says something, has no problems, and its link is its code; every exercise is listed once in config.json with
+  a uuid of its own, its tests (113 in all) pass with its example and every one fails with its starting file.

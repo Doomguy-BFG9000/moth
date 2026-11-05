@@ -1,0 +1,39 @@
+# A bank account
+# A kind is a sort of record with functions of its own. An account keeps its balance and a history, refuses to
+# go below nothing, and says what it is with `shown`, which `say` uses.
+
+kind account with owner, balance or 0
+    to deposit with self, amount
+        if amount is at most 0
+            fail with "a deposit has to be more than nothing, not " + amount
+        end
+        set self's balance to self's balance + amount
+    end
+    to withdraw with self, amount
+        if amount is greater than self's balance
+            fail with self's owner + " has only " + self's balance + ", not " + amount
+        end
+        set self's balance to self's balance - amount
+    end
+    to shown with self
+        return self's owner + "'s account: " + self's balance
+    end
+end
+
+set ada to account("Ada")
+ada's deposit(120.50)
+ada's withdraw(20.25)
+say ada
+
+try
+    ada's withdraw(500)
+if it fails with why
+    say "refused: " + why
+end
+
+set bank to list of ada, account("Lee", 40), account("Sam", 310)
+set total to 0
+for each a in bank
+    set total to total + balance of a
+end
+say "the bank holds " + total

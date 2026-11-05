@@ -108,6 +108,7 @@ to head_object with store, bucket, key
         etag s3_unquoted(s3_header(h, "etag", "")), modified s3_header(h, "last-modified", "")
 end
 
+# an object deleted from a bucket; one that isn't there is no mistake, as S3 has it
 to delete_object with store, bucket, key
     s3_request(store, "DELETE", bucket, key, empty dictionary, nothing, empty dictionary)
 end
@@ -139,6 +140,7 @@ end
 
 # ---------- buckets ----------
 
+# a new bucket, in the store's region
 to create_bucket with store, bucket
     set body to nothing
     if region of store is not "us-east-1"

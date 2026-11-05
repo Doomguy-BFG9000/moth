@@ -1,0 +1,60 @@
+# The game of life
+# Conway's cellular automaton: on a grid, a live cell with two or three live neighbours lives on, and a dead
+# cell with exactly three comes alive. A glider, five cells that walk across the grid, shown for four
+# generations.
+
+set size to 8
+set alive to empty dictionary
+
+to key_of with row, column
+    return row + "," + column
+end
+
+to is_alive with row, column
+    return key_of(row, column) is in alive
+end
+
+to neighbours with row, column
+    set count to 0
+    for each dr in list of -1, 0, 1
+        for each dc in list of -1, 0, 1
+            if not (dr is 0 and dc is 0) and is_alive(row + dr, column + dc)
+                add 1 to count
+            end
+        end
+    end
+    return count
+end
+
+to show_grid with generation
+    say "generation " + generation
+    for each row from 1 to size
+        set line to ""
+        for each column from 1 to size
+            if is_alive(row, column)
+                set line to line + "#"
+            else
+                set line to line + "."
+            end
+        end
+        say line
+    end
+end
+
+for each cell in list of (list of 1, 2), (list of 2, 3), (list of 3, 1), (list of 3, 2), (list of 3, 3)
+    set item key_of(item 1 of cell, item 2 of cell) of alive to yes
+end
+
+for each generation from 1 to 4
+    show_grid(generation)
+    set next to empty dictionary
+    for each row from 1 to size
+        for each column from 1 to size
+            set n to neighbours(row, column)
+            if n is 3 or (n is 2 and is_alive(row, column))
+                set item key_of(row, column) of next to yes
+            end
+        end
+    end
+    set alive to next
+end

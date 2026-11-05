@@ -1,0 +1,21 @@
+use "pangram.moth" as exercise
+
+to test_empty
+    expect not exercise's is_pangram("")
+end
+
+to test_the_classic
+    expect exercise's is_pangram("The quick brown fox jumps over the lazy dog")
+end
+
+to test_missing_x
+    expect not exercise's is_pangram("a quick movement of the enemy will jeopardize five gunboats")
+end
+
+to test_mixed_case_and_punctuation
+    expect exercise's is_pangram("\"Five quacking Zephyrs jolt my wax bed.\"")
+end
+
+to test_a_to_m_twice
+    expect not exercise's is_pangram("abcdefghijklm ABCDEFGHIJKLM")
+end
