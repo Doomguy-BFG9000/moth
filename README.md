@@ -410,9 +410,10 @@ bytes and dictionaries:
   ever read as SQL, rows as dictionaries with each column's type (numbers,
   yes and no, bytes, JSON, arrays), `execute`, `in_transaction(db, work)` and
   `run_script`. [`mysql.moth`](tools/mysql.moth) does the same for MySQL and
-  MariaDB, as `PyMySQL` does: `caching_sha2_password` (its password sent
-  RSA-encrypted where there's no TLS) or `mysql_native_password`, and
-  prepared statements with `?`. Both are tested against real servers.
+  MariaDB, as `PyMySQL` does: `caching_sha2_password` or `sha256_password`
+  (the password sent RSA-encrypted where there's no TLS) or
+  `mysql_native_password`, and prepared statements with `?`. Both are tested
+  against real servers.
 - [`redis.moth`](tools/redis.moth) talks to Redis (and Valkey) as Python's
   `redis` does: `get`, `put`, `put_for` a time, `increment`, lists, hashes,
   `keys_like`, any `command`, a `pipeline` of many sent at once, `transaction`

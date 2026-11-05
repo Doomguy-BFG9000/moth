@@ -4450,12 +4450,20 @@ hold them to agreeing.
 
 - **Why.** The other database companies run, with MariaDB.
 - **What.** The handshake (protocol 10), an SSLRequest where TLS is wanted,
-  HandshakeResponse41 with utf8mb4, and both plugins:
-  `mysql_native_password` (SHA-1) and `caching_sha2_password` (SHA-256),
-  with the server's switch to another plugin followed. caching_sha2's full
-  way sends the password in the clear over TLS, and without TLS asks for the
-  server's RSA key and sends it XORed with the nonce and encrypted with
-  RSAES-OAEP (SHA-1, MGF1), built here on big.moth and jwt.moth's key reader.
+  HandshakeResponse41 with utf8mb4, and the three plugins:
+  `mysql_native_password` (SHA-1), `caching_sha2_password` (SHA-256) and
+  `sha256_password`, with the server's switch to another plugin followed.
+  caching_sha2's full way, and sha256_password, send the password in the
+  clear over TLS, and without TLS ask for the server's RSA key and send it
+  XORed with the nonce and encrypted with RSAES-OAEP (SHA-1, MGF1), built
+  here on big.moth and jwt.moth's key reader.
+- **A user that isn't there.** So that a login can't tell whether an account
+  exists, MySQL gives a user it doesn't have a plugin chosen at random (kept
+  for that name until it restarts): any of the three. Without
+  sha256_password, a mistyped user was refused, one time in three, with
+  "the server logs in with sha256_password" rather than "Access denied";
+  CI's live test caught it. With it, such a user is always refused by the
+  server, as it should be.
   Statements are prepared once each (kept by their SQL on the connection) and
   run with COM_STMT_EXECUTE: whole numbers as 8 bytes, others as doubles,
   text, bytes as blobs, NULLs in the bitmap. Rows in the binary protocol are
@@ -4467,7 +4475,10 @@ hold them to agreeing.
   message and a server's binary and text rows, OK and ERR, as Python makes
   them, on the JIT and in machine code; then a real MySQL 8.4, whose
   certificate is its own, so "prefer" falls back and caching_sha2 goes the
-  RSA way, then the fast way; and a native-password user.
+  RSA way, then the fast way; a native-password user; a sha256_password user;
+  and six users that aren't there, each refused with "Access denied" whatever
+  plugin the server drew for it. A sha256_password user was also logged in
+  over TLS, with a certificate made for the test, against MySQL 8.0.
 
 ## 114. Real servers in CI
 
