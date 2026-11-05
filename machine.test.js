@@ -876,7 +876,7 @@ test("moth.exe build --web makes a page that holds the program and the files it 
   assert.ok(!existsSync(join(sub, "bad.html")));
 });
 
-// moth build --target wasm (DESIGN §123): app.wasm, the module wasm.moth makes, here made by wasm.moth as machine
+// moth build --target wasm (DESIGN §125): app.wasm, the module wasm.moth makes, here made by wasm.moth as machine
 // code, which must be wasm.js's bytes; what running it needs follows in a section of its own, and runWasm runs it
 // as the VM runs the program. A program with a mistake says it, and makes no module.
 test("moth.exe build --target wasm makes wasm.js's module, which runs as the VM runs the program", { skip }, () => {
