@@ -11,6 +11,7 @@ moth it built:
 """
 
 import os
+import queue
 import shutil
 import signal
 import subprocess
@@ -375,6 +376,24 @@ class InJupyter(unittest.TestCase):
         reply = self.kc.execute_interactive(code, output_hook=output, stdin_hook=asked, allow_stdin=answer is not None, timeout=120)
         return reply["content"]["status"], got
 
+    def wait_for_iopub(self, timeout=60):
+        """Until the kernel is heard on iopub. wait_for_ready hears it only on shell: after a restart, iopub's
+        subscriber connects to the new kernel in its own time, and what the kernel publishes before then is lost
+        (ZeroMQ's slow joiner), such as the next cell's idle, which execute_interactive would wait for in vain.
+        A loaded machine widens that gap (a Windows run of the whole suite timed out there)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            asked = self.kc.kernel_info()
+            listen_until = time.monotonic() + 1
+            while time.monotonic() < listen_until:
+                try:
+                    message = self.kc.get_iopub_msg(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if message["parent_header"].get("msg_id") == asked:
+                    return
+        self.fail("the kernel was never heard on iopub after its restart")
+
     def test_a_notebook(self):
         with open(os.path.join(self.where, "kernel.json"), encoding="utf-8") as f:
             self.assertIn('"' + sys.executable.replace("\\", "\\\\") + '"', f.read())
@@ -396,6 +415,7 @@ class InJupyter(unittest.TestCase):
         self.assertEqual(self.run_cell("name"), ("ok", [("stdout", "Ana\n")]))
         self.km.restart_kernel(now=False)
         self.kc.wait_for_ready(timeout=60)
+        self.wait_for_iopub()
         status, got = self.run_cell("xs")
         self.assertEqual((status, got[0][:2]), ("error", ("error", "Mistake")))
 
