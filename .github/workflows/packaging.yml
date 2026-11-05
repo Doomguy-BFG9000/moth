@@ -1,0 +1,221 @@
+name: packaging
+
+# The installers in packaging/ (DESIGN.md §125), each used as a person would use it: winget's and Scoop's
+# manifests against their schemas and the release they name, winget and Scoop installing moth on Windows (and
+# Scoop finding and writing the next version), the .deb installed on Debian and Ubuntu, the image running
+# programs, and install.sh and install.ps1 installing the real release and refusing a download whose sum isn't
+# the release's. The release's own workflow, release.yml, does a dry run of the rest.
+on:
+  push:
+    paths:
+      - .github/workflows/packaging.yml
+      - packaging/**
+      - packaging.test.js
+      - bootstrap.mjs
+      - moth.moth
+      - machine.moth
+  pull_request:
+    paths:
+      - .github/workflows/packaging.yml
+      - packaging/**
+      - packaging.test.js
+      - bootstrap.mjs
+      - moth.moth
+      - machine.moth
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: the manifests are manifests.mjs's, the SBOM writer, the .deb and install.sh (packaging.test.js)
+        run: node --test packaging.test.js
+      - name: winget's and Scoop's manifests against their schemas
+        run: |
+          python -m pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0 referencing==0.37.0
+          python packaging/check-schemas.py
+      - name: the manifests' downloads are there, and are the sums they say
+        run: |
+          check() { # a URL and the SHA-256 it should have
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/download" "$1"
+            got=$(sha256sum "$RUNNER_TEMP/download" | cut -d ' ' -f 1)
+            echo "$1: $got"
+            test "$got" = "$(printf %s "$2" | tr A-F a-f)"
+          }
+          for installer in packaging/winget/manifests/s/samyyy2423/Moth/*/samyyy2423.Moth.installer.yaml; do
+            check "$(sed -n 's/^  InstallerUrl: //p' "$installer")" "$(sed -n 's/^  InstallerSha256: //p' "$installer")"
+          done
+          check "$(node -p 'require("./packaging/scoop/moth.json").architecture["64bit"].url.split("#")[0]')" \
+            "$(node -p 'require("./packaging/scoop/moth.json").architecture["64bit"].hash')"
+          for page in $(grep -ho 'https://[^ ]*' packaging/winget/manifests/s/samyyy2423/Moth/*/*.locale.*.yaml | sort -u); do
+            curl -fsSL --retry 3 -o /dev/null "$page" && echo "$page is there"
+          done
+      - name: the shell scripts (shellcheck)
+        run: shellcheck packaging/install.sh packaging/debian/build-deb.sh packaging/release-build.sh
+
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: moth from the source, and its .deb, twice, the same bytes
+        run: |
+          node bootstrap.mjs linux
+          mkdir dist && mv moth dist/moth-linux
+          version=$(node -p 'require("./package.json").version')
+          packaging/debian/build-deb.sh dist/moth-linux "$version" dist
+          packaging/debian/build-deb.sh dist/moth-linux "$version" again
+          cmp dist/moth_*_amd64.deb again/moth_*_amd64.deb
+          dpkg-deb --info dist/moth_*_amd64.deb
+          dpkg-deb --contents dist/moth_*_amd64.deb
+      - name: installed here, it runs a program, and is removed
+        run: |
+          sudo apt-get install -y -q ./dist/moth_*_amd64.deb
+          test "$(command -v moth)" = /usr/bin/moth
+          cmp /usr/bin/moth dist/moth-linux
+          cd "$RUNNER_TEMP" && printf 'say "Hello from " "the .deb"\n' > hello.moth
+          test "$(moth run hello.moth)" = "Hello from the .deb"
+          sudo apt-get remove -y -q moth
+          test ! -e /usr/bin/moth
+      - name: and on Debian 12 and 13, and Ubuntu 22.04 and 24.04
+        run: |
+          for image in debian:12-slim debian:13-slim ubuntu:22.04 ubuntu:24.04; do
+            docker run --rm -v "$PWD/dist:/dist:ro" "$image" sh -ec '
+              apt-get install -y -q /dist/moth_*_amd64.deb > /dev/null
+              cd /tmp && printf "say \"Hello from \" \"the .deb\"\n" > hello.moth
+              test "$(moth run hello.moth)" = "Hello from the .deb"
+              apt-get remove -y -q moth > /dev/null
+              test ! -e /usr/bin/moth'
+            echo "$image: installed, ran a program, removed"
+          done
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: the image, from moth built from the source
+        run: |
+          node bootstrap.mjs linux
+          mkdir context && mv moth context/moth-linux
+          docker build -f packaging/docker/Dockerfile --build-arg VERSION=test -t moth:test context
+          docker image ls moth:test
+          test "$(docker image inspect --format '{{.Config.User}}' moth:test)" = 65532 # distroless's nonroot
+          test "$(docker image inspect --format '{{.Size}}' moth:test)" -lt 100000000
+      - name: it runs a program, builds one, and lets one use C's library and OpenSSL
+        run: |
+          mkdir work && cd work
+          printf 'say "Hello from " "the image"\n' > hello.moth
+          printf 'use the library "c"\n    abs(a whole number) gives a whole number\nend\nuse the library "ssl"\n    OpenSSL_version_num() gives a long whole number\nend\nsay abs(0 - 5)\nsay OpenSSL_version_num() is at least 805306368\n' > libraries.moth
+          run() { docker run --rm -v "$PWD:/work" --user "$(id -u):$(id -g)" moth:test "$@"; }
+          test "$(run run hello.moth)" = "Hello from the image"
+          test "$(run run --allow-libraries libraries.moth)" = "$(printf '5\nyes')"
+          run build hello.moth
+          test "$(./hello)" = "Hello from the image"
+
+  install-sh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the 1.11.0 release, and the latest, into a new home
+        run: |
+          export HOME="$RUNNER_TEMP/home" SHELL=/bin/bash && mkdir -p "$HOME"
+          sh packaging/install.sh --version 1.11.0
+          test "$(sha256sum "$HOME/.local/bin/moth" | cut -d ' ' -f 1)" = 75bb487a151417fc615fe8ab1d21f9b13fb47d01ed2e8164b64fb2c7d7d01c4a
+          grep -qx 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.profile"
+          grep -qx 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc"
+          cd "$RUNNER_TEMP" && printf 'say "Hello from " "install.sh"\n' > hello.moth
+          test "$(bash -lc 'moth run hello.moth')" = "Hello from install.sh"
+          # as the README has it, piped into sh, for the latest release
+          cat "$GITHUB_WORKSPACE/packaging/install.sh" | sh -s -- --dir "$RUNNER_TEMP/latest"
+          curl -fsSL -o sums https://github.com/samyyy2423/moth/releases/latest/download/SHA256SUMS.txt
+          grep " moth-linux$" sums | sed "s| moth-linux$| $RUNNER_TEMP/latest/moth|" | sha256sum -c
+      - name: on Alpine, with BusyBox's sh, wget and sha256sum
+        run: |
+          docker run --rm -v "$PWD/packaging:/p:ro" alpine:3 sh -ec '
+            sh /p/install.sh --version 1.11.0
+            cd /tmp && printf "say \"Hello from \" \"Alpine\"\n" > hello.moth
+            test "$(moth run hello.moth)" = "Hello from Alpine"'
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install.ps1 in PowerShell 7
+        shell: pwsh
+        run: .\packaging\install.test.ps1
+      - name: install.ps1 in Windows PowerShell 5.1
+        shell: powershell
+        run: .\packaging\install.test.ps1
+      - name: Scoop installs moth from its manifest, and finds and writes the next version
+        shell: pwsh
+        run: |
+          Invoke-RestMethod https://get.scoop.sh -OutFile "$env:RUNNER_TEMP\install-scoop.ps1"
+          & "$env:RUNNER_TEMP\install-scoop.ps1" -RunAsAdmin
+          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          scoop install .\packaging\scoop\moth.json
+          if ($LASTEXITCODE) { throw 'scoop install failed' }
+          Set-Content hello.moth 'say "Hello from " "Scoop"'
+          $said = moth run hello.moth
+          if ($said -ne 'Hello from Scoop') { throw "moth said $said" }
+          scoop uninstall moth
+          # checkver finds the latest release, and autoupdate writes a manifest for it from an older one
+          $checkver = "$env:USERPROFILE\scoop\apps\scoop\current\bin\checkver.ps1"
+          $old = New-Item -ItemType Directory "$env:RUNNER_TEMP\old"
+          $manifest = Get-Content -Raw .\packaging\scoop\moth.json | ConvertFrom-Json
+          $manifest.version = '1.10.0'
+          $manifest.architecture.'64bit'.url = 'https://github.com/samyyy2423/moth/releases/download/v1.10.0/moth-windows.exe#/moth.exe'
+          $manifest.architecture.'64bit'.hash = '0' * 64
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content "$old\moth.json"
+          & $checkver -App moth -Dir $old -Update
+          $updated = Get-Content -Raw "$old\moth.json" | ConvertFrom-Json
+          $latest = (Invoke-RestMethod https://api.github.com/repos/samyyy2423/moth/releases/latest -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN" }).tag_name -replace '^v', ''
+          Invoke-WebRequest -UseBasicParsing "https://github.com/samyyy2423/moth/releases/download/v$latest/SHA256SUMS.txt" -OutFile "$env:RUNNER_TEMP\sums.txt"
+          $sum = (Get-Content "$env:RUNNER_TEMP\sums.txt" | Where-Object { $_ -match ' moth-windows\.exe\s*$' }) -replace ' .*$', ''
+          Write-Host "autoupdate wrote $($updated.version), $($updated.architecture.'64bit'.url), $($updated.architecture.'64bit'.hash)"
+          if ($updated.version -ne $latest) { throw "autoupdate wrote $($updated.version), not $latest" }
+          if ($updated.architecture.'64bit'.url -ne "https://github.com/samyyy2423/moth/releases/download/v$latest/moth-windows.exe#/moth.exe") { throw 'autoupdate wrote the wrong URL' }
+          if ($updated.architecture.'64bit'.hash -ne $sum.Trim().ToLowerInvariant()) { throw "autoupdate wrote the hash $($updated.architecture.'64bit'.hash), not $sum" }
+          scoop install "$old\moth.json"
+          if ($LASTEXITCODE) { throw 'scoop install of the updated manifest failed' }
+          scoop uninstall moth
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: winget validates and installs the manifests
+        shell: pwsh
+        run: |
+          winget --version
+          $manifest = Get-ChildItem packaging\winget\manifests\s\samyyy2423\Moth | Sort-Object { [version] $_.Name } | Select-Object -Last 1
+          winget validate --manifest $manifest.FullName
+          if ($LASTEXITCODE) { throw 'winget validate failed' }
+          winget settings --enable LocalManifestFiles
+          winget install --manifest $manifest.FullName --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE) { throw 'winget install failed' }
+          Set-Content hello.moth 'say "Hello from " "winget"'
+          $said = & "$env:LOCALAPPDATA\Microsoft\WinGet\Links\moth.exe" run hello.moth
+          if ($said -ne 'Hello from winget') { throw "moth said $said" }
+          winget uninstall --id samyyy2423.Moth --disable-interactivity
