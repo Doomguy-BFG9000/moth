@@ -51,6 +51,10 @@ keep it working:
 - **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs`; after changing
   `index.html` or an engine, `node make-web.mjs`; after changing `moth.moth` or `machine.moth`,
   `node bootstrap.mjs`. The tests say when one is out of date.
+- **The VS Code extension is tested in VS Code.** `editors/vscode` has tools of its own, for packing and testing
+  it: `npm ci` there, then `npx @vscode/vsce package` and `xvfb-run -a node e2e/run.mjs` (CI runs both).
+  [docs/publishing-the-extension.md](docs/publishing-the-extension.md) says how it's published to the Visual
+  Studio Marketplace and Open VSX.
 - **Moth files are tidy.** `moth tidy --check file.moth` says whether a file is laid out the one way Moth
   writes code, and `moth tidy file.moth` lays it out.
 - **A name can't be a word Moth uses.** `set`, `item`, `list`, `to`, `every`, `number`, `bytes` and `read`
