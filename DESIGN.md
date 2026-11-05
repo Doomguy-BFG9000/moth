@@ -5305,3 +5305,81 @@ engines stay: as the fallback, and as what the tests compare against.
   calls of four inputs, 573 million; moth building compiler.moth, 3,579
   million. The sections after this one each say what they changed, from
   these.
+
+## 129. A library for C: moth build --library
+
+- **Why.** Moth could call C (§45) and Python (§120), but nothing could call
+  Moth: a fast function written in it was only any use to another Moth
+  program. A shared library with a C ABI is what every language can call:
+  C, Python's ctypes, Rust, Go, C#, Node.
+- **The file.** On Linux an ELF shared object, loaded anywhere: every
+  instruction already reaches its data by a distance from itself (as workers
+  rely on, §124), and the 8-byte addresses in the data, which absolute()
+  lists, become R_X86_64_RELATIVE relocations. The read-only data is in a
+  writable segment the linker makes read-only again once it has moved them
+  (PT_GNU_RELRO). Its dynamic symbols, a SysV hash table and section headers
+  are enough for dlopen, and for gcc to link C to it with `-lfast`. It wants
+  the C library's `environ`, for programs it runs, and `dlopen` and `dlsym`
+  for a program that uses a library, as §45's do. On Windows a DLL: an
+  export directory, names in order as GetProcAddress halves them, base
+  relocations for the same addresses, no entry point, and the same imports.
+- **What it exports.** Each function the main file makes at its top level
+  (not one of a file it uses, a library block's, or one the parser made),
+  by its name: `int fib(moth_value *result, moth_value n)` in Windows x64's
+  convention or System V's, as §46's callbacks take theirs. A `moth_value` is
+  a value's own 8 bytes, so a number is its double. One that's only ever
+  called by its name, with inputs in registers (§63), is called straight;
+  any other as a call through its name's value is, its inputs checked by its
+  description. C may give it anything, so the guesses (§48) know nothing of
+  its inputs. Names starting with `moth_` are the library's own, and a
+  program's function of such a name is a mistake when it's built.
+- **The value API.** Pure functions for what needs no memory (`moth_number`,
+  `moth_number_of`, `moth_yes_or_no`, `moth_nothing`, `moth_kind`) or only
+  reads it (`moth_text_utf8`, `moth_bytes_data`, `moth_list_length`,
+  `moth_list_numbers`, `moth_exports`); and functions shaped as the program's
+  are for what makes or finds values: `moth_text`, `moth_bytes`,
+  `moth_numbers`, `moth_list`, `moth_list_add`, `moth_list_item`,
+  `moth_dictionary`, its `_set`, `_get` and `_keys`, `moth_record_names` and
+  `_values`, `moth_call`, `moth_keep` (a value kept once more), and
+  `moth_free`. `fast.h` declares them, with the
+  program's own functions.
+- **Whose a value is.** What the library gives C is kept from the collector
+  in a list among its roots until C gives it to moth_free, which takes the
+  last place it's kept (so a value given twice is freed twice). What C gives
+  a function stays C's. Numbers, yes, no and nothing are kept nowhere.
+- **Mistakes.** Every call is made inside a `try` of its own, so a mistake,
+  or `fail with`, gives 1 and, in `*result`, `(record with message, line,
+  column, file, value)`: a site in a library carries its file, line and
+  column after what a program's has. What the runtime would end the process
+  for (memory run out) stops the call in progress the same way. What would
+  have to end it is a mistake when it's built: `stop the program`, tasks and
+  workers (which outlive a call), drawing and an app's handlers, sounds, and
+  callbacks from C.
+- **Started once.** The first call runs what a program's start does, then
+  the program's top level, inside a try; a top level that fails gives its
+  mistake to every later call of the program's functions, while the value
+  API still works, to read it.
+- **One at a time, from any thread.** One heap and one collector, as in §62,
+  so a lock: a ticket lock with a futex on Linux, as tasks take their turn,
+  and an SRW lock on Windows. A call from the thread that holds it (C called
+  by Moth, calling back in) goes on inside it, so it can't wait for itself.
+  Running Moth from several threads at once would need what workers do: an
+  image each.
+- **Its own stack.** Moth allows 100,000 calls in progress, which can take
+  far more than a thread C made has, so each call moves to the library's own
+  256 MB stack (in the zeroed data on Linux; on Windows committed at the
+  first call, the TEB's stack fields set to it while Moth runs, so Windows'
+  probes and exceptions see where the stack is) and back. The collector
+  looks through it alone: C's frames hold nothing it keeps.
+- **What it costs.** A call of a function that gives 1 takes about 30 ns
+  from C. fib(30) runs as fast as in a program of its own.
+- **Tested.** A C program, built with gcc and linked to the library, calls
+  it with every kind of value and the value API, gets mistakes as records
+  (a `fail with`, one of the runtime's, an input of the wrong kind, and the
+  value API's), calls a function Moth made, runs eight threads at once that
+  lose no count, recurses 50,000 deep from a 256 KB thread stack (and is
+  told 200,000 is too deep), and holds 100 values through two million
+  lists' collections; a library whose top level fails; each mistake a
+  library can't be built with; `moth build --library` with gcc linking C
+  to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
+  CI runs the same C program against the DLL.
