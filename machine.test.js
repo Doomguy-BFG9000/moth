@@ -5008,6 +5008,7 @@ end
 web's serve_on_workers(${port}, answer, 3)`, { target, name: "site.moth", allow: ["--allow-libraries"], files: { "server.moth": here("tools/server.moth") } }));
     if (target === "linux") chmodSync(exe, 0o755);
     const running = spawn(exe, [], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    const ended = new Promise((resolve) => running.on("exit", resolve));
     let err = "";
     running.stderr.on("data", (d) => (err += d));
     try {
@@ -5023,6 +5024,7 @@ web's serve_on_workers(${port}, answer, 3)`, { target, name: "site.moth", allow:
       assert.equal(await slow, "slow");
     } finally {
       running.kill();
+      await ended; // Windows keeps a program's .exe locked until it has ended, so the folder can't go before it
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
