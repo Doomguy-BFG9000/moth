@@ -40649,7 +40649,7 @@ to emit_library_runtime with a, st
 
     # rt_lib_failure: xmm0 what a try caught, into rax: (record with message, line, column, file, value): its
     # message, as a mistake says it; where it was, if anywhere; and the value, what `fail with` gave
-    set is_text to new_label(a)
+    set given_text to new_label(a)
     set no_site to new_label(a)
     set sited to new_label(a)
     mark(a, "rt_lib_failure")
@@ -40661,13 +40661,13 @@ to emit_library_runtime with a, st
     mov_rr(a, rcx, rax)
     shifti(a, "shr", rcx, 48)
     alui(a, "cmp", rcx, kind_text)
-    jcc(a, cc_e, is_text)
+    jcc(a, cc_e, given_text)
     load(a, rsi, rip("b_ptr"))
     alu_load(a, "add", rsi, rip("reason_at"))
     load(a, rcx, rip("b_len"))
     alu_load(a, "sub", rcx, rip("reason_at"))
     call_to(a, "rt_text_from")
-    mark(a, is_text)
+    mark(a, given_text)
     store(a, mem(rsp, 32), rax) # the message, first
     movi64(a, rax, bits_nothing)
     store(a, mem(rsp, 24), rax)
