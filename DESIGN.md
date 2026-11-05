@@ -5753,3 +5753,108 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   exactly that on the JavaScript engine (files in memory), and every other has no problems; every example runs,
   says something, has no problems, and its link is its code; every exercise is listed once in config.json with
   a uuid of its own, its tests (113 in all) pass with its example and every one fails with its starting file.
+## 136. Moth from Python: the mothlang package
+
+- **Why.** Python is where most people who want speed are: a loop that's
+  slow in Python is fast in Moth's machine code (§129), if Python can call
+  it. And a package is how Python gets anything: `pip install`.
+- **Its name.** `moth` on PyPI is an unrelated project (tokens kept in
+  MongoDB) whose module is also called `moth`, so the package is
+  `mothlang`, and so is its module, everywhere: two packages giving Python
+  one module name would break each other. Code says `import mothlang as
+  moth`, then `moth.load(...)`. The command it installs is still `moth`.
+- **Wheels with moth in them.** A wheel for Windows (`win_amd64`) and one
+  for Linux (`manylinux_2_17_x86_64`) each carry `moth` itself, built from
+  the source by `bootstrap.mjs`, as `mothlang/bin/moth(.exe)`, so `pip
+  install` is all there is. Linux's moth calls the kernel itself and links
+  nothing, so it runs on any distribution, and a library it builds needs
+  only libc.so.6. The wheels are `py3-none`: no Python extension, so one
+  wheel serves every Python from 3.10 on. hatchling builds them, its build
+  hook putting moth in and tagging the wheel when MOTHLANG_BINARY and
+  MOTHLANG_PLATFORM say which; the sdist has no moth, and finds one through
+  MOTHLANG_MOTH or PATH.
+- **Calling a library: ctypes alone.** `moth.load("fast.moth")` builds the
+  file with `moth build --library --into <cache>` and loads it with
+  ctypes; `moth.compile(source)` does the same for code in a string. Each
+  function the library exports (`moth_exports` lists them, with their
+  inputs' names) is an attribute, whose ctypes signature is `int(uint64*,
+  uint64...)`. No compiled extension means nothing to build per Python
+  version, and nothing for pip to compile.
+- **Cached by what it was built from.** A library is kept in
+  `~/.cache/mothlang` (or `%LOCALAPPDATA%\mothlang\Cache`, or
+  `MOTHLANG_CACHE`), in a folder named by a SHA-256 of mothlang's version,
+  the moth that builds it, its --allow flags, the file's name and text, and
+  the text of each file it `use`s (by a name, or as a package), found the
+  way moth finds them. Changing any of them builds it again; changing
+  nothing loads the one built before. Built in a folder of its own, then
+  moved into place, so a library half written is never loaded; loaded once
+  for each process.
+- **Values both ways.** int and float are numbers, whole ones coming back
+  as int; an int past 2^53, which a double can't hold, is an OverflowError
+  rather than a number changed silently. str is text in UTF-8, bool yes or
+  no, None nothing, bytes bytes, list and tuple a list, dict a dictionary.
+  A record comes back as a read-only `Record`, read as `p.x` or `p["x"]`;
+  as C can't make Moth's records (a field is found by its name being one
+  of the program's own texts), one given back is a dictionary. Anything
+  else, a function above all, is a `Value`, kept with `moth_keep` until
+  Python lets go of it, which can be given back, and called with
+  `moth_call`. A list of numbers goes across at once, through
+  `moth_numbers` and `moth_list_numbers` and an array of doubles, not an
+  item at a time; and the kind of a value is worked out in Python from its
+  bits, as a call to `moth_kind` would cost more than the rest.
+- **Mistakes as exceptions.** What a call fails with is raised as
+  `MothError`, with the message, line, column and file from the record
+  (§129) and what `fail with` gave as `value`; code that can't be built is
+  `BuildError`, with moth's own report. A wrong number of inputs is
+  Python's TypeError, before Moth is called.
+- **Running a program.** `moth.run(source)` writes the code to a folder of
+  its own and runs `moth run` there: what it said, its error output and
+  the number it ended with, as a RunResult, with arguments, --allow flags,
+  input and a folder to run in.
+- **What it gave.** On CI's runners, called from Python: fib(30) 10 times
+  as fast as Python's own on Linux and 13 on Windows, a Mandelbrot set 16
+  to 18 times, a sieve of primes 3.5 to 5.7 times (benchmarks/RESULTS.md).
+  A call costs 1.5 to 1.7 µs, most of it ctypes' own, and a value given to
+  Moth is copied, so a sum over a list Python already has is faster in
+  Python, which the benchmark shows too.
+- **Tested** with pytest, against a wheel built as the publishing workflow
+  builds it and installed: Linux with Python 3.10 and 3.14, and Windows. Each
+  kind of value both ways, records and functions, every kind of mistake
+  and where it was, a library's top level failing, deep recursion and
+  eight threads at once, the cache (built once, again when a file it uses
+  changes, nothing written beside the source), moth.run with arguments,
+  input and flags, and the moth command. CI runs the benchmark too.
+
+## 137. Publishing mothlang, with no token
+
+- **Why.** A package is only `pip install`-able once it's on PyPI, and
+  what uploads it must be trusted with the project. A token kept in the
+  repository's secrets works for whoever can read or misuse it; PyPI's
+  trusted publishing (OpenID Connect) has no secret at all: GitHub gives
+  the workflow a token, minutes long, saying which repository, workflow
+  and environment it is, and PyPI takes uploads only from the one it was
+  told to trust. Nothing is published yet: Samyak adds the publisher on
+  pypi.org (docs/python-package.md says how) when he wants it to be.
+- **python-publish.yml.** Runs for a published release, or by hand. It
+  makes moth for Linux and for Windows from the source on one Linux
+  runner (bootstrap.mjs makes either), builds the sdist and the two
+  wheels as python.yml builds one (§136), checks them with `twine check
+  --strict`, installs the Linux wheel and runs its tests, and keeps the
+  three files as the run's artifact. Only then, in a job of its own with
+  `id-token: write` and the `pypi` environment, does
+  pypa/gh-action-pypi-publish upload them; the building job can't. The
+  environment is where Samyak can require his approval of each upload and
+  keep it to `main` and `v*` tags.
+- **A dry run.** By hand with `publish` unticked, it builds, tests and
+  keeps everything, and uploads nothing; and a pull request that changes
+  `python/` or the workflow gets that dry run as a check, so a release
+  never finds out first that the wheels don't build. Only a release, or
+  `publish` ticked by hand, reaches the upload.
+- **Versions.** mothlang's version is Moth's, in `__init__.py`. A release
+  whose tag isn't `v` and that version stops before building anything, as
+  PyPI never takes a version twice and a wheel of the wrong version would
+  be there for good.
+- **Tested.** Its building job runs, as a dry run, on the pull request that
+  added it: the three files built, checked by twine, the Linux wheel's
+  tests passed, and the artifact kept. The upload itself has never run,
+  against PyPI or TestPyPI.

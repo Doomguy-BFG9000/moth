@@ -1,0 +1,46 @@
+name: python
+
+# mothlang, Moth's Python package (python/, DESIGN §136): a wheel built with moth in it, as the publishing workflow
+# builds them, installed, and its tests run against it, on Linux with the oldest and newest Python it takes and on
+# Windows; then the benchmark, so each run says what Moth gave Python
+on: [push, pull_request]
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.10" }
+          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.14" }
+          - { os: windows-latest, system: windows, binary: moth.exe, platform: win_amd64, python: "3.12" }
+    name: python ${{ matrix.python }} on ${{ matrix.system }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: make moth from the source
+        run: node bootstrap.mjs ${{ matrix.system }}
+      - name: build the wheel, with moth in it, and install it
+        shell: bash
+        working-directory: python
+        env:
+          MOTHLANG_BINARY: ${{ github.workspace }}/${{ matrix.binary }}
+          MOTHLANG_PLATFORM: ${{ matrix.platform }}
+        run: |
+          python -m pip install -q build pytest
+          python -m build --wheel
+          python -m pip install dist/*.whl
+      - name: test it
+        shell: bash
+        working-directory: python
+        run: python -m pytest -v
+      - name: the benchmark
+        shell: bash
+        working-directory: python
+        run: python benchmarks/bench.py

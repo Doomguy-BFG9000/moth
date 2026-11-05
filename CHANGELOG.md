@@ -37,6 +37,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,
   and the tests fail when it's behind them. Every public function now has a comment, so the editors' hovers
   say what each does too.
+- **Moth from Python.** `pip install mothlang` (a wheel for Windows and one for Linux, each with `moth` in
+  it): `moth.load("fast.moth")` builds the file into a library once, caches it, and calls its functions
+  through ctypes, with Python's own values going across and Moth's mistakes raised as `MothError`;
+  `moth.run(source)` runs a program; and the wheel gives you the `moth` command. fib(30) runs 10 to 13 times as
+  fast as in Python.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
