@@ -358,6 +358,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
   // these words from token i on, on the line before them
   const wordsAt = (i, words) => words.every((w, k) => wordAt(i + k, w) && !tokens[i + k].nl);
+  // `start count(10) on another core`: a worker, with memory of its own, not a task (DESIGN §124)
+  const onAnotherCore = () => {
+    if (!wordsAt(pos, ["on", "another", "core"])) return false;
+    pos += 3;
+    return true;
+  };
   // a button's label can start at token i: a value there on the same line, where today `button` would end one
   const labelAt = (i) => !tokens[i].nl && (tokens[i].type === "string" || tokens[i].type === "number"
     || (tokens[i].type === "word" && !AFTER_A_VALUE.includes(tokens[i].value)));
@@ -963,9 +969,11 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (isWord("start") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word") {
       const started = phrase(() => {
         const call = primary();
-        return call.kind === "call" && peek().nl ? call : null;
+        if (call.kind !== "call") return null;
+        const worker = onAnotherCore();
+        return peek().nl ? { name: worker ? "start worker" : "start", call } : null;
       });
-      if (started) return { kind: "do", value: { kind: "builtin", name: "start", args: [started], at: t }, at: t };
+      if (started) return { kind: "do", value: { kind: "builtin", name: started.name, args: [started.call], at: t }, at: t };
     }
     if (isWord("wait") && !tokens[pos + 1].nl && wordAt(pos + 1, "for")) {
       pos += 2;
@@ -1323,9 +1331,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     if (isWord("start") && !tokens[pos + 1].nl && tokens[pos + 1].type === "word") { // `set job to start count(10)`
       const started = phrase(() => {
         const call = primary();
-        return call.kind === "call" ? call : null;
+        return call.kind === "call" ? { name: onAnotherCore() ? "start worker" : "start", call } : null;
       });
-      if (started) return { kind: "builtin", name: "start", args: [started], at: t };
+      if (started) return { kind: "builtin", name: started.name, args: [started.call], at: t };
     }
     if (isWord("wait") && !tokens[pos + 1].nl && wordAt(pos + 1, "for")) { // `set answer to wait for job`
       pos += 2;
@@ -1911,7 +1919,7 @@ function prefixed(body, alias) {
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
-  READ_FOLDER, PLAY } = OP;
+  READ_FOLDER, PLAY, WORKER } = OP;
 const MATH_OPS = { "+": ADD, "-": SUB, "*": MUL, "/": DIV };
 const LOOPS = new Set(["while", "repeat", "count", "each"]);
 
@@ -2264,6 +2272,15 @@ class Compiler extends Scope {
         this.emit(e.at, NOW, e.which);
         return;
       case "builtin":
+        if (e.name === "start worker") { // the call, made on copies (see WORKER in vm.js)
+          const call = e.args[0];
+          const found = this.resolve(call.name);
+          if (found) this.emit(call.at, GET_FN, ...found, this.constant(call.name));
+          else this.undefinedName(call.name, call.at, { call: true });
+          for (const arg of call.args) this.expr(arg);
+          this.emit(call.at, WORKER, call.args.length, this.constant(call.name));
+          return;
+        }
         for (const arg of e.args) this.expr(arg);
         this.emit(e.at, BUILTIN, BUILTINS.findIndex((b) => b.name === e.name));
         return;
