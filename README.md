@@ -1821,6 +1821,7 @@ Moth keeps its promises in writing, for anyone who builds on it:
 npm test                     # everything above, in a few minutes
 npm run bench                # the engines, timed
 npm run versus               # Moth against C, Rust and Python
+node bench-count.mjs x.moth  # where x's machine code runs its instructions (Linux, with valgrind)
 node bootstrap.mjs           # moth.exe (moth on Linux), made from the source
 python -m http.server        # then open http://localhost:8000 for the playground
 ```
