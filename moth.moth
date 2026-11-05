@@ -55,8 +55,19 @@ to cli_name_of with cli_path
     return cli_out
 end
 
-# the files a program's lines `use`, by the names they give, as written
+# the files a program's lines `use`, by the names they give, from the folder of the file that uses them
 to cli_used_by with cli_source, cli_from
+    set cli_found to empty list
+    for each cli_use in cli_uses_in(cli_source, cli_from)
+        add path of cli_use to cli_found
+    end
+    return cli_found
+end
+
+# What each of a file's `use` lines names: a record with path, the file's name from the program's folder, and
+# written, the name as the line gives it in quotes, which is the standard library's name for a file of its
+# (see cli_sources_of), or nothing for `use the package`, whose main file is the package's own
+to cli_uses_in with cli_source, cli_from
     set cli_found to empty list
     for each cli_line in split cli_source by "\n"
         set cli_rest to cli_line
@@ -76,9 +87,9 @@ to cli_used_by with cli_source, cli_from
                 add 1 to cli_k
             end
             if cli_first(cli_rest, 5) is "use \"" # from the folder of the file that uses it, as the parser finds it
-                add cli_folder_of(cli_from) + cli_name to cli_found
+                add record with path cli_folder_of(cli_from) + cli_name, written cli_name to cli_found
             else # a package's main file, in packages/ beside the program
-                add "packages/" + cli_name + "/" + cli_name + ".moth" to cli_found
+                add record with path "packages/" + cli_name + "/" + cli_name + ".moth", written nothing to cli_found
             end
         end
     end
@@ -200,18 +211,22 @@ end
 # place of the file on the disk, so a change not yet saved counts
 set cli_open_texts to empty dictionary
 
-# every file the program uses, and the files those use, by the names their `use` lines give: beside the file
+# Every file the program uses, and the files those use, by the names their `use` lines give: beside the file
 # that uses it, or else, for one of the standard library's (json.moth, math.moth and the rest), moth's own
-# copy. A file that's neither is left out: compile_machine says there is no file called that, at the line
-# that uses it.
+# copy. That's from any file: the program, a package (`use "text.moth"` in packages/thing/thing.moth is
+# packages/thing/text.moth if the package has one, and moth's text.moth if not), or a file either uses. A
+# file's name is from the program's folder, as the parser asks for it, so the standard library's copy goes by
+# that name: packages/thing/text.moth, a copy of its own, as the package's own text.moth would be. A file
+# that's neither is left out: compile_machine says there is no file called that, at the line that uses it.
 to cli_sources_of with cli_path, cli_source
     set cli_folder to cli_folder_of(cli_path)
     set cli_names to empty list
     set cli_texts to empty list
-    set cli_waiting to cli_used_by(cli_source, "")
+    set cli_waiting to cli_uses_in(cli_source, "")
     set cli_k to 1
     repeat while cli_k is at most length of cli_waiting
-        set cli_name to item cli_k of cli_waiting
+        set cli_use to item cli_k of cli_waiting
+        set cli_name to path of cli_use
         add 1 to cli_k
         if not (cli_name is in cli_names)
             set cli_text to nothing
@@ -221,13 +236,15 @@ to cli_sources_of with cli_path, cli_source
                 try
                     set cli_text to read cli_folder + cli_name
                 if it fails
-                    set cli_text to standard's standard_text(cli_name)
+                    if written of cli_use is not nothing # the name the use line gives, as the library's files are named
+                        set cli_text to standard's standard_text(written of cli_use)
+                    end
                 end
             end
             if cli_text is not nothing
                 add cli_name to cli_names
                 add cli_text to cli_texts
-                for each cli_more in cli_used_by(cli_text, cli_name)
+                for each cli_more in cli_uses_in(cli_text, cli_name)
                     add cli_more to cli_waiting
                 end
             end
@@ -2945,17 +2962,16 @@ end
 
 # ----- symbols, definitions, hovers and completion -----
 
-# the text of a file the document uses, or the document's own
+# the text of a file the document uses, as a run of it would find it (beside the file that uses it, or the
+# standard library's: see cli_sources_of), or the document's own
 to cli_lsp_file_text with cli_path, cli_source, cli_file
     if cli_file is ""
         return cli_source
     end
-    try
-        return read cli_folder_of(cli_path) + cli_file
-    if it fails
-        set cli_std to standard's standard_text(cli_file)
-        if cli_std is not nothing
-            return cli_std
+    set cli_used to cli_sources_of(cli_path, cli_source)
+    for each cli_k from 1 to length of names of cli_used
+        if item cli_k of names of cli_used is cli_file
+            return item cli_k of texts of cli_used
         end
     end
     return ""

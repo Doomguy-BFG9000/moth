@@ -855,7 +855,8 @@ Every mistake that happens while a program runs, `fail with` and the refusals of
 - A file is found from the folder of the file that uses it. It must be in the program's folder or a folder
   inside it: a name that starts at the top of a disk (`/x`, `C:x`) or goes up (`../x`) is a mistake, and so
   is a link inside the folder that leads out of it.
-- If the file isn't there, moth looks in the **standard library** it carries (section 10.3).
+- If the file isn't there, moth looks in the **standard library** it carries (section 10.3), for the name
+  in quotes, from any file: the program, a package, or a file either uses.
 - A file is read once for each name it's used as, and once without one; two files that use each other are
   a mistake.
 - `use the package "json" as json` is `packages/json/json.moth`, from the program's folder, wherever the
@@ -888,7 +889,8 @@ moth carries these files, so `use "json.moth"` works in any folder: `math.moth`,
 `http`, `images`, `installer`, `json`, `jwt`, `linux`, `lists`, `log`, `mysql`, `oauth`, `options`,
 `postgres`, `redis`, `s3`, `secrets`, `server`, `sets`, `sockets`, `sqlite`, `stats`, `sync`, `system`,
 `tasks`, `text`, `toml`, `ui`, `websocket`, `windows`, `wire`, `xml`, `yaml`, `zip` and `zones`, each
-`.moth`. A file of the same name beside the program is used instead. Each
+`.moth`. A file of the same name beside the file that uses it is used instead: beside the program for the
+program, and in a package's folder for the package. Each
 file's own comments say what its functions do; [VERSIONING.md](VERSIONING.md) says which of them are kept.
 
 ### 10.4 Packages
