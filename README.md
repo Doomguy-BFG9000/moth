@@ -1489,6 +1489,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests, SQLite, Windows' own controls, and a notepad made with them |
 | [`bootstrap.mjs`](bootstrap.mjs) | Makes the first moth.exe from the source, with Node.js |
+| [`packaging/`](packaging) | The installers (winget, Scoop, the .deb, the image, `install.sh` and `install.ps1`), the release's build script and its SBOM writer: [docs/installers.md](docs/installers.md) |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
 </details>
@@ -1680,6 +1681,12 @@ calls that led there.
   that are mistakes, a refused connection, a big page and the `--allow-net`
   rules, in the Rust engine's words; and that a program that never reads is
   the same bytes it was
+- the installers, as people use them (`packaging.test.js`, and CI's packaging
+  workflow): winget and Scoop installing moth on Windows, the .deb on Debian
+  and Ubuntu, the image running programs, and `install.sh` and `install.ps1`
+  installing a release and refusing a download whose sum is wrong; and the
+  release workflow, as a dry run, building moth, checking the fixed point on
+  Linux and Windows, and signing every file
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's

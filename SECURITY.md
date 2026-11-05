@@ -37,7 +37,27 @@ before it security fixes for 90 days, and once 2.0 is out, the last 1.x gets the
 ## Checking a download
 
 Each release has `moth-windows.exe`, `moth-linux` and `SHA256SUMS.txt`, and its notes give the same sums.
-Check one with `sha256sum moth-linux` (or `certutil -hashfile moth-windows.exe SHA256` on Windows).
+Check one with `sha256sum moth-linux` (or `certutil -hashfile moth-windows.exe SHA256` on Windows). That
+says the download arrived whole, not who made it.
+
+**Signed releases.** From the release after 1.11.0, the release workflow signs every file of a release with
+[Sigstore](https://www.sigstore.dev/), keyless: each file has a `.sigstore.json` bundle, a `.sig` and a
+`.pem` beside it, and the certificate names `.github/workflows/release.yml` in samyyy2423/moth, on the
+release's tag. GitHub also attests where each file was built, and the release has an SBOM
+(`moth-<version>.cdx.json`, CycloneDX) of what's built into moth. Check a file with either:
+
+```text
+cosign verify-blob moth-linux --bundle moth-linux.sigstore.json \
+  --certificate-identity https://github.com/samyyy2423/moth/.github/workflows/release.yml@refs/tags/v1.12.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify moth-linux --repo samyyy2423/moth --source-ref refs/tags/v1.12.0
+```
+
+[docs/verifying-releases.md](docs/verifying-releases.md) has the rest: cosign 2 and 3, the `.sig` and
+`.pem` alone, the Docker image, the .deb, and the SBOM. The workflow signs a release only after building
+moth from the tag's source and finding the release's programs are those same bytes, and that each builds
+itself and the other into the same bytes, on Linux and on Windows; it signs nothing for a release whose
+programs aren't what its source builds. (With cosign 2, add `--new-bundle-format` to the command above.)
 
 You can also make moth yourself and compare: `node bootstrap.mjs` makes moth from the source, and that moth
 builds itself into exactly the bytes of the release, on Windows or Linux:
@@ -45,6 +65,9 @@ builds itself into exactly the bytes of the release, on Windows or Linux:
 ```text
 moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
 ```
+
+`packaging/release-build.sh dist` does all of it, the Windows program included. 1.11.0's programs were
+built without `--include moth-debugger.moth`, so for 1.11.0 leave that out.
 
 ## The permission model
 

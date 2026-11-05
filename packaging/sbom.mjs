@@ -26,6 +26,7 @@ export const BUILT_IN = {
   "moth.moth": "the moth command: build, run, test, check, tidy, debug, the shell and packages",
   "machine.moth": "the compiler's back end, which writes x86-64 machine code as Windows' PE and Linux's ELF, and the runtime every program carries",
   "compiler.moth": "the compiler written in Moth: reading a program, its names and its checks",
+  "wasm.moth": "the compiler's back end for WebAssembly, for moth build --target wasm",
   "stdlib.moth": "the standard library moth carries, made by make-stdlib.mjs from math.moth and tools/",
   "webpage.moth": "the page moth build --web writes a program into, made by make-web.mjs from the playground and its engines",
   "checker-rules.moth": "the types moth check works out, made by make-checker-rules.mjs from checker.js and vm.js",
