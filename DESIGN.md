@@ -5307,7 +5307,85 @@ engines stay: as the fallback, and as what the tests compare against.
   million. The sections after this one each say what they changed, from
   these.
 
-## 129. Installers
+## 129. A library for C: moth build --library
+
+- **Why.** Moth could call C (§45) and Python (§120), but nothing could call
+  Moth: a fast function written in it was only any use to another Moth
+  program. A shared library with a C ABI is what every language can call:
+  C, Python's ctypes, Rust, Go, C#, Node.
+- **The file.** On Linux an ELF shared object, loaded anywhere: every
+  instruction already reaches its data by a distance from itself (as workers
+  rely on, §124), and the 8-byte addresses in the data, which absolute()
+  lists, become R_X86_64_RELATIVE relocations. The read-only data is in a
+  writable segment the linker makes read-only again once it has moved them
+  (PT_GNU_RELRO). Its dynamic symbols, a SysV hash table and section headers
+  are enough for dlopen, and for gcc to link C to it with `-lfast`. It wants
+  the C library's `environ`, for programs it runs, and `dlopen` and `dlsym`
+  for a program that uses a library, as §45's do. On Windows a DLL: an
+  export directory, names in order as GetProcAddress halves them, base
+  relocations for the same addresses, no entry point, and the same imports.
+- **What it exports.** Each function the main file makes at its top level
+  (not one of a file it uses, a library block's, or one the parser made),
+  by its name: `int fib(moth_value *result, moth_value n)` in Windows x64's
+  convention or System V's, as §46's callbacks take theirs. A `moth_value` is
+  a value's own 8 bytes, so a number is its double. One that's only ever
+  called by its name, with inputs in registers (§63), is called straight;
+  any other as a call through its name's value is, its inputs checked by its
+  description. C may give it anything, so the guesses (§48) know nothing of
+  its inputs. Names starting with `moth_` are the library's own, and a
+  program's function of such a name is a mistake when it's built.
+- **The value API.** Pure functions for what needs no memory (`moth_number`,
+  `moth_number_of`, `moth_yes_or_no`, `moth_nothing`, `moth_kind`) or only
+  reads it (`moth_text_utf8`, `moth_bytes_data`, `moth_list_length`,
+  `moth_list_numbers`, `moth_exports`); and functions shaped as the program's
+  are for what makes or finds values: `moth_text`, `moth_bytes`,
+  `moth_numbers`, `moth_list`, `moth_list_add`, `moth_list_item`,
+  `moth_dictionary`, its `_set`, `_get` and `_keys`, `moth_record_names` and
+  `_values`, `moth_call`, `moth_keep` (a value kept once more), and
+  `moth_free`. `fast.h` declares them, with the
+  program's own functions.
+- **Whose a value is.** What the library gives C is kept from the collector
+  in a list among its roots until C gives it to moth_free, which takes the
+  last place it's kept (so a value given twice is freed twice). What C gives
+  a function stays C's. Numbers, yes, no and nothing are kept nowhere.
+- **Mistakes.** Every call is made inside a `try` of its own, so a mistake,
+  or `fail with`, gives 1 and, in `*result`, `(record with message, line,
+  column, file, value)`: a site in a library carries its file, line and
+  column after what a program's has. What the runtime would end the process
+  for (memory run out) stops the call in progress the same way. What would
+  have to end it is a mistake when it's built: `stop the program`, tasks and
+  workers (which outlive a call), drawing and an app's handlers, sounds, and
+  callbacks from C.
+- **Started once.** The first call runs what a program's start does, then
+  the program's top level, inside a try; a top level that fails gives its
+  mistake to every later call of the program's functions, while the value
+  API still works, to read it.
+- **One at a time, from any thread.** One heap and one collector, as in §62,
+  so a lock: a ticket lock with a futex on Linux, as tasks take their turn,
+  and an SRW lock on Windows. A call from the thread that holds it (C called
+  by Moth, calling back in) goes on inside it, so it can't wait for itself.
+  Running Moth from several threads at once would need what workers do: an
+  image each.
+- **Its own stack.** Moth allows 100,000 calls in progress, which can take
+  far more than a thread C made has, so each call moves to the library's own
+  256 MB stack (in the zeroed data on Linux; on Windows committed at the
+  first call, the TEB's stack fields set to it while Moth runs, so Windows'
+  probes and exceptions see where the stack is) and back. The collector
+  looks through it alone: C's frames hold nothing it keeps.
+- **What it costs.** A call of a function that gives 1 takes about 30 ns
+  from C. fib(30) runs as fast as in a program of its own.
+- **Tested.** A C program, built with gcc and linked to the library, calls
+  it with every kind of value and the value API, gets mistakes as records
+  (a `fail with`, one of the runtime's, an input of the wrong kind, and the
+  value API's), calls a function Moth made, runs eight threads at once that
+  lose no count, recurses 50,000 deep from a 256 KB thread stack (and is
+  told 200,000 is too deep), and holds 100 values through two million
+  lists' collections; a library whose top level fails; each mistake a
+  library can't be built with; `moth build --library` with gcc linking C
+  to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
+  CI runs the same C program against the DLL.
+
+## 130. Installers
 
 - **Why.** A release was two programs to download, rename and put on PATH by
   hand, and nothing a package manager could install. People on Windows reach
@@ -5317,7 +5395,7 @@ engines stay: as the fallback, and as what the tests compare against.
   or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
   the image's are `moth-linux` byte for byte, and winget, Scoop and the two
   scripts install the release's own download. So each is checked by the
-  release's own sums and signatures (§130), and the fixed point (§25) holds for
+  release's own sums and signatures (§131), and the fixed point (§25) holds for
   what people install, not only for what they download.
 - **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
   installer and the en-US locale) are written to schema 1.28.0, the one
@@ -5380,7 +5458,7 @@ engines stay: as the fallback, and as what the tests compare against.
 - **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
   same place as the program, so they catch a broken download, not a changed
   release. Checking a signature would mean installing cosign first; the
-  signatures are for people who want to check who made it (§130).
+  signatures are for people who want to check who made it (§131).
 - **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
   `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
   with its fields, and comes out the same twice; and install.sh, given a
@@ -5401,7 +5479,7 @@ engines stay: as the fallback, and as what the tests compare against.
   1.28 manifests but warns it doesn't know their schema header's address, and
   that warning alone is let through.
 
-## 130. Signed releases, attested, with an SBOM
+## 131. Signed releases, attested, with an SBOM
 
 - **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
   comes from the same place as the program, so anyone who could change one
@@ -5495,7 +5573,7 @@ engines stay: as the fallback, and as what the tests compare against.
   runs only on a real release, so it's checked step by step against the
   actions' documentation, and its first run is the next release's. The script
   was also run on the v1.11.0 tag, where it stopped as above.
-## 131. The standard library's reference
+## 132. The standard library's reference
 
 - **Why.** The standard library had grown to 49 libraries and 800 public functions, and the only way to learn
   one was to read its source: its opening comment, then the comment above each `to`, where there was one.
@@ -5542,7 +5620,7 @@ engines stay: as the fallback, and as what the tests compare against.
   no entry, inputs with kinds and defaults are read (`with on as yes or no or no`), and an example from the
   tests keeps the `set` and the `add` it needs, leaves out what it doesn't, and shows what it said.
 
-## 132. Coverage of tests, and LCOV
+## 133. Coverage of tests, and LCOV
 
 - **Why.** `moth coverage` (§93) said which lines of one run of a program
   ran. What people measure is their tests, as coverage.py does under pytest:
@@ -5608,7 +5686,7 @@ engines stay: as the fallback, and as what the tests compare against.
   with --lcov after them; lcov.info word for word; nothing left behind; and
   moth test as it was.
 
-## 133. Property-based testing
+## 134. Property-based testing
 
 A test says what one example gives. A property says what holds for every value of a sort: sorting twice is
 sorting once, JSON reads back what `as json` wrote, splitting text by commas and joining it with them gives it
@@ -5647,9 +5725,9 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
   text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
   text.moth's split_by joining back.
-## 134. A cookbook, examples and exercises
+## 135. A cookbook, examples and exercises
 
-- **Why.** The reference (§131) says what each function does, and the Learn page teaches the language a lesson at
+- **Why.** The reference (§132) says what each function does, and the Learn page teaches the language a lesson at
   a time; neither shows a whole task done end to end, nor gives a learner problems to solve. Those are what a
   person new to a language looks for next, and what keeps documentation honest is running it.
 - **The cookbook** (`docs/cookbook/`) is made by `make-guides.mjs` from `guides/cookbook/*.md`: a `# title`, prose,

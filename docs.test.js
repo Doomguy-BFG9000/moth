@@ -1,4 +1,4 @@
-// The standard library's reference, docs/ on the site (DESIGN §131): made by make-docs.mjs from the libraries'
+// The standard library's reference, docs/ on the site (DESIGN §132): made by make-docs.mjs from the libraries'
 // own comments, so it must be what make-docs.mjs makes of them as they are, and every public function must
 // have a comment to make it from.
 import { test } from "node:test";
