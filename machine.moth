@@ -44454,7 +44454,7 @@ to gen_negate with fc, e
     return "number"
 end
 
-# `bit and`, `bit or`, `bit xor`, `shift ... left by` and `shift ... right by` (DESIGN §127): right there when
+# `bit and`, `bit or`, `bit xor`, `shift ... left by` and `shift ... right by` (DESIGN §129): right there when
 # both sides are whole numbers from 0 to 2^53 - 1, and a shift's distance is one it can go, in two to nine
 # instructions; anything else goes to the runtime, which looks at each side with rt_bits, about 60
 # instructions in all, and says what's wrong if something is. A whole number the program wrote on the right,
