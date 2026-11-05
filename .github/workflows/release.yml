@@ -1,6 +1,6 @@
 name: release
 
-# Signs a release and adds what installs and checks it (DESIGN.md §125). When a release is published, with
+# Signs a release and adds what installs and checks it (DESIGN.md §128). When a release is published, with
 # moth-windows.exe, moth-linux and SHA256SUMS.txt made by hand, it:
 #
 #   - builds moth from the tag's source and checks the release's two programs are those bytes, and the fixed
