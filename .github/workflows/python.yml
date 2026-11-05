@@ -11,8 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.9" }
-          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.13" }
+          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.10" }
+          - { os: ubuntu-latest, system: linux, binary: moth, platform: manylinux_2_17_x86_64.manylinux2014_x86_64, python: "3.14" }
           - { os: windows-latest, system: windows, binary: moth.exe, platform: win_amd64, python: "3.12" }
     name: python ${{ matrix.python }} on ${{ matrix.system }}
     runs-on: ${{ matrix.os }}

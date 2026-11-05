@@ -5275,7 +5275,7 @@ engines stay: as the fallback, and as what the tests compare against.
   install` is all there is. Linux's moth calls the kernel itself and links
   nothing, so it runs on any distribution, and a library it builds needs
   only libc.so.6. The wheels are `py3-none`: no Python extension, so one
-  wheel serves every Python from 3.9 on. hatchling builds them, its build
+  wheel serves every Python from 3.10 on. hatchling builds them, its build
   hook putting moth in and tagging the wheel when MOTHLANG_BINARY and
   MOTHLANG_PLATFORM say which; the sdist has no moth, and finds one through
   MOTHLANG_MOTH or PATH.
@@ -5323,7 +5323,7 @@ engines stay: as the fallback, and as what the tests compare against.
   own, so a sum over a list Python already has is faster in Python: the
   benchmark says so too.
 - **Tested** with pytest, against a wheel built as the publishing workflow
-  builds it and installed: Linux with Python 3.9 and 3.13, and Windows. Each
+  builds it and installed: Linux with Python 3.10 and 3.14, and Windows. Each
   kind of value both ways, records and functions, every kind of mistake
   and where it was, a library's top level failing, deep recursion and
   eight threads at once, the cache (built once, again when a file it uses

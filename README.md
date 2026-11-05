@@ -1671,7 +1671,7 @@ calls that led there.
   Runtime, and Python run inside a program, where each is installed (CI
   installs them)
 - mothlang, the Python package: a wheel built with moth in it, installed,
-  and its pytest tests run on Linux (Python 3.9 and 3.13) and Windows:
+  and its pytest tests run on Linux (Python 3.10 and 3.14) and Windows:
   values both ways, mistakes, threads, deep recursion, the cache, moth.run
   and the moth command; then the benchmark
 - libraries for C: a C program, built with gcc, calling a library's
