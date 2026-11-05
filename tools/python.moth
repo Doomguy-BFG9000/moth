@@ -1,0 +1,777 @@
+# Python, inside a Moth program: CPython itself, through its C API, so a program can import Python's modules
+# (NumPy, scikit-learn, anything installed), call their functions and run Python code. Numbers, text, yes and
+# no, nothing, lists and dictionaries go across as each other; arrays (arrays.moth) as NumPy arrays, when NumPy
+# is there; anything else stays a Python object, which can be called and asked for its attributes.
+#
+#   use "python.moth" as python
+#   python's run("import math\nx = math.factorial(10)")
+#   say python's evaluate("x // 3")                  # 1209600
+#   set math to python's import_module("math")
+#   say python's call(math, "sqrt", list of 2)       # 1.4142135623731
+#   set np to python's import_module("numpy")
+#   say python's call(np, "linspace", list of 0, 1, 5)        # an array: [0, 0.25, 0.5, 0.75, 1]
+#   say python's call(np, "round", (list of 2.567), dictionary where "decimals" is 1)   # inputs by name
+#   python's set_variable("data", list of 3, 1, 2)
+#   say python's evaluate("sorted(data)")            # [1, 2, 3]
+#
+# Python is found where the PYTHON_LIBRARY variable says (its DLL, or .so on Linux, or the folder it's in),
+# else beside each folder in PATH (python3*.dll on Windows), else as Linux installs it (libpython3.*.so.1.0).
+# A program that uses it is built with --allow-libraries. A mistake in Python is a `fail with` that says what
+# Python said: "Python: ZeroDivisionError: division by zero". Python objects aren't let go of when Moth is
+# done with them: release(object) lets go of one.
+
+use "arrays.moth" as python_arrays
+
+use the library "msvcrt" or "c"
+    "memcpy" as python_copy_bytes(bytes, a pointer, a long whole number) gives a pointer
+    "memcpy" as python_copy_numbers(a list of numbers, a pointer, a long whole number) gives a pointer
+    "at an address" as python_call_void(a pointer)
+    "at an address" as python_call_p(a pointer) gives a pointer
+    "at an address" as python_call_i(a pointer) gives a whole number
+    "at an address" as python_p_i(a pointer, a whole number)
+    "at an address" as python_p_text(a pointer, text) gives a pointer
+    "at an address" as python_p_p(a pointer, a pointer) gives a pointer
+    "at an address" as python_void_p(a pointer, a pointer)
+    "at an address" as python_p_p_text(a pointer, a pointer, text) gives a pointer
+    "at an address" as python_i_p_text_p(a pointer, a pointer, text, a pointer) gives a whole number
+    "at an address" as python_p_p_p_p(a pointer, a pointer, a pointer, a pointer) gives a pointer
+    "at an address" as python_p_long(a pointer, a long whole number) gives a pointer
+    "at an address" as python_i_p_long_p(a pointer, a pointer, a long whole number, a pointer) gives a whole number
+    "at an address" as python_i_p_p(a pointer, a pointer, a pointer) gives a whole number
+    "at an address" as python_i_p_p_p(a pointer, a pointer, a pointer, a pointer) gives a whole number
+    "at an address" as python_long_p(a pointer, a pointer) gives a long whole number
+    "at an address" as python_p_p_long(a pointer, a pointer, a long whole number) gives a pointer
+    "at an address" as python_p_number(a pointer, a number) gives a pointer
+    "at an address" as python_number_p(a pointer, a pointer) gives a number
+    "at an address" as python_p_p_bytes(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as python_i_p_bytes_bytes_bytes(a pointer, a pointer, bytes, bytes, bytes) gives a whole number
+    "at an address" as python_void_bytes_bytes_bytes(a pointer, bytes, bytes, bytes)
+    "at an address" as python_bytes_numbers(a pointer, a list of numbers, a long whole number) gives a pointer
+    "at an address" as python_run_text(a pointer, text, a whole number, a pointer, a pointer, a pointer) gives a pointer
+    "at an address" as python_p_text_long(a pointer, text, a long whole number) gives a pointer
+end
+
+use the library "kernel32"
+    "LoadLibraryExW" as python_load_windows(wide text, a pointer, a whole number) gives a pointer
+    "GetProcAddress" as python_find_windows(a pointer, text) gives a pointer
+    "GetEnvironmentVariableW" as python_env_windows(wide text, bytes, a whole number) gives a whole number
+end
+
+use the library "ucrtbase"
+    "_wputenv_s" as python_set_env_windows(wide text, wide text) gives a whole number
+end
+
+use the library "c"
+    "dlopen" as python_load_linux(text, a whole number) gives a pointer
+    "dlsym" as python_find_linux(a pointer, text) gives a pointer
+    "getenv" as python_env_linux(text) gives text
+end
+
+use the library "moth"
+    "numbers_convert" as python_convert(a long whole number, a list of numbers, bytes) gives a long whole number
+end
+
+set python_windows to yes
+try
+    python_find_windows(nothing, "x")
+if it fails
+    set python_windows to no
+end
+
+# Python's library, once it's found, and where each of its functions and objects is, by name
+set python_handle to nothing
+set python_found to empty dictionary
+set python_main to nothing
+set python_numpy to nothing
+set python_numpy_checked to no
+set python_found_at to nothing
+
+# a Python object Moth holds: where it is
+kind python_object with pointer
+    to shown with self
+        set state to python_enter()
+        try
+            return "<python " + python_text_of(self's pointer, yes) + ">"
+        either way
+            python_leave(state)
+        end
+    end
+end
+
+to python_wrap with pointer
+    set made to python_object(pointer)
+    set kind of made to "python object"
+    return made
+end
+
+# ---------- starting ----------
+
+# Python started, from the library at `path` (a file or a folder), or as found if there's none; gives where
+# it was found. Every other function starts it as found, the first time.
+to start with path or nothing
+    if python_handle is not nothing
+        return python_found_at
+    end
+    set tries to empty list
+    if path is not nothing
+        set tries to python_candidates(path)
+    else
+        set asked to python_environment("PYTHON_LIBRARY")
+        if asked is not nothing and asked is not ""
+            set tries to python_candidates(asked)
+        else
+            set tries to python_everywhere()
+        end
+    end
+    for each candidate in tries
+        if python_handle is nothing
+            if python_windows
+                set python_handle to python_load_windows(candidate, nothing, 8) # its own folder for what it needs
+            else
+                set python_handle to python_load_linux(candidate, 258) # RTLD_NOW | RTLD_GLOBAL, for its modules
+            end
+            if python_handle is not nothing
+                set python_found_at to candidate
+            end
+        end
+    end
+    if python_handle is nothing
+        fail with "can't find Python: set PYTHON_LIBRARY to its library (python313.dll, or libpython3.13.so.1.0) or the folder it's in"
+    end
+    if python_call_i(python_fn("Py_IsInitialized")) is 0
+        if python_windows and python_environment("PYTHONHOME") is nothing # its own folder, for its standard library
+            python_set_env_windows("PYTHONHOME", python_folder_of(python_found_at))
+        end
+        python_p_i(python_fn("Py_InitializeEx"), 0)
+        python_call_p(python_fn("PyEval_SaveThread")) # the GIL let go, for each call to take
+    end
+    set state to python_enter()
+    set python_main to python_p_p(python_fn("PyModule_GetDict"), python_p_text(python_fn("PyImport_AddModule"), "__main__"))
+    python_leave(state)
+    return python_found_at
+end
+
+to python_folder_of with file
+    set cut to 0
+    for each k from 1 to length of file
+        if item k of file is "\\" or item k of file is "/"
+            set cut to k
+        end
+    end
+    if cut is 0
+        return "."
+    end
+    return items 1 to cut - 1 of file
+end
+
+# the files Python's library could be, for a file or a folder
+to python_candidates with path
+    set lowered to lowercase of path
+    if (python_windows and position of ".dll" in lowered is greater than 0) or position of ".so" in lowered is greater than 0
+        return list of path
+    end
+    set made to empty list
+    for each minor from 14 to 8 by -1
+        if python_windows
+            add path + "\\python3" + minor + ".dll" to made
+        else
+            add path + "/libpython3." + minor + ".so.1.0" to made
+        end
+    end
+    return made
+end
+
+to python_everywhere
+    set made to empty list
+    if python_windows
+        set paths to python_environment("PATH")
+        if paths is not nothing
+            for each folder in split paths by ";"
+                if folder is not ""
+                    for each candidate in python_candidates(folder)
+                        add candidate to made
+                    end
+                end
+            end
+        end
+        return made
+    end
+    for each minor from 14 to 8 by -1
+        add "libpython3." + minor + ".so.1.0" to made
+    end
+    return made
+end
+
+to python_environment with name
+    if python_windows
+        set room to 32768 bytes
+        set n to python_env_windows(name, room, 16384)
+        if n is 0
+            return nothing
+        end
+        set chars to empty list
+        for each k from 0 to n - 1
+            add byte (2 * k + 1) of room + 256 * byte (2 * k + 2) of room to chars
+        end
+        return python_utf16_text(chars)
+    end
+    return python_env_linux(name)
+end
+
+# UTF-16 code units as text
+to python_utf16_text with units
+    set made to empty list
+    set k to 1
+    repeat while k is at most length of units
+        set u to item k of units
+        if u is at least 55296 and u is at most 56319 and k is less than length of units
+            set u to 65536 + (u - 55296) * 1024 + (item (k + 1) of units - 56320)
+            add 1 to k
+        end
+        if u is less than 128
+            add u to made
+        else if u is less than 2048
+            add 192 + (u / 64) rounded down to made
+            add 128 + remainder of u divided by 64 to made
+        else if u is less than 65536
+            add 224 + (u / 4096) rounded down to made
+            add 128 + remainder of (u / 64) rounded down divided by 64 to made
+            add 128 + remainder of u divided by 64 to made
+        else
+            add 240 + (u / 262144) rounded down to made
+            add 128 + remainder of (u / 4096) rounded down divided by 64 to made
+            add 128 + remainder of (u / 64) rounded down divided by 64 to made
+            add 128 + remainder of u divided by 64 to made
+        end
+        add 1 to k
+    end
+    return (made as bytes) as text
+end
+
+# where one of Python's functions or objects is, by its name
+to python_fn with name
+    if name is in python_found
+        return item name of python_found
+    end
+    set at to nothing
+    if python_windows
+        set at to python_find_windows(python_handle, name)
+    else
+        set at to python_find_linux(python_handle, name)
+    end
+    if at is nothing
+        fail with "this Python has no '" + name + "'"
+    end
+    set item name of python_found to at
+    return at
+end
+
+# the GIL, taken for a call into Python, and let go after
+to python_enter
+    start()
+    return python_call_i(python_fn("PyGILState_Ensure"))
+end
+
+to python_leave with state
+    python_p_i(python_fn("PyGILState_Release"), state)
+end
+
+# ---------- mistakes ----------
+
+# what Python gave, unless it's nothing, when Python's mistake is ours
+to python_checked with given
+    if given is nothing
+        python_mistake()
+    end
+    return given
+end
+
+to python_mistake
+    set slots to list of (8 bytes), (8 bytes), (8 bytes)
+    python_void_bytes_bytes_bytes(python_fn("PyErr_Fetch"), item 1 of slots, item 2 of slots, item 3 of slots)
+    python_void_bytes_bytes_bytes(python_fn("PyErr_NormalizeException"), item 1 of slots, item 2 of slots, item 3 of slots)
+    set what to python_pointer_in(item 1 of slots)
+    set value to python_pointer_in(item 2 of slots)
+    if what is nothing
+        fail with "Python: something went wrong, and Python didn't say what"
+    end
+    set name to python_attribute_text(what, "__name__")
+    set said to ""
+    if value is not nothing
+        set said to python_text_of(value, no)
+    end
+    for each slot in slots
+        set held to python_pointer_in(slot)
+        if held is not nothing
+            python_void_p(python_fn("Py_DecRef"), held)
+        end
+    end
+    if said is ""
+        fail with "Python: " + name
+    end
+    fail with "Python: " + name + ": " + said
+end
+
+to python_pointer_in with slot
+    set made to list of 0
+    python_convert(4, made, slot)
+    if item 1 of made is 0
+        return nothing
+    end
+    return item 1 of made
+end
+
+# ---------- Python's objects as text ----------
+
+# str(o), or repr(o), as Moth text
+to python_text_of with o, as_repr
+    set made to nothing
+    if as_repr
+        set made to python_p_p(python_fn("PyObject_Repr"), o)
+    else
+        set made to python_p_p(python_fn("PyObject_Str"), o)
+    end
+    if made is nothing
+        python_call_void(python_fn("PyErr_Clear"))
+        return "?"
+    end
+    set written to python_unicode_text(made)
+    python_void_p(python_fn("Py_DecRef"), made)
+    return written
+end
+
+to python_attribute_text with o, name
+    set got to python_p_p_text(python_fn("PyObject_GetAttrString"), o, name)
+    if got is nothing
+        python_call_void(python_fn("PyErr_Clear"))
+        return "?"
+    end
+    set written to python_text_of(got, no)
+    python_void_p(python_fn("Py_DecRef"), got)
+    return written
+end
+
+# a Python str's characters as Moth text
+to python_unicode_text with o
+    set size_slot to 8 bytes
+    set at to python_checked(python_p_p_bytes(python_fn("PyUnicode_AsUTF8AndSize"), o, size_slot))
+    set n to python_pointer_in(size_slot)
+    if n is nothing
+        return ""
+    end
+    set raw to n bytes
+    python_copy_bytes(raw, at, n)
+    return raw as text
+end
+
+# ---------- Moth's values as Python's ----------
+
+# a new reference to a Python object for a Moth value
+to python_from_moth with value
+    if value is nothing
+        return python_new_reference(python_fn("_Py_NoneStruct"))
+    end
+    if value is yes or value is no
+        set truth to 0
+        if value
+            set truth to 1
+        end
+        return python_checked(python_p_long(python_fn("PyBool_FromLong"), truth))
+    end
+    if python_arrays's arrays_is_number(value)
+        if value - (value rounded down) is 0 and value is at least -9007199254740992 and value is at most 9007199254740992
+            return python_checked(python_p_long(python_fn("PyLong_FromLongLong"), value))
+        end
+        return python_checked(python_p_number(python_fn("PyFloat_FromDouble"), value))
+    end
+    if python_arrays's arrays_is_text(value)
+        return python_checked(python_p_text_long(python_fn("PyUnicode_FromStringAndSize"), value, length of (value as bytes)))
+    end
+    if python_arrays's arrays_is_array(value)
+        return python_numpy_array(value)
+    end
+    if python_is_object(value)
+        return python_new_reference(value's pointer)
+    end
+    if python_arrays's arrays_is_list(value)
+        set made to python_checked(python_p_long(python_fn("PyList_New"), 0))
+        for each v in value
+            set item_made to python_from_moth(v)
+            set done to python_i_p_p(python_fn("PyList_Append"), made, item_made)
+            python_void_p(python_fn("Py_DecRef"), item_made)
+            if done is not 0
+                python_mistake()
+            end
+        end
+        return made
+    end
+    if python_is_dictionary(value)
+        set made to python_checked(python_call_p(python_fn("PyDict_New")))
+        for each k in value
+            set key_made to python_from_moth(k)
+            set value_made to python_from_moth(item k of value)
+            set done to python_i_p_p_p(python_fn("PyDict_SetItem"), made, key_made, value_made)
+            python_void_p(python_fn("Py_DecRef"), key_made)
+            python_void_p(python_fn("Py_DecRef"), value_made)
+            if done is not 0
+                python_mistake()
+            end
+        end
+        return made
+    end
+    fail with "can't give Python " + python_arrays's arrays_kind_name(value) + ": only numbers, text, yes or no, nothing, lists, dictionaries, arrays and Python's own objects"
+end
+
+to python_new_reference with o
+    python_void_p(python_fn("Py_IncRef"), o)
+    return o
+end
+
+to python_is_object with value
+    try
+        return kind of value is "python object"
+    if it fails
+        return no
+    end
+end
+
+to python_is_dictionary with value
+    try
+        set probe to keys of value
+        return yes
+    if it fails
+        return no
+    end
+end
+
+# NumPy, if it's there: its module, or nothing
+to python_numpy_module
+    if not python_numpy_checked
+        set python_numpy_checked to yes
+        set python_numpy to python_p_text(python_fn("PyImport_ImportModule"), "numpy")
+        if python_numpy is nothing
+            python_call_void(python_fn("PyErr_Clear"))
+        end
+    end
+    return python_numpy
+end
+
+# an array as a NumPy array of doubles, its numbers copied as they are in memory; or lists, with no NumPy
+to python_numpy_array with t
+    set np to python_numpy_module()
+    if np is nothing
+        return python_from_moth(python_arrays's to_list(t))
+    end
+    set data to t's data
+    set raw to python_checked(python_bytes_numbers(python_fn("PyBytes_FromStringAndSize"), data, 8 * length of data))
+    set frombuffer_inputs to list of python_wrap(raw), "float64"
+    set flat to python_call_method(np, "frombuffer", frombuffer_inputs, nothing)
+    python_void_p(python_fn("Py_DecRef"), raw)
+    set reshape_inputs to list of t's shape
+    set shaped to python_call_method(flat, "reshape", reshape_inputs, nothing)
+    python_void_p(python_fn("Py_DecRef"), flat)
+    set copied to python_call_method(shaped, "copy", empty list, nothing)
+    python_void_p(python_fn("Py_DecRef"), shaped)
+    return copied
+end
+
+# o.name(*inputs, **named): a new reference, from Moth's values
+to python_call_method with o, name, inputs, named
+    set callable to python_checked(python_p_p_text(python_fn("PyObject_GetAttrString"), o, name))
+    set result to nothing
+    try
+        set result to python_call_object(callable, inputs, named)
+    either way
+        python_void_p(python_fn("Py_DecRef"), callable)
+    end
+    return result
+end
+
+to python_call_object with callable, inputs, named
+    if not python_arrays's arrays_is_list(inputs)
+        set inputs to list of inputs
+    end
+    set args to python_checked(python_p_long(python_fn("PyTuple_New"), length of inputs))
+    set kwargs to nothing
+    try
+        set k to 0
+        for each v in inputs
+            set made to python_from_moth(v)
+            if python_i_p_long_p(python_fn("PyTuple_SetItem"), args, k, made) is not 0
+                python_mistake()
+            end
+            add 1 to k
+        end
+        if named is not nothing
+            set kwargs to python_from_moth(named)
+        end
+        return python_checked(python_p_p_p_p(python_fn("PyObject_Call"), callable, args, kwargs))
+    either way
+        python_void_p(python_fn("Py_DecRef"), args)
+        if kwargs is not nothing
+            python_void_p(python_fn("Py_DecRef"), kwargs)
+        end
+    end
+end
+
+# ---------- Python's values as Moth's ----------
+
+# the Moth value for a Python object, which is let go of (a reference Moth had): numbers, text, yes or no,
+# nothing, lists (from lists and tuples), dictionaries, arrays (from NumPy's arrays), or a Python object
+to python_to_moth with o
+    set made to python_value(o)
+    python_void_p(python_fn("Py_DecRef"), o)
+    return made
+end
+
+to python_is with o, type_name
+    set answer to python_i_p_p(python_fn("PyObject_IsInstance"), o, python_fn(type_name))
+    if answer is -1
+        python_mistake()
+    end
+    return answer is 1
+end
+
+to python_value with o
+    if o is python_fn("_Py_NoneStruct")
+        return nothing
+    end
+    if python_is(o, "PyBool_Type")
+        return o is python_fn("_Py_TrueStruct")
+    end
+    if python_is(o, "PyLong_Type") or python_is(o, "PyFloat_Type")
+        set x to python_number_p(python_fn("PyFloat_AsDouble"), o)
+        if x is -1 and python_call_p(python_fn("PyErr_Occurred")) is not nothing
+            python_mistake()
+        end
+        return x
+    end
+    if python_is(o, "PyUnicode_Type")
+        return python_unicode_text(o)
+    end
+    if python_is(o, "PyList_Type") or python_is(o, "PyTuple_Type")
+        set listed to python_is(o, "PyList_Type")
+        set n to 0
+        if listed
+            set n to python_long_p(python_fn("PyList_Size"), o)
+        else
+            set n to python_long_p(python_fn("PyTuple_Size"), o)
+        end
+        set made to empty list
+        for each k from 0 to n - 1
+            if listed
+                add python_value(python_p_p_long(python_fn("PyList_GetItem"), o, k)) to made
+            else
+                add python_value(python_p_p_long(python_fn("PyTuple_GetItem"), o, k)) to made
+            end
+        end
+        return made
+    end
+    if python_is(o, "PyDict_Type")
+        set made to empty dictionary
+        set place to 8 bytes
+        set key_slot to 8 bytes
+        set value_slot to 8 bytes
+        repeat while python_i_p_bytes_bytes_bytes(python_fn("PyDict_Next"), o, place, key_slot, value_slot) is not 0
+            set item (python_value(python_pointer_in(key_slot))) of made to python_value(python_pointer_in(value_slot))
+        end
+        return made
+    end
+    set np to nothing
+    if python_numpy_checked or python_has_numpy_type(o)
+        set np to python_numpy_module()
+    end
+    if np is not nothing
+        set ndarray to python_checked(python_p_p_text(python_fn("PyObject_GetAttrString"), np, "ndarray"))
+        set generic to python_checked(python_p_p_text(python_fn("PyObject_GetAttrString"), np, "generic"))
+        set is_array to python_i_p_p(python_fn("PyObject_IsInstance"), o, ndarray)
+        set is_scalar to python_i_p_p(python_fn("PyObject_IsInstance"), o, generic)
+        python_void_p(python_fn("Py_DecRef"), ndarray)
+        python_void_p(python_fn("Py_DecRef"), generic)
+        if is_array is 1
+            return python_array_from_numpy(np, o)
+        end
+        if is_scalar is 1
+            return python_to_moth(python_call_method(o, "item", empty list, nothing))
+        end
+    end
+    return python_wrap(python_new_reference(o))
+end
+
+# whether o's type comes from NumPy, by its module's name
+to python_has_numpy_type with o
+    set type to python_p_p(python_fn("PyObject_Type"), o)
+    set where to python_attribute_text(type, "__module__")
+    python_void_p(python_fn("Py_DecRef"), type)
+    return where is "numpy"
+end
+
+# a NumPy array as an array of doubles, its numbers copied as they are in memory; lists, if they aren't numbers
+to python_array_from_numpy with np, o
+    set making to python_attribute(np, "ascontiguousarray")
+    set inputs to python_tuple_of(o)
+    set named to python_from_moth(dictionary where "dtype" is "float64")
+    set as_doubles to python_p_p_p_p(python_fn("PyObject_Call"), making, inputs, named)
+    for each held in list of making, inputs, named
+        python_void_p(python_fn("Py_DecRef"), held)
+    end
+    if as_doubles is nothing
+        python_call_void(python_fn("PyErr_Clear"))
+        return python_to_moth(python_call_method(o, "tolist", empty list, nothing))
+    end
+    set shape to python_to_moth(python_checked(python_p_p_text(python_fn("PyObject_GetAttrString"), as_doubles, "shape")))
+    set raw to python_call_method(as_doubles, "tobytes", empty list, nothing)
+    python_void_p(python_fn("Py_DecRef"), as_doubles)
+    set n to python_long_p(python_fn("PyBytes_Size"), raw)
+    set data to python_arrays's arrays_zeros_list(n / 8)
+    if n is greater than 0
+        python_copy_numbers(data, python_checked(python_p_p(python_fn("PyBytes_AsString"), raw)), n)
+    end
+    python_void_p(python_fn("Py_DecRef"), raw)
+    return python_arrays's shaped(data, shape)
+end
+
+to python_attribute with o, name
+    return python_checked(python_p_p_text(python_fn("PyObject_GetAttrString"), o, name))
+end
+
+to python_tuple_of with o
+    set made to python_checked(python_p_long(python_fn("PyTuple_New"), 1))
+    python_i_p_long_p(python_fn("PyTuple_SetItem"), made, 0, python_new_reference(o))
+    return made
+end
+
+# ---------- what a program uses ----------
+
+# Python statements, run as a module's are, in __main__, whose names the next run and evaluate see
+to run with code
+    set state to python_enter()
+    try
+        set done to python_checked(python_run_text(python_fn("PyRun_StringFlags"), code, 257, python_main, python_main, nothing))
+        python_void_p(python_fn("Py_DecRef"), done)
+    either way
+        python_leave(state)
+    end
+end
+
+# a Python expression's value, worked out in __main__
+to evaluate with expression
+    set state to python_enter()
+    try
+        return python_to_moth(python_checked(python_run_text(python_fn("PyRun_StringFlags"), expression, 258, python_main, python_main, nothing)))
+    either way
+        python_leave(state)
+    end
+end
+
+# a module, as Python imports it: a Python object
+to import_module with name
+    set state to python_enter()
+    try
+        return python_to_moth(python_checked(python_p_text(python_fn("PyImport_ImportModule"), name)))
+    either way
+        python_leave(state)
+    end
+end
+
+# object.name(inputs...), with inputs by name from a dictionary: what it gives, as Moth's value
+to call with object, name, inputs or empty list, named or nothing
+    set state to python_enter()
+    try
+        return python_to_moth(python_call_method(python_need(object, "call"), name, inputs, named))
+    either way
+        python_leave(state)
+    end
+end
+
+# a Python object that can be called, called
+to call_object with object, inputs or empty list, named or nothing
+    set state to python_enter()
+    try
+        return python_to_moth(python_call_object(python_need(object, "call_object"), inputs, named))
+    either way
+        python_leave(state)
+    end
+end
+
+# object.name
+to attribute with object, name
+    set state to python_enter()
+    try
+        return python_to_moth(python_attribute(python_need(object, "attribute"), name))
+    either way
+        python_leave(state)
+    end
+end
+
+# a name in __main__, which run and evaluate see, given a Moth value
+to set_variable with name, value
+    set state to python_enter()
+    try
+        set made to python_from_moth(value)
+        set done to python_i_p_text_p(python_fn("PyDict_SetItemString"), python_main, name, made)
+        python_void_p(python_fn("Py_DecRef"), made)
+        if done is not 0
+            python_mistake()
+        end
+    either way
+        python_leave(state)
+    end
+end
+
+to variable with name
+    set state to python_enter()
+    try
+        set got to python_p_p_text(python_fn("PyDict_GetItemString"), python_main, name)
+        if got is nothing
+            fail with "Python has no variable called '" + name + "'"
+        end
+        return python_value(got)
+    either way
+        python_leave(state)
+    end
+end
+
+# a Moth value as a Python object Moth holds, which goes back to Python as it is
+to to_python with value
+    set state to python_enter()
+    try
+        return python_wrap(python_from_moth(value))
+    either way
+        python_leave(state)
+    end
+end
+
+# a Python object Moth holds as a Moth value, as call gives them
+to from_python with object
+    set state to python_enter()
+    try
+        return python_value(python_need(object, "from_python"))
+    either way
+        python_leave(state)
+    end
+end
+
+# a Python object let go of
+to release with object
+    set state to python_enter()
+    try
+        python_void_p(python_fn("Py_DecRef"), python_need(object, "release"))
+        set object's pointer to python_fn("_Py_NoneStruct")
+        python_void_p(python_fn("Py_IncRef"), object's pointer)
+    either way
+        python_leave(state)
+    end
+end
+
+to python_need with object, what
+    if python_is_object(object)
+        return object's pointer
+    end
+    fail with "'" + what + "' needs a Python object (as import_module gives), not " + python_arrays's arrays_kind_name(object)
+end
+
+# Python's version, as "3.13.3"
+to version
+    return evaluate("__import__('platform').python_version()")
+end
