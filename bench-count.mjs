@@ -39,7 +39,8 @@ const named = (name) => values[made.names.indexOf(name) - 1];
 
 let bytes;
 if (basename(program) === "moth.moth") {
-  const files = ["machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "tools/hash.moth"];
+  const line = here("bootstrap.mjs").split("\n").find((l) => l.startsWith("const files = {")); // the files bootstrap.mjs gives moth
+  const files = [...line.matchAll(/"([^"]+)": here\(/g)].map((m) => m[1]);
   bytes = named("compile_shipping").fn.run(here("moth.moth"), files, files.map(here), "linux", "moth.moth",
     ["--allow-read", "--allow-write", "--allow-run"], null, null, ["moth-debugger.moth"], [Uint8Array.from(readFileSync(new URL("./moth-debugger.moth", import.meta.url)))]);
 } else {
