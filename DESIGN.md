@@ -4425,3 +4425,55 @@ hold them to agreeing.
   definition, tidied, indented and coloured; Helix 25.07 built the grammar and
   found the server and the queries; and the Zed extension built for
   WebAssembly.
+
+## 109. A debug adapter for moth debug
+
+- **Why.** An editor's debugger shows breakpoints in the margin, the calls in
+  progress and the variables, and steps with a key. moth debug (§59) had all
+  of that, as commands typed in a terminal.
+- **What.** editors/vscode/debug-adapter.js speaks the Debug Adapter
+  Protocol to the editor and moth debug's commands to the program: a
+  breakpoint is `break lib.moth 4` (or `clear`), step in, over and out and
+  continue are `step`, `next`, `out` and `go`, the calls in progress are
+  `where`, the variables `vars`, and what's under the pointer, in a watch or
+  in the debug console is `show` (the console's `where`, `list`, `breaks` and
+  `help` are said as they are). The mistake that ends a program is a stop
+  with its words, whose variables can still be looked at. While the program
+  runs, a line typed in the debug console answers its `ask`.
+- **Reading it.** The debugger answers on the program's own output, and asks
+  for each command with `(moth) `, which the command is said after, as `ask`
+  says an answer when the input isn't a terminal; a text value's new line is
+  `\n`. So what comes before `(moth) ` after a command that only looks is its
+  answer; after one that runs the program, it's what the program said, then
+  the line it stopped at, whose shape (`prog.moth:5, in 'bump': ...`, or
+  `stopped at the mistake, at ...`) the adapter reads. What the program says
+  is shown as it comes, but for its last line, which may be that line: held
+  until the next line comes, `(moth) ` does, or 200 ms go by.
+- **In JavaScript, for now.** Driving a program's input and output both,
+  while reading the editor's, needs a process with pipes for both, which
+  tasks.moth hasn't, and moth isn't built with --allow-libraries. So the
+  adapter is Node.js's: VS Code runs it inside the extension, and Neovim
+  (nvim-dap, which editors/neovim sets up), Helix and LSP4IJ start it with
+  node. A `moth dap` in Moth can come once tasks.moth can give a program its
+  input.
+- **What moth debug can't do.** It's told things only while the program is
+  stopped, so a breakpoint set while it runs counts from where it next stops,
+  and a pause is refused, saying so. A program stopped while it runs is ended
+  with moth, as a group, and the program moth built (prog-debug) is taken
+  away by the adapter, as moth can't, if this session made it.
+- **VS Code.** *Moth: Debug this file* (and F5 with no launch.json) starts a
+  debugging session in place of `moth debug` in a terminal, with moth.path's
+  moth.
+- **Tested.** machine.test.js runs the adapter as a program of its own, as an
+  editor other than VS Code does, on moth.exe's moth debug: breakpoints in the
+  program and a file it uses, taken away, the calls in progress, variables, a
+  hover, a watch that fails, the console's `where` and an answer to `ask`,
+  step out and over, a refused pause, what the program said and the number it
+  ended with; a mistake stopped at, with its calls and variables; stopping on
+  entry; a program stopped while it runs, and the program moth built taken
+  away; and a moth that isn't there. editor.test.js checks the extension
+  starts a session for Debug, fills a launch configuration in, and runs the
+  adapter inside itself. Done by hand: Neovim 0.11 with nvim-dap, headless,
+  set a breakpoint, stopped there, read a variable, continued, stepped and
+  ran to the end, through editors/neovim's setup; and Helix 25.07 took the
+  debugger's settings.

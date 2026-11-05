@@ -15,14 +15,18 @@ extension gives `.moth` files:
   function takes and gives, with the comment above it.
 - **Completion** of the names the program makes and Moth's words; after `rex's`, what rex has.
 - **Snippets** for `to`, `if`, `repeat`, `for each`, `try` and a `test_` function.
-- **Run, Debug and Build** (in the editor's Run menu, and as *Moth: Run this file* and the others),
-  which start `moth run`, `moth debug` or `moth build` on the file in a terminal.
+- **A debugger**: breakpoints in the file and the files it uses, stepping in, over and out, the calls in
+  progress, the variables, what's under the pointer or typed in the debug console, and the mistake that
+  ends a program, through `moth debug` (*Moth: Debug this file*, or F5).
+- **Run and Build** (in the editor's Run menu, and as *Moth: Run this file* and *Moth: Build this file*),
+  which start `moth run` or `moth build` on the file in a terminal.
 
 The checker and the tidying are Moth's own engine, built into the extension. The outline, Go to
 Definition, hovers and completion come from Moth's language server, `moth lsp`, which the extension starts
 where [moth](https://github.com/samyyy2423/moth/releases) is installed; without it, the outline and Go to
-Definition find the file's functions by their lines. Set `moth.path` if moth isn't on your PATH, and
-`moth.languageServer` to `false` not to start it. What it does is in the Moth output (View, Output).
+Definition find the file's functions by their lines. The debugger, Run and Build need moth too. Set
+`moth.path` if moth isn't on your PATH, and `moth.languageServer` to `false` not to start the server.
+What it does is in the Moth output (View, Output).
 
 ## Installing
 

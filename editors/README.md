@@ -103,6 +103,31 @@ JetBrains IDE, the free ones too). Then:
    tab, under File name patterns, add `*.moth` with the language id `moth`. A file name pattern, rather than a
    file type, keeps the TextMate colours.
 
+## Debugging
+
+`moth debug` runs a program stopping at its first line and takes commands (`step`, `break 12`, `show x`...).
+[vscode/debug-adapter.js](vscode/debug-adapter.js) is a Debug Adapter Protocol adapter for it, so an editor's
+debugger can set breakpoints in a program and the files it uses, step in, over and out, show the calls in
+progress and the variables, work out what's typed in the debug console or under the pointer, and stop at the
+mistake that ends a program. While the program runs, a line typed in the debug console answers its `ask`.
+It needs moth, and Node.js to run it (VS Code runs it inside the extension). Its launch configuration takes
+`program`, `args`, `allow` (the `--allow` flags), `stopOnEntry` and `mothPath`.
+
+- **VS Code**: *Moth: Debug this file*, or F5 in a Moth file. A `launch.json` entry is `{ "type": "moth",
+  "request": "launch", "name": "Debug", "program": "${file}" }`.
+- **Neovim**: with [nvim-dap](https://github.com/mfussenegger/nvim-dap) installed, `neovim/` sets it up:
+  `:DapToggleBreakpoint`, then `:DapContinue`. Set `vim.g.moth_debug_adapter` if the plugin folder isn't
+  beside `vscode/`.
+- **Helix**: take the `#` off the debugger lines at the end of [helix/languages.toml](helix/languages.toml),
+  with where this repository is; then `:debug-start launch` (or `space G l`).
+- **JetBrains IDEs**: LSP4IJ runs debug adapters too: Run, Edit Configurations, **+**, Debug Adapter
+  Protocol. The command is `node /path/to/moth/editors/vscode/debug-adapter.js`, the file name pattern
+  `*.moth`, and the launch configuration `{ "type": "moth", "request": "launch", "program": "${file}" }`.
+- **Any other** editor's DAP client: start `node debug-adapter.js` and launch with `program`.
+
+`moth debug` can only be told things while the program is stopped, so a breakpoint set while it runs counts
+from where it next stops, and pausing a running program isn't something it can do.
+
 ## Any other editor
 
 Start `moth lsp`, with nothing after it, and speak the Language Server Protocol to it over its input and
