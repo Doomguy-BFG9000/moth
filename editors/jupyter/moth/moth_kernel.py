@@ -1,4 +1,4 @@
-"""A Jupyter kernel for Moth (DESIGN §114). Each cell runs through `moth kernel` as `moth notebook` runs a
+"""A Jupyter kernel for Moth (DESIGN §122). Each cell runs through `moth kernel` as `moth notebook` runs a
 Markdown file's blocks: a cell has what the cells before it made, a cell whose last line is a value shows it,
 and a cell that fails keeps nothing it made. What a cell says comes as it's said, its mistakes come as
 Jupyter's errors, `ask` asks in the notebook, and stopping a cell (Jupyter's interrupt) stops only that cell:

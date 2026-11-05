@@ -35737,7 +35737,7 @@ to emit_run_why with a
     ret(a)
 end
 
-# ---------- Moth's own kernels (DESIGN §110) ----------
+# ---------- Moth's own kernels (DESIGN §118) ----------
 # `use the library "moth"` names functions a program can have in it, written here for tools/arrays.moth:
 # loops over lists of numbers that take Moth's own code a few instructions an item. Each is called as a C
 # function is, on the system's own convention, and is given each list itself (see "a list of numbers" in
@@ -36833,7 +36833,7 @@ to gen_library_call with fc, e
     set target to target of st
     set own to own_library(nat)
     set desc to nothing
-    if own # Moth's own (DESIGN §110): in the program already, so nothing to load or ask for
+    if own # Moth's own (DESIGN §118): in the program already, so nothing to load or ask for
         if symbol of nat is not in own_kernel_names
             fail with front's problem(at of e, "the library 'moth' has no function called '" + symbol of nat + "'")
         end
@@ -36850,7 +36850,7 @@ to gen_library_call with fc, e
     end
     set types to types of nat
     set n to length of types
-    # a function "at an address" (DESIGN §111): its first input is where it is, which C doesn't get
+    # a function "at an address" (DESIGN §119): its first input is where it is, which C doesn't get
     set by_address to not own and symbol of nat is "at an address"
     set first_skipped to 0
     set c_types to types

@@ -4,11 +4,11 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import https from "node:https";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -892,7 +892,7 @@ test("moth.exe notebook runs a Markdown file's blocks, and writes what each said
   assert.deepEqual(readdirSync(sub), ["notes.md"], "what it built to run the blocks was left behind");
 });
 
-// `moth kernel` (DESIGN §114), as editors/jupyter's kernel talks to it: each line names a file of a cell's code,
+// `moth kernel` (DESIGN §122), as editors/jupyter's kernel talks to it: each line names a file of a cell's code,
 // which runs as a notebook's block does, with its output and mistakes going out as they come, between a line of
 // byte 1 and "moth-cell" and one of byte 1 and "moth-done ok" or "moth-done failed", and one of byte 1 and
 // "moth-done" on the error output; a number before the file's name numbers the cell, unless that would go back;
@@ -936,7 +936,7 @@ test("moth.exe kernel runs cells for Jupyter, each with what the ones before mad
   assert.deepEqual(readdirSync(sub).sort(), Object.keys(cells).sort(), "what the kernel built or kept was left behind");
 });
 
-// editors/jupyter's kernel (DESIGN §114): its own tests, in Python, against a stand-in for moth kernel and against
+// editors/jupyter's kernel (DESIGN §122): its own tests, in Python, against a stand-in for moth kernel and against
 // the moth built here; and, where ipykernel and jupyter_client are installed, as Jupyter runs it
 function pythonCommand() {
   for (const command of ["python3", "python"]) {
@@ -2368,7 +2368,7 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
   assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
 });
 
-// tools/arrays.moth (DESIGN §110): its own tests, in machine code, where machine code's own loops do the work and
+// tools/arrays.moth (DESIGN §118): its own tests, in machine code, where machine code's own loops do the work and
 // must give what Moth gives to the last bit
 test("arrays.moth and ai.moth pass their own tests in machine code, where machine code's own loops do the work", { skip }, () => {
   const { dir, exe } = mothExe();
@@ -2417,7 +2417,7 @@ memcpy(to_here, (list of 1, "two"), 16)`);
     (err) => err.reason === "a library's function can't give a list of numbers: only a function's input can be one");
 });
 
-// A library's function "at an address" (DESIGN §111): the first input is where the function is, a pointer C
+// A library's function "at an address" (DESIGN §119): the first input is where the function is, a pointer C
 // gave, as ONNX Runtime's C API gives a table of them
 test("a library's function at an address is called where a pointer says it is", { skip }, () => {
   const finding = target === "windows" ? `use the library "kernel32"
@@ -2672,7 +2672,7 @@ ${numpy}`, "", 0]);
   }
 });
 
-// tools/ai.moth (DESIGN §113), against a server of the test's own that answers as Anthropic's Messages API and
+// tools/ai.moth (DESIGN §121), against a server of the test's own that answers as Anthropic's Messages API and
 // OpenAI's chat completions and embeddings do: plain and streamed answers (server-sent events, in chunks),
 // tools, JSON, embeddings, and the APIs' mistakes. The keys are made up, and only ever in the environment.
 async function aiMock() {
@@ -2930,6 +2930,601 @@ You said: no key needed
 `, "", 0]);
   } finally {
     server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The company libraries (DESIGN §110-§117): yaml.moth, jwt.moth, s3.moth, oauth.moth, redis.moth, postgres.moth,
+// mysql.moth and wire.moth: their own tests, run by moth.exe's test runner, in machine code; --allow-libraries for
+// those that ask the system for randomness or the time
+const COMPANY_TESTS = ["yaml", "jwt", "s3", "oauth", "redis", "postgres", "mysql", "wire"].map((name) => `${name}.test.moth`);
+test("yaml.moth, jwt.moth, s3.moth, oauth.moth, redis.moth, postgres.moth, mysql.moth and wire.moth pass their own tests in machine code", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "company");
+  mkdirSync(sub);
+  for (const name of readdirSync(new URL("./tools/", import.meta.url)).filter((f) => f.endsWith(".moth"))) writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url)));
+  const ran = spawnSync(exe, ["test", ...COMPANY_TESTS, "--allow-libraries"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
+  assert.equal(ran.stdout.split("\n").at(-2), "44 passed");
+});
+
+// A program of the company libraries' built with --allow-libraries, every file in tools/ there for it to use,
+// and run with these arguments: what it said, as lines, and the rest of what spawnSync says
+function companyRun(source, args) {
+  const dir = mkdtempSync(join(tmpdir(), "moth-company-"));
+  try {
+    const files = {};
+    for (const name of readdirSync(new URL("./tools/", import.meta.url)).filter((f) => f.endsWith(".moth"))) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(source, { target, name: "p.moth", allow: ["--allow-libraries"], files }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, args, { cwd: dir, encoding: "utf8", timeout: 180_000 });
+    return { ...ran, lines: ran.stdout.split("\n").slice(0, -1) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The live tests: a real server, where the environment says where one is (CI starts each in a container, as
+// .github/workflows/test.yml has them; on another computer, docker run them and set these), else skipped:
+// MOTH_POSTGRES_URL postgres://moth:moth-test@127.0.0.1:5432/moth (a superuser, its host's logins md5 or scram)
+// MOTH_MYSQL_URL mysql://root:moth-root@127.0.0.1:3306/moth (MySQL 8.4, started with --mysql-native-password=ON)
+// MOTH_REDIS_URL redis://127.0.0.1:6379 (Redis 6 or later, for its ACL users)
+// MOTH_S3_URL http://moth-test-key:moth-test-secret@127.0.0.1:9000 (MinIO, its root user's key and secret)
+const live = (name) => skip || (!process.env[name] && `no server here: set ${name} to test against one`);
+
+// tools/postgres.moth against PostgreSQL: SCRAM-SHA-256, then a user whose password is kept as MD5; every kind of
+// value both ways, a name that would be SQL if it were pasted in, 5000 rows, a transaction rolled back and one
+// committed, the server's errors, a password it won't take, and TLS required of a server that hasn't it
+test("tools/postgres.moth queries a real PostgreSQL, with parameters, types and transactions", { skip: live("MOTH_POSTGRES_URL") }, () => {
+  const ran = companyRun(String.raw`use "postgres.moth" as pg
+
+set url to item 1 of arguments
+set db to pg's connect_url(url)
+say pg's transaction_status(db)
+pg's run_script(db, "drop table if exists moth_people; create table moth_people (id serial primary key, name text not null, age int, score double precision, ok boolean, data bytea, doc jsonb, tags text[], born date, price numeric(10, 2))")
+set sql to "insert into moth_people (name, age, score, ok, data, doc, tags, born, price) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+say pg's execute(db, sql, list of "Sam", 20, 1.5, yes, (list of 0, 255, 10) as bytes, (dictionary where "pets" is (list of "cat")), "\{a,\"b c\"}", "2006-01-02", 12.5)
+say pg's execute(db, sql, list of "Robert'); drop table moth_people; --", nothing, nothing, no, nothing, nothing, nothing, nothing, nothing)
+say pg's execute(db, sql, list of "Zoë 😀", -7, -0.25, nothing, 0 bytes, (list of 1, "two"), "\{}", nothing, 99999999.99)
+for each row in pg's query(db, "select name, age, score, ok, data, doc, tags, born, price from moth_people order by id")
+    say row
+end
+say pg's query_one(db, "select count(*) as n, sum(age) as total from moth_people where name like $1", list of "%o%")
+say pg's query_one(db, "select 1 where false")
+set many to pg's query(db, "select g, g * 2 as twice from generate_series(1, 5000) as g")
+set total to 0
+for each row in many
+    set total to total + item "twice" of row
+end
+say length of many " " total
+# a transaction that fails: rolled back, and its mistake said again
+to failing with db
+    pg's execute(db, "delete from moth_people")
+    pg's execute(db, "insert into nowhere values (1)")
+end
+try
+    pg's in_transaction(db, failing)
+if it fails with why
+    say why
+end
+say pg's query_one(db, "select count(*) as n from moth_people") " " pg's transaction_status(db)
+to adding with db
+    pg's execute(db, "insert into moth_people (name) values ($1)", list of "Ana")
+    return "added"
+end
+say pg's in_transaction(db, adding)
+say pg's query_one(db, "select count(*) as n from moth_people")
+try
+    pg's execute(db, "insert into moth_people (id, name) values ($1, $2)", list of 1, "again")
+if it fails with why
+    say why
+end
+say pg's query_one(db, "select $1::int + 1 as n, $2::text as t, $3::float8 as f, $4::bool as b, $5::numeric as big", list of 41, "x", 0.1, no, 12345678901234)
+pg's run_script(db, "drop table moth_people")
+# a user whose password is kept as MD5, which logs in the MD5 way
+pg's run_script(db, "drop role if exists moth_md5; set password_encryption = 'md5'; create role moth_md5 login password 'md5-test'")
+set parts to pg's pg_url_options(url)
+set item "user" of parts to "moth_md5"
+set item "password" of parts to "md5-test"
+set md5_db to pg's connect(parts)
+say pg's query_one(md5_db, "select current_user as who")
+pg's close(md5_db)
+set item "password" of parts to "wrong"
+try
+    pg's connect(parts)
+if it fails with why
+    say why
+end
+pg's run_script(db, "drop role moth_md5")
+set item "tls" of parts to "require"
+try
+    pg's connect(parts)
+if it fails with why
+    say why
+end
+pg's close(db)
+say "done"
+`, [process.env.MOTH_POSTGRES_URL]);
+  assert.deepEqual([ran.stderr, ran.status], ["", 0], ran.stdout);
+  assert.deepEqual(ran.lines, [
+    "I",
+    "1",
+    "1",
+    "1",
+    "(dictionary where \"name\" is \"Sam\", \"age\" is 20, \"score\" is 1.5, \"ok\" is yes, \"data\" is (3 bytes: 0, 255, 10), \"doc\" is (dictionary where \"pets\" is [\"cat\"]), \"tags\" is [\"a\", \"b c\"], \"born\" is \"2006-01-02\", \"price\" is 12.5)",
+    "(dictionary where \"name\" is \"Robert'); drop table moth_people; --\", \"age\" is nothing, \"score\" is nothing, \"ok\" is no, \"data\" is nothing, \"doc\" is nothing, \"tags\" is nothing, \"born\" is nothing, \"price\" is nothing)",
+    "(dictionary where \"name\" is \"Zoë 😀\", \"age\" is -7, \"score\" is -0.25, \"ok\" is nothing, \"data\" is (0 bytes), \"doc\" is [1, \"two\"], \"tags\" is [], \"born\" is nothing, \"price\" is 99999999.99)",
+    "(dictionary where \"n\" is 2, \"total\" is -7)",
+    "nothing",
+    "5000 25005000",
+    "PostgreSQL said: relation \"nowhere\" does not exist (42P01)",
+    "(dictionary where \"n\" is 3) I",
+    "added",
+    "(dictionary where \"n\" is 4)",
+    "PostgreSQL said: duplicate key value violates unique constraint \"moth_people_pkey\" (23505). Key (id)=(1) already exists.",
+    "(dictionary where \"n\" is 42, \"t\" is \"x\", \"f\" is 0.1, \"b\" is no, \"big\" is 12345678901234)",
+    "(dictionary where \"who\" is \"moth_md5\")",
+    "PostgreSQL said: password authentication failed for user \"moth_md5\" (28P01)",
+    "the PostgreSQL server at 127.0.0.1 has no TLS, and tls is \"require\"",
+    "done",
+  ]);
+});
+
+// tools/mysql.moth against MySQL 8.4: caching_sha2_password the full way, its password sent RSA-encrypted (TLS
+// is "prefer", and the server's certificate is its own, which can't be checked), then the fast way; every kind
+// of value both ways, by prepared statements and as text; errors; a mysql_native_password user and a
+// sha256_password user (a server without the plugin skips it); users that aren't there, whom the server gives a
+// plugin at random, refused all the same; and TLS required of a certificate it can't check
+test("tools/mysql.moth queries a real MySQL, with prepared statements, types and transactions", { skip: live("MOTH_MYSQL_URL") }, () => {
+  const ran = companyRun(String.raw`use "mysql.moth" as mysql
+
+set url to item 1 of arguments
+set db to mysql's connect_url(url)
+say "connected, secure: " secure of db
+mysql's run_script(db, "drop table if exists moth_people; create table moth_people (id int auto_increment primary key, name varchar(100) not null, age int, score double, small float, ok boolean, data blob, doc json, born date, at datetime(6), dur time, price decimal(10, 2), big bigint unsigned) character set utf8mb4")
+set sql to "insert into moth_people (name, age, score, small, ok, data, doc, born, at, dur, price, big) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+set done to mysql's run(db, sql, list of "Sam", 20, 1.5, 0.5, yes, (list of 0, 255, 10) as bytes, (dictionary where "pets" is (list of "cat")), "2006-01-02", "2026-11-04 10:15:00.25", "-26:03:04", 12.5, 9007199254740991)
+say count of done " " last_id of done
+say mysql's execute(db, sql, list of "Robert'); drop table moth_people; --", nothing, nothing, nothing, no, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+say mysql's execute(db, sql, list of "Zoë 😀", -7, -0.25, nothing, nothing, 0 bytes, (list of 1, "two"), nothing, nothing, "12:30:00", 99999999.99, 0)
+for each row in mysql's query(db, "select name, age, score, small, ok, data, doc, born, at, dur, price, big from moth_people order by id")
+    say row
+end
+say mysql's query_one(db, "select count(*) as n, sum(age) as total from moth_people where name like ?", list of "%o%")
+say mysql's query_one(db, "select 1 from dual where false")
+say mysql's run_script(db, "select id, name from moth_people where id = 1")
+mysql's run_script(db, "drop table if exists moth_many; create table moth_many (n int)")
+mysql's run_script(db, "insert into moth_many (n) with recursive seq (n) as (select 1 union all select n + 1 from seq where n < 1000) select n from seq")
+set many to mysql's query(db, "select n, n * 2 as twice from moth_many")
+set total to 0
+for each row in many
+    set total to total + item "twice" of row
+end
+say length of many " " total
+to failing with db
+    mysql's execute(db, "delete from moth_people")
+    mysql's execute(db, "insert into nowhere values (1)")
+end
+try
+    mysql's in_transaction(db, failing)
+if it fails with why
+    say why
+end
+say mysql's query_one(db, "select count(*) as n from moth_people")
+try
+    mysql's execute(db, "insert into moth_people (id, name) values (?, ?)", list of 1, "again")
+if it fails with why
+    say why
+end
+try
+    mysql's execute(db, "select ? + ?", list of 1)
+if it fails with why
+    say why
+end
+mysql's run_script(db, "drop table moth_people; drop table moth_many")
+# a user of mysql_native_password, where the server has it
+set native to yes
+try
+    mysql's run_script(db, "drop user if exists 'moth_native'@'%'; create user 'moth_native'@'%' identified with mysql_native_password by 'native-test'")
+if it fails
+    set native to no
+end
+set parts to mysql's my_url_options(url)
+if native
+    set item "user" of parts to "moth_native"
+    set item "password" of parts to "native-test"
+    set item "database" of parts to nothing
+    set native_db to mysql's connect(parts)
+    say mysql's query_one(native_db, "select current_user() as who")
+    mysql's close(native_db)
+    mysql's run_script(db, "drop user 'moth_native'@'%'")
+else
+    say "mysql_native_password: not on this server"
+end
+# a user of sha256_password, where the server has it: its password RSA-encrypted, as there's no TLS
+set sha256 to yes
+try
+    mysql's run_script(db, "drop user if exists 'moth_sha256'@'%'; create user 'moth_sha256'@'%' identified with sha256_password by 'sha256-test'")
+if it fails
+    set sha256 to no
+end
+if sha256
+    set item "user" of parts to "moth_sha256"
+    set item "password" of parts to "sha256-test"
+    set item "database" of parts to nothing
+    set sha256_db to mysql's connect(parts)
+    say mysql's query_one(sha256_db, "select current_user() as who")
+    mysql's close(sha256_db)
+    mysql's run_script(db, "drop user 'moth_sha256'@'%'")
+else
+    say "sha256_password: not on this server"
+end
+# users that aren't there: the server gives each a plugin at random, so it can't be told from one that is
+for each k from 1 to 6
+    set item "user" of parts to "nobody" + k
+    set item "password" of parts to "wrong"
+    try
+        mysql's connect(parts)
+    if it fails with why
+        say item 1 of split why by "@"
+    end
+end
+set item "user" of parts to "root"
+set item "tls" of parts to "require"
+try
+    mysql's connect(parts)
+if it fails
+    say "TLS required, and the server's certificate can't be checked: refused"
+end
+mysql's close(db)
+say "done"
+`, [process.env.MOTH_MYSQL_URL]);
+  assert.deepEqual([ran.stderr, ran.status], ["", 0], ran.stdout);
+  const native = '(dictionary where "who" is "moth_native@%")';
+  const sha256 = '(dictionary where "who" is "moth_sha256@%")';
+  const missing = { "mysql_native_password: not on this server": native, "sha256_password: not on this server": sha256 };
+  assert.deepEqual(ran.lines.map((line) => missing[line] ?? line), [
+    "connected, secure: no",
+    "1 1",
+    "1",
+    "1",
+    "(dictionary where \"name\" is \"Sam\", \"age\" is 20, \"score\" is 1.5, \"small\" is 0.5, \"ok\" is 1, \"data\" is (3 bytes: 0, 255, 10), \"doc\" is (dictionary where \"pets\" is [\"cat\"]), \"born\" is \"2006-01-02\", \"at\" is \"2026-11-04 10:15:00.250000\", \"dur\" is \"-26:03:04\", \"price\" is 12.5, \"big\" is 9007199254740991)",
+    "(dictionary where \"name\" is \"Robert'); drop table moth_people; --\", \"age\" is nothing, \"score\" is nothing, \"small\" is nothing, \"ok\" is 0, \"data\" is nothing, \"doc\" is nothing, \"born\" is nothing, \"at\" is nothing, \"dur\" is nothing, \"price\" is nothing, \"big\" is nothing)",
+    "(dictionary where \"name\" is \"Zoë 😀\", \"age\" is -7, \"score\" is -0.25, \"small\" is nothing, \"ok\" is nothing, \"data\" is (0 bytes), \"doc\" is [1, \"two\"], \"born\" is nothing, \"at\" is nothing, \"dur\" is \"12:30:00\", \"price\" is 99999999.99, \"big\" is 0)",
+    "(dictionary where \"n\" is 2, \"total\" is -7)",
+    "nothing",
+    "(record with rows [(dictionary where \"id\" is 1, \"name\" is \"Sam\")], count 1, columns [\"id\", \"name\"], last_id 0)",
+    "1000 1001000",
+    "MySQL said: Table 'moth.nowhere' doesn't exist (1146, 42S02)",
+    "(dictionary where \"n\" is 3)",
+    "MySQL said: Duplicate entry '1' for key 'moth_people.PRIMARY' (1062, 23000)",
+    "the SQL has 2 ?s, and 1 values were given",
+    "(dictionary where \"who\" is \"moth_native@%\")",
+    "(dictionary where \"who\" is \"moth_sha256@%\")",
+    ...[1, 2, 3, 4, 5, 6].map((k) => `MySQL said: Access denied for user 'nobody${k}'`),
+    "TLS required, and the server's certificate can't be checked: refused",
+    "done",
+  ]);
+});
+
+// tools/redis.moth against Redis: an ACL user of its own logging in, values that end, numbers, lists, hashes,
+// bytes, 100 commands pipelined, MULTI and EXEC, SCAN, errors, publishing to a subscriber (by channel and by
+// pattern, and waiting for none in time), RESP3, and a password it won't take
+test("tools/redis.moth runs commands on a real Redis, pipelined, subscribed, and in RESP3", { skip: live("MOTH_REDIS_URL") }, () => {
+  const ran = companyRun(String.raw`use "redis.moth" as redis
+
+set url to item 1 of arguments
+set admin to redis's connect_url(url)
+redis's command(admin, list of "ACL", "SETUSER", "moth_test", "on", ">moth-test", "~*", "&*", "+@all")
+set parts to redis's redis_url(url)
+set r to redis's connect_url("redis://moth_test:moth-test@" + host of parts + ":" + port of parts + "/1")
+redis's delete(r, list of "moth:greeting", "moth:count", "moth:jobs", "moth:user", "moth:bin", "moth:temp", "moth:n")
+redis's put(r, "moth:greeting", "héllo 😀")
+say redis's get(r, "moth:greeting")
+say redis's get(r, "moth:missing")
+say redis's exists(r, "moth:greeting") " " redis's exists(r, "moth:missing")
+redis's put_for(r, "moth:temp", "x", 100)
+set left to redis's time_left(r, "moth:temp")
+say left is at least 90 and left is at most 100
+say redis's time_left(r, "moth:greeting") " " redis's time_left(r, "moth:missing")
+say redis's expire(r, "moth:greeting", 1000) " " redis's expire(r, "moth:missing", 10)
+say redis's increment(r, "moth:count") " " redis's increment(r, "moth:count") " " redis's increment(r, "moth:count", 10)
+say redis's push(r, "moth:jobs", "b") " " redis's push(r, "moth:jobs", list of "c", "d") " " redis's push_front(r, "moth:jobs", "a")
+say redis's list_items(r, "moth:jobs") " " redis's list_length(r, "moth:jobs")
+say redis's pop(r, "moth:jobs") " " redis's pop_back(r, "moth:jobs") " " redis's list_items(r, "moth:jobs")
+say redis's pop_waiting(r, (list of "moth:empty", "moth:jobs"), 1)
+say redis's hash_put(r, "moth:user", "name", "Sam") " " redis's hash_put(r, "moth:user", "age", 20)
+say redis's hash_get(r, "moth:user", "name") " " redis's hash_get(r, "moth:user", "nothing")
+say redis's hash_all(r, "moth:user")
+say redis's hash_remove(r, "moth:user", "age") " " redis's hash_all(r, "moth:user")
+set block to 256 bytes
+for each k from 1 to 256
+    set byte k of block to k - 1
+end
+redis's put(r, "moth:bin", block)
+say redis's get_bytes(r, "moth:bin") is block
+set incrs to empty list
+for each k from 1 to 100
+    add (list of "INCR", "moth:n") to incrs
+end
+set replies to redis's pipeline(r, incrs)
+say length of replies " " item 100 of replies
+say redis's transaction(r, list of (list of "INCR", "moth:n"), (list of "GET", "moth:n"), (list of "DEL", "moth:n"))
+say (redis's keys_like(r, "moth:*") in order)
+try
+    redis's increment(r, "moth:greeting")
+if it fails with why
+    say why
+end
+try
+    redis's command(r, list of "NOSUCHCOMMAND")
+if it fails with why
+    say item 1 of split why by ","
+end
+# publishing and subscribing, on a connection of its own
+set listener to redis's connect_url("redis://moth_test:moth-test@" + host of parts + ":" + port of parts)
+redis's subscribe(listener, list of "moth:news", "moth:other")
+say redis's publish(r, "moth:news", "hello") " " redis's publish(r, "moth:nobody", "x")
+say redis's next_message(listener)
+say redis's next_message(listener, 200)
+redis's subscribe_like(listener, "moth:p.*")
+redis's publish(r, "moth:p.one", "patterned")
+say redis's next_message(listener, 5000)
+redis's unsubscribe(listener)
+say redis's command(listener, list of "PING")
+redis's close(listener)
+# RESP3: maps as dictionaries
+set three to redis's connect_url("redis://moth_test:moth-test@" + host of parts + ":" + port of parts + "/1")
+set hello to redis's use_resp3(three)
+say item "proto" of hello
+say redis's command(three, list of "HGETALL", "moth:user")
+say redis's command(three, list of "EXISTS", "moth:user")
+redis's close(three)
+try
+    redis's connect_url("redis://moth_test:wrong@" + host of parts + ":" + port of parts)
+if it fails with why
+    say why
+end
+redis's delete(r, list of "moth:greeting", "moth:count", "moth:jobs", "moth:user", "moth:bin", "moth:temp")
+redis's close(r)
+redis's command(admin, list of "ACL", "DELUSER", "moth_test")
+redis's close(admin)
+say "done"
+`, [process.env.MOTH_REDIS_URL]);
+  assert.deepEqual([ran.stderr, ran.status], ["", 0], ran.stdout);
+  assert.deepEqual(ran.lines, [
+    "héllo 😀",
+    "nothing",
+    "yes no",
+    "yes",
+    "-1 -2",
+    "yes no",
+    "1 2 12",
+    "1 3 4",
+    "[\"a\", \"b\", \"c\", \"d\"] 4",
+    "a d [\"b\", \"c\"]",
+    "(record with key \"moth:jobs\", value \"b\")",
+    "1 1",
+    "Sam nothing",
+    "(dictionary where \"name\" is \"Sam\", \"age\" is \"20\")",
+    "1 (dictionary where \"name\" is \"Sam\")",
+    "yes",
+    "100 100",
+    "[101, \"101\", 1]",
+    "[\"moth:bin\", \"moth:count\", \"moth:greeting\", \"moth:jobs\", \"moth:temp\", \"moth:user\"]",
+    "Redis said ERR value is not an integer or out of range",
+    "Redis said ERR unknown command 'NOSUCHCOMMAND'",
+    "1 0",
+    "(record with channel \"moth:news\", message \"hello\", pattern nothing)",
+    "nothing",
+    "(record with channel \"moth:p.one\", message \"patterned\", pattern \"moth:p.*\")",
+    "PONG",
+    "3",
+    "(dictionary where \"name\" is \"Sam\")",
+    "1",
+    "Redis said WRONGPASS invalid username-password pair or user is disabled.",
+    "done",
+  ]);
+});
+
+// tools/s3.moth against MinIO: a bucket made, objects of text, 300 KB of bytes and a key with spaces, a + and a
+// ü put, got, listed and looked at, presigned URLs to GET and PUT (and one changed, which MinIO turns down),
+// deleted, a wrong secret, and the bucket removed
+test("tools/s3.moth puts, gets, lists and deletes on a real MinIO, and makes presigned URLs", { skip: live("MOTH_S3_URL") }, () => {
+  const where = new URL(process.env.MOTH_S3_URL);
+  const ran = companyRun(String.raw`use "s3.moth" as s3
+use "http.moth" as http
+
+set store to s3's client(item 1 of arguments, "us-east-1", item 2 of arguments, item 3 of arguments)
+set bucket to "moth-test"
+try
+    s3's create_bucket(store, bucket)
+if it fails with why
+    say "made before: " why
+end
+for each found in s3's list_objects(store, bucket)
+    s3's delete_object(store, bucket, key of found)
+end
+say bucket is in s3's list_buckets(store)
+s3's put_object(store, bucket, "notes/hello.txt", "Hello, S3 ✓", "text/plain; charset=utf-8")
+set big to 300000 bytes
+for each k from 1 to 300000
+    set byte k of big to remainder of (k * 7) divided by 256
+end
+s3's put_object(store, bucket, "data/big.bin", big)
+s3's put_object(store, bucket, "notes/a b+c/ü.txt", "odd key")
+say s3's get_object(store, bucket, "notes/hello.txt") as text
+say s3's get_object(store, bucket, "data/big.bin") is big
+say s3's get_object(store, bucket, "notes/a b+c/ü.txt") as text
+set info to s3's head_object(store, bucket, "notes/hello.txt")
+say size of info " " type of info " " length of etag of info
+say s3's head_object(store, bucket, "notes/nothing.txt")
+for each found in s3's list_objects(store, bucket, "notes/")
+    say key of found " " size of found
+end
+say length of s3's list_objects(store, bucket)
+set got to http's get(s3's presigned_url(store, "GET", bucket, "notes/hello.txt", 60))
+say status of got " " text of got
+set put_url to s3's presigned_url(store, "PUT", bucket, "notes/uploaded.txt", 60)
+say status of http's put(put_url, "put through a presigned URL" as bytes)
+say s3's get_object(store, bucket, "notes/uploaded.txt") as text
+say status of http's get(s3's presigned_url(store, "GET", bucket, "notes/hello.txt", 60) + "x")
+s3's delete_object(store, bucket, "notes/hello.txt")
+try
+    s3's get_object(store, bucket, "notes/hello.txt")
+if it fails with why
+    say why
+end
+set wrong to s3's client(item 1 of arguments, "us-east-1", item 2 of arguments, "not the secret")
+try
+    s3's list_buckets(wrong)
+if it fails with why
+    say item 1 of split why by ":"
+end
+for each found in s3's list_objects(store, bucket)
+    s3's delete_object(store, bucket, key of found)
+end
+s3's delete_bucket(store, bucket)
+say bucket is in s3's list_buckets(store)
+say "done"
+`, [`${where.protocol}//${where.host}`, decodeURIComponent(where.username), decodeURIComponent(where.password)]);
+  assert.deepEqual([ran.stderr, ran.status], ["", 0], ran.stdout);
+  assert.deepEqual(ran.lines.filter((line) => !line.startsWith("made before")), [
+    "yes",
+    "Hello, S3 ✓",
+    "yes",
+    "odd key",
+    "13 text/plain; charset=utf-8 32",
+    "nothing",
+    "notes/a b+c/ü.txt 7",
+    "notes/hello.txt 13",
+    "3",
+    "200 Hello, S3 ✓",
+    "200",
+    "put through a presigned URL",
+    "403",
+    "S3 said NoSuchKey (404): The specified key does not exist.",
+    "S3 said SignatureDoesNotMatch (403)",
+    "no",
+    "done",
+  ]);
+});
+
+// tools/oauth.moth signing in for real: a provider of the test's own (Node's), which checks PKCE's verifier
+// against the challenge in the address the program gave, and the test as the browser, going back to the
+// program's own server on 127.0.0.1: first with a state it never sent, which the program turns down and waits
+// on, then with the code; tokens refreshed (one refresh token revoked); the program's own tokens with its
+// secret in HTTP Basic and in the form; and a sign-in the person said no to
+test("tools/oauth.moth signs a person in with PKCE and a server of its own, and gets and refreshes tokens", { skip }, async () => {
+  const challenges = [];
+  const strict = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const provider = createServer((req, res) => {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      const form = Object.fromEntries(new URLSearchParams(body));
+      const reply = (status, value) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(value));
+      };
+      if (req.url !== "/token" || req.method !== "POST" || req.headers["content-type"] !== "application/x-www-form-urlencoded") return reply(404, {});
+      if (form.grant_type === "authorization_code") {
+        const challenge = createHash("sha256").update(form.code_verifier ?? "").digest("base64url");
+        if (form.code === "the-code" && form.client_id === "moth-app" && challenge === challenges.at(-1) && /^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(form.redirect_uri)) {
+          return reply(200, { access_token: "at1", token_type: "Bearer", expires_in: 3600, refresh_token: "rt1", scope: "openid email" });
+        }
+        return reply(400, { error: "invalid_grant", error_description: "PKCE didn't match" });
+      }
+      if (form.grant_type === "refresh_token") {
+        return form.refresh_token === "rt1" && form.client_id === "moth-app" ? reply(200, { access_token: "at2", expires_in: 30 }) : reply(400, { error: "invalid_grant", error_description: "that refresh token was revoked" });
+      }
+      if (form.grant_type === "client_credentials") {
+        if (req.headers.authorization === `Basic ${Buffer.from(`svc:${strict("shh: it's a secret")}`).toString("base64")}` && form.scope === "reports.read") return reply(200, { access_token: "svc-basic", token_type: "Bearer" });
+        if (!req.headers.authorization && form.client_id === "svc" && form.client_secret === "shh: it's a secret") return reply(200, { access_token: "svc-body" });
+        return reply(401, { error: "invalid_client" });
+      }
+      return reply(400, { error: "unsupported_grant_type" });
+    });
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  const dir = mkdtempSync(join(tmpdir(), "moth-oauth-"));
+  try {
+    const files = {};
+    for (const name of readdirSync(new URL("./tools/", import.meta.url)).filter((f) => f.endsWith(".moth"))) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(String.raw`use "oauth.moth" as oauth
+
+set base to item 1 of arguments
+set app to oauth's provider(base + "/authorize", base + "/token", "moth-app")
+set open_browser of app to no
+set port of app to number of item 2 of arguments
+set item "access_type" of extra of app to "offline"
+set tokens to oauth's sign_in(app, list of "openid", "email")
+say access_token of tokens " " refresh_token of tokens " " scope of tokens " " token_type of tokens
+say expires_at of tokens is not nothing and not oauth's expired(tokens)
+set tokens to oauth's refresh(app, tokens)
+say access_token of tokens " " refresh_token of tokens " " oauth's expired(tokens)
+set service to oauth's provider("", base + "/token", "svc")
+set client_secret of service to "shh: it's a secret"
+say access_token of oauth's client_credentials(service, list of "reports.read")
+set secret_in of service to "body"
+say access_token of oauth's client_credentials(service)
+set gone to record with access_token "x", refresh_token "revoked", expires_at nothing
+try
+    oauth's refresh(app, gone)
+if it fails with why
+    say why
+end
+try
+    oauth's sign_in(app)
+if it fails with why
+    say why
+end
+say "done"
+`, { target, name: "p.moth", allow: ["--allow-libraries"], files }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const running = spawn(exe, [`http://127.0.0.1:${provider.address().port}`, String(25000 + (process.pid % 2000))], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    running.stdout.on("data", (d) => (out += d));
+    running.stderr.on("data", (d) => (err += d));
+    const ended = new Promise((resolve) => running.on("exit", resolve));
+    // the address the program said to open, the nth time, once its server is listening
+    const nth = async (n) => {
+      for (let waited = 0; waited < 30000; waited += 20) {
+        const said = [...err.matchAll(/open this address in a browser:\n(\S+)\n/g)];
+        if (said.length >= n && err.split("listening on").length > n) return new URL(said[n - 1][1]);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error(`no address to sign in at, ${n}: ${err}`);
+    };
+    const first = await nth(1);
+    const q = Object.fromEntries(first.searchParams);
+    assert.deepEqual([first.pathname, q.response_type, q.client_id, q.scope, q.code_challenge_method, q.access_type, q.state.length, q.code_challenge.length], ["/authorize", "code", "moth-app", "openid email", "S256", "offline", 22, 43]);
+    challenges.push(q.code_challenge);
+    const back = (url, fields) => fetch(`${url}?${new URLSearchParams(fields)}`).then(async (r) => [r.status, await r.text()]);
+    assert.deepEqual(await back(q.redirect_uri, { state: "not the one", code: "stolen" }), [400, "This sign-in wasn't asked for here: its state isn't the one sent."]);
+    const [status, page] = await back(q.redirect_uri, { state: q.state, code: "the-code" });
+    assert.deepEqual([status, page.includes("<h1>Signed in</h1>")], [200, true]);
+    const second = Object.fromEntries((await nth(2)).searchParams);
+    challenges.push(second.code_challenge);
+    assert.equal(second.scope, undefined);
+    const [refused, said] = await back(second.redirect_uri, { state: second.state, error: "access_denied", error_description: "the person said <no>" });
+    assert.deepEqual([refused, said.includes("the person said &lt;no&gt;")], [400, true]);
+    assert.equal(await ended, 0, err);
+    assert.deepEqual(out.split("\n"), [
+      "at1 rt1 openid email Bearer",
+      "yes",
+      "at2 rt1 yes",
+      "svc-basic",
+      "svc-body",
+      "the provider said invalid_grant: that refresh token was revoked",
+      "the provider said access_denied: the person said <no>",
+      "done",
+      "",
+    ]);
+  } finally {
+    provider.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

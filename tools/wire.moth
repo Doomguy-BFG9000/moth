@@ -1,0 +1,340 @@
+# Bytes to and from a connection a message at a time, as the protocols of databases have them: a reader that
+# keeps what came and isn't used yet, so lines, exact counts of bytes and the numbers in them come off it as
+# they're wanted; and a writer that puts bytes, text and numbers together, to send at once. redis.moth,
+# postgres.moth and mysql.moth speak through it, on sockets.moth.
+#
+#   use "wire.moth" as wire
+#   set reader to wire's reader(connection)           # a connection of sockets.moth's
+#   set line to wire's line(reader)                   # the bytes up to the next \r\n, as text, without it
+#   set block to wire's take(reader, 16)              # exactly 16 bytes, waiting for them to come
+#   set n to wire's number_of(block, 1, 4, "big")     # 4 bytes from byte 1, the highest first; or "little"
+#   set out to wire's writer()
+#   wire's add_text(out, "SELECT 1")                  # its UTF-8; add_bytes, add_byte, add_number(out, n, 4, "big")
+#   net's send(connection, wire's bytes_of(out))
+#
+# number_of and signed_of read whole numbers of 1 to 8 bytes (signed ones as two's complement), double_of a
+# float of 8 (IEEE 754), and add_number, add_double write them. A connection that closes in the middle of a
+# message is a `fail with`.
+
+use "sockets.moth" as wire_net
+
+# ---------- reading ----------
+
+# a reader of a connection: its bytes come in as they're asked for
+to reader with connection
+    return record with connection connection, data (65536 bytes), at 1, filled 0
+end
+
+# a reader of bytes already here, with no connection: what's past them is the end
+to reader_of with data
+    return record with connection nothing, data data, at 1, filled length of data
+end
+
+# how many bytes have come that aren't read yet
+to waiting with r
+    return filled of r - at of r + 1
+end
+
+# at least n bytes waiting, received until there are
+to wire_need with r, n
+    if filled of r - at of r + 1 is at least n
+        return nothing
+    end
+    if connection of r is nothing
+        fail with "the message ends too soon"
+    end
+    set left to filled of r - at of r + 1
+    if at of r is greater than 1 # what's left to the start, so the room after it is free
+        set data to data of r
+        set first to at of r - 1
+        for each k from 1 to left
+            set byte k of data to byte (first + k) of data
+        end
+        set at of r to 1
+        set filled of r to left
+    end
+    if n is greater than length of data of r # more room, twice as much at least
+        set size to length of data of r * 2
+        if size is less than n
+            set size to n
+        end
+        set bigger to size bytes
+        set old to data of r
+        for each k from 1 to left
+            set byte k of bigger to byte k of old
+        end
+        set data of r to bigger
+    end
+    repeat while filled of r is less than n
+        set room to length of data of r - filled of r
+        if room is greater than 65536
+            set room to 65536
+        end
+        set got to wire_net's receive(connection of r, room)
+        if length of got is 0
+            fail with "the connection closed in the middle of a message"
+        end
+        set data to data of r
+        set base to filled of r
+        for each k from 1 to length of got
+            set byte (base + k) of data to byte k of got
+        end
+        set filled of r to base + length of got
+    end
+end
+
+# exactly n bytes, waiting for them
+to take with r, n
+    if n is 0
+        return 0 bytes
+    end
+    wire_need(r, n)
+    set start to at of r
+    set at of r to start + n
+    return items start to (start + n - 1) of data of r
+end
+
+# one byte, as a number
+to take_byte with r
+    wire_need(r, 1)
+    set b to byte (at of r) of data of r
+    set at of r to at of r + 1
+    return b
+end
+
+# a whole number of `count` bytes, "big" (the highest first) or "little" (the lowest first)
+to take_number with r, count, order
+    wire_need(r, count)
+    set n to number_of(data of r, at of r, count, order)
+    set at of r to at of r + count
+    return n
+end
+
+# the bytes before a \r\n, as text, with the \r\n read too
+to line with r
+    set found to wire_find(r, 13, 10)
+    set made to take(r, found)
+    set at of r to at of r + 2
+    return made as text
+end
+
+# the bytes before a 0 byte, as text, with the 0 read too
+to text_to_zero with r
+    set found to wire_find(r, 0, nothing)
+    set made to take(r, found)
+    set at of r to at of r + 1
+    return made as text
+end
+
+# how many bytes from here come before this byte (and the next, if one is given), receiving until it's here
+to wire_find with r, first_byte, second_byte
+    set offset to 0 # from the first byte not read, as receiving may move them
+    repeat while yes
+        wire_need(r, offset + 1)
+        if byte (at of r + offset) of data of r is first_byte
+            if second_byte is nothing
+                return offset
+            end
+            wire_need(r, offset + 2)
+            if byte (at of r + offset + 1) of data of r is second_byte
+                return offset
+            end
+        end
+        set offset to offset + 1
+    end
+end
+
+# ---------- numbers in bytes ----------
+
+# a whole number from `count` bytes of b, from byte `from`, "big" (the highest first) or "little"
+to number_of with b, from, count, order
+    set made to 0
+    if order is "big"
+        for each k from from to from + count - 1
+            set made to made * 256 + byte k of b
+        end
+    else
+        set k to from + count - 1
+        repeat while k is at least from
+            set made to made * 256 + byte k of b
+            set k to k - 1
+        end
+    end
+    return made
+end
+
+# the same, as two's complement: negative if its top bit is 1
+to signed_of with b, from, count, order
+    set n to number_of(b, from, count, order)
+    set top to 2 to the power of (8 * count - 1)
+    if n is at least top
+        return n - 2 * top
+    end
+    return n
+end
+
+# an IEEE 754 double from 8 bytes of b
+to double_of with b, from, order
+    set parts to empty list
+    for each k from 0 to 7
+        if order is "big"
+            add byte (from + k) of b to parts
+        else
+            add byte (from + 7 - k) of b to parts
+        end
+    end
+    set sign to 1
+    if item 1 of parts is at least 128
+        set sign to -1
+    end
+    set exponent to (item 1 of parts bit and 127) * 16 + (shift item 2 of parts right by 4)
+    set fraction to item 2 of parts bit and 15
+    for each k from 3 to 8
+        set fraction to fraction * 256 + item k of parts
+    end
+    if exponent is 2047
+        if fraction is 0
+            return sign * (10 to the power of 400)
+        end
+        fail with "this double isn't a number (NaN)"
+    end
+    if exponent is 0 # below the smallest normal one
+        return sign * fraction / (2 to the power of 1022) / (2 to the power of 52)
+    end
+    set whole to (fraction + (2 to the power of 52)) * sign
+    set e to exponent - 1075
+    if e is at least 0
+        return whole * (2 to the power of e)
+    else if e is at least -1022
+        return whole / (2 to the power of (0 - e))
+    end
+    return whole / (2 to the power of 1022) / (2 to the power of (0 - e - 1022))
+end
+
+# ---------- writing ----------
+
+# a writer: pieces of bytes, put together at the end
+to writer
+    return record with pieces empty list, size 0
+end
+
+to add_bytes with w, b
+    set kept to pieces of w
+    add b to kept
+    set size of w to size of w + length of b
+end
+
+# text's UTF-8
+to add_text with w, words
+    add_bytes(w, words as bytes)
+end
+
+to add_byte with w, b
+    add_bytes(w, (list of b) as bytes)
+end
+
+# a whole number in `count` bytes, "big" or "little"; one below 0 as two's complement
+to add_number with w, n, count, order
+    add_bytes(w, bytes_of_number(n, count, order))
+end
+
+# a whole number as `count` bytes, "big" or "little"; one below 0 as two's complement
+to bytes_of_number with n, count, order
+    set left to n
+    set flip to 0
+    if left is less than 0 # -n - 1 with each bit turned over, so a number to 2^53 stays exact in 8 bytes
+        set left to 0 - n - 1
+        set flip to 255
+    end
+    set made to count bytes
+    for each k from 0 to count - 1
+        set low to remainder of left divided by 256
+        if order is "big"
+            set byte (count - k) of made to low bit xor flip
+        else
+            set byte (k + 1) of made to low bit xor flip
+        end
+        set left to (left - low) / 256
+    end
+    return made
+end
+
+# a number as an IEEE 754 double, in 8 bytes, "big" or "little"
+to add_double with w, x, order
+    set made to 8 bytes
+    set sign to 0
+    set value to x
+    if value is less than 0 or ("" + value is "-0")
+        set sign to 1
+        set value to 0 - value
+    end
+    set exponent to 0
+    set fraction to 0
+    if value is 10 to the power of 400
+        set exponent to 2047
+    else if value is not 0
+        set e to 0
+        repeat while value is at least 2 to the power of (e + 1)
+            set e to e + 1
+        end
+        repeat while value is less than 2 to the power of e and e is greater than -1022
+            set e to e - 1
+        end
+        if value is less than 2 to the power of e # too small for a normal one
+            set exponent to 0
+            set fraction to (value * (2 to the power of 1022) * (2 to the power of 52)) rounded
+        else
+            set exponent to e + 1023
+            if e is at least 52
+                set fraction to value / (2 to the power of (e - 52)) - (2 to the power of 52)
+            else
+                set scale to 52 - e
+                set scaled to value
+                if scale is greater than 1000 # 2 to the power of 1074 is more than a double holds: two steps
+                    set scaled to scaled * (2 to the power of 1000)
+                    set scale to scale - 1000
+                end
+                set fraction to scaled * (2 to the power of scale) - (2 to the power of 52)
+            end
+        end
+    end
+    set high to sign * 2048 + exponent # 12 bits, then 52 of fraction
+    set low_part to remainder of fraction divided by 4294967296
+    set high_part to (fraction - low_part) / 4294967296 + high * 1048576
+    set high_bytes to bytes_of_number(high_part, 4, "big")
+    set low_bytes to bytes_of_number(low_part, 4, "big")
+    for each k from 1 to 4
+        set byte k of made to byte k of high_bytes
+        set byte (4 + k) of made to byte k of low_bytes
+    end
+    if order is "little"
+        set turned to 8 bytes
+        for each k from 1 to 8
+            set byte k of turned to byte (9 - k) of made
+        end
+        set made to turned
+    end
+    add_bytes(w, made)
+end
+
+# everything written, as one block of bytes
+to bytes_of with w
+    return joined(pieces of w)
+end
+
+# pieces of bytes, one after another, as one
+to joined with pieces
+    set total to 0
+    for each piece in pieces
+        set total to total + length of piece
+    end
+    set made to total bytes
+    set at to 0
+    for each piece in pieces
+        for each k from 1 to length of piece
+            set byte (at + k) of made to byte k of piece
+        end
+        set at to at + length of piece
+    end
+    return made
+end

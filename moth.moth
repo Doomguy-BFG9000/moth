@@ -5532,7 +5532,7 @@ end
 # then one of byte 1 and "moth-done ok" (or "moth-done failed"). A number and a space before the file's name
 # number the cell, as Jupyter does, if that's past the last cell's number. An empty line, or the input's end,
 # ends it. Its program and the file it keeps names in are its own, so two kernels can run in one folder.
-# (DESIGN §114)
+# (DESIGN §122)
 to cli_kernel with cli_flags
     set cli_host_now to cli_host()
     set cli_own to ".moth-kernel-" + (random number from 100000 to 999999)

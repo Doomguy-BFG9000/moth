@@ -1,4 +1,4 @@
-"""Tests for the Jupyter kernel, moth/moth_kernel.py (DESIGN §114), which machine.test.js runs with MOTH set to the
+"""Tests for the Jupyter kernel, moth/moth_kernel.py (DESIGN §122), which machine.test.js runs with MOTH set to the
 moth it built:
 
 - MothSession and execute against a stand-in for `moth kernel`, in Python, that talks as it does and runs each

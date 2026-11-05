@@ -1,0 +1,548 @@
+# JSON Web Tokens (RFC 7519), as Python's PyJWT has them: made and checked with a shared secret (HS256, HS384,
+# HS512), and checked with an RSA public key (RS256, RS384, RS512), in PEM or as a JWK, as identity providers
+# sign them. In Moth alone, so it works everywhere, but for the clock: now(), and verify when it isn't given
+# `now`, ask the system's clock through its C library, so a program `moth build` makes that uses them is built
+# with --allow-libraries; and in the playground, where no library loads, verify is given `now`.
+#
+#   use "jwt.moth" as jwt
+#   set token to jwt's make((dictionary where "sub" is "42", "exp" is jwt's now() + 3600), "a long random secret")
+#   set claims to jwt's verify(token, "a long random secret")   # its claims, or a mistake if it isn't good
+#   say item "sub" of claims
+#   set claims to jwt's verify(token, read "public.pem", record with issuer "https://id.example.com", audience "my-app")
+#   set claims to jwt's verify(token, key)        # a JWK: a dictionary with kty "RSA", n and e, as a JWKS lists
+#   set token to jwt's make(claims, secret, "HS512", dictionary where "kid" is "2026-11")   # another algorithm, a kid
+#   set parts to jwt's decode(token)               # its header and claims, NOT checked: to look at, never to trust
+#   set key to jwt's read_key(read "public.pem")   # an RSA key's n and e (as big.moth has them), and size in bytes
+#
+# verify checks the signature first, with an algorithm of the key's kind: a secret (text or bytes, or a JWK of
+# kty "oct") only with HS256, HS384 or HS512; an RSA key (a PEM public key, RSA public key or certificate, or a
+# JWK of kty "RSA") only with RS256, RS384 or RS512. So a token can't choose "none", nor HMAC with a public key
+# as its secret. Then its claims: exp (the moment it ends) and nbf (the moment it starts), in seconds since
+# 1970, give or take `leeway` seconds for clocks that differ; iat isn't after now; iss is `issuer`, if one's
+# given; and if the token has an aud, `audience` is one of them. Its options, a record or dictionary, can
+# have any of issuer, audience (each text or a list), leeway (0), require (claims it must have, as list of
+# "exp", "iss"), algorithms (those allowed, as list of "RS256") and now (the time to check against, for tests).
+# A token that isn't good is a `fail with` that says why: catch it with `try`.
+
+use "base64.moth" as jwt_b64
+use "hash.moth" as jwt_hash
+use "big.moth" as jwt_big
+use "secrets.moth" as jwt_secrets
+
+use the library "msvcrt"
+    "_time64" as jwt_windows_time(a pointer) gives a long whole number
+end
+use the library "c"
+    "time" as jwt_unix_time(a pointer) gives a long whole number
+end
+
+set jwt_url_letters to "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+set jwt_hex to "0123456789abcdef"
+
+# ---------- making ----------
+
+# a token of these claims (a dictionary or record), signed with a secret: HS256, or HS384 or HS512; `extra`,
+# a dictionary of more header fields, as kid
+to make with claims, key, algorithm or "HS256", extra or nothing
+    set name to uppercase of algorithm
+    set hashed to jwt_hmac_hash(name)
+    if hashed is nothing
+        fail with "jwt.moth makes tokens with HS256, HS384 or HS512, not " + algorithm
+    end
+    set signing to jwt_key(key)
+    if kind of signing is not "secret"
+        fail with "a token is made with a secret here: an RSA key can only check one"
+    end
+    set header to dictionary where "alg" is name, "typ" is "JWT"
+    if extra is not nothing
+        for each field in extra
+            if field is not "alg"
+                set item field of header to item field of extra
+            end
+        end
+    end
+    set body to claims
+    if jwt_is_record(claims)
+        set body to json from (claims as json)
+    end
+    if not jwt_is_dictionary(body)
+        fail with "a token's claims are a dictionary or a record"
+    end
+    set signed to jwt_url(header as json) + "." + jwt_url(body as json)
+    set signature to jwt_hash's bytes_of_hex(jwt_hash's hmac(hashed, secret of signing, signed))
+    return signed + "." + jwt_url(signature)
+end
+
+# ---------- reading ----------
+
+# a token's parts, NOT checked: its header and claims (dictionaries), signature (bytes), and signed (the text
+# its signature is of)
+to decode with token
+    if not jwt_is_text(token)
+        fail with "a token is text"
+    end
+    set parts to split token by "."
+    if length of parts is not 3
+        fail with "this isn't a JWT: it has " + (length of parts - 1) + " dots, not 2"
+    end
+    for each part in parts
+        for each c in part
+            if not (c is in jwt_url_letters)
+                fail with "this isn't a JWT: '" + c + "' isn't one of base64url's letters"
+            end
+        end
+    end
+    set header to jwt_json_object(item 1 of parts, "header")
+    set claims to jwt_json_object(item 2 of parts, "claims")
+    set signature to jwt_b64's bytes_of_url_base64(item 3 of parts)
+    return record with header header, claims claims, signature signature, signed (item 1 of parts + "." + item 2 of parts)
+end
+
+to jwt_json_object with part, what
+    set value to nothing
+    try
+        set value to json from (jwt_b64's bytes_of_url_base64(part) as text)
+    if it fails
+        fail with "this isn't a JWT: its " + what + " isn't JSON"
+    end
+    if not jwt_is_dictionary(value)
+        fail with "this isn't a JWT: its " + what + " isn't a JSON object"
+    end
+    return value
+end
+
+# ---------- checking ----------
+
+# the token's claims, once its signature and claims are checked; else a mistake that says what's wrong
+to verify with token, key, options or nothing
+    set given to jwt_options(options)
+    set parts to decode(token)
+    set header to header of parts
+    if not ("alg" is in header) or not jwt_is_text(item "alg" of header)
+        fail with "the token's header says no algorithm"
+    end
+    set name to item "alg" of header
+    if lowercase of name is "none"
+        fail with "a token with no signature (alg none) is never accepted"
+    end
+    if "crit" is in header
+        fail with "the token needs header fields (crit) that jwt.moth doesn't know"
+    end
+    set checking to jwt_key(key)
+    set allowed to list of "HS256", "HS384", "HS512"
+    if kind of checking is "rsa"
+        set allowed to list of "RS256", "RS384", "RS512"
+    end
+    if "algorithms" is in given
+        set kept to empty list
+        for each a in allowed
+            if a is in item "algorithms" of given
+                add a to kept
+            end
+        end
+        set allowed to kept
+    end
+    if not (name is in allowed)
+        if kind of checking is "rsa"
+            fail with "the token says " + name + ", but this RSA key checks only RS256, RS384 or RS512"
+        end
+        fail with "the token says " + name + ", but a secret checks only HS256, HS384 or HS512"
+    end
+    if kind of checking is "secret"
+        set expected to jwt_hash's bytes_of_hex(jwt_hash's hmac(jwt_hmac_hash(name), secret of checking, signed of parts))
+        if not jwt_secrets's same_secret(signature of parts, expected)
+            fail with "the token's signature isn't right"
+        end
+    else if not jwt_rsa_verified(checking, name, signed of parts, signature of parts)
+        fail with "the token's signature isn't right"
+    end
+    jwt_check_claims(claims of parts, given)
+    return claims of parts
+end
+
+to jwt_check_claims with claims, given
+    set moment to nothing
+    if "now" is in given
+        set moment to item "now" of given
+    else
+        set moment to now()
+    end
+    set leeway to 0
+    if "leeway" is in given
+        set leeway to item "leeway" of given
+    end
+    if "require" is in given
+        for each field in item "require" of given
+            if not (field is in claims)
+                fail with "the token has no " + field + " claim, which it must have"
+            end
+        end
+    end
+    for each field in list of "exp", "nbf", "iat"
+        if field is in claims and not jwt_is_number(item field of claims)
+            fail with "the token's " + field + " isn't a number of seconds"
+        end
+    end
+    if "exp" is in claims and moment - leeway is at least item "exp" of claims
+        fail with "the token has expired"
+    end
+    if "nbf" is in claims and item "nbf" of claims is greater than moment + leeway
+        fail with "the token isn't good yet: its nbf is after now"
+    end
+    if "iat" is in claims and item "iat" of claims is greater than moment + leeway
+        fail with "the token says it was made after now (iat)"
+    end
+    if "issuer" is in given
+        set wanted to jwt_listed(item "issuer" of given)
+        if not ("iss" is in claims) or not (item "iss" of claims is in wanted)
+            fail with "the token isn't from the issuer it should be (iss)"
+        end
+    end
+    set ours to empty list
+    if "audience" is in given
+        set ours to jwt_listed(item "audience" of given)
+    end
+    if "aud" is in claims
+        set shared to no
+        for each a in jwt_listed(item "aud" of claims)
+            if a is in ours
+                set shared to yes
+            end
+        end
+        if not shared
+            fail with "the token is for another audience (aud)"
+        end
+    else if length of ours is greater than 0
+        fail with "the token says no audience (aud), and one was expected"
+    end
+end
+
+# seconds since 1970 began, in UTC, as the system's clock has it
+to now
+    try
+        return jwt_windows_time(nothing)
+    if it fails
+        return jwt_unix_time(nothing)
+    end
+end
+
+# options, a record or a dictionary, as a dictionary
+to jwt_options with options
+    if options is nothing
+        return empty dictionary
+    end
+    if jwt_is_record(options)
+        return json from (options as json)
+    end
+    if not jwt_is_dictionary(options)
+        fail with "verify's options are a record or a dictionary"
+    end
+    return options
+end
+
+to jwt_listed with value
+    if jwt_is_list(value)
+        return value
+    end
+    return list of value
+end
+
+# the hash an HMAC algorithm uses, or nothing for one that isn't HMAC
+to jwt_hmac_hash with name
+    if name is "HS256"
+        return "sha256"
+    else if name is "HS384"
+        return "sha384"
+    else if name is "HS512"
+        return "sha512"
+    end
+    return nothing
+end
+
+# ---------- keys ----------
+
+# A key as jwt.moth reads one: a record with kind "secret", and its bytes as secret; or kind "rsa", with n and
+# e (big.moth's whole numbers, as text) and size, n's length in bytes. For a PEM public key, RSA public key or
+# certificate, a JWK, or a secret.
+to read_key with key
+    return jwt_key(key)
+end
+
+# A key as a record: kind "secret", with its bytes as secret; or kind "rsa", with n and e (big.moth's whole numbers, as
+# text), and size, n's length in bytes
+to jwt_key with key
+    if jwt_is_dictionary(key) or jwt_is_record(key)
+        return jwt_from_jwk(key)
+    end
+    if jwt_is_text(key) and "-----BEGIN" is in key
+        return jwt_from_pem(key)
+    end
+    set secret to key as bytes
+    if length of secret is 0
+        fail with "a secret for a token can't be empty"
+    end
+    return record with kind "secret", secret secret, n nothing, e nothing, size 0
+end
+
+# a JWK (RFC 7517): kty "RSA", with n and e, or kty "oct", with k
+to jwt_from_jwk with key
+    set fields to key
+    if jwt_is_record(key)
+        set fields to json from (key as json)
+    end
+    if not ("kty" is in fields)
+        fail with "this JWK has no kty"
+    end
+    set kty to item "kty" of fields
+    if kty is "oct"
+        return record with kind "secret", secret jwt_b64's bytes_of_url_base64(item "k" of fields), n nothing, e nothing, size 0
+    else if kty is "RSA"
+        if not ("n" is in fields) or not ("e" is in fields)
+            fail with "this RSA JWK needs n and e"
+        end
+        set n_bytes to jwt_b64's bytes_of_url_base64(item "n" of fields)
+        return jwt_rsa(jwt_number(n_bytes), jwt_number(jwt_b64's bytes_of_url_base64(item "e" of fields)))
+    end
+    fail with "jwt.moth checks tokens with RSA keys and secrets, not a JWK of kty " + kty
+end
+
+# a PEM file's key: a public key (SubjectPublicKeyInfo), an RSA public key (PKCS #1) or a certificate's
+to jwt_from_pem with words
+    set label to ""
+    set body to empty list
+    set inside to no
+    for each line in split words by "\n"
+        set trimmed to jwt_trimmed(line)
+        if items 1 to (length of "-----BEGIN ") of (trimmed + "           ") is "-----BEGIN "
+            set label to items 12 to (length of trimmed - 5) of trimmed
+            set inside to yes
+        else if items 1 to (length of "-----END ") of (trimmed + "         ") is "-----END "
+            set inside to no
+        else if inside
+            add trimmed to body
+        end
+    end
+    set der to jwt_b64's bytes_of_base64(join body with "")
+    if label is "RSA PUBLIC KEY"
+        return jwt_rsa_of_pkcs1(der, 1)
+    else if label is "PUBLIC KEY"
+        return jwt_rsa_of_spki(der, 1)
+    else if label is "CERTIFICATE"
+        set certificate to jwt_der(der, 1)
+        set signed to jwt_der_children(der, certificate)
+        set inside_fields to jwt_der_children(der, item 1 of signed)
+        set k to 1
+        if tag of item 1 of inside_fields is 160 # [0], its version
+            set k to 2
+        end
+        set spki to item (k + 5) of inside_fields
+        return jwt_rsa_of_spki(der, at of spki)
+    else if "PRIVATE KEY" is in label
+        fail with "this is a private key: a token is checked with the public key, which can't sign"
+    end
+    fail with "jwt.moth reads PEM public keys, RSA public keys and certificates, not " + label
+end
+
+# SubjectPublicKeyInfo: the algorithm, which must be RSA's, then the key in a bit string
+to jwt_rsa_of_spki with der, at
+    set info to jwt_der(der, at)
+    set parts to jwt_der_children(der, info)
+    set algorithm to jwt_der_children(der, item 1 of parts)
+    set rsa_oid to (list of 42, 134, 72, 134, 247, 13, 1, 1, 1) as bytes # 1.2.840.113549.1.1.1
+    if tag of item 1 of algorithm is not 6 or jwt_der_value(der, item 1 of algorithm) is not rsa_oid
+        fail with "this public key isn't RSA's: jwt.moth checks RS256, RS384 and RS512"
+    end
+    set bits to item 2 of parts
+    return jwt_rsa_of_pkcs1(der, start of bits + 1) # after the bit string's count of unused bits, 0
+end
+
+# RSAPublicKey: SEQUENCE { n, e }
+to jwt_rsa_of_pkcs1 with der, at
+    set numbers to jwt_der_children(der, jwt_der(der, at))
+    return jwt_rsa(jwt_number(jwt_der_value(der, item 1 of numbers)), jwt_number(jwt_der_value(der, item 2 of numbers)))
+end
+
+to jwt_rsa with n, e
+    set size to (length of jwt_big's in_base(n, 16) + 1) / 2 rounded down
+    if size is less than 256
+        fail with "this RSA key has " + (size * 8) + " bits: it needs 2048 or more"
+    end
+    return record with kind "rsa", secret nothing, n n, e e, size size
+end
+
+# A DER element at byte `at`: its tag, where its value starts and how long it is
+to jwt_der with der, at
+    if at + 1 is greater than length of der
+        fail with "this key isn't DER: it ends too soon"
+    end
+    set tag to byte at of der
+    set first to byte (at + 1) of der
+    set size to first
+    set start to at + 2
+    if first is greater than 127
+        set count to first - 128
+        if count is 0 or count is greater than 4
+            fail with "this key isn't DER: a length is wrong"
+        end
+        set size to 0
+        for each k from 1 to count
+            set size to size * 256 + byte (at + 1 + k) of der
+        end
+        set start to at + 2 + count
+    end
+    if start + size - 1 is greater than length of der
+        fail with "this key isn't DER: it ends too soon"
+    end
+    return record with tag tag, at at, start start, size size
+end
+
+# the elements inside a SEQUENCE (or another element made of them)
+to jwt_der_children with der, element
+    set made to empty list
+    set k to start of element
+    repeat while k is less than start of element + size of element
+        set child to jwt_der(der, k)
+        add child to made
+        set k to start of child + size of child
+    end
+    return made
+end
+
+to jwt_der_value with der, element
+    if size of element is 0
+        return 0 bytes
+    end
+    return items (start of element) to (start of element + size of element - 1) of der
+end
+
+# bytes, the highest first, as a whole number (big.moth's, as text)
+to jwt_number with b
+    set digits to empty list
+    for each x in b
+        add item ((shift x right by 4) + 1) of jwt_hex + item ((x bit and 15) + 1) of jwt_hex to digits
+    end
+    if length of digits is 0
+        return "0"
+    end
+    return jwt_big's from_base(join digits with "", 16)
+end
+
+# ---------- RSA ----------
+
+# whether an RSASSA-PKCS1-v1_5 signature (RFC 8017) is the key's of these bytes: the signature to the power
+# e, as bytes, must be exactly 00 01 FF ... FF 00, the hash's DigestInfo, and the hash
+to jwt_rsa_verified with key, name, signed, signature
+    if length of signature is not size of key
+        return no
+    end
+    set s to jwt_number(signature)
+    if jwt_big's compare(s, n of key) is not -1
+        return no
+    end
+    set m to jwt_big's power_mod(s, e of key, n of key)
+    set hex to jwt_big's in_base(m, 16)
+    repeat while length of hex is less than size of key * 2
+        set hex to "0" + hex
+    end
+    set prefix to ""
+    set hashed to ""
+    if name is "RS256"
+        set prefix to "3031300d060960864801650304020105000420"
+        set hashed to jwt_hash's sha256(signed)
+    else if name is "RS384"
+        set prefix to "3041300d060960864801650304020205000430"
+        set hashed to jwt_hash's sha384(signed)
+    else
+        set prefix to "3051300d060960864801650304020305000440"
+        set hashed to jwt_hash's sha512(signed)
+    end
+    set tail to "00" + prefix + hashed
+    set fill to ""
+    repeat (size of key * 2 - 4 - length of tail) / 2 times
+        set fill to fill + "ff"
+    end
+    return jwt_secrets's same_secret(lowercase of hex, "0001" + fill + tail)
+end
+
+# ---------- small things ----------
+
+# text or bytes in base64url, with no = at the end, as a JWT has it
+to jwt_url with data
+    set made to jwt_b64's url_base64_of(data)
+    repeat while length of made is greater than 0 and item (length of made) of made is "="
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end
+
+to jwt_trimmed with words
+    set cr to (list of 13) as bytes as text
+    set made to words
+    repeat while length of made is greater than 0 and (item 1 of made is " " or item 1 of made is "\t")
+        set made to items 2 to (length of made) of made
+    end
+    repeat while length of made is greater than 0 and (item (length of made) of made is " " or item (length of made) of made is "\t" or item (length of made) of made is cr)
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end
+
+to jwt_text_check with value as text
+    return yes
+end
+
+to jwt_is_text with value
+    try
+        return jwt_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to jwt_number_check with value as a number
+    return yes
+end
+
+to jwt_is_number with value
+    try
+        return jwt_number_check(value)
+    if it fails
+        return no
+    end
+end
+
+to jwt_list_check with value as a list
+    return yes
+end
+
+to jwt_is_list with value
+    try
+        return jwt_list_check(value)
+    if it fails
+        return no
+    end
+end
+
+to jwt_dictionary_check with value as a dictionary
+    return yes
+end
+
+to jwt_is_dictionary with value
+    try
+        return jwt_dictionary_check(value)
+    if it fails
+        return no
+    end
+end
+
+to jwt_record_check with value as a record
+    return yes
+end
+
+to jwt_is_record with value
+    try
+        return jwt_record_check(value)
+    if it fails
+        return no
+    end
+end
