@@ -1,0 +1,17 @@
+# price_of: what one of an item costs, in pounds
+to price_of with thing as text gives a number
+    match thing
+        when "apples"
+            return 2.4
+        when "bread"
+            return 1.35
+        when "tea"
+            return 3.1
+        else
+            fail with "we don't sell {thing}"
+    end
+end
+
+to test_price_of
+    expect price_of("tea") is 3.1
+end
