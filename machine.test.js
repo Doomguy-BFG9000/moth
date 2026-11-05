@@ -1589,6 +1589,30 @@ test("moth lsp answers an editor: problems as it's typed, tidying, the outline, 
   await assert.rejects(startServer(exe, { args: ["lsp-not"] }), /moth lsp couldn't start: it ended with 2/);
 });
 
+// `ask for 5 bytes` (DESIGN §108), what moth lsp reads messages with: the next 5 bytes of the input, waited for
+// but not to a line's end, or as many as come before it ends, and then none; from the same input `ask` reads
+// lines from. Only machine code reads the input so: the playground's engines say so.
+test("ask for ... bytes reads the input as it comes, in machine code", { skip }, () => {
+  const source = ['set name to ask "Name? "', 'say "hi " name', "set got to ask for 5 bytes", "repeat while length of got is greater than 0",
+    '    say length of got ": " (got as text)', "    set got to ask for 5 bytes", "end", "say length of (ask for 3 bytes)", "try",
+    "    say ask for -1 bytes", "if it fails with why", "    say why", "end"].join("\n");
+  const dir = mkdtempSync(join(tmpdir(), "moth-machine-"));
+  try {
+    const exe = executable(dir, "ask");
+    writeFileSync(exe, machine(source, { target, name: "ask.moth" }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { input: "Sam\nhello world é", encoding: "utf8", timeout: 60_000 });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status],
+      ["Name?  Sam\nhi Sam\n5: hello\n5:  worl\n4: d é\n0\n'bytes' needs a whole number in front of it, not -1\n", "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const engine of ["vm", "jit", "wasm"]) {
+    assert.throws(() => run("say length of (ask for 5 bytes)", () => {}, { engine }), { reason: "'ask for ... bytes' reads the input as it comes, which only a program moth builds can do" });
+  }
+  assert.throws(() => run('say ask for "x"', () => {}), { reason: "say how many bytes, as in 'ask for 64 bytes'" });
+});
+
 // `moth test`: every test_ function in a file, each in a run of its own, said as test() in moth.js says it.
 const TESTS_IN_MOTH = ["set count to 0", "to average with numbers", "    return 10 / length of numbers", "end",
   "to test_one", "    add 1 to count", "    expect count is 1", "end", "to test_two", "    add 1 to count",
