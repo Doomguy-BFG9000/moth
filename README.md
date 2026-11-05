@@ -351,7 +351,8 @@ bytes and dictionaries:
   ```
 - **The standard library:** math.moth and the libraries below (not the
   example programs) are built into moth, so `use "json.moth"` works in any
-  folder; a file of that name beside the program comes first.
+  folder, and in a package; a file of that name beside the file that uses it
+  comes first.
   [`stdlib.moth`](stdlib.moth) holds them, made by `node make-stdlib.mjs`.
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
@@ -1171,7 +1172,7 @@ import mothlang as moth
 print(moth.run('say "Hello from Moth"').output)
 
 fast = moth.load("fast.moth")      # built into a library the first time, then cached
-print(fast.fib(30))                # 832040, about 14 times as fast as in Python
+print(fast.fib(30))                # 832040, 10 to 13 times as fast as in Python
 ```
 
 `moth.load` builds a file with `moth build --library` and calls its
@@ -1285,8 +1286,10 @@ anywhere fetches the same code; a program uses it with `use the package "json"
 as json`. If the package lists packages of its own in a `moth.packages`, they
 come too, at their commits. A file uses files from its own folder, so a
 package's `use "helpers.moth"` is its own helpers, and `use the package` is
-always the program's, from wherever it's written. moth runs the system's `git`
-to fetch them.
+always the program's, from wherever it's written. A package uses the standard
+library as a program does: its `use "text.moth"` is moth's own, unless the
+package has a `text.moth` of its own. moth runs the system's `git` to fetch
+them.
 
 `moth.sums`, beside `moth.packages`, has the SHA-256 of each package's files.
 `moth add` and `moth update` write it and `moth get` checks it, so a package
@@ -1612,7 +1615,9 @@ calls that led there.
 - packages: Git repositories made by the tests, added, run, updated to a new
   commit, fetched again after `packages/` is gone, a package that uses another
   bringing it at its commit, the mistakes, and removed, through moth.exe on
-  Windows and Linux; and files in folders and `use the package` on all three
+  Windows and Linux; a package that uses text.moth and dates.moth from the
+  standard library, run, checked, built, made a page and tested, its own
+  json.moth first; and files in folders and `use the package` on all three
   engines and in the compiler written in Moth
 - the VS Code extension: its colours, run through a TextMate tokenizer of the
   tests' own, on the words the playground colours, values in text and every
@@ -1672,7 +1677,7 @@ calls that led there.
   Runtime, and Python run inside a program, where each is installed (CI
   installs them)
 - mothlang, the Python package: a wheel built with moth in it, installed,
-  and its pytest tests run on Linux (Python 3.9 and 3.13) and Windows:
+  and its pytest tests run on Linux (Python 3.10 and 3.14) and Windows:
   values both ways, mistakes, threads, deep recursion, the cache, moth.run
   and the moth command; then the benchmark
 - libraries for C: a C program, built with gcc, calling a library's
@@ -1902,6 +1907,7 @@ Moth keeps its promises in writing, for anyone who builds on it:
 npm test                     # everything above, in a few minutes
 npm run bench                # the engines, timed
 npm run versus               # Moth against C, Rust and Python
+node bench-count.mjs x.moth  # where x's machine code runs its instructions (Linux, with valgrind)
 node bootstrap.mjs           # moth.exe (moth on Linux), made from the source
 python -m http.server        # then open http://localhost:8000 for the playground
 ```

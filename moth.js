@@ -2731,7 +2731,7 @@ export function machineCompiler(machineSource, compilerSource) {
   // `icon`, an .ico or .png file's bytes, and `version`, as "1.2.0", for a Windows program; `include`, files built
   // into the program, as { "logo.png": bytes }, which its `read`s find there first; `debug`, a build for `moth debug`,
   // which needs the debugger, moth-debugger.moth, among the files; `library`, a shared library of the program's
-  // functions for C (DESIGN §127), and `header`, the C header for one, as text
+  // functions for C (DESIGN §129), and `header`, the C header for one, as text
   return (source, { files = {}, target, name = "program.moth", allow = [], icon = null, version = null, include = {}, debug = false, library = false, header = false } = {}) => {
     try {
       if (header) return libraryHeader(source, Object.keys(files), Object.values(files), name);

@@ -14,8 +14,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 - **Moth from Python.** `pip install mothlang` (a wheel for Windows and one for Linux, each with `moth` in
   it): `moth.load("fast.moth")` builds the file into a library once, caches it, and calls its functions
   through ctypes, with Python's own values going across and Moth's mistakes raised as `MothError`;
-  `moth.run(source)` runs a program; and the wheel gives you the `moth` command. fib(30) runs 14 times as fast
-  as in Python.
+  `moth.run(source)` runs a program; and the wheel gives you the `moth` command. fib(30) runs 10 to 13 times as
+  fast as in Python.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
@@ -75,6 +75,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   `wire.moth`. `s3.moth` keeps objects in S3 and the stores that speak its language, `jwt.moth` makes and
   checks JSON Web Tokens, `oauth.moth` signs a person in with OAuth 2 and PKCE, and `yaml.moth` reads and
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
+- **Fixes.** A package can use the standard library: `use "text.moth"` in a package, or in a file it uses,
+  is moth's own `text.moth` unless the package has one, so a package no longer needs copies of its own.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 
