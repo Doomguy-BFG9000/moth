@@ -2010,8 +2010,9 @@ say "done"
 
 // tools/mysql.moth against MySQL 8.4: caching_sha2_password the full way, its password sent RSA-encrypted (TLS
 // is "prefer", and the server's certificate is its own, which can't be checked), then the fast way; every kind
-// of value both ways, by prepared statements and as text; errors; a mysql_native_password user (a server
-// without that plugin skips it); a password it won't take; and TLS required of a certificate it can't check
+// of value both ways, by prepared statements and as text; errors; a mysql_native_password user and a
+// sha256_password user (a server without the plugin skips it); users that aren't there, whom the server gives a
+// plugin at random, refused all the same; and TLS required of a certificate it can't check
 test("tools/mysql.moth queries a real MySQL, with prepared statements, types and transactions", { skip: live("MOTH_MYSQL_URL") }, () => {
   const ran = companyRun(String.raw`use "mysql.moth" as mysql
 
@@ -2078,12 +2079,33 @@ if native
 else
     say "mysql_native_password: not on this server"
 end
-set item "user" of parts to "nobody"
-set item "password" of parts to "wrong"
+# a user of sha256_password, where the server has it: its password RSA-encrypted, as there's no TLS
+set sha256 to yes
 try
-    mysql's connect(parts)
-if it fails with why
-    say item 1 of split why by "@"
+    mysql's run_script(db, "drop user if exists 'moth_sha256'@'%'; create user 'moth_sha256'@'%' identified with sha256_password by 'sha256-test'")
+if it fails
+    set sha256 to no
+end
+if sha256
+    set item "user" of parts to "moth_sha256"
+    set item "password" of parts to "sha256-test"
+    set item "database" of parts to nothing
+    set sha256_db to mysql's connect(parts)
+    say mysql's query_one(sha256_db, "select current_user() as who")
+    mysql's close(sha256_db)
+    mysql's run_script(db, "drop user 'moth_sha256'@'%'")
+else
+    say "sha256_password: not on this server"
+end
+# users that aren't there: the server gives each a plugin at random, so it can't be told from one that is
+for each k from 1 to 6
+    set item "user" of parts to "nobody" + k
+    set item "password" of parts to "wrong"
+    try
+        mysql's connect(parts)
+    if it fails with why
+        say item 1 of split why by "@"
+    end
 end
 set item "user" of parts to "root"
 set item "tls" of parts to "require"
@@ -2097,7 +2119,9 @@ say "done"
 `, [process.env.MOTH_MYSQL_URL]);
   assert.deepEqual([ran.stderr, ran.status], ["", 0], ran.stdout);
   const native = '(dictionary where "who" is "moth_native@%")';
-  assert.deepEqual(ran.lines.map((line) => (line === "mysql_native_password: not on this server" ? native : line)), [
+  const sha256 = '(dictionary where "who" is "moth_sha256@%")';
+  const missing = { "mysql_native_password: not on this server": native, "sha256_password: not on this server": sha256 };
+  assert.deepEqual(ran.lines.map((line) => missing[line] ?? line), [
     "connected, secure: no",
     "1 1",
     "1",
@@ -2114,7 +2138,8 @@ say "done"
     "MySQL said: Duplicate entry '1' for key 'moth_people.PRIMARY' (1062, 23000)",
     "the SQL has 2 ?s, and 1 values were given",
     "(dictionary where \"who\" is \"moth_native@%\")",
-    "MySQL said: Access denied for user 'nobody'",
+    "(dictionary where \"who\" is \"moth_sha256@%\")",
+    ...[1, 2, 3, 4, 5, 6].map((k) => `MySQL said: Access denied for user 'nobody${k}'`),
     "TLS required, and the server's certificate can't be checked: refused",
     "done",
   ]);

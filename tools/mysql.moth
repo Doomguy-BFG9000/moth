@@ -1,8 +1,8 @@
 # MySQL and MariaDB, as Python's PyMySQL has them: connected over their own protocol, logged in with
-# caching_sha2_password (MySQL 8's) or mysql_native_password, over TLS where asked for; prepared statements
-# with their values as parameters, sent apart from the SQL so no value is ever read as SQL; rows as
-# dictionaries, each value as Moth has it; and transactions. On sockets.moth: a program `moth build` makes can
-# use it, built with --allow-libraries.
+# caching_sha2_password (MySQL 8's), sha256_password or mysql_native_password, over TLS where asked for;
+# prepared statements with their values as parameters, sent apart from the SQL so no value is ever read as SQL;
+# rows as dictionaries, each value as Moth has it; and transactions. On sockets.moth: a program `moth build`
+# makes can use it, built with --allow-libraries.
 #
 #   use "mysql.moth" as mysql
 #   set db to mysql's connect(record with host "localhost", port 3306, user "app", password "secret", database "shop")
@@ -21,7 +21,7 @@
 # connect's record has host, port (3306), user, password, database (or none), tls ("prefer": TLS if the server
 # has it and its certificate can be checked, "require": checked TLS or a mistake, "disable": never) and trust
 # (a PEM file of certificates to trust besides the system's); each but user can be left out. Without TLS,
-# caching_sha2_password sends the password encrypted with the server's RSA key, as MySQL 8 asks. Parameters
+# caching_sha2_password and sha256_password send the password encrypted with the server's RSA key. Parameters
 # are ? in the SQL: text, numbers, yes and no, nothing (NULL), bytes, and lists, dictionaries and records (as
 # JSON). Values come back as text, numbers (integers, floats and decimals), nothing, bytes (binary columns),
 # and what JSON says (JSON columns); dates and times are text, as "2026-11-04 10:15:00". A statement MySQL
@@ -157,7 +157,7 @@ to my_start with db, host, user, password, database, tls
     end
     set plugin to plugin of hello
     set nonce to nonce of hello
-    my_send(db, my_handshake_answer(capabilities, user, my_scramble(plugin, password, nonce), database, plugin))
+    my_send(db, my_handshake_answer(capabilities, user, my_scramble(plugin, password, nonce, secure of db), database, plugin))
     repeat while yes
         set p to my_packet(db)
         set first to byte 1 of p
@@ -173,23 +173,18 @@ to my_start with db, host, user, password, database, tls
             if length of nonce is greater than 0 and byte (length of nonce) of nonce is 0
                 set nonce to items 1 to (length of nonce - 1) of nonce
             end
-            my_send(db, my_scramble(plugin, password, nonce))
+            my_send(db, my_scramble(plugin, password, nonce, secure of db))
+        else if first is 1 and plugin is "sha256_password" # the server's RSA key, which it was asked for
+            my_send(db, my_encrypted(password, nonce, (items 2 to (length of p) of p) as text))
         else if first is 1 and length of p is 2 and byte 2 of p is 3
             set first to first # caching_sha2_password: the fast way worked; the OK comes next
         else if first is 1 and length of p is 2 and byte 2 of p is 4 # the full way: the password itself
-            set zeroed to my_wire's joined(list of (password as bytes), (list of 0) as bytes)
             if secure of db
-                my_send(db, zeroed)
+                my_send(db, my_wire's joined(list of (password as bytes), (list of 0) as bytes))
             else
                 my_send(db, (list of 2) as bytes) # the server's RSA key, to send it encrypted
                 set key_packet to my_packet(db)
-                set pem to (items 2 to (length of key_packet) of key_packet) as text
-                set masked to (length of zeroed) bytes
-                for each k from 1 to length of zeroed
-                    set at to (remainder of (k - 1) divided by (length of nonce)) + 1
-                    set byte k of masked to byte k of zeroed bit xor byte at of nonce
-                end
-                my_send(db, rsa_oaep(masked, my_jwt's read_key(pem), my_secrets's random_bytes(20)))
+                my_send(db, my_encrypted(password, nonce, (items 2 to (length of key_packet) of key_packet) as text))
             end
         else
             fail with "the MySQL server logs in a way mysql.moth doesn't know (" + first + ")"
@@ -249,8 +244,10 @@ to my_handshake_answer with capabilities, user, scrambled, database, plugin
     return my_wire's bytes_of(w)
 end
 
-# the password as a plugin proves it with the nonce: no bytes for no password
-to my_scramble with plugin, password, nonce
+# the password as a plugin proves it with the nonce: no bytes for no password. sha256_password sends the
+# password itself over TLS, and without it asks for the server's RSA key (1), to send it encrypted. A server
+# gives a user that isn't there any of the three, so that it can't be told from one that is.
+to my_scramble with plugin, password, nonce, over_tls or no
     if password is "" or password is nothing
         return 0 bytes
     end
@@ -258,8 +255,30 @@ to my_scramble with plugin, password, nonce
         return native_scramble(password, nonce)
     else if plugin is "caching_sha2_password"
         return sha2_scramble(password, nonce)
+    else if plugin is "sha256_password"
+        if over_tls
+            return my_wire's joined(list of (password as bytes), (list of 0) as bytes)
+        end
+        return (list of 1) as bytes
     end
-    fail with "the MySQL server logs in with " + plugin + ", and mysql.moth has caching_sha2_password and mysql_native_password"
+    fail with "the MySQL server logs in with " + plugin + ", and mysql.moth has caching_sha2_password, sha256_password and mysql_native_password"
+end
+
+# the password and a 0, XORed with the nonce over and over
+to my_masked with password, nonce
+    set zeroed to my_wire's joined(list of (password as bytes), (list of 0) as bytes)
+    set masked to (length of zeroed) bytes
+    for each k from 1 to length of zeroed
+        set at to (remainder of (k - 1) divided by (length of nonce)) + 1
+        set byte k of masked to byte k of zeroed bit xor byte at of nonce
+    end
+    return masked
+end
+
+# the password as caching_sha2_password's full way and sha256_password send it without TLS: masked, then
+# encrypted with the server's RSA key (a PEM public key) and a random seed
+to my_encrypted with password, nonce, pem
+    return rsa_oaep(my_masked(password, nonce), my_jwt's read_key(pem), my_secrets's random_bytes(20))
 end
 
 # mysql_native_password's: SHA1(password) XOR SHA1(nonce + SHA1(SHA1(password)))
