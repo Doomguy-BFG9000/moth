@@ -23,8 +23,9 @@
 # stops halfway, holds up nobody. A connection is kept open for the requests after the first (HTTP/1.1
 # keep-alive), and answers them in the order they came, even when they come together. Each request is given
 # `timeout` milliseconds to arrive once it has begun, and a kept connection `idle_timeout` to begin the next;
-# one that goes over is answered 408 and closed. An answer the other end takes none of for `timeout` is cut off. A request bigger than `most_bytes` is answered 413, headers over
-# 64 KB 431, and one that can't be read 400. Only `most_connections` are held at once, and while they are, the
+# one that goes over is answered 408 and closed. An answer the other end takes none of for `timeout` is cut
+# off. A request bigger than `most_bytes` is answered 413, headers over 64 KB 431, and one that can't be read
+# 400. Only `most_connections` are held at once, and while they are, the
 # rest wait in the system's own queue.
 #
 #   web's set_timeout(30000)          # how long a request has to arrive, once begun, or an answer can wait
@@ -34,6 +35,10 @@
 #   web's set_most_requests(1000)     # how many a connection answers before it's closed
 #   web's set_keep_alive(no)          # a connection closed after each request, as HTTP/1.0 had it
 #   web's set_workers(4)              # answered on 4 workers; 0 for one a core
+#   web's serve_everywhere(8080, answer)              # from every network the computer is on
+#   web's serve_on_workers(8080, answer, 4)           # on 4 workers at once, each a core of its own
+#   web's serve_secure(8443, answer, "cert.pem", "key.pem")   # HTTPS
+#   web's stop_serving()              # in a handler: serve returns once what's being sent is sent
 #
 # serve() answers this computer alone (127.0.0.1); serve_everywhere() every network it's on. stop_serving()
 # ends serve() once the requests it's answering are sent. Built with --allow-libraries.

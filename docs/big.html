@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>big.moth · Moth's standard library</title>
+  <meta name="description" content="Whole numbers of any size, kept as text: &quot;265252859812191058636308480000000&quot;.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>big</em>.moth</h1>
+      <p>Whole numbers of any size, kept as text: &quot;265252859812191058636308480000000&quot;.</p>
+      <p class="use"><code>use "big.moth" as big</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="big.moth's functions">
+      <h2>18 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#whole">whole</a></li><li><a href="#plus">plus</a></li><li><a href="#minus">minus</a></li><li><a href="#times">times</a></li><li><a href="#divided">divided</a></li><li><a href="#remainder">remainder</a></li><li><a href="#power">power</a></li><li><a href="#compare">compare</a></li><li><a href="#absolute">absolute</a></li><li><a href="#negated">negated</a></li><li><a href="#gcd">gcd</a></li><li><a href="#lcm">lcm</a></li><li><a href="#square_root">square_root</a></li><li><a href="#factorial">factorial</a></li><li><a href="#choices">choices</a></li><li><a href="#power_mod">power_mod</a></li><li><a href="#in_base">in_base</a></li><li><a href="#from_base">from_base</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Whole numbers of any size, kept as text: &quot;265252859812191058636308480000000&quot;. So <code>say</code> shows one, <code>is</code> compares two, and save and json keep them as they are. Each function takes such text, or a whole number, and gives text back: <code>use &quot;big.moth&quot; as big</code>, then big's <a href="#times">times</a>(f, 30), big's <a href="#power">power</a>(2, 100). As Python's math has them too: gcd, lcm, <a href="#square_root">square_root</a> (math.isqrt), factorial, choices (math.comb), <a href="#power_mod">power_mod</a> (pow(a, n, m)), absolute and negated; and <a href="#in_base">in_base</a> and <a href="#from_base">from_base</a>, for bases 2 to 36.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="whole">
+          <h3><a href="#whole"><code>big's whole(x)</code></a></h3>
+          <p>x as these functions give it: &quot;007&quot; is &quot;7&quot;, and &quot;-0&quot; is &quot;0&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to whole with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L73">big.moth line 73</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's whole(<span class="s">&quot;007&quot;</span>)</code></pre><pre class="says"><code>7</code></pre></div>
+        </section>
+        <section class="fn" id="plus">
+          <h3><a href="#plus"><code>big's plus(a, b)</code></a></h3>
+          <p>a + b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to plus with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L236">big.moth line 236</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's plus(<span class="s">&quot;99999999999999999999&quot;</span>, <span class="n">1</span>)</code></pre><pre class="says"><code>100000000000000000000</code></pre></div>
+        </section>
+        <section class="fn" id="minus">
+          <h3><a href="#minus"><code>big's minus(a, b)</code></a></h3>
+          <p>a - b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to minus with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L249">big.moth line 249</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's minus(<span class="n">1</span>, <span class="s">&quot;10000000000000000000000&quot;</span>)</code></pre><pre class="says"><code>-9999999999999999999999</code></pre></div>
+        </section>
+        <section class="fn" id="times">
+          <h3><a href="#times"><code>big's times(a, b)</code></a></h3>
+          <p>a times b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to times with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L255">big.moth line 255</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's <span class="k">times</span>(<span class="s">&quot;-12345678901234567890&quot;</span>, <span class="s">&quot;98765432109876543210&quot;</span>)</code></pre><pre class="says"><code>-1219326311370217952237463801111263526900</code></pre></div>
+        </section>
+        <section class="fn" id="divided">
+          <h3><a href="#divided"><code>big's divided(a, b)</code></a></h3>
+          <p>a divided by b, a whole number, rounded down as Python's // does: divided(-7, 2) is -4</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to divided with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L280">big.moth line 280</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's <span class="k">divided</span>(<span class="s">&quot;1267650600228229401496703205376&quot;</span>, <span class="s">&quot;1024&quot;</span>)</code></pre><pre class="says"><code>1237940039285380274899124224</code></pre></div>
+        </section>
+        <section class="fn" id="remainder">
+          <h3><a href="#remainder"><code>big's remainder(a, b)</code></a></h3>
+          <p>what's left after dividing a by b, as Python's % has it, with b's sign: remainder(-7, 2) is 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to remainder with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L285">big.moth line 285</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's <span class="k">remainder</span>(-<span class="n">7</span>, <span class="n">2</span>)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="power">
+          <h3><a href="#power"><code>big's power(a, n)</code></a></h3>
+          <p>a to the power of n, a whole number of 0 or more</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to power with a, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L290">big.moth line 290</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's <span class="k">power</span>(<span class="n">2</span>, <span class="n">100</span>)</code></pre><pre class="says"><code>1267650600228229401496703205376</code></pre></div>
+        </section>
+        <section class="fn" id="compare">
+          <h3><a href="#compare"><code>big's compare(a, b)</code></a></h3>
+          <p>-1, 0 or 1: whether a is less than, the same as, or more than b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to compare with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L310">big.moth line 310</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's compare(<span class="s">&quot;100000000000000000000&quot;</span>, <span class="s">&quot;99999999999999999999&quot;</span>)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="absolute">
+          <h3><a href="#absolute"><code>big's absolute(a)</code></a></h3>
+          <p>a without its sign</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to absolute with a</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L329">big.moth line 329</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's absolute(<span class="s">&quot;-5&quot;</span>)</code></pre><pre class="says"><code>5</code></pre></div>
+        </section>
+        <section class="fn" id="negated">
+          <h3><a href="#negated"><code>big's negated(a)</code></a></h3>
+          <p>a with its sign the other way</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to negated with a</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L335">big.moth line 335</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's negated(<span class="n">5</span>)</code></pre><pre class="says"><code>-5</code></pre></div>
+        </section>
+        <section class="fn" id="gcd">
+          <h3><a href="#gcd"><code>big's gcd(a, b)</code></a></h3>
+          <p>the largest whole number both divide by, never below 0, and 0 for 0 and 0 (math.gcd)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to gcd with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L341">big.moth line 341</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's gcd(<span class="s">&quot;1071&quot;</span>, <span class="s">&quot;462&quot;</span>)</code></pre><pre class="says"><code>21</code></pre></div>
+        </section>
+        <section class="fn" id="lcm">
+          <h3><a href="#lcm"><code>big's lcm(a, b)</code></a></h3>
+          <p>the smallest whole number above 0 that both divide, or 0 if either is 0 (math.lcm)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to lcm with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L353">big.moth line 353</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's lcm(<span class="n">4</span>, <span class="n">6</span>)</code></pre><pre class="says"><code>12</code></pre></div>
+        </section>
+        <section class="fn" id="square_root">
+          <h3><a href="#square_root"><code>big's square_root(a)</code></a></h3>
+          <p>the whole square root, rounded down: the largest r with r times r at most a (math.isqrt)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to square_root with a</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L361">big.moth line 361</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's square_root(<span class="n">0</span>)</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="factorial">
+          <h3><a href="#factorial"><code>big's factorial(n)</code></a></h3>
+          <p>1 times 2 times ... n, for a whole number n of 0 or more (math.factorial)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to factorial with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L382">big.moth line 382</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's factorial(<span class="n">0</span>)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="choices">
+          <h3><a href="#choices"><code>big's choices(n, k)</code></a></h3>
+          <p>how many ways there are to choose k things of n, in no order (math.comb)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li><li><code>k</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to choices with n, k</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L394">big.moth line 394</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's choices(<span class="n">52</span>, <span class="n">5</span>)</code></pre><pre class="says"><code>2598960</code></pre></div>
+        </section>
+        <section class="fn" id="power_mod">
+          <h3><a href="#power_mod"><code>big's power_mod(a, n, m)</code></a></h3>
+          <p>a to the power of n, divided by m, and what's left: Python's pow(a, n, m), worked out a step at a time without the whole power, so n can have hundreds of digits</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>n</code></li><li><code>m</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to power_mod with a, n, m</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L414">big.moth line 414</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's power_mod(<span class="n">4</span>, <span class="n">13</span>, <span class="n">497</span>)</code></pre><pre class="says"><code>445</code></pre></div>
+        </section>
+        <section class="fn" id="in_base">
+          <h3><a href="#in_base"><code>big's in_base(a, b)</code></a></h3>
+          <p>a written in base b, 2 to 36, in lowercase, as Python's format(a, &quot;x&quot;) or &quot;b&quot; writes it; &quot;-&quot; first below 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to in_base with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L446">big.moth line 446</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's in_base(<span class="n">255</span>, <span class="n">16</span>)</code></pre><pre class="says"><code>ff</code></pre></div>
+        </section>
+        <section class="fn" id="from_base">
+          <h3><a href="#from_base"><code>big's from_base(text, b)</code></a></h3>
+          <p>the whole number text in base b says, as Python's int(text, b) reads it: any case, a &quot;-&quot; first if it's below 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>text</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to from_base with text, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/big.moth#L472">big.moth line 472</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;big.moth&quot;</span> <span class="k">as</span> big
+<span class="k">say</span> big's from_base(<span class="s">&quot;FF&quot;</span>, <span class="n">16</span>)</code></pre><pre class="says"><code>255</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

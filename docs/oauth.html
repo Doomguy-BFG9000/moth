@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>oauth.moth · Moth's standard library</title>
+  <meta name="description" content="OAuth 2 clients (RFC 6749), as Python's requests-oauthlib and Authlib have them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>oauth</em>.moth</h1>
+      <p>OAuth 2 clients (RFC 6749), as Python's requests-oauthlib and Authlib have them.</p>
+      <p class="use"><code>use "oauth.moth" as oauth</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="oauth.moth's functions">
+      <h2>9 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#provider">provider</a></li><li><a href="#discover">discover</a></li><li><a href="#authorization_start">authorization_start</a></li><li><a href="#challenge_of">challenge_of</a></li><li><a href="#exchange_code">exchange_code</a></li><li><a href="#sign_in">sign_in</a></li><li><a href="#client_credentials">client_credentials</a></li><li><a href="#refresh">refresh</a></li><li><a href="#expired">expired</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>OAuth 2 clients (RFC 6749), as Python's requests-oauthlib and Authlib have them: signing a person in with the authorization code flow and PKCE (RFC 7636), which a program on the command line does with a server of its own on 127.0.0.1 for the browser to come back to (RFC 8252); a program's own tokens, with its client credentials; and tokens refreshed before they end. Over http.moth and server.moth: a program <code>moth build</code> makes can use it, built with --allow-libraries (and --allow-run, to open the browser itself).</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> github <span class="k">to</span> oauth's provider(<span class="s">&quot;https://github.com/login/oauth/authorize&quot;</span>, <span class="s">&quot;https://github.com/login/oauth/access_token&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)
+<span class="k">set</span> google <span class="k">to</span> oauth's discover(<span class="s">&quot;https://accounts.google.com&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)   <span class="c"># its endpoints, from OpenID Connect</span>
+<span class="k">set</span> tokens <span class="k">to</span> oauth's sign_in(google, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;openid&quot;</span>, <span class="s">&quot;email&quot;</span>)   <span class="c"># the browser opens; the person signs in</span>
+<span class="k">say</span> access_token <span class="k">of</span> tokens            <span class="c"># and refresh_token, expires_at, scope, id_token, token_type, fields</span>
+<span class="k">if</span> oauth's expired(tokens)            <span class="c"># within a minute of its end</span>
+    <span class="k">set</span> tokens <span class="k">to</span> oauth's refresh(google, tokens)
+<span class="k">end</span>
+<span class="k">set</span> service <span class="k">to</span> oauth's provider(<span class="s">&quot;&quot;</span>, <span class="s">&quot;https://id.example.com/oauth/token&quot;</span>, <span class="s">&quot;my-service&quot;</span>)
+<span class="k">set</span> client_secret <span class="k">of</span> service <span class="k">to</span> <span class="s">&quot;the service's secret&quot;</span>
+<span class="k">set</span> tokens <span class="k">to</span> oauth's client_credentials(service, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;reports.read&quot;</span>)   <span class="c"># no person: the program's own</span>
+
+<span class="k">set</span> started <span class="k">to</span> oauth's authorization_start(google, <span class="s">&quot;https://my.app/callback&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;openid&quot;</span>)   <span class="c"># a web app's:</span>
+<span class="c"># send the browser to url of started, keep state and verifier of started, and when it comes back,</span>
+<span class="k">set</span> tokens <span class="k">to</span> oauth's exchange_code(google, code, <span class="s">&quot;https://my.app/callback&quot;</span>, verifier <span class="k">of</span> started)</code></pre></div>
+          <p>A provider is a record: authorize_url, token_url, client_id, client_secret (nothing for a public client, as a program on a person's computer is), secret_in (&quot;basic&quot;, sent as HTTP Basic, or &quot;body&quot;, in the form), port (where sign_in's own server listens first, 8765; the next free one up from it), open_browser (yes) and extra (a dictionary of more for the authorization URL, as &quot;access_type&quot; is &quot;offline&quot;). Tokens are a record: access_token, token_type, refresh_token, scope, id_token and expires_at (seconds since 1970), each nothing when the provider didn't send it, and fields, everything it sent. A provider that says no is a <code>fail with</code> with what it said, as &quot;the provider said invalid_grant: the code has expired&quot;.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="provider">
+          <h3><a href="#provider"><code>oauth's provider(authorize_url, token_url, client_id)</code></a></h3>
+          <p>a provider, from its authorization and token URLs and the client ID it gave the program: a record whose client_secret, secret_in, port, open_browser and extra can be set after, as at the top of this file</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>authorize_url</code></li><li><code>token_url</code></li><li><code>client_id</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to provider with authorize_url, token_url, client_id</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L51">oauth.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> google <span class="k">to</span> oauth's provider(<span class="s">&quot;https://accounts.example.com/o/oauth2/auth&quot;</span>, <span class="s">&quot;https://accounts.example.com/token&quot;</span>, <span class="s">&quot;client 1&quot;</span>)
+<span class="k">say</span> google</code></pre><pre class="says"><code>(record with authorize_url &quot;https://accounts.example.com/o/oauth2/auth&quot;, token_url &quot;https://accounts.example.com/token&quot;, client_id &quot;client 1&quot;, client_secret nothing, secret_in &quot;basic&quot;, port 8765, open_browser yes, extra (empty dictionary))</code></pre></div>
+        </section>
+        <section class="fn" id="discover">
+          <h3><a href="#discover"><code>oauth's discover(issuer, client_id)</code></a></h3>
+          <p>a provider from its OpenID Connect discovery document, at its issuer's /.well-known/openid-configuration</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>issuer</code></li><li><code>client_id</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to discover with issuer, client_id</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L57">oauth.moth line 57</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> google <span class="k">to</span> oauth's discover(<span class="s">&quot;https://accounts.google.com&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)   <span class="c"># its endpoints, from OpenID Connect</span></code></pre></div>
+        </section>
+        <section class="fn" id="authorization_start">
+          <h3><a href="#authorization_start"><code>oauth's authorization_start(given_provider, redirect_uri, scopes)</code></a></h3>
+          <p>Where to send the browser to sign in, and what to keep for when it comes back: a record with url, state (a random text the provider sends back, so a page that wasn't asked for is known) and verifier (PKCE's, whose SHA-256, the challenge, is in the URL, so only this program can use the code)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>given_provider</code></li><li><code>redirect_uri</code></li><li><code>scopes</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to authorization_start with given_provider, redirect_uri, scopes or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L74">oauth.moth line 74</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> google <span class="k">to</span> oauth's discover(<span class="s">&quot;https://accounts.google.com&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)   <span class="c"># its endpoints, from OpenID Connect</span>
+<span class="k">set</span> started <span class="k">to</span> oauth's authorization_start(google, <span class="s">&quot;https://my.app/callback&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;openid&quot;</span>)   <span class="c"># a web app's:</span></code></pre></div>
+        </section>
+        <section class="fn" id="challenge_of">
+          <h3><a href="#challenge_of"><code>oauth's challenge_of(verifier)</code></a></h3>
+          <p>PKCE's challenge for a verifier, as S256 has it: its SHA-256, in base64url</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>verifier</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to challenge_of with verifier</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L97">oauth.moth line 97</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">say</span> oauth's challenge_of(<span class="s">&quot;dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&quot;</span>)</code></pre><pre class="says"><code>E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM</code></pre></div>
+        </section>
+        <section class="fn" id="exchange_code">
+          <h3><a href="#exchange_code"><code>oauth's exchange_code(given_provider, code, redirect_uri, verifier)</code></a></h3>
+          <p>the tokens for a code the browser came back with</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>given_provider</code></li><li><code>code</code></li><li><code>redirect_uri</code></li><li><code>verifier</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to exchange_code with given_provider, code, redirect_uri, verifier</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L102">oauth.moth line 102</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> google <span class="k">to</span> oauth's discover(<span class="s">&quot;https://accounts.google.com&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)   <span class="c"># its endpoints, from OpenID Connect</span>
+<span class="k">set</span> service <span class="k">to</span> oauth's provider(<span class="s">&quot;&quot;</span>, <span class="s">&quot;https://id.example.com/oauth/token&quot;</span>, <span class="s">&quot;my-service&quot;</span>)
+<span class="k">set</span> tokens <span class="k">to</span> oauth's client_credentials(service, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;reports.read&quot;</span>)   <span class="c"># no person: the program's own</span>
+<span class="k">set</span> started <span class="k">to</span> oauth's authorization_start(google, <span class="s">&quot;https://my.app/callback&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;openid&quot;</span>)   <span class="c"># a web app's:</span>
+<span class="k">set</span> tokens <span class="k">to</span> oauth's exchange_code(google, code, <span class="s">&quot;https://my.app/callback&quot;</span>, verifier <span class="k">of</span> started)</code></pre></div>
+        </section>
+        <section class="fn" id="sign_in">
+          <h3><a href="#sign_in"><code>oauth's sign_in(given_provider, scopes)</code></a></h3>
+          <p>A person signed in from the command line: a server of the program's own on 127.0.0.1, the browser sent to sign in (or the address said, to the error output, to open), and the code it comes back with exchanged</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>given_provider</code></li><li><code>scopes</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sign_in with given_provider, scopes or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L109">oauth.moth line 109</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> google <span class="k">to</span> oauth's discover(<span class="s">&quot;https://accounts.google.com&quot;</span>, <span class="s">&quot;my-client-id&quot;</span>)   <span class="c"># its endpoints, from OpenID Connect</span>
+<span class="k">set</span> tokens <span class="k">to</span> oauth's sign_in(google, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;openid&quot;</span>, <span class="s">&quot;email&quot;</span>)   <span class="c"># the browser opens; the person signs in</span></code></pre></div>
+        </section>
+        <section class="fn" id="client_credentials">
+          <h3><a href="#client_credentials"><code>oauth's client_credentials(given_provider, scopes)</code></a></h3>
+          <p>the program's own tokens, with its client_id and client_secret: no person signs in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>given_provider</code></li><li><code>scopes</code> <span class="optional">optional: empty list if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to client_credentials with given_provider, scopes or empty list</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L200">oauth.moth line 200</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">to</span> failure_of <span class="k">with</span> f
+    <span class="k">try</span>
+        f()
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">nothing</span>
+<span class="k">end</span>
+<span class="k">set</span> public <span class="k">to</span> oauth's provider(<span class="s">&quot;https://id.example.com/auth&quot;</span>, <span class="s">&quot;https://id.example.com/token&quot;</span>, <span class="s">&quot;c&quot;</span>)
+<span class="k">say</span> failure_of(<span class="k">function</span> <span class="k">gives</span> oauth's client_credentials(public))</code></pre><pre class="says"><code>client credentials need the provider's client_secret</code></pre></div>
+        </section>
+        <section class="fn" id="refresh">
+          <h3><a href="#refresh"><code>oauth's refresh(given_provider, tokens)</code></a></h3>
+          <p>new tokens for ones ending, with their refresh_token; the refresh_token kept if no new one comes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>given_provider</code></li><li><code>tokens</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to refresh with given_provider, tokens</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L212">oauth.moth line 212</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">to</span> failure_of <span class="k">with</span> f
+    <span class="k">try</span>
+        f()
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">nothing</span>
+<span class="k">end</span>
+<span class="k">set</span> public <span class="k">to</span> oauth's provider(<span class="s">&quot;https://id.example.com/auth&quot;</span>, <span class="s">&quot;https://id.example.com/token&quot;</span>, <span class="s">&quot;c&quot;</span>)
+<span class="k">set</span> no_refresh <span class="k">to</span> <span class="k">record</span> <span class="k">with</span> access_token <span class="s">&quot;a&quot;</span>, refresh_token <span class="k">nothing</span>, expires_at <span class="k">nothing</span>
+<span class="k">say</span> failure_of(<span class="k">function</span> <span class="k">gives</span> oauth's refresh(public, no_refresh))</code></pre><pre class="says"><code>these tokens have no refresh_token to refresh them with</code></pre></div>
+        </section>
+        <section class="fn" id="expired">
+          <h3><a href="#expired"><code>oauth's expired(tokens, margin)</code></a></h3>
+          <p>whether tokens end within <code>margin</code> seconds (or have ended); tokens that say no end never do</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>tokens</code></li><li><code>margin</code> <span class="optional">optional: 60 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to expired with tokens, margin or 60</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/oauth.moth#L221">oauth.moth line 221</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;oauth.moth&quot;</span> <span class="k">as</span> oauth
+<span class="k">set</span> renewed <span class="k">to</span> oauth's oauth_read_tokens(<span class="n">200</span>, <span class="s">&quot;\{\&quot;access_token\&quot;:\&quot;at2\&quot;}&quot;</span>, <span class="n">5000</span>, <span class="s">&quot;rt1&quot;</span>)
+<span class="k">say</span> oauth's expired(renewed)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

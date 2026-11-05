@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sqlite.moth · Moth's standard library</title>
+  <meta name="description" content="A database in a file, through SQLite itself: the library that comes with Windows (winsqlite3.dll) and with most Linux systems (libsqlite3.so.0).">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>sqlite</em>.moth</h1>
+      <p>A database in a file, through SQLite itself: the library that comes with Windows (winsqlite3.dll) and with most Linux systems (libsqlite3.so.0).</p>
+      <p class="use"><code>use "sqlite.moth" as sqlite</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="sqlite.moth's functions">
+      <h2>6 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#open">open</a></li><li><a href="#close">close</a></li><li><a href="#run">run</a></li><li><a href="#run_with">run_with</a></li><li><a href="#query">query</a></li><li><a href="#query_with">query_with</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>A database in a file, through SQLite itself: the library that comes with Windows (winsqlite3.dll) and with most Linux systems (libsqlite3.so.0). Each row a query gives is a dictionary of its columns.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)
+sqlite's run(people, <span class="s">&quot;create table if not exists people (name text, age integer)&quot;</span>)
+sqlite's run_with(people, <span class="s">&quot;insert into people values (?, ?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">20</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> sqlite's query(people, <span class="s">&quot;select name, age from people&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row + <span class="s">&quot; is &quot;</span> + <span class="k">item</span> <span class="s">&quot;age&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+sqlite's close(people)</code></pre></div>
+          <p>A program that uses it is built with --allow-libraries. A mistake SQLite finds is a <code>fail with</code>, which says what SQLite said: catch it with <code>try</code>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="open">
+          <h3><a href="#open"><code>sqlite's open(path)</code></a></h3>
+          <p>the database in that file, made if it isn't there</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to open with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L37">sqlite.moth line 37</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>sqlite's close(database)</code></a></h3>
+          <p>the database closed, once it's no longer needed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>database</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with database</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L53">sqlite.moth line 53</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)
+sqlite's close(people)</code></pre></div>
+        </section>
+        <section class="fn" id="run">
+          <h3><a href="#run"><code>sqlite's run(database, sql)</code></a></h3>
+          <p>SQL that gives no rows, like <code>create table</code> or <code>insert</code>: how many rows it changed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>database</code></li><li><code>sql</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run with database, sql</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L58">sqlite.moth line 58</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)
+sqlite's run(people, <span class="s">&quot;create table if not exists people (name text, age integer)&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="run_with">
+          <h3><a href="#run_with"><code>sqlite's run_with(database, sql, values)</code></a></h3>
+          <p>the same, with values for its ?s: numbers, text, yes or no, or nothing</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>database</code></li><li><code>sql</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_with with database, sql, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L63">sqlite.moth line 63</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)
+sqlite's run_with(people, <span class="s">&quot;insert into people values (?, ?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">20</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="query">
+          <h3><a href="#query"><code>sqlite's query(database, sql)</code></a></h3>
+          <p>the rows SQL like <code>select</code> gives, each a dictionary of its columns by their names</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>database</code></li><li><code>sql</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query with database, sql</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L77">sqlite.moth line 77</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+<span class="k">set</span> people <span class="k">to</span> sqlite's open(<span class="s">&quot;people.db&quot;</span>)
+sqlite's run(people, <span class="s">&quot;create table if not exists people (name text, age integer)&quot;</span>)
+sqlite's run_with(people, <span class="s">&quot;insert into people values (?, ?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sam&quot;</span>, <span class="n">20</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> sqlite's query(people, <span class="s">&quot;select name, age from people&quot;</span>)
+    <span class="k">say</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> row + <span class="s">&quot; is &quot;</span> + <span class="k">item</span> <span class="s">&quot;age&quot;</span> <span class="k">of</span> row
+<span class="k">end</span>
+sqlite's close(people)</code></pre></div>
+        </section>
+        <section class="fn" id="query_with">
+          <h3><a href="#query_with"><code>sqlite's query_with(database, sql, values)</code></a></h3>
+          <p>the rows SQL gives, with values for its ?s, each a dictionary of its columns by their names</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>database</code></li><li><code>sql</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to query_with with database, sql, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sqlite.moth#L82">sqlite.moth line 82</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+sqlite's query_with(database, sql, values)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

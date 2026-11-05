@@ -8,6 +8,11 @@
 #   say hash's sha256("abc")             # ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 #   say hash's sha256(read bytes "moth.exe")
 #   say hash's digest("sha512", "abc")   # any of them by its name: md5, sha1, sha224, sha256, sha384, sha512
+#   say hash's sha224("abc")             # and sha384, sha512; sha1 and md5 for what still uses them
+#   say hash's sha384("abc")
+#   say hash's sha512("abc")
+#   say hash's sha1("abc")
+#   say hash's md5("abc")
 #   say hash's hmac("sha256", "key", "The quick brown fox jumps over the lazy dog")
 #   say hash's pbkdf2("sha256", "password", "salt", 1000, 32)   # 32 bytes, as hex
 #   say hash's bytes_of_hex("ff00")      # (2 bytes: 255, 0); hex_of(bytes) back

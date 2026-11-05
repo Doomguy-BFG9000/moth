@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>email.moth · Moth's standard library</title>
+  <meta name="description" content="Email, as Python's smtplib, email, poplib and imaplib have it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>email</em>.moth</h1>
+      <p>Email, as Python's smtplib, email, poplib and imaplib have it.</p>
+      <p class="use"><code>use "email.moth" as mail</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="email.moth's functions">
+      <h2>22 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#server">server</a></li><li><a href="#log_in">log_in</a></li><li><a href="#message">message</a></li><li><a href="#attach">attach</a></li><li><a href="#attach_bytes">attach_bytes</a></li><li><a href="#message_text">message_text</a></li><li><a href="#base64_of">base64_of</a></li><li><a href="#bytes_of_base64">bytes_of_base64</a></li><li><a href="#send">send</a></li><li><a href="#read_message">read_message</a></li><li><a href="#pop_open">pop_open</a></li><li><a href="#pop_count">pop_count</a></li><li><a href="#pop_get">pop_get</a></li><li><a href="#pop_delete">pop_delete</a></li><li><a href="#pop_close">pop_close</a></li><li><a href="#imap_open">imap_open</a></li><li><a href="#imap_folders">imap_folders</a></li><li><a href="#imap_select">imap_select</a></li><li><a href="#imap_search">imap_search</a></li><li><a href="#imap_get">imap_get</a></li><li><a href="#imap_mark">imap_mark</a></li><li><a href="#imap_close">imap_close</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Email, as Python's smtplib, email, poplib and imaplib have it: a message with text, a page of HTML and files, sent through a mail server over SMTP, secure from the start (port 465) or after STARTTLS (587), logged in; and messages read: from MIME, and from a mailbox over POP3 or IMAP. A program <code>moth build</code> makes can use it, built with --allow-libraries (and --allow-read, to attach files).</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+          <p>A server is a record: host, port, security (&quot;tls&quot; for 465, 993 and 995, else &quot;starttls&quot;; &quot;none&quot; in the clear, for a server of one's own), user and password (nothing until <a href="#log_in">log_in</a>), name (what it says it is, &quot;localhost&quot;), trust (a PEM file of certificates to trust besides the system's, or nothing) and time_limit (the milliseconds an answer may take, 30000). A message is a record: sender, recipients, cc and bcc (lists of addresses, as &quot;you@example.com&quot; or &quot;You &lt;you@example.com&gt;&quot;), reply_to, subject, text, html, attachments and headers (a dictionary of others). <a href="#message_text">message_text</a>(m) is the message as it's sent, in MIME; <a href="#read_message">read_message</a>(raw) reads one back, with its date and message_id too. <a href="#send">send</a>() fails with what the server said when it says no. <a href="#base64_of">base64_of</a> and <a href="#bytes_of_base64">bytes_of_base64</a> are base64's two ways.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="server">
+          <h3><a href="#server"><code>mail's server(host, port)</code></a></h3>
+          <p>a mail server, by its name and port: secure from the start on 465, 993 and 995, else after STARTTLS</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>host</code></li><li><code>port</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to server with host, port</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L74">email.moth line 74</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="log_in">
+          <h3><a href="#log_in"><code>mail's log_in(server, user, password)</code></a></h3>
+          <p>a server's user name and password, for send to log in with first</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>server</code></li><li><code>user</code></li><li><code>password</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to log_in with server, user, password</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L84">email.moth line 84</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="message">
+          <h3><a href="#message"><code>mail's message(sender, recipients, subject, words)</code></a></h3>
+          <p>a message from one address to another (or to a list of them), with a subject and text</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>sender</code></li><li><code>recipients</code></li><li><code>subject</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to message with sender, recipients, subject, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L90">email.moth line 90</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="attach">
+          <h3><a href="#attach"><code>mail's attach(m, file)</code></a></h3>
+          <p>a file, by its name, sent with the message: its type from how its name ends</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>m</code></li><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to attach with m, file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L100">email.moth line 100</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span></code></pre></div>
+        </section>
+        <section class="fn" id="attach_bytes">
+          <h3><a href="#attach_bytes"><code>mail's attach_bytes(m, name, data, type)</code></a></h3>
+          <p>bytes sent with a message as a file, with its name and its type, as &quot;application/pdf&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>m</code></li><li><code>name</code></li><li><code>data</code></li><li><code>type</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to attach_bytes with m, name, data, type</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L109">email.moth line 109</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="message_text">
+          <h3><a href="#message_text"><code>mail's message_text(m)</code></a></h3>
+          <p>the message as it's sent: its headers, then its parts, in MIME, each line ending in \r\n</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>m</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to message_text with m</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L129">email.moth line 129</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span></code></pre></div>
+        </section>
+        <section class="fn" id="base64_of">
+          <h3><a href="#base64_of"><code>mail's base64_of(data)</code></a></h3>
+          <p>text's UTF-8, or bytes, in base64 (base64.moth's)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to base64_of with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L430">email.moth line 430</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre><pre class="says"><code>aGk= hi</code></pre></div>
+        </section>
+        <section class="fn" id="bytes_of_base64">
+          <h3><a href="#bytes_of_base64"><code>mail's bytes_of_base64(words)</code></a></h3>
+          <p>base64 back to its bytes; what isn't base64 (line ends, spaces, =) is passed over</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to bytes_of_base64 with words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L435">email.moth line 435</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre><pre class="says"><code>aGk= hi</code></pre></div>
+        </section>
+        <section class="fn" id="send">
+          <h3><a href="#send"><code>mail's send(server, m)</code></a></h3>
+          <p>the message, through the server: secure as the server's security says, logged in if it was, to every address it's to, cc'd and bcc'd</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>server</code></li><li><code>m</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to send with server, m</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L443">email.moth line 443</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+mail's <span class="k">send</span>(server, m)</code></pre></div>
+        </section>
+        <section class="fn" id="read_message">
+          <h3><a href="#read_message"><code>mail's read_message(raw)</code></a></h3>
+          <p>A message as it came (text or bytes, in MIME), as a record: sender, recipients, cc, reply_to, subject, date, message_id (each header's words decoded), headers (each name in small letters), text and html (its parts of each kind, decoded, or nothing), and attachments (each with name, type and data), as Python's email module reads one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>raw</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_message with raw</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L585">email.moth line 585</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span></code></pre></div>
+        </section>
+        <section class="fn" id="pop_open">
+          <h3><a href="#pop_open"><code>mail's pop_open(server)</code></a></h3>
+          <p>a connection to a server's mailbox over POP3 (port 995 secure from the start, 110 after STLS), logged in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>server</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_open with server</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L987">email.moth line 987</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)</code></pre></div>
+        </section>
+        <section class="fn" id="pop_count">
+          <h3><a href="#pop_count"><code>mail's pop_count(box)</code></a></h3>
+          <p>how many messages there are</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_count with box</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1008">email.moth line 1008</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+        </section>
+        <section class="fn" id="pop_get">
+          <h3><a href="#pop_get"><code>mail's pop_get(box, n)</code></a></h3>
+          <p>message n (from 1), read as <a href="#read_message">read_message</a> reads one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_get with box, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1014">email.moth line 1014</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+        </section>
+        <section class="fn" id="pop_delete">
+          <h3><a href="#pop_delete"><code>mail's pop_delete(box, n)</code></a></h3>
+          <p>marks message n to be removed, which it is when the box is closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_delete with box, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1034">email.moth line 1034</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+        </section>
+        <section class="fn" id="pop_close">
+          <h3><a href="#pop_close"><code>mail's pop_close(box)</code></a></h3>
+          <p>a POP3 mailbox left: messages marked with <a href="#pop_delete">pop_delete</a> are deleted then</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_close with box</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1039">email.moth line 1039</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+mail's pop_close(pop_box)</code></pre></div>
+        </section>
+        <section class="fn" id="imap_open">
+          <h3><a href="#imap_open"><code>mail's imap_open(server)</code></a></h3>
+          <p>a connection to a server's mailboxes over IMAP (port 993 secure from the start, 143 after STARTTLS), logged in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>server</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_open with server</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1094">email.moth line 1094</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)</code></pre></div>
+        </section>
+        <section class="fn" id="imap_folders">
+          <h3><a href="#imap_folders"><code>mail's imap_folders(box)</code></a></h3>
+          <p>the folders' names</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_folders with box</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1118">email.moth line 1118</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span></code></pre></div>
+        </section>
+        <section class="fn" id="imap_select">
+          <h3><a href="#imap_select"><code>mail's imap_select(box, folder)</code></a></h3>
+          <p>a folder chosen, for the searches and messages after: how many messages it has</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>folder</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_select with box, folder</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1139">email.moth line 1139</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span></code></pre></div>
+        </section>
+        <section class="fn" id="imap_search">
+          <h3><a href="#imap_search"><code>mail's imap_search(box, criteria)</code></a></h3>
+          <p>the messages that match, as IMAP's search says (&quot;ALL&quot;, &quot;UNSEEN&quot;, &quot;FROM \&quot;sam\&quot;&quot;, &quot;SINCE 1-Nov-2026&quot;), by their numbers that don't change (UIDs)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>criteria</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_search with box, criteria</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1153">email.moth line 1153</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+        </section>
+        <section class="fn" id="imap_get">
+          <h3><a href="#imap_get"><code>mail's imap_get(box, uid)</code></a></h3>
+          <p>the message with this UID, read as <a href="#read_message">read_message</a> reads one, without marking it seen</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>uid</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_get with box, uid</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1168">email.moth line 1168</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+mail's log_in(server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> m <span class="k">to</span> mail's message(<span class="s">&quot;Sam &lt;me@example.com&gt;&quot;</span>, <span class="s">&quot;you@example.com&quot;</span>, <span class="s">&quot;Hello&quot;</span>, <span class="s">&quot;Hi there,\nall well?&quot;</span>)
+<span class="k">set</span> cc <span class="k">of</span> m <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;them@example.com&quot;</span>           <span class="c"># and bcc, reply_to</span>
+<span class="k">set</span> html <span class="k">of</span> m <span class="k">to</span> <span class="s">&quot;&lt;p&gt;Hi there, &lt;b&gt;all well?&lt;/b&gt;&lt;/p&gt;&quot;</span>  <span class="c"># shown instead of the text where it can be</span>
+mail's attach(m, <span class="s">&quot;report.pdf&quot;</span>)                       <span class="c"># or attach_bytes(m, &quot;notes.txt&quot;, data, &quot;text/plain&quot;)</span>
+mail's <span class="k">send</span>(server, m)
+
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+mail's log_in(inbox, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_select(<span class="k">box</span>, <span class="s">&quot;INBOX&quot;</span>)                     <span class="c"># how many messages it has</span>
+<span class="k">for</span> <span class="k">each</span> uid <span class="k">in</span> mail's imap_search(<span class="k">box</span>, <span class="s">&quot;UNSEEN&quot;</span>)
+    <span class="k">set</span> got <span class="k">to</span> mail's imap_get(<span class="k">box</span>, uid)            <span class="c"># a message, as read_message reads one</span>
+    <span class="k">say</span> sender <span class="k">of</span> got + <span class="s">&quot;: &quot;</span> + subject <span class="k">of</span> got
+<span class="k">end</span>
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span>
+<span class="k">say</span> mail's imap_folders(<span class="k">box</span>)                         <span class="c"># each folder's name</span>
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span>
+
+<span class="k">set</span> pop_server <span class="k">to</span> mail's server(<span class="s">&quot;pop.example.com&quot;</span>, <span class="n">995</span>)
+mail's log_in(pop_server, <span class="s">&quot;me@example.com&quot;</span>, <span class="s">&quot;an app password&quot;</span>)
+<span class="k">set</span> pop_box <span class="k">to</span> mail's pop_open(pop_server)
+<span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> mail's pop_count(pop_box)       <span class="c"># how many messages there are</span>
+    <span class="k">say</span> subject <span class="k">of</span> mail's pop_get(pop_box, n)       <span class="c"># each read as read_message reads one</span>
+    mail's pop_delete(pop_box, n)                   <span class="c"># deleted when the box is closed</span>
+<span class="k">end</span>
+mail's pop_close(pop_box)
+
+<span class="k">set</span> text <span class="k">to</span> mail's message_text(m)                   <span class="c"># the message as it's sent, in MIME</span>
+<span class="k">say</span> subject <span class="k">of</span> mail's read_message(text)             <span class="c"># Hello</span>
+mail's attach_bytes(m, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;milk, eggs&quot;</span> <span class="k">as</span> <span class="k">bytes</span>, <span class="s">&quot;text/plain&quot;</span>)
+<span class="k">say</span> mail's base64_of(<span class="s">&quot;hi&quot;</span>) <span class="s">&quot; &quot;</span> mail's bytes_of_base64(<span class="s">&quot;aGk=&quot;</span>) <span class="k">as</span> text   <span class="c"># aGk= hi</span></code></pre></div>
+        </section>
+        <section class="fn" id="imap_mark">
+          <h3><a href="#imap_mark"><code>mail's imap_mark(box, uid, flag)</code></a></h3>
+          <p>a flag added to a message, as &quot;\\Seen&quot; or &quot;\\Deleted&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li><li><code>uid</code></li><li><code>flag</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_mark with box, uid, flag</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1178">email.moth line 1178</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_mark(<span class="k">box</span>, uid, <span class="s">&quot;\\Seen&quot;</span>)                 <span class="c"># a flag on a message</span></code></pre></div>
+        </section>
+        <section class="fn" id="imap_close">
+          <h3><a href="#imap_close"><code>mail's imap_close(box)</code></a></h3>
+          <p>an IMAP mailbox logged out of, and its connection closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>box</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to imap_close with box</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/email.moth#L1183">email.moth line 1183</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;email.moth&quot;</span> <span class="k">as</span> mail
+<span class="k">set</span> server <span class="k">to</span> mail's server(<span class="s">&quot;smtp.example.com&quot;</span>, <span class="n">587</span>)
+<span class="k">set</span> inbox <span class="k">to</span> mail's server(<span class="s">&quot;imap.example.com&quot;</span>, <span class="n">993</span>)
+<span class="k">set</span> <span class="k">box</span> <span class="k">to</span> mail's imap_open(inbox)
+mail's imap_close(<span class="k">box</span>)                               <span class="c"># pop_open, pop_count, pop_get, pop_delete, pop_close</span></code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

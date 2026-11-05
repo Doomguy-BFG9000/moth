@@ -5,6 +5,8 @@
 #   use "log.moth" as log
 #   log's info("started")                  # 2026-11-04 10:15:00 INFO started, on the error output
 #   log's warning("the disk is almost full")
+#   log's debug("cache hit")                # written only at the debug level
+#   log's error("can't reach the database") # and critical, the most
 #   log's set_level("debug")               # debug, info (the first level), warning, error or critical
 #   log's to_file("app.log")               # each line added to the end of app.log (built with --allow-libraries)
 #   log's to_error_output()                # back to the error output

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>lists.moth · Moth's standard library</title>
+  <meta name="description" content="Lists, as Python's itertools and functools work through them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>lists</em>.moth</h1>
+      <p>Lists, as Python's itertools and functools work through them.</p>
+      <p class="use"><code>use "lists.moth" as lists</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="lists.moth's functions">
+      <h2>23 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#chunks">chunks</a></li><li><a href="#windows">windows</a></li><li><a href="#paired">paired</a></li><li><a href="#numbered">numbered</a></li><li><a href="#flattened">flattened</a></li><li><a href="#product">product</a></li><li><a href="#permutations">permutations</a></li><li><a href="#combinations">combinations</a></li><li><a href="#running_totals">running_totals</a></li><li><a href="#total">total</a></li><li><a href="#folded">folded</a></li><li><a href="#mapped">mapped</a></li><li><a href="#kept_by">kept_by</a></li><li><a href="#dropped_by">dropped_by</a></li><li><a href="#split_by">split_by</a></li><li><a href="#taken_while">taken_while</a></li><li><a href="#dropped_while">dropped_while</a></li><li><a href="#every_one">every_one</a></li><li><a href="#some_one">some_one</a></li><li><a href="#sorted_by">sorted_by</a></li><li><a href="#smallest_by">smallest_by</a></li><li><a href="#largest_by">largest_by</a></li><li><a href="#repeated">repeated</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Lists, as Python's itertools and functools work through them: in chunks and windows, paired, numbered, flattened, every way of choosing and ordering them, running totals, folded into one, sorted by what a function says, and split by it. In Moth alone, so it works everywhere. Each gives a new list. (A list given before another input goes in brackets, or <code>list of</code> takes that input as one of its own.)</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's chunks((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>), <span class="n">2</span>)     <span class="c"># [[1, 2], [3, 4], [5]]</span>
+<span class="k">say</span> lists's windows((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>), <span class="n">2</span>)       <span class="c"># [[1, 2], [2, 3], [3, 4]]</span>
+<span class="k">say</span> lists's paired((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)   <span class="c"># [[1, &quot;a&quot;], [2, &quot;b&quot;]] (zip)</span>
+<span class="k">say</span> lists's numbered(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)             <span class="c"># [[1, &quot;a&quot;], [2, &quot;b&quot;]] (enumerate)</span>
+<span class="k">say</span> lists's flattened(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>)
+<span class="k">say</span> lists's product((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;x&quot;</span>, <span class="s">&quot;y&quot;</span>)   <span class="c"># [[1, &quot;x&quot;], [1, &quot;y&quot;], [2, &quot;x&quot;], [2, &quot;y&quot;]]</span>
+<span class="k">say</span> lists's permutations((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), <span class="n">2</span>)     <span class="c"># each ordering of 2 of them</span>
+<span class="k">say</span> lists's combinations((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), <span class="n">2</span>)     <span class="c"># each choice of 2, in order</span>
+<span class="k">say</span> lists's running_totals(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)        <span class="c"># [1, 3, 6] (accumulate)</span>
+<span class="k">say</span> lists's folded((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), adding, <span class="n">0</span>)   <span class="c"># adding(adding(adding(0, 1), 2), 3) (reduce)</span>
+<span class="k">say</span> lists's sorted_by(names, length_of)            <span class="c"># by what the function says of each, the same kept in order</span>
+<span class="k">say</span> lists's smallest_by(names, length_of)          <span class="c"># and largest_by: the first with the least (or most)</span>
+<span class="k">say</span> lists's kept_by(numbers, is_even)              <span class="c"># those the function says yes to (filter); dropped_by</span>
+<span class="k">say</span> lists's mapped(numbers, double)                <span class="c"># what the function says of each (map)</span>
+<span class="k">say</span> lists's split_by(numbers, is_even)             <span class="c"># [the yeses, the noes] (partition)</span>
+<span class="k">say</span> lists's taken_while(numbers, is_small)         <span class="c"># and dropped_while</span>
+<span class="k">say</span> lists's every_one(numbers, is_even)            <span class="c"># and some_one: whether all, or any, are</span>
+<span class="k">say</span> lists's <span class="k">total</span>(numbers)                         <span class="c"># their sum; repeated(x, 3) is [x, x, x]</span></code></pre></div>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="chunks">
+          <h3><a href="#chunks"><code>lists's chunks(things, size)</code></a></h3>
+          <p>the list cut into lists of <code>size</code> things, one after another, the last shorter if they don't come out even</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>size</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chunks with things, size</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L27">lists.moth line 27</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's chunks((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>), <span class="n">2</span>)     <span class="c"># [[1, 2], [3, 4], [5]]</span></code></pre><pre class="says"><code>[[1, 2], [3, 4], [5]]</code></pre></div>
+        </section>
+        <section class="fn" id="windows">
+          <h3><a href="#windows"><code>lists's windows(things, size)</code></a></h3>
+          <p>every run of <code>size</code> things next to each other, sliding along one at a time</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>size</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to windows with things, size</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L45">lists.moth line 45</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's windows((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>), <span class="n">2</span>)       <span class="c"># [[1, 2], [2, 3], [3, 4]]</span></code></pre><pre class="says"><code>[[1, 2], [2, 3], [3, 4]]</code></pre></div>
+        </section>
+        <section class="fn" id="paired">
+          <h3><a href="#paired"><code>lists's paired(first_things, second_things)</code></a></h3>
+          <p>the first of each, the second of each, as long as the shorter</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>first_things</code></li><li><code>second_things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to paired with first_things, second_things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L65">lists.moth line 65</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's paired((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)   <span class="c"># [[1, &quot;a&quot;], [2, &quot;b&quot;]] (zip)</span></code></pre><pre class="says"><code>[[1, &quot;a&quot;], [2, &quot;b&quot;]]</code></pre></div>
+        </section>
+        <section class="fn" id="numbered">
+          <h3><a href="#numbered"><code>lists's numbered(things)</code></a></h3>
+          <p>each thing with its place, from 1, as a list of two: [[1, &quot;a&quot;], [2, &quot;b&quot;]]</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to numbered with things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L78">lists.moth line 78</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's numbered(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)             <span class="c"># [[1, &quot;a&quot;], [2, &quot;b&quot;]] (enumerate)</span></code></pre><pre class="says"><code>[[1, &quot;a&quot;], [2, &quot;b&quot;]]</code></pre></div>
+        </section>
+        <section class="fn" id="flattened">
+          <h3><a href="#flattened"><code>lists's flattened(lists_of)</code></a></h3>
+          <p>the things in lists, as one list; lists inside them stay lists</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>lists_of</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to flattened with lists_of</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L87">lists.moth line 87</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's flattened(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>)</code></pre><pre class="says"><code>[1, 2, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="product">
+          <h3><a href="#product"><code>lists's product(first_things, second_things)</code></a></h3>
+          <p>every pair of a thing from the first list and one from the second, as lists of two, the first list's in the outer loop</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>first_things</code></li><li><code>second_things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to product with first_things, second_things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L99">lists.moth line 99</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's product((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;x&quot;</span>, <span class="s">&quot;y&quot;</span>)   <span class="c"># [[1, &quot;x&quot;], [1, &quot;y&quot;], [2, &quot;x&quot;], [2, &quot;y&quot;]]</span></code></pre><pre class="says"><code>[[1, &quot;x&quot;], [1, &quot;y&quot;], [2, &quot;x&quot;], [2, &quot;y&quot;]]</code></pre></div>
+        </section>
+        <section class="fn" id="permutations">
+          <h3><a href="#permutations"><code>lists's permutations(things, size)</code></a></h3>
+          <p>each ordering of <code>size</code> of the things, those from earlier ones first</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>size</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to permutations with things, size</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L110">lists.moth line 110</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's permutations((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), <span class="n">2</span>)     <span class="c"># each ordering of 2 of them</span></code></pre><pre class="says"><code>[[1, 2], [1, 3], [2, 1], [2, 3], [3, 1], [3, 2]]</code></pre></div>
+        </section>
+        <section class="fn" id="combinations">
+          <h3><a href="#combinations"><code>lists's combinations(things, size)</code></a></h3>
+          <p>each choice of <code>size</code> of the things, each in the order they're in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>size</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to combinations with things, size</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L143">lists.moth line 143</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's combinations((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>), <span class="n">2</span>)     <span class="c"># each choice of 2, in order</span></code></pre><pre class="says"><code>[[1, 2], [1, 3], [2, 3]]</code></pre></div>
+        </section>
+        <section class="fn" id="running_totals">
+          <h3><a href="#running_totals"><code>lists's running_totals(numbers)</code></a></h3>
+          <p>the sum of the numbers so far, at each one: [1, 2, 3] gives [1, 3, 6]</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>numbers</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to running_totals with numbers</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L165">lists.moth line 165</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's running_totals(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)        <span class="c"># [1, 3, 6] (accumulate)</span></code></pre><pre class="says"><code>[1, 3, 6]</code></pre></div>
+        </section>
+        <section class="fn" id="total">
+          <h3><a href="#total"><code>lists's total(numbers)</code></a></h3>
+          <p>the numbers added up, 0 for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>numbers</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to total with numbers</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L176">lists.moth line 176</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's <span class="k">total</span>(numbers)</code></pre><pre class="says"><code>15</code></pre></div>
+        </section>
+        <section class="fn" id="folded">
+          <h3><a href="#folded"><code>lists's folded(things, combine, start)</code></a></h3>
+          <p>the function given what it gave so far and each thing in turn, starting from <code>start</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>combine</code></li><li><code>start</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to folded with things, combine, start</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L185">lists.moth line 185</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> adding <span class="k">with</span> a, b
+    <span class="k">return</span> a + b
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's folded(numbers, adding, <span class="n">100</span>)</code></pre><pre class="says"><code>115</code></pre></div>
+        </section>
+        <section class="fn" id="mapped">
+          <h3><a href="#mapped"><code>lists's mapped(things, change)</code></a></h3>
+          <p>what the function gives for each thing, in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>change</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mapped with things, change</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L194">lists.moth line 194</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> doubled <span class="k">with</span> n
+    <span class="k">return</span> n * <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's mapped(numbers, doubled)</code></pre><pre class="says"><code>[2, 4, 6, 8, 10]</code></pre></div>
+        </section>
+        <section class="fn" id="kept_by">
+          <h3><a href="#kept_by"><code>lists's kept_by(things, test)</code></a></h3>
+          <p>the things the function says yes to, in order (a filter)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to kept_by with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L203">lists.moth line 203</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_even <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> <span class="k">divisible</span> <span class="k">by</span> <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's kept_by(numbers, is_even)</code></pre><pre class="says"><code>[2, 4]</code></pre></div>
+        </section>
+        <section class="fn" id="dropped_by">
+          <h3><a href="#dropped_by"><code>lists's dropped_by(things, test)</code></a></h3>
+          <p>the things the function says no to, in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to dropped_by with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L214">lists.moth line 214</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_even <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> <span class="k">divisible</span> <span class="k">by</span> <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's dropped_by(numbers, is_even)</code></pre><pre class="says"><code>[1, 3, 5]</code></pre></div>
+        </section>
+        <section class="fn" id="split_by">
+          <h3><a href="#split_by"><code>lists's split_by(things, test)</code></a></h3>
+          <p>[the things the function says yes to, those it says no to]</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to split_by with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L225">lists.moth line 225</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_even <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> <span class="k">divisible</span> <span class="k">by</span> <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's split_by(numbers, is_even)</code></pre><pre class="says"><code>[[2, 4], [1, 3, 5]]</code></pre></div>
+        </section>
+        <section class="fn" id="taken_while">
+          <h3><a href="#taken_while"><code>lists's taken_while(things, test)</code></a></h3>
+          <p>the things from the start for as long as the function says yes to each</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to taken_while with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L239">lists.moth line 239</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_small <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> less <span class="k">than</span> <span class="n">3</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's taken_while(numbers, is_small)</code></pre><pre class="says"><code>[1, 2]</code></pre></div>
+        </section>
+        <section class="fn" id="dropped_while">
+          <h3><a href="#dropped_while"><code>lists's dropped_while(things, test)</code></a></h3>
+          <p>the things from the first one the function says no to, on to the end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to dropped_while with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L251">lists.moth line 251</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_small <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> less <span class="k">than</span> <span class="n">3</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's dropped_while(numbers, is_small)</code></pre><pre class="says"><code>[3, 4, 5]</code></pre></div>
+        </section>
+        <section class="fn" id="every_one">
+          <h3><a href="#every_one"><code>lists's every_one(things, test)</code></a></h3>
+          <p>whether the function says yes to every thing; yes for an empty list</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to every_one with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L266">lists.moth line 266</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_even <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> <span class="k">divisible</span> <span class="k">by</span> <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">say</span> lists's every_one((<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">4</span>), is_even)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="some_one">
+          <h3><a href="#some_one"><code>lists's some_one(things, test)</code></a></h3>
+          <p>whether the function says yes to at least one thing; no for an empty list</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to some_one with things, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L276">lists.moth line 276</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> is_even <span class="k">with</span> n
+    <span class="k">return</span> n <span class="k">is</span> <span class="k">divisible</span> <span class="k">by</span> <span class="n">2</span>
+<span class="k">end</span>
+<span class="k">set</span> numbers <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>
+<span class="k">say</span> lists's some_one(numbers, is_even)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="sorted_by">
+          <h3><a href="#sorted_by"><code>lists's sorted_by(things, key_of)</code></a></h3>
+          <p>sorted by what the function says of each, those it says the same of kept in the order they were</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>key_of</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sorted_by with things, key_of</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L286">lists.moth line 286</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> length_of <span class="k">with</span> words
+    <span class="k">return</span> <span class="k">length</span> <span class="k">of</span> words
+<span class="k">end</span>
+<span class="k">set</span> words <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;pear&quot;</span>, <span class="s">&quot;fig&quot;</span>, <span class="s">&quot;apple&quot;</span>, <span class="s">&quot;kiwi&quot;</span>, <span class="s">&quot;date&quot;</span>
+<span class="k">say</span> lists's sorted_by(words, length_of)</code></pre><pre class="says"><code>[&quot;fig&quot;, &quot;pear&quot;, &quot;kiwi&quot;, &quot;date&quot;, &quot;apple&quot;]</code></pre></div>
+        </section>
+        <section class="fn" id="smallest_by">
+          <h3><a href="#smallest_by"><code>lists's smallest_by(things, key_of)</code></a></h3>
+          <p>the thing for which the function gives the least, the first of those that tie; a mistake if the list is empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>key_of</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to smallest_by with things, key_of</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L302">lists.moth line 302</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> length_of <span class="k">with</span> words
+    <span class="k">return</span> <span class="k">length</span> <span class="k">of</span> words
+<span class="k">end</span>
+<span class="k">set</span> words <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;pear&quot;</span>, <span class="s">&quot;fig&quot;</span>, <span class="s">&quot;apple&quot;</span>, <span class="s">&quot;kiwi&quot;</span>, <span class="s">&quot;date&quot;</span>
+<span class="k">say</span> lists's smallest_by(words, length_of)</code></pre><pre class="says"><code>fig</code></pre></div>
+        </section>
+        <section class="fn" id="largest_by">
+          <h3><a href="#largest_by"><code>lists's largest_by(things, key_of)</code></a></h3>
+          <p>the thing for which the function gives the most, the first of those that tie; a mistake if the list is empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>key_of</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to largest_by with things, key_of</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L319">lists.moth line 319</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">to</span> length_of <span class="k">with</span> words
+    <span class="k">return</span> <span class="k">length</span> <span class="k">of</span> words
+<span class="k">end</span>
+<span class="k">set</span> words <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;pear&quot;</span>, <span class="s">&quot;fig&quot;</span>, <span class="s">&quot;apple&quot;</span>, <span class="s">&quot;kiwi&quot;</span>, <span class="s">&quot;date&quot;</span>
+<span class="k">say</span> lists's largest_by(words, length_of)</code></pre><pre class="says"><code>apple</code></pre></div>
+        </section>
+        <section class="fn" id="repeated">
+          <h3><a href="#repeated"><code>lists's repeated(x, times_given)</code></a></h3>
+          <p>a list of x, so many times over</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li><li><code>times_given</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to repeated with x, times_given</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/lists.moth#L336">lists.moth line 336</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;lists.moth&quot;</span> <span class="k">as</span> lists
+<span class="k">say</span> lists's repeated(<span class="s">&quot;x&quot;</span>, <span class="n">3</span>)</code></pre><pre class="says"><code>[&quot;x&quot;, &quot;x&quot;, &quot;x&quot;]</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

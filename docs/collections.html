@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>collections.moth · Moth's standard library</title>
+  <meta name="description" content="Collections, as Python's collections, heapq and bisect have them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>collections</em>.moth</h1>
+      <p>Collections, as Python's collections, heapq and bisect have them.</p>
+      <p class="use"><code>use "collections.moth" as c</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="collections.moth's functions">
+      <h2>20 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#counted">counted</a></li><li><a href="#most_common">most_common</a></li><li><a href="#grouped">grouped</a></li><li><a href="#queue">queue</a></li><li><a href="#push">push</a></li><li><a href="#push_front">push_front</a></li><li><a href="#size">size</a></li><li><a href="#pop_front">pop_front</a></li><li><a href="#pop">pop</a></li><li><a href="#peek_front">peek_front</a></li><li><a href="#peek">peek</a></li><li><a href="#items_of">items_of</a></li><li><a href="#heap">heap</a></li><li><a href="#heap_size">heap_size</a></li><li><a href="#heap_push">heap_push</a></li><li><a href="#heap_peek">heap_peek</a></li><li><a href="#heap_pop">heap_pop</a></li><li><a href="#where_sorted">where_sorted</a></li><li><a href="#where_sorted_first">where_sorted_first</a></li><li><a href="#insert_sorted">insert_sorted</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Collections, as Python's collections, heapq and bisect have them: counting things, a queue both ends of which are quick, a heap that gives the smallest first, and a sorted list kept sorted. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> counts <span class="k">to</span> c's counted(<span class="k">split</span> <span class="s">&quot;a b a c a b&quot;</span> <span class="k">by</span> <span class="s">&quot; &quot;</span>)    <span class="c"># (dictionary where &quot;a&quot; is 3, &quot;b&quot; is 2, &quot;c&quot; is 1)</span>
+<span class="k">say</span> c's most_common(counts, <span class="n">2</span>)                           <span class="c"># [(record with value &quot;a&quot;, count 3, ...), ...]</span>
+
+<span class="k">set</span> q <span class="k">to</span> c's queue()                     <span class="c"># a deque</span>
+c's push(q, <span class="n">1</span>)                           <span class="c"># at the back; push_front at the front</span>
+<span class="k">say</span> c's pop_front(q)                     <span class="c"># 1; pop at the back; size(q), peek_front(q), peek(q), items_of(q)</span>
+
+<span class="k">set</span> h <span class="k">to</span> c's heap()                      <span class="c"># the smallest first: numbers, or text</span>
+c's heap_push(h, <span class="n">5</span>)
+<span class="k">say</span> c's heap_pop(h)                      <span class="c"># heap_peek(h), heap_size(h)</span>
+
+<span class="k">set</span> xs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">3</span>, <span class="n">5</span>
+<span class="k">say</span> c's where_sorted(xs, <span class="n">4</span>)              <span class="c"># 3: where 4 goes, after anything equal (bisect)</span>
+c's insert_sorted(xs, <span class="n">4</span>)                 <span class="c"># [1, 3, 4, 5]</span>
+
+<span class="k">set</span> by_first <span class="k">to</span> c's grouped(<span class="k">split</span> <span class="s">&quot;apple avocado banana&quot;</span> <span class="k">by</span> <span class="s">&quot; &quot;</span>, first_letter)   <span class="c"># a dictionary of lists</span></code></pre></div>
+          <p><a href="#heap_push">heap_push</a> and the rest take a record <a href="#heap">heap</a>() made, and push and the rest one <a href="#queue">queue</a>() made.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="counted">
+          <h3><a href="#counted"><code>c's counted(things)</code></a></h3>
+          <p>how many times each thing is in the list, as a dictionary</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to counted with things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L28">collections.moth line 28</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> counts <span class="k">to</span> c's counted(<span class="k">split</span> <span class="s">&quot;a b a c a b&quot;</span> <span class="k">by</span> <span class="s">&quot; &quot;</span>)
+<span class="k">say</span> counts</code></pre><pre class="says"><code>(dictionary where &quot;a&quot; is 3, &quot;b&quot; is 2, &quot;c&quot; is 1)</code></pre></div>
+        </section>
+        <section class="fn" id="most_common">
+          <h3><a href="#most_common"><code>c's most_common(counts, n)</code></a></h3>
+          <p>the n things counted most, most first, those counted the same in the order they were first counted</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>counts</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to most_common with counts, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L41">collections.moth line 41</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> counts <span class="k">to</span> c's counted(<span class="k">split</span> <span class="s">&quot;a b a c a b&quot;</span> <span class="k">by</span> <span class="s">&quot; &quot;</span>)    <span class="c"># (dictionary where &quot;a&quot; is 3, &quot;b&quot; is 2, &quot;c&quot; is 1)</span>
+<span class="k">say</span> c's most_common(counts, <span class="n">2</span>)                           <span class="c"># [(record with value &quot;a&quot;, count 3, ...), ...]</span></code></pre><pre class="says"><code>[(record with value &quot;a&quot;, count 3, fewer -3), (record with value &quot;b&quot;, count 2, fewer -2)]</code></pre></div>
+        </section>
+        <section class="fn" id="grouped">
+          <h3><a href="#grouped"><code>c's grouped(things, key_of)</code></a></h3>
+          <p>the list's things in groups by what the function says of each, as a dictionary of lists, each in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li><li><code>key_of</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to grouped with things, key_of</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L57">collections.moth line 57</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">to</span> first_letter <span class="k">with</span> word
+    <span class="k">return</span> <span class="k">item</span> <span class="n">1</span> <span class="k">of</span> word
+<span class="k">end</span>
+<span class="k">say</span> c's grouped(<span class="k">split</span> <span class="s">&quot;apple avocado banana cherry blueberry&quot;</span> <span class="k">by</span> <span class="s">&quot; &quot;</span>, first_letter)</code></pre><pre class="says"><code>(dictionary where &quot;a&quot; is [&quot;apple&quot;, &quot;avocado&quot;], &quot;b&quot; is [&quot;banana&quot;, &quot;blueberry&quot;], &quot;c&quot; is [&quot;cherry&quot;])</code></pre></div>
+        </section>
+        <section class="fn" id="queue">
+          <h3><a href="#queue"><code>c's queue()</code></a></h3>
+          <p>A queue keeps its things in a dictionary, by where each is: from <code>first</code> to <code>last</code>, so either end gives and takes at once.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to queue</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L74">collections.moth line 74</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+<span class="k">say</span> q</code></pre><pre class="says"><code>(record with slots (empty dictionary), first 1, last 0)</code></pre></div>
+        </section>
+        <section class="fn" id="push">
+          <h3><a href="#push"><code>c's push(q, x)</code></a></h3>
+          <p>at the back</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to push with q, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L79">collections.moth line 79</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+<span class="k">say</span> c's items_of(q)</code></pre><pre class="says"><code>[1]</code></pre></div>
+        </section>
+        <section class="fn" id="push_front">
+          <h3><a href="#push_front"><code>c's push_front(q, x)</code></a></h3>
+          <p>x put at the front of a queue</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to push_front with q, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L86">collections.moth line 86</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's items_of(q)</code></pre><pre class="says"><code>[0, 1, 2]</code></pre></div>
+        </section>
+        <section class="fn" id="size">
+          <h3><a href="#size"><code>c's size(q)</code></a></h3>
+          <p>how many things a queue holds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to size with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L93">collections.moth line 93</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's size(q)</code></pre><pre class="says"><code>3</code></pre></div>
+        </section>
+        <section class="fn" id="pop_front">
+          <h3><a href="#pop_front"><code>c's pop_front(q)</code></a></h3>
+          <p>the thing at the front, taken off</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_front with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L98">collections.moth line 98</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's pop_front(q)</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="pop">
+          <h3><a href="#pop"><code>c's pop(q)</code></a></h3>
+          <p>the thing at the back, taken off</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L110">collections.moth line 110</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's pop(q)</code></pre><pre class="says"><code>2</code></pre></div>
+        </section>
+        <section class="fn" id="peek_front">
+          <h3><a href="#peek_front"><code>c's peek_front(q)</code></a></h3>
+          <p>the thing at the front of a queue, left there; a mistake if it's empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to peek_front with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L122">collections.moth line 122</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's peek_front(q)</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="peek">
+          <h3><a href="#peek"><code>c's peek(q)</code></a></h3>
+          <p>the thing at the back of a queue, left there; a mistake if it's empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to peek with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L130">collections.moth line 130</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's peek(q)</code></pre><pre class="says"><code>2</code></pre></div>
+        </section>
+        <section class="fn" id="items_of">
+          <h3><a href="#items_of"><code>c's items_of(q)</code></a></h3>
+          <p>the queue's things, front first</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to items_of with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L138">collections.moth line 138</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> q <span class="k">to</span> c's queue()
+c's push(q, <span class="n">1</span>)
+c's push(q, <span class="n">2</span>)
+c's push_front(q, <span class="n">0</span>)
+<span class="k">say</span> c's items_of(q)</code></pre><pre class="says"><code>[0, 1, 2]</code></pre></div>
+        </section>
+        <section class="fn" id="heap">
+          <h3><a href="#heap"><code>c's heap()</code></a></h3>
+          <p>A heap keeps its things in a list, each no greater than the two after it (at 2k and 2k + 1), and how many of the list's are its, as a list only grows.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to heap</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L151">collections.moth line 151</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> h <span class="k">to</span> c's heap()
+<span class="k">say</span> h</code></pre><pre class="says"><code>(record with things [], count 0)</code></pre></div>
+        </section>
+        <section class="fn" id="heap_size">
+          <h3><a href="#heap_size"><code>c's heap_size(h)</code></a></h3>
+          <p>how many things a heap holds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>h</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to heap_size with h</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L156">collections.moth line 156</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> h <span class="k">to</span> c's heap()
+<span class="k">say</span> c's heap_size(h)</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="heap_push">
+          <h3><a href="#heap_push"><code>c's heap_push(h, x)</code></a></h3>
+          <p>x put in a heap, which keeps its smallest on top</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>h</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to heap_push with h, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L161">collections.moth line 161</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> h <span class="k">to</span> c's heap()
+c's heap_push(h, <span class="s">&quot;pear&quot;</span>)
+<span class="k">say</span> c's heap_pop(h)</code></pre><pre class="says"><code>pear</code></pre></div>
+        </section>
+        <section class="fn" id="heap_peek">
+          <h3><a href="#heap_peek"><code>c's heap_peek(h)</code></a></h3>
+          <p>the smallest thing in a heap, left there; a mistake if it's empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>h</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to heap_peek with h</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L183">collections.moth line 183</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> h <span class="k">to</span> c's heap()
+<span class="k">say</span> c's heap_peek(h)</code></pre></div>
+        </section>
+        <section class="fn" id="heap_pop">
+          <h3><a href="#heap_pop"><code>c's heap_pop(h)</code></a></h3>
+          <p>the smallest, taken off</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>h</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to heap_pop with h</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L191">collections.moth line 191</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> h <span class="k">to</span> c's heap()
+c's heap_push(h, <span class="s">&quot;pear&quot;</span>)
+c's heap_push(h, <span class="s">&quot;apple&quot;</span>)
+<span class="k">say</span> c's heap_pop(h)</code></pre><pre class="says"><code>apple</code></pre></div>
+        </section>
+        <section class="fn" id="where_sorted">
+          <h3><a href="#where_sorted"><code>c's where_sorted(sorted_things, x)</code></a></h3>
+          <p>where x goes in a sorted list, after anything equal to it: the number of things not greater than it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>sorted_things</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to where_sorted with sorted_things, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L226">collections.moth line 226</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> xs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">3</span>, <span class="n">5</span>
+<span class="k">say</span> c's where_sorted(xs, <span class="n">4</span>)              <span class="c"># 3: where 4 goes, after anything equal (bisect)</span></code></pre><pre class="says"><code>2</code></pre></div>
+        </section>
+        <section class="fn" id="where_sorted_first">
+          <h3><a href="#where_sorted_first"><code>c's where_sorted_first(sorted_things, x)</code></a></h3>
+          <p>where x first is, or would go, in a sorted list: the number of things less than it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>sorted_things</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to where_sorted_first with sorted_things, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L241">collections.moth line 241</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> xs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">3</span>, <span class="n">3</span>, <span class="n">5</span>
+<span class="k">say</span> c's where_sorted_first(xs, <span class="n">3</span>)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="insert_sorted">
+          <h3><a href="#insert_sorted"><code>c's insert_sorted(sorted_things, x)</code></a></h3>
+          <p>x put in a sorted list where it goes, so it stays sorted</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>sorted_things</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to insert_sorted with sorted_things, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/collections.moth#L256">collections.moth line 256</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;collections.moth&quot;</span> <span class="k">as</span> c
+<span class="k">set</span> xs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">3</span>, <span class="n">3</span>, <span class="n">5</span>
+c's insert_sorted(xs, <span class="n">4</span>)
+<span class="k">say</span> xs</code></pre><pre class="says"><code>[1, 3, 3, 4, 5]</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

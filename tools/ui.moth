@@ -10,6 +10,77 @@
 #   set name to ui's text_box(w, 20, 20, 200, 26)
 #   ui's button(w, "Greet", 230, 20, 100, 28, say_hello)
 #   ui's run()
+#
+# Every function, in a window of controls: places and sizes are in pixels from the window's top left, and each
+# handler named is a function of the program's, called when that happens.
+#
+#   set w to ui's window("Shop", 520, 400)
+#   ui's set_icon(w, "shop.png")
+#   ui's label(w, "Name", 20, 20, 60, 24)
+#   set name to ui's text_box(w, 80, 20, 200, 26)
+#   ui's on_change(name, name_changed)                 # name_changed(text), as it's typed
+#   ui's set_text(name, "Sam")
+#   say ui's text_of(name)                             # Sam
+#   ui's focus(name)                                   # what's typed goes into it
+#   set notes to ui's text_area(w, 20, 56, 260, 80)
+#   set buy to ui's button(w, "Buy", 300, 20, 80, 28, bought)    # bought(), when it's pressed
+#   ui's enable(buy, no)                               # greyed out, until enable(buy, yes)
+#   set gift to ui's checkbox(w, "A gift", 300, 56, 120, 24, gift_ticked)    # gift_ticked(yes or no)
+#   ui's set_ticked(gift, yes)
+#   say ui's ticked(gift)                              # yes
+#   set fruits to ui's list_box(w, 20, 150, 120, 100, fruit_chosen)    # fruit_chosen(item)
+#   ui's add_item(fruits, "apple")
+#   ui's add_item(fruits, "pear")
+#   ui's choose(fruits, 2)
+#   say ui's chosen(fruits) " " ui's chosen_place(fruits) " of " ui's count_of(fruits)    # pear 2 of 2
+#   ui's remove_item(fruits, 1)
+#   ui's clear_items(fruits)
+#   set sizes to ui's dropdown(w, 160, 150, 120, 28, size_chosen)      # size_chosen(item), as a list box's
+#   ui's place(sizes, 160, 190, 140, 28)               # moved, or made another size
+#   set bar to ui's progress(w, 20, 270, 260, 16)
+#   ui's set_progress(bar, 40)
+#   set photo to ui's picture(w, "apple.png", 300, 150, 100, 100)
+#   ui's set_picture(photo, "pear.png")
+#   ui's menu_item(w, "File", "Save\tCtrl+S", saved)  # saved(), when it's chosen or its keys pressed
+#   ui's timer(w, 1000, every_second)                  # every_second(), each second
+#   ui's on_resize(w, resized)                         # resized(width, height)
+#   ui's on_close(w, may_close)                        # may_close() gives yes to let it close
+#   ui's message(w, "Saved.")
+#   say ui's ask_yes_no(w, "Buy it?")                  # yes or no
+#   say ui's choose_file_to_open(w)                    # a file's name, or nothing
+#   say ui's choose_file_to_save(w)
+#   set pages to ui's tabs(w, 20, 20, 480, 360, tab_chosen)      # tab_chosen(title)
+#   set first_page to ui's tab(pages, "First")         # a page, to put controls on as on a window
+#   ui's choose_tab(pages, 1)
+#   say ui's chosen_tab(pages)                         # 1
+#   set orders to ui's table(w, (list of "Item", "Price"), 20, 20, 300, 200, row_chosen)    # row_chosen(values)
+#   ui's add_row(orders, list of "apple", 0.5)
+#   ui's choose_row(orders, 1)
+#   say ui's chosen_row(orders)                        # ["apple", 0.5]
+#   ui's clear_rows(orders)
+#   set board to ui's drawing(w, 20, 20, 300, 200, paint)        # paint(canvas), as below
+#   ui's on_click(board, clicked)                      # clicked(x, y)
+#   ui's on_key(board, key_pressed)                    # key_pressed(name)
+#   say ui's key_down(board, "Left")                   # whether it's held down
+#   say ui's mouse_x(board) ", " ui's mouse_y(board) " " ui's mouse_down(board)
+#   ui's redraw(board)                                 # paint is called again
+#   set ship to ui's load_image("ship.png")
+#   ui's play_sound("ping.wav")
+#   ui's close(w)
+#   ui's run()
+#
+# A drawing's painter is given a canvas to draw on, in pixels from the drawing's top left:
+#
+#   to paint with canvas
+#       ui's colour(canvas, 20, 20, 40)                # red, green and blue, for what's drawn next
+#       ui's rectangle(canvas, 0, 0, 300, 200)
+#       ui's colour(canvas, 255, 200, 80)
+#       ui's circle(canvas, 150, 100, 30)              # its middle, and how far from it to its edge
+#       ui's line(canvas, 0, 199, 300, 199)
+#       ui's words(canvas, "Score: 3", 10, 10)
+#       ui's draw_image(canvas, ship, 40, 60)          # at its own size
+#       ui's draw_image_sized(canvas, ship, 200, 60, 32, 32)
+#   end
 
 use "windows.moth" as win
 use "linux.moth" as gtk

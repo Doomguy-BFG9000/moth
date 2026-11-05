@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>python.moth · Moth's standard library</title>
+  <meta name="description" content="Python, inside a Moth program: CPython itself, through its C API, so a program can import Python's modules (NumPy, scikit-learn, anything installed), call…">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>python</em>.moth</h1>
+      <p>Python, inside a Moth program: CPython itself, through its C API, so a program can import Python's modules (NumPy, scikit-learn, anything installed), call…</p>
+      <p class="use"><code>use "python.moth" as python</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="python.moth's functions">
+      <h2>13 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#start">start</a></li><li><a href="#run">run</a></li><li><a href="#evaluate">evaluate</a></li><li><a href="#import_module">import_module</a></li><li><a href="#call">call</a></li><li><a href="#call_object">call_object</a></li><li><a href="#attribute">attribute</a></li><li><a href="#set_variable">set_variable</a></li><li><a href="#variable">variable</a></li><li><a href="#to_python">to_python</a></li><li><a href="#from_python">from_python</a></li><li><a href="#release">release</a></li><li><a href="#version">version</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Python, inside a Moth program: CPython itself, through its C API, so a program can import Python's modules (NumPy, scikit-learn, anything installed), call their functions and run Python code. Numbers, text, yes and no, nothing, lists and dictionaries go across as each other; arrays (arrays.moth) as NumPy arrays, when NumPy is there; anything else stays a Python object, which can be called and asked for its attributes.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">say</span> python's <span class="k">start</span>(<span class="k">nothing</span>)                      <span class="c"># where Python was found; or a library's path to use that one</span>
+python's run(<span class="s">&quot;import math\nx = math.factorial(10)&quot;</span>)
+<span class="k">say</span> python's evaluate(<span class="s">&quot;x // 3&quot;</span>)                  <span class="c"># 1209600</span>
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)
+<span class="k">say</span> python's call(math, <span class="s">&quot;sqrt&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>)       <span class="c"># 1.4142135623731</span>
+<span class="k">set</span> np <span class="k">to</span> python's import_module(<span class="s">&quot;numpy&quot;</span>)
+<span class="k">say</span> python's call(np, <span class="s">&quot;linspace&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">1</span>, <span class="n">5</span>)        <span class="c"># an array: [0, 0.25, 0.5, 0.75, 1]</span>
+<span class="k">say</span> python's call(np, <span class="s">&quot;round&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="n">2.567</span>), <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;decimals&quot;</span> <span class="k">is</span> <span class="n">1</span>)   <span class="c"># inputs by name</span>
+python's set_variable(<span class="s">&quot;data&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">2</span>)
+<span class="k">say</span> python's evaluate(<span class="s">&quot;sorted(data)&quot;</span>)            <span class="c"># [1, 2, 3]</span>
+<span class="k">say</span> python's variable(<span class="s">&quot;x&quot;</span>)                       <span class="c"># 3628800, set by the run above</span>
+<span class="k">set</span> pi_object <span class="k">to</span> python's attribute(math, <span class="s">&quot;pi&quot;</span>)  <span class="c"># a Python object, held by Moth</span>
+<span class="k">say</span> python's from_python(pi_object)              <span class="c"># 3.14159265358979, as Moth's own</span>
+<span class="k">set</span> three <span class="k">to</span> python's to_python(<span class="n">3</span>)
+<span class="k">set</span> sqrt <span class="k">to</span> python's attribute(math, <span class="s">&quot;sqrt&quot;</span>)
+<span class="k">say</span> python's call_object(sqrt, <span class="k">list</span> <span class="k">of</span> three)    <span class="c"># 1.73205080756888</span>
+python's release(three)                          <span class="c"># let go of, once Moth is done with it</span></code></pre></div>
+          <p>Python is found where the PYTHON_LIBRARY variable says (its DLL, or .so on Linux, or the folder it's in), else beside each folder in PATH (python3*.dll on Windows), else as Linux installs it (libpython3.*.so.1.0). A program that uses it is built with --allow-libraries. A mistake in Python is a <code>fail with</code> that says what Python said: &quot;Python: ZeroDivisionError: division by zero&quot;. Python objects aren't let go of when Moth is done with them: <a href="#release">release</a>(object) lets go of one.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="start">
+          <h3><a href="#start"><code>python's start(path)</code></a></h3>
+          <p>Python started, from the library at <code>path</code> (a file or a folder), or as found if there's none; gives where it was found. Every other function starts it as found, the first time.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to start with path or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L119">python.moth line 119</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">say</span> python's <span class="k">start</span>(<span class="k">nothing</span>)                      <span class="c"># where Python was found; or a library's path to use that one</span></code></pre></div>
+        </section>
+        <section class="fn" id="run">
+          <h3><a href="#run"><code>python's run(code)</code></a></h3>
+          <p>Python statements, run as a module's are, in __main__, whose names the next run and evaluate see</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>code</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run with code</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L655">python.moth line 655</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+python's run(<span class="s">&quot;import math\nx = math.factorial(10)&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="evaluate">
+          <h3><a href="#evaluate"><code>python's evaluate(expression)</code></a></h3>
+          <p>a Python expression's value, worked out in __main__</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>expression</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to evaluate with expression</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L666">python.moth line 666</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">say</span> python's evaluate(<span class="s">&quot;x // 3&quot;</span>)                  <span class="c"># 1209600</span></code></pre></div>
+        </section>
+        <section class="fn" id="import_module">
+          <h3><a href="#import_module"><code>python's import_module(name)</code></a></h3>
+          <p>a module, as Python imports it: a Python object</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to import_module with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L676">python.moth line 676</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="call">
+          <h3><a href="#call"><code>python's call(object, name, inputs, named)</code></a></h3>
+          <p>object.name(inputs...), with inputs by name from a dictionary: what it gives, as Moth's value</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>object</code></li><li><code>name</code></li><li><code>inputs</code> <span class="optional">optional: empty list if it's left out</span></li><li><code>named</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to call with object, name, inputs or empty list, named or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L686">python.moth line 686</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)
+<span class="k">say</span> python's call(math, <span class="s">&quot;sqrt&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">2</span>)       <span class="c"># 1.4142135623731</span></code></pre></div>
+        </section>
+        <section class="fn" id="call_object">
+          <h3><a href="#call_object"><code>python's call_object(object, inputs, named)</code></a></h3>
+          <p>a Python object that can be called, called</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>object</code></li><li><code>inputs</code> <span class="optional">optional: empty list if it's left out</span></li><li><code>named</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to call_object with object, inputs or empty list, named or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L696">python.moth line 696</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)
+<span class="k">set</span> three <span class="k">to</span> python's to_python(<span class="n">3</span>)
+<span class="k">set</span> sqrt <span class="k">to</span> python's attribute(math, <span class="s">&quot;sqrt&quot;</span>)
+<span class="k">say</span> python's call_object(sqrt, <span class="k">list</span> <span class="k">of</span> three)    <span class="c"># 1.73205080756888</span></code></pre></div>
+        </section>
+        <section class="fn" id="attribute">
+          <h3><a href="#attribute"><code>python's attribute(object, name)</code></a></h3>
+          <p>object.name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>object</code></li><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to attribute with object, name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L706">python.moth line 706</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)
+<span class="k">set</span> pi_object <span class="k">to</span> python's attribute(math, <span class="s">&quot;pi&quot;</span>)  <span class="c"># a Python object, held by Moth</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_variable">
+          <h3><a href="#set_variable"><code>python's set_variable(name, value)</code></a></h3>
+          <p>a name in __main__, which run and evaluate see, given a Moth value</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_variable with name, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L716">python.moth line 716</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+python's set_variable(<span class="s">&quot;data&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">2</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="variable">
+          <h3><a href="#variable"><code>python's variable(name)</code></a></h3>
+          <p>a name in __main__'s value, as a Moth value; a mistake if Python has no variable called that</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to variable with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L731">python.moth line 731</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">say</span> python's variable(<span class="s">&quot;x&quot;</span>)                       <span class="c"># 3628800, set by the run above</span></code></pre></div>
+        </section>
+        <section class="fn" id="to_python">
+          <h3><a href="#to_python"><code>python's to_python(value)</code></a></h3>
+          <p>a Moth value as a Python object Moth holds, which goes back to Python as it is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to to_python with value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L745">python.moth line 745</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> three <span class="k">to</span> python's to_python(<span class="n">3</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="from_python">
+          <h3><a href="#from_python"><code>python's from_python(object)</code></a></h3>
+          <p>a Python object Moth holds as a Moth value, as call gives them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>object</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to from_python with object</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L755">python.moth line 755</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> math <span class="k">to</span> python's import_module(<span class="s">&quot;math&quot;</span>)
+<span class="k">set</span> pi_object <span class="k">to</span> python's attribute(math, <span class="s">&quot;pi&quot;</span>)  <span class="c"># a Python object, held by Moth</span>
+<span class="k">say</span> python's from_python(pi_object)              <span class="c"># 3.14159265358979, as Moth's own</span></code></pre></div>
+        </section>
+        <section class="fn" id="release">
+          <h3><a href="#release"><code>python's release(object)</code></a></h3>
+          <p>a Python object let go of</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>object</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to release with object</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L765">python.moth line 765</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+<span class="k">set</span> three <span class="k">to</span> python's to_python(<span class="n">3</span>)
+python's release(three)                          <span class="c"># let go of, once Moth is done with it</span></code></pre></div>
+        </section>
+        <section class="fn" id="version">
+          <h3><a href="#version"><code>python's version()</code></a></h3>
+          <p>Python's version, as &quot;3.13.3&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to version</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/python.moth#L784">python.moth line 784</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;python.moth&quot;</span> <span class="k">as</span> python
+python's version()</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>
