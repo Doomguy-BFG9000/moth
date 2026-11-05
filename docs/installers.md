@@ -81,7 +81,7 @@ On Windows, with winget up to date (Microsoft Store, App Installer, or `winget u
    winget validate --manifest packaging\winget\manifests\s\samyyy2423\Moth\1.11.0
    winget install --manifest packaging\winget\manifests\s\samyyy2423\Moth\1.11.0
    moth
-   winget uninstall samyyy2423.Moth
+   winget uninstall --manifest packaging\winget\manifests\s\samyyy2423\Moth\1.11.0
    ```
 
    `moth` should start the Moth shell in a new terminal (`quit` ends it).
