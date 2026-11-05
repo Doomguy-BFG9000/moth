@@ -22,3 +22,5 @@ apps/guestbook/guestbook
 apps/guestbook/guestbook.exe
 # what Python makes when it runs the Jupyter kernel or its tests
 editors/jupyter/**/__pycache__/
+# what packaging/release-build.sh makes, given dist (docs/installers.md)
+/dist/
