@@ -98,10 +98,21 @@ write Moth and press Run, or [learn Moth in an afternoon](https://samyyy2423.git
 eleven short lessons, each with a program to run and change. There's nothing to
 install.
 
-**On your computer:** download Moth from the
-[latest release](https://github.com/samyyy2423/moth/releases/latest), one file
-with nothing else to install: `moth-windows.exe`, saved as `moth.exe`, or
-`moth-linux`, saved as `moth` (then `chmod +x moth`).
+**On your computer:** install Moth, one program with nothing else to install.
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex
+```
+
+On Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh
+```
+
+[Install](#install) has Scoop, winget, Debian's packages, Docker and the
+download itself.
 
 ```text
 moth run hello.moth          runs a program
@@ -113,6 +124,79 @@ moth                         the Moth shell: Moth a line at a time
 
 [The language](#the-language) has all of Moth on one page, and
 [CONTRIBUTING.md](CONTRIBUTING.md) says how to help.
+
+## Install
+
+Moth is one program, `moth`, for Windows and Linux on x86-64. Each way below
+installs a [release](https://github.com/samyyy2423/moth/releases)'s program as
+it is, byte for byte, and [docs/verifying-releases.md](docs/verifying-releases.md)
+says how to check one.
+
+**Windows, with the installer.** In PowerShell, with no administrator needed:
+
+```powershell
+irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex
+```
+
+It downloads `moth-windows.exe` and the release's `SHA256SUMS.txt`, installs
+nothing unless the two agree, saves it as `moth.exe` in
+`%LOCALAPPDATA%\Programs\Moth`, and adds that folder to your PATH. A new terminal
+has `moth`. `$env:MOTH_VERSION = "1.11.0"` before it picks a release, and
+`$env:MOTH_INSTALL_DIR` another folder.
+
+**Windows, with Scoop:**
+
+```powershell
+scoop install https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/scoop/moth.json
+```
+
+`scoop update moth` takes the next release once this repository has it.
+
+**Windows, with winget** (once Moth is in winget's repository):
+
+```powershell
+winget install samyyy2423.Moth
+```
+
+**Linux, with the installer:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh
+```
+
+It downloads `moth-linux` and `SHA256SUMS.txt`, installs nothing unless the two
+agree, puts `moth` in `~/.local/bin` (`/usr/local/bin` as root), and adds that
+folder to your shell's PATH if it isn't there. `sh -s -- --version 1.11.0`
+picks a release, `--dir` another folder, and `--no-modify-path` leaves your
+shell's files alone. It needs `curl` or `wget`.
+
+**Debian and Ubuntu.** From the release after 1.11.0, each release has
+`moth_<version>_amd64.deb`, with `moth` as `/usr/bin/moth`:
+
+```bash
+sudo apt install ./moth_1.12.0_amd64.deb
+```
+
+**Docker.** From the release after 1.11.0, `ghcr.io/samyyy2423/moth` is moth on
+[distroless](https://github.com/GoogleContainerTools/distroless) Debian, tagged
+with each version and `latest`. Run in the folder of your program, as you, so
+what it writes is yours:
+
+```bash
+docker run --rm -v "$PWD:/work" --user "$(id -u):$(id -g)" ghcr.io/samyyy2423/moth run hello.moth
+```
+
+The image has no shell, git or curl, so `moth add` and `moth search` don't work
+in it. To use moth in another image, copy it:
+`COPY --from=ghcr.io/samyyy2423/moth:latest /usr/bin/moth /usr/local/bin/moth`.
+
+**By hand.** Download `moth-windows.exe` (save it as `moth.exe`) or `moth-linux`
+(save it as `moth`, then `chmod +x moth`) from the
+[latest release](https://github.com/samyyy2423/moth/releases/latest), or make it
+from the source with Node.js: `node bootstrap.mjs`.
+
+[docs/installers.md](docs/installers.md) says how each of these is made and
+tested.
 
 ## What makes it different
 
@@ -1050,9 +1134,9 @@ nothing to install.
 ## Command line
 
 `moth` is standalone Moth: a program of its own, with nothing else to install.
-Get `moth-windows.exe` (save it as `moth.exe`) or `moth-linux` (save it as
-`moth`, then `chmod +x moth`) from
-[the releases](https://github.com/samyyy2423/moth/releases), or make it from the
+[Install](#install) has the ways to get it: an installer for Windows or Linux,
+Scoop, winget, a .deb, Docker, or `moth-windows.exe` or `moth-linux` from
+[the releases](https://github.com/samyyy2423/moth/releases). Or make it from the
 source with Node.js: `node bootstrap.mjs`.
 
 ```text
@@ -1620,6 +1704,10 @@ Moth keeps its promises in writing, for anyone who builds on it:
 - **[SECURITY.md](SECURITY.md)**: how to report a vulnerability privately, the
   versions that get fixes, and what the `--allow` flags protect against and
   what they don't.
+- **Signed releases.** From the release after 1.11.0, every file of a release
+  is signed with Sigstore and attested by GitHub, with an SBOM of what's built
+  into moth: [docs/verifying-releases.md](docs/verifying-releases.md) says how
+  to check one with `cosign` or `gh`, or by building moth yourself.
 
 ## Limits
 

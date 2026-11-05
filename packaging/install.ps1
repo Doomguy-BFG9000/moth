@@ -11,15 +11,18 @@
 # or as a script: .\install.ps1 -Version 1.11.0 -InstallDir C:\Tools\Moth -NoModifyPath. MOTH_RELEASES_URL says
 # where the releases are, for a mirror or a test; else GitHub's. To check who made the download, not only that it
 # arrived whole, see docs/verifying-releases.md.
-param(
-    [string] $Version = $env:MOTH_VERSION,
-    [string] $InstallDir = $env:MOTH_INSTALL_DIR,
-    [switch] $NoModifyPath = ($env:MOTH_NO_MODIFY_PATH -eq '1'),
-    [string] $ReleasesUrl = $env:MOTH_RELEASES_URL
-)
 
-# in a scope of its own, so that run through iex it leaves the session's settings as they were
+# Everything is in a script block of its own, its options with it, so that run through iex it leaves the
+# session as it was: no variable, function or setting of its own stays behind. As a script, its arguments go to
+# the block with @args.
 & {
+    param(
+        [string] $Version = $env:MOTH_VERSION,
+        [string] $InstallDir = $env:MOTH_INSTALL_DIR,
+        [switch] $NoModifyPath = ($env:MOTH_NO_MODIFY_PATH -eq '1'),
+        [string] $ReleasesUrl = $env:MOTH_RELEASES_URL
+    )
+
     Set-StrictMode -Version 3.0
     $ErrorActionPreference = 'Stop'
 
@@ -140,4 +143,4 @@ param(
     }
 
     Install-Moth
-}
+} @args

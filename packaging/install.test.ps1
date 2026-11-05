@@ -15,9 +15,11 @@ New-Item -ItemType Directory -Path $work | Out-Null
 Set-Content -LiteralPath (Join-Path $work 'hello.moth') -Value 'say "Hello from " "install.ps1"'
 Write-Host "PowerShell $($PSVersionTable.PSVersion)"
 
+$script:passed = 0
 function Assert([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw "FAILED: $Message" }
     Write-Host "ok: $Message"
+    $script:passed += 1
 }
 function Get-UserPath {
     $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
@@ -44,19 +46,27 @@ try {
     Assert ((Get-Count $dir) -eq 1) 'its folder is on the user PATH once, after installing twice'
     Assert (-not (Test-Path (Join-Path $dir 'moth.exe.old'))) 'no moth.exe.old is left'
 
-    # irm | iex: the latest release, its options from the environment, and the session's settings as they were
+    # irm | iex, in a session of its own as a person's would be: the latest release, its options from the
+    # environment, and nothing of the session changed, its own $Version included
     $dir2 = Join-Path $work 'b'
-    $env:MOTH_INSTALL_DIR = $dir2
-    $env:MOTH_NO_MODIFY_PATH = '1'
-    $before = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    Get-Content -Raw -LiteralPath $script | Invoke-Expression
-    Assert ($ErrorActionPreference -eq 'Continue') 'iex left $ErrorActionPreference as it was'
-    Assert ($null -eq $variableNoOneSet) 'iex left strict mode off'
-    $ErrorActionPreference = $before
-    Remove-Item Env:MOTH_INSTALL_DIR, Env:MOTH_NO_MODIFY_PATH
+    $session = @"
+`$ErrorActionPreference = 'Continue'
+`$Version = 'mine'
+`$env:MOTH_INSTALL_DIR = '$dir2'
+`$env:MOTH_NO_MODIFY_PATH = '1'
+Get-Content -Raw -LiteralPath '$script' | Invoke-Expression
+if (`$ErrorActionPreference -ne 'Continue') { 'iex changed `$ErrorActionPreference'; exit 2 }
+if (`$Version -ne 'mine') { 'iex changed `$Version'; exit 3 }
+try { `$null = `$noOneSetThis } catch { 'iex left strict mode on'; exit 4 }
+if (Get-Command Install-Moth -ErrorAction SilentlyContinue) { 'iex left its functions behind'; exit 5 }
+exit 0
+"@
+    $shell = (Get-Process -Id $PID).Path
+    $said = & $shell -NoProfile -NonInteractive -EncodedCommand ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($session)))
+    $said | Write-Host
+    Assert ($LASTEXITCODE -eq 0) "irm | iex installs, and leaves the session's variables, settings and functions as they were (exit $LASTEXITCODE)"
     Assert (Test-Path (Join-Path $dir2 'moth.exe')) 'iex installed the latest moth'
-    Assert ((Get-Count $dir2) -eq 0) '-NoModifyPath (MOTH_NO_MODIFY_PATH=1) left PATH alone'
+    Assert ((Get-Count $dir2) -eq 0) 'MOTH_NO_MODIFY_PATH=1 left PATH alone'
 
     # a release whose SHA256SUMS.txt doesn't have moth-windows.exe's sum: nothing is installed
     $fake = Join-Path $work 'releases\download\v9.8.7'
@@ -81,4 +91,5 @@ try {
     }
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host 'install.ps1 works'
+if ($script:passed -ne 12) { throw "only $script:passed of the 12 checks ran" }
+Write-Host 'install.ps1 works: 12 checks'
