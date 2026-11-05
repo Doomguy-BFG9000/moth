@@ -5,7 +5,7 @@ import { Scope } from "./scope.js";
 import { UNSET, Closure, Turtle, TURTLE_ACTIONS, fail, catchable, caughtValue, truthy, equal, show, item, compare, plus, arithmetic, negate, lengthOf,
   addInto, checkRepeat, checkRange, itemsOf, callable, checkInputs, checkKinds, numberOrder, atMost, divisible, noValue, stoppedMessage, Record, makeRecord, fieldOf, recordFor,
   failWith, BUILTINS, askFor, itemAt, putItem, makeDictionary, removeKey, readFile, writeFile, trailOf, expectThat, expectYes, randomWhole, seeded, EVENTS, LABELLED, everyInterval,
-  Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP } from "./vm.js";
+  Ended, exitCode, removeFile, fakeClock, nowValue, waitFor, readFolder, soundOf, BEEP, startWorker } from "./vm.js";
 
 const q = JSON.stringify; // a JavaScript literal
 const COMPARE_HELPERS = { "is": "eq", "less than": "lt", "greater than": "gt", "at least": "ge", "at most": "le", "divisible by": "dv", "in": "isIn" };
@@ -43,6 +43,12 @@ class JsCompiler extends Scope {
 
   temp() {
     return `$t${++this.temps}`;
+  }
+
+  top() {
+    let c = this;
+    while (c.parent) c = c.parent;
+    return c;
   }
 
   undefined(name, at, options) {
@@ -143,7 +149,8 @@ class JsCompiler extends Scope {
     const inner = new JsCompiler(this, d.name, d.params, d.body, this.ats);
     const params = d.params.map((_, i) => inner.v(i + 1)).join(", ");
     const kinds = d.kinds?.some((k) => k >= 0) ? `, [${d.kinds.join(", ")}]` : ""; // what each input says it is, if any does
-    return `fn(${q(d.name)}, ${q(d.params)}, function (${params}) {\n${inner.code}\nreturn null;\n}${kinds})`;
+    const made = this.level ? "fnIn" : "fn"; // made inside another function, which a worker can't be given
+    return `${made}(${q(d.name)}, ${q(d.params)}, function (${params}) {\n${inner.code}\nreturn null;\n}${kinds})`;
   }
 
   // The function is looked up before its inputs are worked out, and checked after, as in the VM.
@@ -208,6 +215,13 @@ class JsCompiler extends Scope {
       case "now":
         return `now(${e.which})`;
       case "builtin":
+        if (e.name === "start worker") { // the call, made on copies, with the program's variables swapped for them by $globals
+          const call = e.args[0];
+          if (!this.resolve(call.name)) return this.undefined(call.name, call.at, { call: true });
+          const k = this.pos(call.at);
+          this.top().workers = true;
+          return `worker(callable(${this.ref(call.name)}, ${q(call.name)}, ${k}), [${call.args.map((a) => this.expr(a)).join(", ")}], ${q(call.name)}, ${k}, $globals)`;
+        }
         return `builtin(${BUILTINS.findIndex((b) => b.name === e.name)}, [${e.args.map((a) => this.expr(a)).join(", ")}], ${this.pos(e.at)})`;
     }
   }
@@ -218,6 +232,7 @@ class JsCompiler extends Scope {
 // means the hand-over never happens halfway through something else, like the code that prints a line.
 export class TooDeep {}
 const MAX_DEPTH = 2000;
+const INSIDE = {}; // the scope of a function made inside another, as the JIT's functions keep none of their own
 
 // What the generated code calls. The fast paths (two numbers) are written out here so V8 can inline them;
 // everything else goes to the checks the VM uses too. `k` is a position, so an error points at the right spot.
@@ -266,6 +281,7 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     from[depth++] = k;
   };
   const leave = (result) => (depth--, result);
+  const callAny = (f, args, name, k) => (enter(f, args.length, name, k, f.fn.kinds && args), leave(f.fn.run(...args)));
   host.call = (handler, inputs) => {
     [steps, depth] = [0, 0];
     handler.closure.fn.run(...inputs.slice(0, handler.closure.fn.params.length));
@@ -278,12 +294,27 @@ function helpers(ats, print, draw, maxSteps, answer, disk, args = [], chance = s
     fail: (message, k) => errors[k](message),
     unset: (name, k) => errors[k](noValue(name)),
     fn: (name, params, run, kinds) => new Closure(kinds ? { name, params, run, kinds } : { name, params, run }, null),
+    fnIn: (name, params, run, kinds) => new Closure(kinds ? { name, params, run, kinds } : { name, params, run }, INSIDE),
     callable: (f, name, k) => callable(f, name, errors[k]),
     call0: (f, name, k) => (enter(f, 0, name, k), leave(f.fn.run())),
     call1: (f, a, name, k) => (enter(f, 1, name, k, f.fn.kinds && [a]), leave(f.fn.run(a))),
     call2: (f, a, b, name, k) => (enter(f, 2, name, k, f.fn.kinds && [a, b]), leave(f.fn.run(a, b))),
     call3: (f, a, b, c, name, k) => (enter(f, 3, name, k, f.fn.kinds && [a, b, c]), leave(f.fn.run(a, b, c))),
-    callN: (f, args, name, k) => (enter(f, args.length, name, k, f.fn.kinds && args), leave(f.fn.run(...args))),
+    callN: callAny,
+    // `start f(x) on another core`: see startWorker in vm.js
+    worker: (f, inputs, name, k, globals) => {
+      const at = depth;
+      return startWorker(f, inputs, name, errors[k], {
+        call: (g, given) => callAny(g, given, name, k),
+        globals,
+        topLevel: (g) => g.env !== INSIDE,
+        caught: (err) => {
+          if (!catchable(err)) throw err;
+          depth = at;
+          return caughtValue(err);
+        },
+      });
+    },
     add: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a + b : plus(a, b, errors[k])),
     sub: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a - b : arithmetic("-", a, b, errors[k])),
     mul: (a, b, k) => (typeof a === "number" && typeof b === "number" ? a * b : arithmetic("*", a, b, errors[k])),
@@ -360,7 +391,13 @@ export function jit(program) {
   const ats = [];
   const main = new JsCompiler(null, "main", [], program, ats);
   const slots = main.fn.names.map((_, slot) => main.v(slot)).filter((_, slot) => slot > 0);
-  return fromJs(`${main.code}\nreturn [${slots.join(", ")}];`, ats, main.fn.names);
+  return fromJs(`${main.code}\n${main.workers ? globalsCode(slots) : ""}return [${slots.join(", ")}];`, ats, main.fn.names);
+}
+
+// For a program that starts a worker: a function that gives the program's variables, and puts others in their
+// place if it's given them (see startWorker in vm.js)
+function globalsCode(slots) {
+  return `function $globals($s) {\nconst $o = [${slots.join(", ")}];\nif ($s) [${slots.join(", ")}] = $s;\nreturn $o;\n}\n`;
 }
 
 // Runs JavaScript made for these helpers, whoever made it: jit() above, or the compiler written in Moth.

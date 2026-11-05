@@ -234,6 +234,7 @@ to new_asm
         charts no, pictures no, widgets no, sends no, controls no, files no, window no, libraries no,
         library_blocks empty dictionary, library_structs empty dictionary, struct_jobs empty list,
         library_callbacks empty dictionary, callback_jobs empty list, shipping nothing, task_runtime no, threading no,
+        workers no,
         guarded empty list, released empty list, last_store nothing, field_spots 0, last_word no, own_kernels empty dictionary
     set code of made to hot of made
     return made
@@ -28572,16 +28573,23 @@ to emit_runtime with st
         call_to(a, "rt_snd_start")
     end
     store(a, rip("stack_top"), rsp)
-    set task_runtime of a to uses_threads of st or uses_waitfor of st
+    set workers of a to uses_workers of st
+    set task_runtime of a to uses_threads of st or uses_waitfor of st or workers of a
     set threading of a to uses_threads of st
     if threading of a
         call_to(a, "rt_threads_init")
+    end
+    if workers of a
+        call_to(a, "rt_wk_init")
     end
     movi(a, r15, 0)
     call_to(a, "moth_main")
     call_mark(a, -1)
     if threading of a # the tasks still running, done first
         call_to(a, "rt_task_join_all")
+    end
+    if workers of a # and the workers
+        call_to(a, "rt_wk_join_all")
     end
     movi(a, rcx, 0)
     mark(a, "rt_finish") # rcx: the number the program ends with, once what it said and drew has gone out
@@ -28630,6 +28638,10 @@ to emit_runtime with st
     emit_gc_tables(a)
     if task_runtime of a
         emit_threads(a, target of st)
+        emit_job_of(a)
+    end
+    if workers of a
+        emit_workers(a, target of st, uses_random of st)
     end
     if uses_case of st or windowed or uses_saving of st or files of a or libraries of a or length of keys of own_kernels of a is greater than 0 # (and a file's name, from UTF-16)
         emit_cases(a)
@@ -28753,6 +28765,9 @@ to emit_runtime with st
     if task_runtime of a and target of st is "windows"
         add (list of "KERNEL32.dll", thread_imports) to wanted
     end
+    if workers of a and target of st is "windows"
+        add (list of "KERNEL32.dll", wk_imports) to wanted
+    end
     if threading of a
         emit_guards(a, target of st)
     end
@@ -28770,7 +28785,9 @@ to emit_runtime with st
         reserve(a, "wbuf", 2 * wide_cap, 16)
     else
         emit_linux(a)
-        reserve(a, "stack", stack_size, 16)
+        if not workers of a # (with workers, after the image they copy: see wk_image_end)
+            reserve(a, "stack", stack_size, 16)
+        end
     end
     reserve(a, "out_buf", out_cap, 16)
     for each name in list of "gc_base", "gc_abits", "gc_mbits", "gc_info", "gc_marks", "gc_marks_end", "gc_pages",
@@ -28873,10 +28890,17 @@ to emit_runtime with st
         end
     end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
+    if workers of a # a worker's slots, what one was given, and what each gave: all of them values (DESIGN §124)
+        reserve(a, "wk_slots", wk_max * wk_size, 8)
+        reserve(a, "wk_given", 64, 8)
+        reserve(a, "wk_given_fn", 8, 8)
+        reserve(a, "wk_gave", 8, 8)
+        reserve(a, "wk_bad", 8, 8)
+    end
     if task_runtime of a # each task's function, inputs and what it gave
         reserve(a, "thr_slots", thr_max * thr_size, 16)
         for each name in list of "thr_current", "gil_sem", "gil_waiting", "gil_next", "gil_serving", "gil_ticks", "tasks_made",
-            "task_made", "tls_index", "gc_thr_i"
+            "task_made", "tls_index", "gc_thr_i", "job_asked"
             reserve(a, name, 8, 8)
         end
         reserve(a, "thr_ts", 16, 8)
@@ -28969,11 +28993,28 @@ to emit_runtime with st
             reserve(a, name, 8, 8)
         end
     end
+    if workers of a # never values: where its image is, how far along, and how its copying is going
+        for each name in list of "wk_made", "wk_ready", "wk_me", "wk_delta", "wk_copy_delta", "wk_copy_from",
+            "wk_copy_to", "wk_depth", "wk_given_n", "wk_pret", "wk_image_size", "wk_my_base"
+            reserve(a, name, 8, 8)
+        end
+    end
     reserve(a, "scratch", 64, 16)
     reserve(a, "gc_roots_to", 0, 8)
     reserve(a, "dbuf", 64, 16)
     for each name in list of "big_r", "big_s", "big_mp", "big_mm", "big_t", "big_n"
         reserve(a, name, 8 * limbs, 16)
+    end
+    if workers of a # the last of the runtime's memory, so a worker knows how much to copy (see rt_wk_init)
+        reserve(a, "wk_image_end", 0, 4096)
+        set ro to rodata of a
+        pad_to(ro, 8)
+        rodata_here(a, "wk_image_end_at")
+        absolute(a, "rodata", length of ro, "wk_image_end", 0)
+        put64(ro, 0)
+        if target of st is "linux" # the program's own stack, 256 MB that no worker needs a copy of
+            reserve(a, "stack", stack_size, 16)
+        end
     end
     # where each call is, each function's name and its description, and what an input can say it is: texts
     # first, then tables of where they are
@@ -29051,6 +29092,1404 @@ to table_of_texts with a, name, labels
         absolute(a, "rodata", length of ro, label, 0)
         put64(ro, 0)
     end
+end
+
+# ---------- the runtime: workers ----------
+# `start f(x) on another core` (DESIGN §124) makes the call on a worker: a thread of the system's with memory
+# of its own, which shares nothing with the program. A worker runs a copy of the program's whole image -- its
+# code, its read-only data, its variables and the runtime's own memory -- taken as the worker starts. Every
+# address inside the image is written as a distance from the instruction using it, so the copy's code reads
+# and writes the copy's data and nothing else's: each worker has a heap and a collector of its own, its own
+# turn (so the tasks it starts take turns among themselves alone), and its own copy of the program's
+# variables. The program and its workers therefore run Moth at the same moment, on as many cores as there are.
+#
+# What a worker is given, and what it gives back, is copied between the two heaps. Both are in the one address
+# space, so the thread doing the copying reads the other's memory and allocates in its own. A value that lives
+# in the image itself (a text the program writes, and a field's name, which a record finds by where it is) is
+# not copied: the same place in the copy is that far along from it, so it stays the one value, and `x of r`
+# finds its field in a worker as it does in the program.
+#
+# The program waits while the worker copies what it was given, so nothing it is reading can be collected
+# underneath it; after that the worker reads nothing of the program's. What the worker gives back, or the
+# mistake it ended with, waits in its heap until `wait for` copies it out, and only then is the worker's image
+# free for the next worker in its slot -- so a program that starts worker after worker, as a server answering
+# requests does, makes one copy for each worker it has at a time, not one for each worker.
+
+set wk_max to 64 # workers at once whose answers nothing has taken yet
+set wk_size to 176
+set wk_at_state to 0 # 0 free, 1 copying what it was given, 2 running, 3 done, 4 its answer taken
+set wk_at_image to 8 # where its copy of the image is, kept for the next worker in the slot (0 for none yet)
+set wk_at_delta to 16 # how far that copy is from the program's own image
+set wk_at_fn to 24 # the function, and its inputs: the program's own values, read while the worker copies them
+set wk_at_nargs to 32
+set wk_at_args to 40 # up to 8
+set wk_at_result to 104 # what it gave, or the mistake it ended with: a value in the worker's own heap
+set wk_at_failed to 112 # 1 if it ended with a mistake
+set wk_at_number to 120 # the worker's number, from 1
+set wk_at_why to 128 # 0, or why what it was given couldn't be copied (see rt_wk_copy)
+set wk_at_bad to 136 # for why 2, where the name of the function made inside another is
+set wk_at_event to 144 # on Windows, the event its end sets, made once for the slot
+set wk_at_tid to 152 # on Linux, its thread's id
+set wk_at_stack to 160 # on Linux without libraries, the memory its stack is in, kept with the image
+set wk_deepest to 1000 # how deep a value may be nested and still be copied, as the JavaScript engines have it
+set wk_imports to list of "CreateThread", "VirtualAlloc", "CreateEventW", "SetEvent", "ResetEvent",
+    "WaitForSingleObject", "ExitThread", "CloseHandle", "SwitchToThread"
+# the runtime's own memory a worker starts afresh: what the program still had to say is the program's to say,
+# and the rest holds values of the program's heap that are no business of the worker's
+set wk_cleared to list of "try_top", "out_len", "b_ptr", "b_len", "b_cap", "showing", "comparing", "la_ptr"
+
+# where the system loads the program: the image a worker copies starts there
+to wk_image_base with target
+    if target is "windows"
+        return 0x140000000
+    end
+    return 4194304
+end
+
+to emit_workers with a, target, random
+    set windows to target is "windows"
+    emit_wk_memory(a, target)
+    emit_wk_start(a, target)
+    emit_wk_entry(a, target, random)
+    emit_wk_copy(a, target)
+    emit_wk_wait(a, target)
+end
+
+to emit_wk_memory with a, target
+    set windows to target is "windows"
+
+    # rt_wk_alloc: rcx bytes: memory that can be read, written and run, in rax, or 0 if there is none
+    set had to new_label(a)
+    mark(a, "rt_wk_alloc")
+    for each r in list of rcx, rdx, rsi, rdi, r8, r9, r10, r11
+        push_r(a, r)
+    end
+    if windows
+        win_enter(a)
+        mov_rr(a, rdx, rcx)
+        movi(a, rcx, 0)
+        movi(a, r8, 0x3000) # MEM_COMMIT | MEM_RESERVE
+        movi(a, r9, 0x40) # PAGE_EXECUTE_READWRITE
+        call_import(a, "imp_VirtualAlloc")
+        win_leave(a)
+    else
+        mov_rr(a, rsi, rcx)
+        movi(a, rdi, 0)
+        movi(a, rdx, 7) # PROT_READ | PROT_WRITE | PROT_EXEC
+        movi(a, r10, 0x22) # MAP_PRIVATE | MAP_ANONYMOUS
+        movi(a, r8, -1)
+        movi(a, r9, 0)
+        sys_call(a, 9)
+        alui(a, "cmp", rax, -4096)
+        jcc(a, cc_be, had)
+        movi(a, rax, 0)
+        mark(a, had)
+    end
+    for each r in list of r11, r10, r9, r8, rdi, rsi, rdx, rcx
+        pop_r(a, r)
+    end
+    ret(a)
+
+    # rt_wk_init: how long the program's image is, which is as far as the runtime's own memory goes, rounded
+    # up to a whole page; the workers copy that much
+    mark(a, "rt_wk_init")
+    movi_big(a, rcx, wk_image_base(target))
+    store(a, rip("wk_my_base"), rcx) # where this image is: a worker's own copy says where its copy is
+    load(a, rax, rip("wk_image_end_at"))
+    alu(a, "sub", rax, rcx)
+    alui(a, "add", rax, 4095)
+    alui(a, "and", rax, -4096)
+    store(a, rip("wk_image_size"), rax)
+    ret(a)
+
+    # rt_wk_image: rbx a slot with no image yet: a copy of the program's image for it, where it is in
+    # wk_at_image and how far along in wk_at_delta; rax 1, or 0 if the memory couldn't be had
+    set no_room to new_label(a)
+    mark(a, "rt_wk_image")
+    push_r(a, rsi)
+    push_r(a, rdi)
+    push_r(a, rcx)
+    push_r(a, rdx)
+    load(a, rcx, rip("wk_image_size"))
+    call_to(a, "rt_wk_alloc")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_room)
+    store(a, mem(rbx, wk_at_image), rax)
+    load(a, rcx, rip("wk_my_base")) # a copy of the image this is, which may itself be a worker's
+    mov_rr(a, rdx, rax)
+    alu(a, "sub", rdx, rcx)
+    store(a, mem(rbx, wk_at_delta), rdx)
+    mov_rr(a, rdi, rax)
+    mov_rr(a, rsi, rcx)
+    load(a, rcx, rip("wk_image_size"))
+    rep_movsb(a)
+    # each 8-byte address in the image (a text's bytes, a record's field names, a table of texts) made to say
+    # where that is in the copy, as an instruction's distance to it already does (see wk_fixes_table)
+    set fixing to new_label(a)
+    set fixed to new_label(a)
+    push_r(a, r8)
+    push_r(a, r9)
+    lea(a, rsi, rip("wk_fixes"))
+    load(a, rcx, mem(rsi, 0))
+    mark(a, fixing)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, fixed)
+    alui(a, "add", rsi, 8)
+    load(a, r8, mem(rsi, 0))
+    alu_load(a, "add", r8, mem(rbx, wk_at_image))
+    load(a, r9, mem(r8, 0))
+    alu_load(a, "add", r9, mem(rbx, wk_at_delta))
+    store(a, mem(r8, 0), r9)
+    dec_r(a, rcx)
+    jmp_to(a, fixing)
+    mark(a, fixed)
+    pop_r(a, r9)
+    pop_r(a, r8)
+    lea(a, rax, rip("wk_slots")) # nor any of this image's workers' images: it makes its own
+    alu_load(a, "add", rax, mem(rbx, wk_at_delta))
+    movi(a, rcx, wk_max * wk_size)
+    call_to(a, "rt_wk_clear")
+    lea(a, rax, rip("wk_ready")) # the copy has a heap of its own to make, whatever this image has made
+    alu_load(a, "add", rax, mem(rbx, wk_at_delta))
+    storei(a, mem(rax, 0), 0)
+    movi(a, rax, 1)
+    mark(a, no_room)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    pop_r(a, rdi)
+    pop_r(a, rsi)
+    ret(a)
+
+    # rt_wk_clear: rax where, rcx how many bytes (a multiple of 8): all zero. Every register is kept.
+    set clearing to new_label(a)
+    set cleared to new_label(a)
+    mark(a, "rt_wk_clear")
+    push_r(a, rax)
+    push_r(a, rcx)
+    push_r(a, rdx)
+    mov_rr(a, rdx, rax)
+    movi(a, rax, 0)
+    mark(a, clearing)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, cleared)
+    store(a, mem(rdx, 0), rax)
+    alui(a, "add", rdx, 8)
+    alui(a, "sub", rcx, 8)
+    jmp_to(a, clearing)
+    mark(a, cleared)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    pop_r(a, rax)
+    ret(a)
+end
+
+to emit_wk_start with a, target
+    set windows to target is "windows"
+    # rt_wk_start: rsi what a start pushed (its inputs, the last first, then the function), rcx how many
+    # inputs: a slot, an image and a thread for it. rax the worker's number; 0 if every slot is in use; -1 if
+    # the thread or its memory couldn't be had; or -2 if what it was given couldn't be copied, with why in
+    # err_why (1 nested too deep, 2 a function made inside another, whose name is where err_what points).
+    set seek to new_label(a)
+    set next_slot to new_label(a)
+    set none_free to new_label(a)
+    set found to new_label(a)
+    set has_image to new_label(a)
+    set copying to new_label(a)
+    set copied to new_label(a)
+    set waiting_copy to new_label(a)
+    set given_ok to new_label(a)
+    set started to new_label(a)
+    set failed to new_label(a)
+    set over to new_label(a)
+    mark(a, "rt_wk_start")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, r12, rsi)
+    mov_rr(a, r13, rcx)
+    push_r(a, r12)
+    push_r(a, r13)
+    call_to(a, "rt_flush_out") # what the program has said so far, said before anything the worker says
+    pop_r(a, r13)
+    pop_r(a, r12)
+    lea(a, rbx, rip("wk_slots"))
+    movi(a, rcx, 0)
+    mark(a, seek)
+    alui(a, "cmp", rcx, wk_max)
+    jcc(a, cc_ae, none_free)
+    load(a, rax, mem(rbx, wk_at_state))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, found)
+    alui(a, "cmp", rax, 4)
+    jcc(a, cc_e, found)
+    mark(a, next_slot)
+    alui(a, "add", rbx, wk_size)
+    inc_r(a, rcx)
+    jmp_to(a, seek)
+    mark(a, none_free)
+    movi(a, rax, 0)
+    jmp_to(a, over)
+    mark(a, found)
+    load(a, rax, mem(rbx, wk_at_image))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, has_image)
+    call_to(a, "rt_wk_image")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, failed)
+    mark(a, has_image)
+    mov_rr(a, rax, r13) # the function, pushed under its inputs
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r12)
+    load(a, rax, mem(rax, 0))
+    store(a, mem(rbx, wk_at_fn), rax)
+    store(a, mem(rbx, wk_at_nargs), r13)
+    movi(a, rcx, 0)
+    mark(a, copying) # input k, from the first: pushed n - 1 - k places above the last
+    alu(a, "cmp", rcx, r13)
+    jcc(a, cc_ae, copied)
+    mov_rr(a, rax, r13)
+    alu(a, "sub", rax, rcx)
+    dec_r(a, rax)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, r12)
+    load(a, rax, mem(rax, 0))
+    mov_rr(a, rdx, rcx)
+    shifti(a, "shl", rdx, 3)
+    alu(a, "add", rdx, rbx)
+    store(a, mem(rdx, wk_at_args), rax)
+    inc_r(a, rcx)
+    jmp_to(a, copying)
+    mark(a, copied)
+    load(a, rax, rip("wk_made")) # its number, and room for what it gives, nothing until it gives it
+    inc_r(a, rax)
+    store(a, rip("wk_made"), rax)
+    store(a, mem(rbx, wk_at_number), rax)
+    call_to(a, "rt_wk_room")
+    storei(a, mem(rbx, wk_at_why), 0)
+    storei(a, mem(rbx, wk_at_failed), 0)
+    movi64(a, rax, bits_nothing)
+    store(a, mem(rbx, wk_at_result), rax)
+    if windows # the event its end sets: made once for the slot, and reset for each worker in it
+        set have_event to new_label(a)
+        set event_ready to new_label(a)
+        load(a, rax, mem(rbx, wk_at_event))
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, have_event)
+        win_enter(a)
+        movi(a, rcx, 0)
+        movi(a, rdx, 1) # reset by hand
+        movi(a, r8, 0)
+        movi(a, r9, 0)
+        call_import(a, "imp_CreateEventW")
+        win_leave(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, failed)
+        store(a, mem(rbx, wk_at_event), rax)
+        jmp_to(a, event_ready)
+        mark(a, have_event)
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_ResetEvent")
+        win_leave(a)
+        mark(a, event_ready)
+    else # the last thread in the slot gone first, as its stack, which this one is given, is free only then
+        set tid_gone to new_label(a)
+        set tid_waiting to new_label(a)
+        mark(a, tid_waiting)
+        load(a, rdx, mem(rbx, wk_at_tid))
+        test_rr(a, rdx, rdx)
+        jcc(a, cc_e, tid_gone)
+        lea(a, rdi, mem(rbx, wk_at_tid))
+        movi(a, rsi, 0) # FUTEX_WAIT, as the system wakes it when it clears the thread's id
+        movi(a, r10, 0)
+        sys_call(a, 202)
+        jmp_to(a, tid_waiting)
+        mark(a, tid_gone)
+    end
+    storei(a, mem(rbx, wk_at_state), 1)
+    if windows
+        lea(a, rax, rip("rt_wk_entry")) # where the entry is in the worker's own copy of the image
+        alu_load(a, "add", rax, mem(rbx, wk_at_delta))
+        win_enter(a)
+        movi(a, rcx, 0)
+        movi(a, rdx, thr_stack)
+        mov_rr(a, r8, rax)
+        mov_rr(a, r9, rbx)
+        storei(a, mem(rsp, 32), 65536) # STACK_SIZE_PARAM_IS_A_RESERVATION
+        storei(a, mem(rsp, 40), 0)
+        call_import(a, "imp_CreateThread")
+        win_leave(a)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, failed)
+        win_enter(a)
+        mov_rr(a, rcx, rax)
+        call_import(a, "imp_CloseHandle")
+        win_leave(a)
+    else
+        set by_clone to new_label(a)
+        set in_child to new_label(a)
+        set have_stack to new_label(a)
+        if libraries of a # the C library's own way, so the thread has its own of what the library keeps
+            set have_pthreads to new_label(a)
+            load(a, rax, rip("thr_pcreate"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, have_pthreads)
+            for each pair in list of (list of "thr_pcreate", "pthread_create"), (list of "thr_pattr_init", "pthread_attr_init"),
+                (list of "thr_pattr_size", "pthread_attr_setstacksize"), (list of "thr_pattr_detach", "pthread_attr_setdetachstate")
+                push_r(a, rbp)
+                mov_rr(a, rbp, rsp)
+                alui(a, "and", rsp, -16)
+                movi(a, rdi, 0) # RTLD_DEFAULT
+                lea(a, rsi, rip(c_text_place(a, item 2 of pair)))
+                call_import(a, "got_dlsym")
+                mov_rr(a, rsp, rbp)
+                pop_r(a, rbp)
+                store(a, rip(item 1 of pair), rax)
+            end
+            load(a, rax, rip("thr_pcreate"))
+            test_rr(a, rax, rax)
+            jcc(a, cc_e, by_clone) # a C library older than 2.34, with pthreads apart: as without libraries
+            mark(a, have_pthreads)
+            push_r(a, rbp)
+            mov_rr(a, rbp, rsp)
+            alui(a, "and", rsp, -16)
+            lea(a, rdi, rip("thr_pattr"))
+            load(a, rax, rip("thr_pattr_init"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_pattr"))
+            movi(a, rsi, thr_stack)
+            load(a, rax, rip("thr_pattr_size"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_pattr"))
+            movi(a, rsi, 1) # PTHREAD_CREATE_DETACHED
+            load(a, rax, rip("thr_pattr_detach"))
+            call_r(a, rax)
+            lea(a, rdi, rip("thr_ptid"))
+            lea(a, rsi, rip("thr_pattr"))
+            lea(a, rdx, rip("rt_wk_pentry"))
+            alu_load(a, "add", rdx, mem(rbx, wk_at_delta))
+            mov_rr(a, rcx, rbx)
+            load(a, rax, rip("thr_pcreate"))
+            call_r(a, rax)
+            mov_rr(a, rsp, rbp)
+            pop_r(a, rbp)
+            test_rr(a, rax, rax)
+            jcc(a, cc_ne, failed)
+            jmp_to(a, started)
+        end
+        mark(a, by_clone)
+        load(a, rax, mem(rbx, wk_at_stack)) # a stack of its own, kept with the image for the next worker
+        test_rr(a, rax, rax)
+        jcc(a, cc_ne, have_stack)
+        movi(a, rdi, 0)
+        movi(a, rsi, thr_stack)
+        movi(a, rdx, 3) # PROT_READ | PROT_WRITE
+        movi(a, r10, 147490) # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_STACK
+        movi(a, r8, -1)
+        movi(a, r9, 0)
+        sys_call(a, 9)
+        alui(a, "cmp", rax, -4096)
+        jcc(a, cc_a, failed)
+        store(a, mem(rbx, wk_at_stack), rax)
+        mark(a, have_stack)
+        mov_rr(a, rsi, rax)
+        movi(a, rcx, thr_stack)
+        alu(a, "add", rsi, rcx)
+        lea(a, rax, rip("rt_wk_entry"))
+        alu_load(a, "add", rax, mem(rbx, wk_at_delta))
+        alui(a, "sub", rsi, 16) # where the child goes, on the stack it starts with
+        store(a, mem(rsi, 0), rax)
+        movi(a, rdi, 3477248) # CLONE_VM | FS | FILES | SIGHAND | THREAD | SYSVSEM | PARENT_SETTID | CHILD_CLEARTID
+        lea(a, rdx, mem(rbx, wk_at_tid))
+        mov_rr(a, r10, rdx)
+        movi(a, r8, 0)
+        sys_call(a, 56)
+        test_rr(a, rax, rax)
+        jcc(a, cc_e, in_child)
+        jcc(a, cc_l, failed)
+        jmp_to(a, started)
+        mark(a, in_child) # the new thread, on its own stack: on to the entry in its own copy of the image
+        mov_rr(a, rcx, rbx)
+        pop_r(a, rax)
+        jmp_r(a, rax)
+    end
+    mark(a, started)
+    set copy_done to new_label(a)
+    mark(a, waiting_copy) # while it copies what it was given, the program waits, so nothing it reads is collected
+    load(a, rax, mem(rbx, wk_at_state))
+    alui(a, "cmp", rax, 2)
+    jcc(a, cc_ae, copy_done)
+    if windows # its core given to the worker's thread, if that's waiting for one
+        win_enter(a)
+        call_import(a, "imp_SwitchToThread")
+        win_leave(a)
+    else
+        sys_call(a, 24) # sched_yield
+    end
+    jmp_to(a, waiting_copy)
+    mark(a, copy_done)
+    load(a, rax, mem(rbx, wk_at_why))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, given_ok)
+    store(a, rip("err_why"), rax)
+    load(a, rax, mem(rbx, wk_at_bad))
+    store(a, rip("err_what"), rax)
+    storei(a, mem(rbx, wk_at_state), 4)
+    movi(a, rax, -2)
+    jmp_to(a, over)
+    mark(a, given_ok)
+    load(a, rax, mem(rbx, wk_at_number))
+    jmp_to(a, over)
+    mark(a, failed)
+    storei(a, mem(rbx, wk_at_state), 0)
+    movi(a, rax, -1)
+    mark(a, over)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_wk_room: room in wk_gave and wk_bad for what the worker just numbered gives, nothing until it does
+    set have_lists to new_label(a)
+    mark(a, "rt_wk_room")
+    push_r(a, rax)
+    push_r(a, rcx)
+    push_r(a, rdx)
+    load(a, rax, rip("wk_gave"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, have_lists)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    store(a, rip("wk_gave"), rax)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    store(a, rip("wk_bad"), rax)
+    mark(a, have_lists)
+    load(a, rax, rip("wk_gave"))
+    movi64(a, rdx, bits_nothing)
+    call_to(a, "rt_list_push")
+    load(a, rax, rip("wk_bad"))
+    movi64(a, rdx, bits_nothing)
+    call_to(a, "rt_list_push")
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    pop_r(a, rax)
+    ret(a)
+end
+
+to emit_wk_entry with a, target, random
+    set windows to target is "windows"
+    set first_time to new_label(a)
+    set ready to new_label(a)
+    set gave to new_label(a)
+    set caught to new_label(a)
+    set as_words to new_label(a)
+    set ended to new_label(a)
+    set pushing to new_label(a)
+    set pushed to new_label(a)
+    set entered to new_label(a)
+    if not windows # rt_wk_pentry: a pthread's start, rdi its slot: what C keeps, kept for going back to it
+        mark(a, "rt_wk_pentry")
+        for each r in list of rbx, rbp, r12, r13, r14, r15
+            push_r(a, r)
+        end
+        store(a, rip("wk_pret"), rsp)
+        mov_rr(a, rcx, rdi)
+        jmp_to(a, entered)
+    end
+
+    # rt_wk_entry: a worker's thread, rcx its slot (which is the program's memory, reached through that
+    # pointer alone): its runtime made ready, what it was given copied into its own heap, the call made, and
+    # what it gave left in the slot for `wait for`. All of this runs in the worker's copy of the image, so
+    # everything it names by where it is is the copy's own.
+    mark(a, "rt_wk_entry")
+    storei(a, rip("wk_pret"), 0) # a thread of its own, not C's, which ends itself
+    mark(a, entered)
+    alui(a, "and", rsp, -16)
+    store(a, rip("wk_me"), rcx)
+    load(a, rax, mem(rcx, wk_at_delta))
+    store(a, rip("wk_delta"), rax)
+    load(a, rax, mem(rcx, wk_at_image)) # where this copy of the image is, as the slot it belongs to says
+    store(a, rip("wk_my_base"), rax)
+    lea(a, rax, rip("thr_stop")) # a frame for its first call to go back from, where a mistake's trail stops
+    push_r(a, rax)
+    push_r(a, rax)
+    mov_rr(a, rbp, rsp)
+    store(a, rip("stack_top"), rsp)
+    movi(a, r15, 0)
+    for each name in wk_cleared
+        storei(a, rip(name), 0)
+    end
+    storei(a, rip("wk_made"), 0) # the workers it starts are its own, as are the answers it keeps for them
+    storei(a, rip("wk_gave"), 0)
+    storei(a, rip("wk_bad"), 0)
+    set freeing to new_label(a) # its slots free, keeping the images an earlier worker here made for them
+    lea(a, rax, rip("wk_slots"))
+    movi(a, rcx, wk_max)
+    mark(a, freeing)
+    storei(a, mem(rax, wk_at_state), 0)
+    alui(a, "add", rax, wk_size)
+    dec_r(a, rcx)
+    jcc(a, cc_ne, freeing)
+    if task_runtime of a
+        storei(a, rip("task_gave"), 0)
+        storei(a, rip("tasks_made"), 0)
+    end
+    load(a, rax, rip("wk_ready"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, first_time)
+    jmp_to(a, ready)
+    mark(a, first_time) # a heap of its own, made once for the image and kept for the workers after it
+    for each name in list of "gc_base", "gc_abits", "gc_mbits", "gc_info", "gc_marks", "gc_marks_end", "gc_pages",
+        "gc_committed", "gc_since", "gc_threshold", "gc_live", "gc_runs"
+        storei(a, rip(name), 0)
+    end
+    lea(a, rax, rip("gc_free"))
+    movi(a, rcx, 16 * length of gc_sizes)
+    call_to(a, "rt_wk_clear")
+    call_to(a, "rt_gc_init")
+    if threading of a # its own turn, and its own task slots, none of which any task of the program's is in
+        lea(a, rax, rip("thr_slots"))
+        movi(a, rcx, thr_max * thr_size)
+        call_to(a, "rt_wk_clear")
+        call_to(a, "rt_threads_init")
+    end
+    storei(a, rip("wk_ready"), 1)
+    set threads_ready to new_label(a)
+    jmp_to(a, threads_ready)
+    mark(a, ready)
+    if threading of a # a thread of the system's own, new, as the image's slot 0, which has the turn it left with
+        if windows # (its semaphore and the index of what each thread keeps are the image's, made once)
+            lea(a, rax, rip("thr_slots"))
+            store(a, mem(rax, 0), rax)
+            storei(a, mem(rax, thr_state), 1)
+            storei(a, mem(rax, thr_holding), 1)
+            load(a, rcx, rip("stack_top"))
+            store(a, mem(rax, thr_top), rcx)
+            store(a, rip("thr_current"), rax)
+            storei(a, rip("gil_ticks"), gil_slice)
+            win_enter(a)
+            load(a, rcx, rip("tls_index"))
+            lea(a, rdx, rip("thr_slots"))
+            call_import(a, "imp_TlsSetValue")
+            win_leave(a)
+        else
+            call_to(a, "rt_threads_init")
+        end
+    end
+    mark(a, threads_ready)
+    call_to(a, "rt_wk_take_in")
+    if random # `random number` going on from where the program's has got to, each worker far along it from the others
+        set parent_ready to new_label(a)
+        set spread to new_label(a)
+        lea(a, rax, rip("rnd_ready"))
+        alu_load(a, "sub", rax, rip("wk_delta"))
+        load(a, rcx, mem(rax, 0))
+        test_rr(a, rcx, rcx)
+        jcc(a, cc_ne, parent_ready)
+        call_to(a, "rt_rnd_seed") # the program has had none yet: where they start, as it would have them
+        jmp_to(a, spread)
+        mark(a, parent_ready)
+        lea(a, rax, rip("rnd_state"))
+        alu_load(a, "sub", rax, rip("wk_delta"))
+        load(a, rcx, mem(rax, 0))
+        store(a, rip("rnd_state"), rcx)
+        storei(a, rip("rnd_ready"), 1)
+        mark(a, spread) # 2^24 numbers along for each worker's number
+        load(a, rcx, rip("wk_me"))
+        load(a, rax, mem(rcx, wk_at_number))
+        imul_ri(a, rax, rax, -184549376) # 0x6D2B79F5 * 2^24, as the generator goes up by 0x6D2B79F5 each time
+        alu_load(a, "add", rax, rip("rnd_state"))
+        mov32_rr(a, rax, rax)
+        store(a, rip("rnd_state"), rax)
+    end
+    load(a, rcx, rip("wk_me"))
+    load(a, rax, mem(rcx, wk_at_why))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, ended) # what it was given couldn't be copied: the program is told, and says so itself
+    storei(a, mem(rcx, wk_at_state), 2)
+    load(a, rax, rip("try_top")) # a try of its own, so a mistake is its answer and not the thread's end
+    push_r(a, rax)
+    lea(a, rax, rip(caught))
+    push_r(a, rax)
+    push_r(a, rbp)
+    push_r(a, r15)
+    store(a, rip("try_top"), rsp)
+    load(a, rcx, rip("wk_given_n")) # its copies of the inputs, the first pushed first, as a call pushes them
+    lea(a, rsi, rip("wk_given"))
+    mark(a, pushing)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, pushed)
+    load(a, rax, mem(rsi, 0))
+    push_r(a, rax)
+    alui(a, "add", rsi, 8)
+    dec_r(a, rcx)
+    jmp_to(a, pushing)
+    mark(a, pushed)
+    load(a, rax, rip("wk_given_fn"))
+    untag(a, rax)
+    load(a, rdx, mem(rax, 8))
+    load(a, rax, mem(rax, 0))
+    inc_r(a, r15)
+    call_r(a, rax)
+    jmp_to(a, gave)
+    mark(a, caught) # a mistake it ended with: kept as its answer, for `wait for` to fail with again
+    load(a, rcx, rip("wk_me"))
+    storei(a, mem(rcx, wk_at_failed), 1)
+    load(a, rax, rip("fail_has"))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, as_words)
+    storei(a, rip("fail_has"), 0)
+    movsd_load(a, xmm0, rip("fail_val"))
+    jmp_to(a, gave)
+    mark(a, as_words) # a mistake with no value of its own: its words, as `if it fails with` gives them
+    load(a, rsi, rip("b_ptr"))
+    alu_load(a, "add", rsi, rip("reason_at"))
+    load(a, rcx, rip("b_len"))
+    alu_load(a, "sub", rcx, rip("reason_at"))
+    call_to(a, "rt_text_from")
+    movq_xr(a, xmm0, rax)
+    mark(a, gave)
+    storei(a, rip("try_top"), 0)
+    # the tasks and workers it started, ended first, as the program's own are, so nothing runs in its image
+    movq_rx(a, rax, xmm0) # what it gave, on its stack, where its collector sees it, while they end
+    push_r(a, rax)
+    push_r(a, rax)
+    if threading of a
+        call_to(a, "rt_task_join_all")
+    end
+    call_to(a, "rt_wk_join_all")
+    pop_r(a, rax)
+    pop_r(a, rax)
+    movq_xr(a, xmm0, rax)
+    load(a, rcx, rip("wk_me"))
+    movsd_store(a, mem(rcx, wk_at_result), xmm0)
+    mark(a, ended)
+    storei(a, rip("try_top"), 0)
+    call_to(a, "rt_flush_out") # what it said, said before the program hears that it has ended
+    # Once its state says it has ended, its image can be the next worker's at once, so after that this thread
+    # reads and writes nothing in it: what it needs is in registers, or in the slot, which is the program's.
+    load(a, rcx, rip("wk_me"))
+    if windows
+        mov_rr(a, rbx, rcx)
+        win_enter(a)
+        load(a, rcx, mem(rbx, wk_at_event)) # set first: a program that wakes before the state says so waits again
+        call_import(a, "imp_SetEvent")
+        win_leave(a)
+        storei(a, mem(rbx, wk_at_state), 3)
+        alui(a, "and", rsp, -16)
+        alui(a, "sub", rsp, 32)
+        movi(a, rcx, 0)
+        call_import(a, "imp_ExitThread")
+    else
+        set raw_thread to new_label(a)
+        load(a, r12, rip("wk_pret"))
+        storei(a, mem(rcx, wk_at_state), 3)
+        lea(a, rdi, mem(rcx, wk_at_state))
+        movi(a, rsi, 129) # FUTEX_WAKE_PRIVATE
+        movi(a, rdx, 2147483647)
+        sys_call(a, 202)
+        test_rr(a, r12, r12)
+        jcc(a, cc_e, raw_thread)
+        mov_rr(a, rsp, r12) # a pthread: back to its start, which ends it and gives its stack back
+        for each r in list of r15, r14, r13, r12, rbp, rbx
+            pop_r(a, r)
+        end
+        movi(a, rax, 0)
+        ret(a)
+        mark(a, raw_thread) # the system clears the slot's thread id once it has gone, and its stack is free
+        movi(a, rdi, 0)
+        sys_call(a, 60) # exit: this thread only
+    end
+
+    # rt_wk_take_in: what the worker was given, and the program's variables, copied into its heap from the
+    # program's. The slot's why says what stopped it, if anything did.
+    set taking to new_label(a)
+    set took to new_label(a)
+    set globals_loop to new_label(a)
+    set globals_done to new_label(a)
+    set globals_on to new_label(a)
+    set gave_up to new_label(a)
+    set took_all to new_label(a)
+    mark(a, "rt_wk_take_in")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    load(a, rax, rip("wk_delta")) # from the image that started it into this one, which is that far along
+    store(a, rip("wk_copy_delta"), rax)
+    load(a, rcx, rip("wk_my_base"))
+    alu(a, "sub", rcx, rax) # where that image is
+    store(a, rip("wk_copy_from"), rcx)
+    alu_load(a, "add", rcx, rip("wk_image_size"))
+    store(a, rip("wk_copy_to"), rcx)
+    storei(a, rip("wk_depth"), 0)
+    load(a, rbx, rip("wk_me"))
+    movsd_load(a, xmm0, mem(rbx, wk_at_fn))
+    call_to(a, "rt_wk_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    movsd_store(a, rip("wk_given_fn"), xmm0)
+    load(a, rax, mem(rbx, wk_at_nargs))
+    store(a, rip("wk_given_n"), rax)
+    movi(a, r12, 0)
+    mark(a, taking)
+    alu_load(a, "cmp", r12, mem(rbx, wk_at_nargs))
+    jcc(a, cc_ae, took)
+    mov_rr(a, rax, r12)
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, rbx)
+    movsd_load(a, xmm0, mem(rax, wk_at_args))
+    storei(a, rip("wk_depth"), 0)
+    call_to(a, "rt_wk_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    mov_rr(a, rax, r12)
+    shifti(a, "shl", rax, 3)
+    lea(a, rdx, rip("wk_given"))
+    alu(a, "add", rax, rdx)
+    movsd_store(a, mem(rax, 0), xmm0)
+    inc_r(a, r12)
+    jmp_to(a, taking)
+    mark(a, took)
+    # the program's variables, each copied into this heap from where it is in the program's image; one that
+    # cannot be copied is left with no value, as the worker can never be given it
+    lea(a, r12, rip("globals"))
+    alu_load(a, "sub", r12, rip("wk_delta")) # where they are in the program's own image
+    lea(a, r13, rip("globals"))
+    mark(a, globals_loop)
+    lea(a, rax, rip("globals_end"))
+    alu(a, "cmp", r13, rax)
+    jcc(a, cc_ae, globals_done)
+    storei(a, rip("wk_depth"), 0)
+    movsd_load(a, xmm0, mem(r12, 0))
+    call_to(a, "rt_wk_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, globals_on)
+    movi64(a, rax, bits_unset)
+    movq_xr(a, xmm0, rax)
+    mark(a, globals_on)
+    movsd_store(a, mem(r13, 0), xmm0)
+    alui(a, "add", r12, 8)
+    alui(a, "add", r13, 8)
+    jmp_to(a, globals_loop)
+    mark(a, globals_done)
+    jmp_to(a, took_all)
+    mark(a, gave_up) # what it was given couldn't be copied: the program is told why, and says so itself
+    load(a, rcx, rip("err_why"))
+    store(a, mem(rbx, wk_at_why), rcx)
+    load(a, rcx, rip("err_what"))
+    store(a, mem(rbx, wk_at_bad), rcx)
+    mark(a, took_all)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+to emit_wk_copy with a, target
+    # rt_wk_in_image: r8 a place in the other image: the same place in this copy of it; left as it is if it
+    # isn't in the image at all. Every other register is kept.
+    set out_of_image to new_label(a)
+    mark(a, "rt_wk_in_image")
+    alu_load(a, "cmp", r8, rip("wk_copy_from"))
+    jcc(a, cc_b, out_of_image)
+    alu_load(a, "cmp", r8, rip("wk_copy_to"))
+    jcc(a, cc_ae, out_of_image)
+    alu_load(a, "add", r8, rip("wk_copy_delta"))
+    mark(a, out_of_image)
+    ret(a)
+
+    # rt_wk_name: rdx where a field's name is: where it is for this heap, in rax. A name in the image is the
+    # one value records compare by where it is, so it's the same place that far along; anything else is copied.
+    set copy_name to new_label(a)
+    mark(a, "rt_wk_name")
+    alu_load(a, "cmp", rdx, rip("wk_copy_from"))
+    jcc(a, cc_b, copy_name)
+    alu_load(a, "cmp", rdx, rip("wk_copy_to"))
+    jcc(a, cc_ae, copy_name)
+    mov_rr(a, rax, rdx)
+    alu_load(a, "add", rax, rip("wk_copy_delta"))
+    ret(a)
+    mark(a, copy_name)
+    load(a, rsi, mem(rdx, 16))
+    load(a, rcx, mem(rdx, 0))
+    call_to(a, "rt_text_from")
+    untag(a, rax)
+    ret(a)
+
+    # rt_wk_copy: xmm0 a value in the other heap: a copy of it in this one, in xmm0, with rax 0; or rax 1,
+    # with err_why 1 (nested deeper than wk_deepest, which a list holding itself is) or 2 (a function made
+    # inside another, whose name is where err_what points). A value that lives in the image itself is not
+    # copied: the same place in this copy of the image is that far along from it.
+    set immediate to new_label(a)
+    set outside to new_label(a)
+    set from_image to new_label(a)
+    set too_deep to new_label(a)
+    set finish to new_label(a)
+    set good to new_label(a)
+    set gave_up to new_label(a)
+    set as_text to new_label(a)
+    set as_list to new_label(a)
+    set list_loop to new_label(a)
+    set list_done to new_label(a)
+    set as_record to new_label(a)
+    set record_loop to new_label(a)
+    set record_done to new_label(a)
+    set as_dict to new_label(a)
+    set dict_loop to new_label(a)
+    set dict_next to new_label(a)
+    set dict_done to new_label(a)
+    set as_bytes to new_label(a)
+    set as_function to new_label(a)
+    set made_inside to new_label(a)
+    set as_quantity to new_label(a)
+    mark(a, "rt_wk_copy")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    push_r(a, r14)
+    load(a, rax, rip("wk_depth"))
+    inc_r(a, rax)
+    store(a, rip("wk_depth"), rax)
+    alui(a, "cmp", rax, wk_deepest)
+    jcc(a, cc_a, too_deep)
+    movq_rx(a, rax, xmm0)
+    mov_rr(a, r14, rax)
+    shifti(a, "shr", r14, 48) # which kind it is, if it is one that lives in memory
+    alui(a, "cmp", r14, kind_text)
+    jcc(a, cc_b, immediate)
+    mov_rr(a, rbx, rax)
+    untag(a, rbx)
+    alu_load(a, "cmp", rbx, rip("wk_copy_from"))
+    jcc(a, cc_b, outside)
+    alu_load(a, "cmp", rbx, rip("wk_copy_to"))
+    jcc(a, cc_b, from_image)
+    mark(a, outside)
+    alui(a, "cmp", r14, kind_text)
+    jcc(a, cc_e, as_text)
+    alui(a, "cmp", r14, kind_list)
+    jcc(a, cc_e, as_list)
+    alui(a, "cmp", r14, kind_record)
+    jcc(a, cc_e, as_record)
+    alui(a, "cmp", r14, kind_dict)
+    jcc(a, cc_e, as_dict)
+    alui(a, "cmp", r14, kind_bytes)
+    jcc(a, cc_e, as_bytes)
+    alui(a, "cmp", r14, kind_function)
+    jcc(a, cc_e, as_function)
+    if units of a
+        alui(a, "cmp", r14, kind_quantity)
+        jcc(a, cc_e, as_quantity)
+    end
+    mark(a, immediate) # a number, nothing, yes, no, or no value yet: itself
+    jmp_to(a, good)
+
+    mark(a, from_image)
+    alu_load(a, "add", rbx, rip("wk_copy_delta"))
+    shifti(a, "shl", r14, 48)
+    alu(a, "or", rbx, r14)
+    movq_xr(a, xmm0, rbx)
+    jmp_to(a, good)
+
+    mark(a, as_text)
+    load(a, rsi, mem(rbx, 16))
+    load(a, rcx, mem(rbx, 0))
+    call_to(a, "rt_text_from")
+    movq_xr(a, xmm0, rax)
+    jmp_to(a, good)
+
+    mark(a, as_bytes)
+    load(a, rcx, mem(rbx, 0))
+    call_to(a, "rt_bytes_new")
+    mov_rr(a, r12, rax)
+    load(a, rdi, mem(rax, 8))
+    load(a, rsi, mem(rbx, 8))
+    load(a, rcx, mem(rbx, 0))
+    call_to(a, "rt_copy")
+    mov_rr(a, rax, r12)
+    movi64(a, rcx, tag_bytes)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    jmp_to(a, good)
+
+    mark(a, as_list)
+    movi(a, rcx, 0)
+    call_to(a, "rt_list_make")
+    mov_rr(a, r12, rax)
+    movi(a, r13, 0)
+    mark(a, list_loop)
+    alu_load(a, "cmp", r13, mem(rbx, 0))
+    jcc(a, cc_ae, list_done)
+    load(a, rax, mem(rbx, 16))
+    mov_rr(a, rcx, r13)
+    shifti(a, "shl", rcx, 3)
+    alu(a, "add", rax, rcx)
+    movsd_load(a, xmm0, mem(rax, 0))
+    call_to(a, "rt_wk_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    movq_rx(a, rdx, xmm0)
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_list_push")
+    inc_r(a, r13)
+    jmp_to(a, list_loop)
+    mark(a, list_done)
+    movq_xr(a, xmm0, r12)
+    jmp_to(a, good)
+
+    mark(a, as_record)
+    movi(a, rcx, 0)
+    call_to(a, "rt_record_make")
+    untag(a, rax)
+    mov_rr(a, r12, rax)
+    movi(a, r13, 0)
+    mark(a, record_loop)
+    alu_load(a, "cmp", r13, mem(rbx, 0))
+    jcc(a, cc_ae, record_done)
+    load(a, r8, mem(rbx, 16))
+    mov_rr(a, rcx, r13)
+    shifti(a, "shl", rcx, 4) # a field is its name and its value
+    alu(a, "add", r8, rcx)
+    push_r(a, r8)
+    movsd_load(a, xmm0, mem(r8, 8))
+    call_to(a, "rt_wk_copy")
+    pop_r(a, r8)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    movq_rx(a, r9, xmm0)
+    push_r(a, r9)
+    load(a, rdx, mem(r8, 0))
+    call_to(a, "rt_wk_name")
+    mov_rr(a, rdx, rax)
+    pop_r(a, r8)
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_record_put")
+    inc_r(a, r13)
+    jmp_to(a, record_loop)
+    mark(a, record_done)
+    mov_rr(a, rax, r12)
+    movi64(a, rcx, tag_record)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    jmp_to(a, good)
+
+    mark(a, as_dict)
+    call_to(a, "rt_dict_new")
+    mov_rr(a, r12, rax)
+    movi(a, r13, 0)
+    mark(a, dict_loop)
+    alu_load(a, "cmp", r13, mem(rbx, 8))
+    jcc(a, cc_ae, dict_done)
+    load(a, r8, mem(rbx, 24))
+    mov_rr(a, rcx, r13)
+    imul_ri(a, rcx, rcx, 24) # an entry is its key, its value and the key's hash
+    alu(a, "add", r8, rcx)
+    load(a, rax, mem(r8, 0))
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, dict_next) # a key removed, which keeps its place with none
+    push_r(a, r8)
+    movsd_load(a, xmm0, mem(r8, 0))
+    call_to(a, "rt_wk_copy")
+    pop_r(a, r8)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    movq_rx(a, r9, xmm0)
+    push_r(a, r8)
+    push_r(a, r9)
+    movsd_load(a, xmm0, mem(r8, 8))
+    call_to(a, "rt_wk_copy")
+    pop_r(a, r9)
+    pop_r(a, r8)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, gave_up)
+    movq_rx(a, r10, xmm0)
+    push_r(a, r10)
+    mov_rr(a, rax, r9)
+    call_to(a, "rt_key") # the key as a dictionary holds it, and its hash in r8, which rt_dict_set wants
+    pop_r(a, r10)
+    mov_rr(a, rax, r12)
+    call_to(a, "rt_dict_set")
+    mark(a, dict_next)
+    inc_r(a, r13)
+    jmp_to(a, dict_loop)
+    mark(a, dict_done)
+    mov_rr(a, rax, r12)
+    movi64(a, rcx, tag_dict)
+    alu(a, "or", rax, rcx)
+    movq_xr(a, xmm0, rax)
+    jmp_to(a, good)
+
+    mark(a, as_function)
+    load(a, rax, mem(rbx, 8))
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, made_inside)
+    load(a, r8, mem(rbx, 16)) # its description, in the image: that far along in this copy of it
+    call_to(a, "rt_wk_in_image")
+    load(a, rcx, mem(rbx, 0)) # its code, which is this copy's own
+    alu_load(a, "add", rcx, rip("wk_copy_delta"))
+    movi(a, rdx, 0)
+    call_to(a, "rt_closure")
+    movq_xr(a, xmm0, rax)
+    jmp_to(a, good)
+    mark(a, made_inside) # it shares the variables of the function that made it, which no worker can have
+    load(a, rax, mem(rbx, 16))
+    load(a, rax, mem(rax, 8))
+    store(a, rip("err_what"), rax)
+    storei(a, rip("err_why"), 2)
+    movi(a, rax, 1)
+    jmp_to(a, finish)
+
+    if units of a
+        mark(a, as_quantity)
+        movsd_load(a, xmm0, mem(rbx, 0))
+        load(a, rcx, mem(rbx, 8))
+        call_to(a, "rt_q_make")
+        jmp_to(a, good)
+    end
+
+    mark(a, too_deep)
+    storei(a, rip("err_why"), 1)
+    storei(a, rip("err_what"), 0)
+    mark(a, gave_up)
+    movi(a, rax, 1)
+    jmp_to(a, finish)
+    mark(a, good)
+    movi(a, rax, 0)
+    mark(a, finish)
+    load(a, rcx, rip("wk_depth"))
+    dec_r(a, rcx)
+    store(a, rip("wk_depth"), rcx)
+    pop_r(a, r14)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+end
+
+# rt_job_of, for `wait for` and `has ended`, with tasks or workers
+to emit_job_of with a
+    # rt_job_of: xmm0 a record: rcx 0 with the number in rax and rdx 0 for a task or 1 for a worker; or rcx 2
+    # if it is neither (err_why 1 for a value that isn't a record at all)
+    set is_task to new_label(a)
+    set whole to new_label(a)
+    set not_job to new_label(a)
+    set job_over to new_label(a)
+    mark(a, "rt_job_of")
+    movsd_store(a, rip("job_asked"), xmm0)
+    lea(a, rdx, rip(text_object(a, "task")))
+    call_to(a, "rt_field")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, is_task)
+    load(a, rcx, rip("err_why"))
+    alui(a, "cmp", rcx, 1)
+    jcc(a, cc_e, not_job) # not a record at all
+    movsd_load(a, xmm0, rip("job_asked"))
+    lea(a, rdx, rip(text_object(a, "worker")))
+    call_to(a, "rt_field")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, not_job)
+    movi(a, r8, 1)
+    jmp_to(a, whole)
+    mark(a, is_task)
+    movi(a, r8, 0)
+    mark(a, whole) # its number, which must be a whole one
+    set not_whole to new_label(a)
+    cvttsd2si(a, rax, xmm0)
+    cvtsi2sd(a, xmm1, rax)
+    ucomisd(a, xmm0, reg_at(xmm1))
+    jcc(a, cc_ne, not_whole)
+    jcc(a, cc_p, not_whole) # NaN: text, or another value that isn't a number
+    mov_rr(a, rdx, r8)
+    movi(a, rcx, 0)
+    jmp_to(a, job_over)
+    mark(a, not_whole) # a record all the same
+    storei(a, rip("err_why"), 2)
+    mark(a, not_job)
+    movi(a, rcx, 2)
+    mark(a, job_over)
+    ret(a)
+end
+
+to emit_wk_wait with a, target
+    set windows to target is "windows"
+
+    # rt_wk_item: rax a worker's number, rcx a list: where item `rax` of it is, in rax. Every other register
+    # is kept.
+    mark(a, "rt_wk_item")
+    push_r(a, rcx)
+    untag(a, rcx)
+    load(a, rcx, mem(rcx, 16))
+    shifti(a, "shl", rax, 3)
+    alu(a, "add", rax, rcx)
+    alui(a, "sub", rax, 8)
+    pop_r(a, rcx)
+    ret(a)
+
+    # rt_wk_slot: rax a worker's number: its slot in rax, or 0 if no worker running has that number
+    set seek to new_label(a)
+    set next_slot to new_label(a)
+    set no_slot to new_label(a)
+    set its_slot to new_label(a)
+    mark(a, "rt_wk_slot")
+    push_r(a, rcx)
+    push_r(a, rdx)
+    push_r(a, r8)
+    mov_rr(a, r8, rax)
+    lea(a, rdx, rip("wk_slots"))
+    movi(a, rcx, 0)
+    mark(a, seek)
+    alui(a, "cmp", rcx, wk_max)
+    jcc(a, cc_ae, no_slot)
+    load(a, rax, mem(rdx, wk_at_state))
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, next_slot)
+    load(a, rax, mem(rdx, wk_at_number))
+    alu(a, "cmp", rax, r8)
+    jcc(a, cc_e, its_slot)
+    mark(a, next_slot)
+    alui(a, "add", rdx, wk_size)
+    inc_r(a, rcx)
+    jmp_to(a, seek)
+    mark(a, its_slot)
+    mov_rr(a, rax, rdx)
+    jmp_to(a, "rt_wk_slot_done")
+    mark(a, no_slot)
+    movi(a, rax, 0)
+    mark(a, "rt_wk_slot_done")
+    pop_r(a, r8)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
+
+    # rt_wk_answered: rax a worker's number: rax 1 if its answer has been taken already, else 0; every other
+    # register is kept
+    set not_answered to new_label(a)
+    mark(a, "rt_wk_answered")
+    push_r(a, rcx)
+    push_r(a, rdx)
+    push_r(a, r8)
+    mov_rr(a, r8, rax)
+    load(a, rcx, rip("wk_bad"))
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_e, not_answered)
+    call_to(a, "rt_wk_item")
+    load(a, rdx, mem(rax, 0))
+    movi64(a, rcx, bits_nothing)
+    alu(a, "cmp", rdx, rcx)
+    jcc(a, cc_e, not_answered)
+    movi(a, rax, 1)
+    jmp_to(a, "rt_wk_answered_done")
+    mark(a, not_answered)
+    movi(a, rax, 0)
+    mark(a, "rt_wk_answered_done")
+    pop_r(a, r8)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
+
+    # rt_wk_wait: rax a worker's number: rax 0 and what it gave in xmm0; 1 if there is no such worker; 2 and
+    # the mistake's value in xmm0 if it ended with one; or 3 if its answer couldn't be copied, with why in
+    # err_why (1 alone: a function it made inside another is its own to keep, and never comes back)
+    set no_worker to new_label(a)
+    set kept to new_label(a)
+    set waiting to new_label(a)
+    set there to new_label(a)
+    set copy_failed to new_label(a)
+    set its_mistake to new_label(a)
+    set over to new_label(a)
+    mark(a, "rt_wk_wait")
+    push_r(a, rbx)
+    push_r(a, r12)
+    push_r(a, r13)
+    mov_rr(a, r13, rax)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_l, no_worker)
+    alu_load(a, "cmp", rax, rip("wk_made"))
+    jcc(a, cc_a, no_worker)
+    call_to(a, "rt_wk_answered")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, kept)
+    mov_rr(a, rax, r13)
+    call_to(a, "rt_wk_slot")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, no_worker)
+    mov_rr(a, rbx, rax)
+    mark(a, waiting) # while it works, the program's other tasks have the turn
+    load(a, rax, mem(rbx, wk_at_state))
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_ae, there)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
+    if windows
+        win_enter(a)
+        load(a, rcx, mem(rbx, wk_at_event))
+        movi(a, rdx, -1)
+        call_import(a, "imp_WaitForSingleObject")
+        win_leave(a)
+    else
+        lea(a, rdi, mem(rbx, wk_at_state))
+        movi(a, rsi, 128) # FUTEX_WAIT_PRIVATE, while it is still running
+        movi(a, rdx, 2)
+        movi(a, r10, 0)
+        sys_call(a, 202)
+    end
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
+    jmp_to(a, waiting)
+    mark(a, there) # what it gave, copied out of its heap into the program's, and kept by its number
+    load(a, rcx, mem(rbx, wk_at_delta))
+    movi(a, rdx, 0)
+    alu(a, "sub", rdx, rcx)
+    store(a, rip("wk_copy_delta"), rdx) # the other way: from the worker's image into this one
+    load(a, rdx, rip("wk_my_base"))
+    alu(a, "add", rdx, rcx) # where the worker's image is
+    store(a, rip("wk_copy_from"), rdx)
+    alu_load(a, "add", rdx, rip("wk_image_size"))
+    store(a, rip("wk_copy_to"), rdx)
+    storei(a, rip("wk_depth"), 0)
+    movsd_load(a, xmm0, mem(rbx, wk_at_result))
+    call_to(a, "rt_wk_copy")
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, copy_failed)
+    alui(a, "sub", rsp, 16)
+    movsd_store(a, mem(rsp, 0), xmm0)
+    mov_rr(a, rax, r13)
+    load(a, rcx, rip("wk_gave"))
+    call_to(a, "rt_wk_item")
+    movsd_load(a, xmm0, mem(rsp, 0))
+    movsd_store(a, mem(rax, 0), xmm0)
+    load(a, r12, mem(rbx, wk_at_failed))
+    mov_rr(a, rax, r13)
+    load(a, rcx, rip("wk_bad"))
+    call_to(a, "rt_wk_item")
+    movi64(a, rcx, bits_no)
+    test_rr(a, r12, r12)
+    set was_fine to new_label(a)
+    jcc(a, cc_e, was_fine)
+    movi64(a, rcx, bits_yes)
+    mark(a, was_fine)
+    store(a, mem(rax, 0), rcx)
+    movsd_load(a, xmm0, mem(rsp, 0))
+    alui(a, "add", rsp, 16)
+    storei(a, mem(rbx, wk_at_state), 4) # its image is free for the next worker in its slot
+    test_rr(a, r12, r12)
+    jcc(a, cc_ne, its_mistake)
+    movi(a, rax, 0)
+    jmp_to(a, over)
+    mark(a, kept) # asked for again: what was copied out the first time
+    mov_rr(a, rax, r13)
+    load(a, rcx, rip("wk_gave"))
+    call_to(a, "rt_wk_item")
+    movsd_load(a, xmm0, mem(rax, 0))
+    mov_rr(a, rax, r13)
+    load(a, rcx, rip("wk_bad"))
+    call_to(a, "rt_wk_item")
+    load(a, rcx, mem(rax, 0))
+    movi64(a, rax, bits_yes)
+    alu(a, "cmp", rcx, rax)
+    jcc(a, cc_e, its_mistake)
+    movi(a, rax, 0)
+    jmp_to(a, over)
+    mark(a, its_mistake)
+    movi(a, rax, 2)
+    jmp_to(a, over)
+    mark(a, copy_failed)
+    movi(a, rax, 3)
+    jmp_to(a, over)
+    mark(a, no_worker)
+    movi(a, rax, 1)
+    mark(a, over)
+    pop_r(a, r13)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_wk_join_all: every worker still working waited for, once the program's own code is done, or a
+    # worker's (whose workers are in its image, which can be another's once it has ended)
+    set join_seek to new_label(a)
+    set join_next to new_label(a)
+    set joined to new_label(a)
+    mark(a, "rt_wk_join_all")
+    push_r(a, rbx)
+    push_r(a, r12)
+    lea(a, rbx, rip("wk_slots"))
+    movi(a, r12, 0)
+    mark(a, join_seek)
+    alui(a, "cmp", r12, wk_max)
+    jcc(a, cc_ae, joined)
+    load(a, rax, mem(rbx, wk_at_state))
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_b, join_next)
+    alui(a, "cmp", rax, 3)
+    jcc(a, cc_ae, join_next)
+    if threading of a
+        call_to(a, "rt_gil_out")
+    end
+    if windows
+        win_enter(a)
+        load(a, rcx, mem(rbx, wk_at_event))
+        movi(a, rdx, -1)
+        call_import(a, "imp_WaitForSingleObject")
+        win_leave(a)
+    else
+        lea(a, rdi, mem(rbx, wk_at_state))
+        movi(a, rsi, 128) # FUTEX_WAIT_PRIVATE, while it is still working
+        movi(a, rdx, 2)
+        movi(a, r10, 0)
+        sys_call(a, 202)
+    end
+    if threading of a
+        call_to(a, "rt_gil_in")
+    end
+    jmp_to(a, join_seek) # the same slot again
+    mark(a, join_next)
+    alui(a, "add", rbx, wk_size)
+    inc_r(a, r12)
+    jmp_to(a, join_seek)
+    mark(a, joined)
+    pop_r(a, r12)
+    pop_r(a, rbx)
+    ret(a)
+
+    # rt_wk_ended: rax a worker's number: rax 1 if it has ended, 0 while it works, or 2 if there's no such worker
+    set none_such to new_label(a)
+    set still_going to new_label(a)
+    set has_ended to new_label(a)
+    set ended_over to new_label(a)
+    mark(a, "rt_wk_ended")
+    push_r(a, rcx)
+    push_r(a, rdx)
+    alui(a, "cmp", rax, 1)
+    jcc(a, cc_l, none_such)
+    alu_load(a, "cmp", rax, rip("wk_made"))
+    jcc(a, cc_a, none_such)
+    push_r(a, rax)
+    call_to(a, "rt_wk_answered")
+    mov_rr(a, rcx, rax)
+    pop_r(a, rax)
+    test_rr(a, rcx, rcx)
+    jcc(a, cc_ne, has_ended)
+    call_to(a, "rt_wk_slot")
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, none_such)
+    load(a, rcx, mem(rax, wk_at_state))
+    alui(a, "cmp", rcx, 3)
+    jcc(a, cc_b, still_going)
+    mark(a, has_ended)
+    movi(a, rax, 1)
+    jmp_to(a, ended_over)
+    mark(a, still_going)
+    movi(a, rax, 0)
+    jmp_to(a, ended_over)
+    mark(a, none_such)
+    movi(a, rax, 2)
+    mark(a, ended_over)
+    pop_r(a, rdx)
+    pop_r(a, rcx)
+    ret(a)
 end
 
 # ---------- the runtime: files, arguments and asking ----------
@@ -38569,7 +40008,7 @@ to new_state with a, program_name, files, source, target
         uses_saving no, literal_kinds empty dictionary, uses_pictures no, uses_widgets no, uses_sound no,
         uses_controls no, uses_choose no, uses_files no, sigs nothing, seen_inputs empty dictionary,
         seen_gives empty dictionary, escaped empty dictionary, live no, debugging no, uses_threads no, uses_waitfor no,
-        threaded no, inline_bodies empty dictionary
+        threaded no, inline_bodies empty dictionary, uses_workers no
 end
 
 # In a program built to be debugged or profiled, the runtime's calls to the debugger (DESIGN §81):
@@ -39114,14 +40553,16 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
     end
     gen_program(st, body)
     set threaded to uses_threads of st
-    if threaded # it starts tasks: written again, its code taking turns with theirs (see gen_tick)
+    set has_workers to uses_workers of st
+    if threaded or has_workers # it starts tasks or workers: written again, knowing so from its first line
         set a to new_asm()
         set shipping of a to shipping
         set st to new_state(a, program_name, files, source, target)
         set allowed of st to allowing
         set debugging of st to debugging
-        set threaded of st to yes
-        set threading of a to yes # what code generation writes, library calls among it, knows already
+        set threaded of st to threaded
+        set uses_workers of st to has_workers
+        set threading of a to threaded # what code generation writes, library calls among it, knows already
         if debugging
             set sigs of st to empty dictionary
         end
@@ -39141,6 +40582,7 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
         set debugging of st to debugging
         set threaded of st to threaded
         set threading of a to threaded
+        set uses_workers of st to has_workers
         set sigs of st to guess
         gen_program(st, body)
     end
@@ -39154,6 +40596,7 @@ to compile_built with source, file_names, file_texts, target, program_name, flag
         set debugging of st to debugging
         set threaded of st to threaded
         set threading of a to threaded
+        set uses_workers of st to has_workers
         set sigs of st to settled
         gen_program(st, body)
     end
@@ -42440,6 +43883,8 @@ to gen_expr with fc, e
         end
     else if what is "builtin" and name of e is "start"
         gen_task_start(fc, e)
+    else if what is "builtin" and name of e is "start worker"
+        gen_worker_start(fc, e)
     else if what is "builtin" and name of e is "wait for"
         gen_task_wait(fc, e)
     else if what is "builtin" and name of e is "has ended"
@@ -43556,17 +45001,25 @@ to gen_task_ended with fc, e
     set uses_waitfor of st of fc to yes
     set not_task to fail_stub(fc, at of e, "'has ended' needs a task, as 'start' gives, not this record")
     gen_expr(fc, item 1 of args of e)
-    lea(a, rdx, rip(text_object(a, "task")))
-    call_to(a, "rt_field")
+    call_to(a, "rt_job_of")
     set bad to new_label(a)
-    test_rr(a, rax, rax)
+    test_rr(a, rcx, rcx)
     jcc(a, cc_ne, bad)
-    cvttsd2si(a, rax, xmm0)
-    cvtsi2sd(a, xmm1, rax)
-    ucomisd(a, xmm0, reg_at(xmm1))
-    jcc(a, cc_ne, not_task)
-    jcc(a, cc_p, not_task)
+    set as_worker to new_label(a)
+    set asked to new_label(a)
+    test_rr(a, rdx, rdx)
+    if uses_workers of st of fc
+        jcc(a, cc_ne, as_worker)
+    else # a record of a worker's, in a program that starts none
+        jcc(a, cc_ne, not_task)
+    end
     call_to(a, "rt_task_ended")
+    jmp_to(a, asked)
+    if uses_workers of st of fc
+        mark(a, as_worker)
+        call_to(a, "rt_wk_ended")
+    end
+    mark(a, asked)
     alui(a, "cmp", rax, 2)
     jcc(a, cc_e, not_task)
     set running to new_label(a)
@@ -43584,7 +45037,7 @@ to gen_task_ended with fc, e
         jmp_to(a, over)
     end
     mark(a, bad)
-    load(a, rcx, rip("err_why"))
+    load(a, rcx, rip("err_why")) # a value that isn't a record at all: its kind is said
     alui(a, "cmp", rcx, 1)
     jcc(a, cc_ne, not_task)
     stub_start(fc, at of e)
@@ -43600,23 +45053,52 @@ to gen_task_wait with fc, e
     set uses_waitfor of st of fc to yes
     set not_task to fail_stub(fc, at of e, "'wait for' needs a task, as 'start' gives, not this record")
     gen_expr(fc, item 1 of args of e)
-    lea(a, rdx, rip(text_object(a, "task")))
-    call_to(a, "rt_field")
+    call_to(a, "rt_job_of")
     set bad to new_label(a)
-    test_rr(a, rax, rax)
+    test_rr(a, rcx, rcx)
     jcc(a, cc_ne, bad)
-    cvttsd2si(a, rax, xmm0)
-    cvtsi2sd(a, xmm1, rax)
-    ucomisd(a, xmm0, reg_at(xmm1))
-    jcc(a, cc_ne, not_task)
-    jcc(a, cc_p, not_task) # NaN: text, or another value that isn't a number
+    set as_worker to new_label(a)
+    set waited to new_label(a)
+    set its_mistake to new_label(a)
+    set cant_copy to new_label(a)
+    test_rr(a, rdx, rdx)
+    if uses_workers of st of fc
+        jcc(a, cc_ne, as_worker)
+    else # a record of a worker's, in a program that starts none
+        jcc(a, cc_ne, not_task)
+    end
     call_to(a, "rt_task_wait")
     test_rr(a, rax, rax)
     jcc(a, cc_ne, not_task)
+    jmp_to(a, waited)
+    if uses_workers of st of fc # what the worker gave, copied into this heap, or the mistake it ended with
+        mark(a, as_worker)
+        call_to(a, "rt_wk_wait")
+        alui(a, "cmp", rax, 1)
+        jcc(a, cc_e, not_task)
+        alui(a, "cmp", rax, 2)
+        jcc(a, cc_e, its_mistake)
+        alui(a, "cmp", rax, 3)
+        jcc(a, cc_e, cant_copy)
+    end
+    mark(a, waited)
     set was to enter_cold(a)
     set over to new_label(a)
     if was is "cold"
         jmp_to(a, over)
+    end
+    if uses_workers of st of fc
+        mark(a, its_mistake) # it ended with a mistake: the program fails with it again, as `fail with` does
+        movsd_store(a, rip("err_a"), xmm0)
+        movsd_store(a, rip("fail_val"), xmm0)
+        storei(a, rip("fail_has"), 1)
+        stub_start(fc, at of e)
+        load(a, rax, rip("err_a"))
+        movi(a, rdx, 0)
+        call_to(a, "rt_e_shown")
+        jmp_to(a, "rt_e_end")
+        mark(a, cant_copy)
+        gen_wk_cant_copy(fc, at of e)
     end
     mark(a, bad) # no such field, or not a record at all
     load(a, rcx, rip("err_why"))
@@ -43629,6 +45111,120 @@ to gen_task_wait with fc, e
     mark(a, over)
     leave_cold(a, was)
     forget_main(fc)
+end
+
+# What a value that couldn't be copied for a worker, or back from one, is said to be: the cold code for it,
+# which reads err_why as rt_wk_copy left it
+to gen_wk_cant_copy with fc, at
+    set a to a of fc
+    set too_deep to new_label(a)
+    load(a, rcx, rip("err_why"))
+    alui(a, "cmp", rcx, 2)
+    jcc(a, cc_ne, too_deep)
+    stub_start(fc, at)
+    stub_text(a, "a worker can only be given, or give back, functions made at the top of a file, and '")
+    load(a, rax, rip("err_what")) # where its name is: a text of the program's
+    load(a, rsi, mem(rax, 16))
+    load(a, rcx, mem(rax, 0))
+    call_to(a, "rt_e_text")
+    stub_text(a, "' was made inside another function")
+    jmp_to(a, "rt_e_end")
+    mark(a, too_deep)
+    stub_start(fc, at)
+    stub_text(a, "a worker can't be given, or give back, a value nested more than 1,000 deep (a list that holds itself is nested for ever)")
+    jmp_to(a, "rt_e_end")
+end
+
+# `start f(x) on another core`: the call made on a worker, which has memory of its own (DESIGN §124); gives
+# the worker: a record of its number.
+to gen_worker_start with fc, e
+    set a to a of fc
+    set st to st of fc
+    set uses_workers of st to yes
+    set call to item 1 of args of e
+    set callee to name of call
+    set n to length of args of call
+    if n is greater than 8
+        not_yet(at of e, "a worker given more than 8 inputs")
+    end
+    set found to front's resolve(scope of fc, callee)
+    if found is nothing
+        jmp_to(a, fail_stub(fc, at of call, front's undefined_message(scope of fc, callee, yes, no)))
+        return "value"
+    end
+    set named_fn to function_at(fc, found)
+    if named_fn is not nothing # called with anything, by the worker's thread
+        note_escaped(st, named_fn)
+    end
+    set none to fail_stub(fc, at of call, "there is no function called '" + callee + "'")
+    set wrong to new_label(a)
+    set back to new_label(a)
+    movsd_load(a, xmm0, place_of(fc, found))
+    movq_rx(a, rax, xmm0)
+    movi64(a, rcx, bits_unset)
+    alu(a, "cmp", rax, rcx)
+    jcc(a, cc_e, none)
+    shifti(a, "shr", rax, 48)
+    alui(a, "cmp", rax, kind_function)
+    jcc(a, cc_ne, wrong)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, wrong)
+    movsd_store(a, rip("err_a"), xmm0)
+    stub_start(fc, at of call)
+    stub_text(a, "'" + callee + "' is ")
+    stub_kind(a, "err_a")
+    stub_text(a, ", not a function")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+    push_value(fc)
+    for each arg in args of call
+        gen_expr(fc, arg)
+        push_value(fc)
+    end
+    load(a, rax, mem(rsp, 8 * n))
+    movi(a, rcx, n)
+    mov_rr(a, rsi, rsp)
+    call_to(a, "rt_check_call")
+    set call_wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_ne, call_wrong)
+    set was_too to enter_cold(a)
+    mark(a, call_wrong)
+    stub_start(fc, at of call)
+    lea(a, rax, rip(text_object(a, callee)))
+    store(a, rip("err_what"), rax)
+    call_to(a, "rt_why_call")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was_too)
+    mov_rr(a, rsi, rsp)
+    movi(a, rcx, n)
+    call_to(a, "rt_wk_start")
+    alui(a, "add", rsp, 8 * (n + 1))
+    set pushed of fc to pushed of fc - n - 1
+    set full to fail_stub(fc, at of call, "this program has " + wk_max
+        + " workers whose answers nothing has waited for: wait for one of them before starting another")
+    set no_thread to fail_stub(fc, at of call, "the worker's thread couldn't be started")
+    set given_wrong to new_label(a)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, full)
+    jcc(a, cc_l, given_wrong)
+    cvtsi2sd(a, xmm0, rax)
+    movsd_store(a, rip("task_made"), xmm0)
+    set was_three to enter_cold(a)
+    set over to new_label(a)
+    if was_three is "cold"
+        jmp_to(a, over)
+    end
+    mark(a, given_wrong)
+    alui(a, "cmp", rax, -1)
+    jcc(a, cc_e, no_thread)
+    gen_wk_cant_copy(fc, at of call) # what it was given, which the call says
+    mark(a, over)
+    leave_cold(a, was_three)
+    forget_main(fc)
+    set the_number to list of (record with kind "task_made", at at of e)
+    return gen_expr(fc, (record with kind "record", fields (list of "worker"), values the_number, at at of e))
 end
 
 # A call through a function value: the name's value must be a function, then the inputs are worked out
@@ -43752,6 +45348,47 @@ to place_absolutes with a, bases, image_base
     end
 end
 
+# For a program with workers (DESIGN §124): where each 8-byte address absolute() asked for is, as a distance
+# from where the image starts, so a worker's copy of the image can have each say where its place is in the
+# copy (see rt_wk_image). Made when the read-only data is otherwise done, as every such address has been
+# asked for by then; filled in by wk_fixes_place once each has its place.
+to wk_fixes_table with a
+    if not workers of a
+        return nothing
+    end
+    set ro to rodata of a
+    pad_to(ro, 8)
+    rodata_here(a, "wk_fixes")
+    put64(ro, length of absolutes of a)
+    repeat length of absolutes of a times
+        put64(ro, 0)
+    end
+end
+
+# `start` is where the image starts, as `bases` counts
+to wk_fixes_place with a, bases, start
+    if not workers of a
+        return nothing
+    end
+    set ro to rodata of a
+    set at to at of item "wk_fixes" of labels of a
+    set counted to 0
+    for each k from 1 to 8
+        set counted to counted * 256 + item (at + 9 - k) of ro
+    end
+    if counted is not length of absolutes of a
+        fail with "machine.moth asked for an address after it made the workers' table of them"
+    end
+    for each fix in absolutes of a
+        set at to at + 8
+        set eight to empty list
+        put64(eight, item (section of fix) of bases + at of fix - start)
+        for each k from 1 to 8
+            set item (at + k) of ro to item k of eight
+        end
+    end
+end
+
 to label_offset with a, name
     set target to item name of labels of a
     if section of target is "cold"
@@ -43763,6 +45400,7 @@ end
 set load_config_size to 320 # IMAGE_LOAD_CONFIG_DIRECTORY64 as Windows 10 and 11 know it
 
 to windows_file with a
+    wk_fixes_table(a)
     set names to list of "GetStdHandle", "GetConsoleMode", "WriteFile", "WriteConsoleW", "MultiByteToWideChar", "ExitProcess",
         "VirtualAlloc"
     for each fn_name in file_imports
@@ -43885,6 +45523,7 @@ to windows_file with a
     set bases to dictionary where "hot" is text_rva, "rodata" is rdata_rva, "data" is data_rva, "bss" is bss_rva
     set text to place_labels(a, bases)
     place_absolutes(a, bases, 0x140000000)
+    wk_fixes_place(a, bases, 0)
     set text_raw to align_up(text_size, 512)
     set rdata_raw to align_up(length of rodata of a, 512)
     set data_raw to align_up(length of dat, 512)
@@ -43994,6 +45633,7 @@ end
 
 to linux_file with a
     set base to 4194304 # 0x400000
+    wk_fixes_table(a)
     set text_size to length of hot of a + length of cold of a
     set text_at to 256
     set headers to 3
@@ -44010,6 +45650,7 @@ to linux_file with a
     set bases to dictionary where "hot" is base + text_at, "rodata" is base + rodata_at, "data" is base + data_at, "bss" is base + bss_at
     set text to place_labels(a, bases)
     place_absolutes(a, bases, 0)
+    wk_fixes_place(a, bases, base)
     set out to empty list
     put_all(out, list of 0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0) # ELF, 64-bit, little-endian
     repeat 8 times

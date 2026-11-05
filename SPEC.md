@@ -1044,16 +1044,30 @@ The controls of section 6.16 are drawn where they're placed and found by their l
 line of up to 40 letters and a text area 2,000; a slider's value is a whole number, kept between its ends;
 `the choice in the list` is nothing until there is one.
 
-## 13. Tasks
+## 13. Tasks and workers
 
 `start count(10)` runs the call on a thread of its own and gives a task, a record, at once; `wait for job`
 waits for it to end and gives what the call gave; `job has ended` says whether it has, without waiting.
 Tasks share the program's variables. A mistake in a task ends the program.
 
+`start count(10) on another core` runs the call on a worker and gives a record of its number, `(record with
+worker 1)`; `wait for` and `has ended` take it as they take a task. A worker shares nothing with the program:
+it's given copies of the call's inputs and of the program's variables as they are when it starts, and what it
+changes is its own. `wait for` gives a copy of what the call gave; if the call ended with a mistake, `wait
+for` fails with it (a `try` around `wait for` catches it, with the value `if it fails with` would have given
+inside the worker). A copy is made of numbers, text, yes and no, nothing, lists, records, dictionaries, bytes,
+amounts and functions made at the top of a file, all the way down; a function made inside another, or a value
+nested more than 1,000 deep, can't be copied, which is a mistake where the worker is started (its inputs or
+its function) or waited for (what it gave), and a variable of the program's that holds one has no value in
+the worker. A worker's own tasks and workers are numbered from 1. No more than 64 workers may have ended or
+be working with nothing having waited for them; starting another is a mistake. A program ends its workers, as
+it ends its tasks, before it ends, and so does a worker.
+
 **Implementation detail:** in a program moth builds, tasks take turns: one runs Moth at a time, and lets the
 others run every so often and whenever it waits (for input, a program, a site, a window, a C function or
-`wait`), so a task keeps a program from waiting but doesn't make a sum faster on more cores (`cores.moth`
-does that, with copies of the program). In the playground, a task runs to its end when it's started.
+`wait`), so a task keeps a program from waiting but doesn't make a sum faster on more cores. Workers run at
+the same moment, each a thread with a copy of the program's memory, on as many cores as there are; a worker's
+tasks take turns among themselves. In the playground, a task or a worker runs to its end when it's started.
 
 ## 14. Implementation details
 
@@ -1067,7 +1081,8 @@ These are how Moth works today. Any release can change them.
   playground before it's stopped (it's given a number of steps), and how big a value can be.
 - **Memory.** How values are laid out, the garbage collector, and where a program is loaded (at a fixed
   address).
-- **How tasks take turns** (section 13), and how many C callbacks of each kind can be waiting at once (64).
+- **How tasks take turns, and how workers run** (section 13), and how many C callbacks of each kind can be
+  waiting at once (64).
 - **Speed**, and what's put in line or kept in registers.
 - **Text order beyond U+FFFF.** `is less than` on text compares UTF-16 units on the playground's engines,
   which can put a character beyond U+FFFF before one from U+E000 to U+FFFF; `in order` sorts by code point
