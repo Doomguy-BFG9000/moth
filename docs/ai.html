@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ai.moth · Moth's standard library</title>
+  <meta name="description" content="Talking to large language models: Anthropic's Messages API, and any API that speaks OpenAI's (OpenAI's own, and local servers such as Ollama, LM Studio and vLLM).">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>ai</em>.moth</h1>
+      <p>Talking to large language models: Anthropic's Messages API, and any API that speaks OpenAI's (OpenAI's own, and local servers such as Ollama, LM Studio and vLLM).</p>
+      <p class="use"><code>use "ai.moth" as ai</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="ai.moth's functions">
+      <h2>14 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#anthropic">anthropic</a></li><li><a href="#openai">openai</a></li><li><a href="#openai_compatible">openai_compatible</a></li><li><a href="#chat">chat</a></li><li><a href="#answer">answer</a></li><li><a href="#stream">stream</a></li><li><a href="#tool">tool</a></li><li><a href="#chat_with_tools">chat_with_tools</a></li><li><a href="#answer_json">answer_json</a></li><li><a href="#embed">embed</a></li><li><a href="#cosine">cosine</a></li><li><a href="#vectors">vectors</a></li><li><a href="#add_vector">add_vector</a></li><li><a href="#search">search</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Talking to large language models: Anthropic's Messages API, and any API that speaks OpenAI's (OpenAI's own, and local servers such as Ollama, LM Studio and vLLM). Messages and a system prompt, answers streamed as they're written, tools the model can use, answers in JSON of a shape you give, embeddings, and a small search of vectors by cosine similarity, on arrays.moth.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+<span class="k">say</span> ai's answer(claude, <span class="s">&quot;Name three moths.&quot;</span>)
+<span class="k">set</span> reply <span class="k">to</span> ai's chat(claude, (<span class="k">list</span> <span class="k">of</span> (<span class="k">record</span> <span class="k">with</span> role <span class="s">&quot;user&quot;</span>, content <span class="s">&quot;Hi&quot;</span>)), <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;system&quot;</span> <span class="k">is</span> <span class="s">&quot;Be brief.&quot;</span>)
+<span class="k">say</span> reply's text <span class="s">&quot; &quot;</span> reply's stop_reason <span class="s">&quot; &quot;</span> reply's usage's output_tokens
+<span class="k">to</span> shown_as_written <span class="k">with</span> piece
+    <span class="k">say</span> piece                                       <span class="c"># each piece of the answer as it comes</span>
+<span class="k">end</span>
+ai's stream(claude, <span class="s">&quot;Write a haiku.&quot;</span>, shown_as_written)
+<span class="k">set</span> weather <span class="k">to</span> ai's tool(<span class="s">&quot;get_weather&quot;</span>, <span class="s">&quot;The weather in a city&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;object&quot;</span>,
+    <span class="s">&quot;properties&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;city&quot;</span> <span class="k">is</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;string&quot;</span>), <span class="k">function</span> <span class="k">with</span> input <span class="k">gives</span> <span class="s">&quot;sunny&quot;</span>)
+<span class="k">say</span> ai's chat_with_tools(claude, <span class="s">&quot;Is it sunny in Paris?&quot;</span>, <span class="k">list</span> <span class="k">of</span> weather)'s text
+<span class="k">say</span> ai's answer_json(claude, <span class="s">&quot;A moth's name and wingspan in mm&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;object&quot;</span>,
+    <span class="s">&quot;properties&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;name&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;string&quot;</span>), <span class="s">&quot;wingspan&quot;</span> <span class="k">is</span>
+    (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;number&quot;</span>)))
+<span class="k">set</span> local <span class="k">to</span> ai's openai_compatible(<span class="s">&quot;http://localhost:11434/v1&quot;</span>, <span class="s">&quot;nomic-embed-text&quot;</span>)   <span class="c"># Ollama, no key</span>
+<span class="k">set</span> vectors <span class="k">to</span> ai's embed(local, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;moths fly at night&quot;</span>, <span class="s">&quot;bees fly by day&quot;</span>)   <span class="c"># an array, a row each</span></code></pre></div>
+          <p><a href="#openai">openai</a>(model) is OpenAI's own. Keys come only from the environment: ANTHROPIC_API_KEY for <a href="#anthropic">anthropic</a>(), and OPENAI_API_KEY for openai(), and for <a href="#openai_compatible">openai_compatible</a>(base_url, model, yes), a server that wants a key; they're never kept in a value or shown. Options, a dictionary: system, max_tokens, effort (Anthropic's output_config.effort), temperature (OpenAI's), and for a client base_url. A reply is a record: text, stop_reason, tool_calls (each a record of id, name and input), usage (input_tokens and output_tokens), and message, the model's turn to add to a conversation. On Claude Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5, a request the model declines is run again on another model (Anthropic's server-side fallbacks); &quot;fallbacks&quot; is no in a client's options to turn that off. A program that uses it is built with --allow-libraries and --allow-net. The API's mistakes are a <code>fail with</code> that says what it said.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="anthropic">
+          <h3><a href="#anthropic"><code>ai's anthropic(model, options)</code></a></h3>
+          <p>a client for Anthropic's Messages API and a Claude model (&quot;claude-opus-5-5&quot; if none is given), its key from ANTHROPIC_API_KEY; options, a dictionary, can have base_url, max_tokens, effort and fallbacks</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>model</code> <span class="optional">optional: &quot;claude-opus-5-5&quot; if it's left out</span></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to anthropic with model or &quot;claude-opus-5-5&quot;, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L55">ai.moth line 55</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)
+<span class="k">say</span> claude</code></pre><pre class="says"><code>an Anthropic client (claude-opus-5-5)</code></pre></div>
+        </section>
+        <section class="fn" id="openai">
+          <h3><a href="#openai"><code>ai's openai(model, options)</code></a></h3>
+          <p>a client for OpenAI's own API and one of its models, its key from OPENAI_API_KEY; options, a dictionary, can have base_url</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>model</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to openai with model, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L66">ai.moth line 66</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> gpt <span class="k">to</span> ai's openai(<span class="s">&quot;gpt-test&quot;</span>)
+<span class="k">say</span> gpt</code></pre><pre class="says"><code>an OpenAI client (gpt-test)</code></pre></div>
+        </section>
+        <section class="fn" id="openai_compatible">
+          <h3><a href="#openai_compatible"><code>ai's openai_compatible(base_url, model, uses_key)</code></a></h3>
+          <p>any server that speaks OpenAI's API, at base_url (as &quot;http://localhost:11434/v1&quot;): with uses_key yes, one that wants a key, from OPENAI_API_KEY; else none is sent</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>base_url</code></li><li><code>model</code></li><li><code>uses_key</code> <span class="optional">optional: no if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to openai_compatible with base_url, model, uses_key or no</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L73">ai.moth line 73</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> local <span class="k">to</span> ai's openai_compatible(<span class="s">&quot;http://localhost:11434/v1&quot;</span>, <span class="s">&quot;nomic-embed-text&quot;</span>)   <span class="c"># Ollama, no key</span></code></pre></div>
+        </section>
+        <section class="fn" id="chat">
+          <h3><a href="#chat"><code>ai's chat(client, messages, options)</code></a></h3>
+          <p>the model's answer to a conversation (or to text, one message from the user), as a reply</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>messages</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chat with client, messages, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L272">ai.moth line 272</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+<span class="k">set</span> reply <span class="k">to</span> ai's chat(claude, (<span class="k">list</span> <span class="k">of</span> (<span class="k">record</span> <span class="k">with</span> role <span class="s">&quot;user&quot;</span>, content <span class="s">&quot;Hi&quot;</span>)), <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;system&quot;</span> <span class="k">is</span> <span class="s">&quot;Be brief.&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="answer">
+          <h3><a href="#answer"><code>ai's answer(client, prompt, system)</code></a></h3>
+          <p>just the text of the model's answer to a prompt</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>prompt</code></li><li><code>system</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to answer with client, prompt, system or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L279">ai.moth line 279</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+<span class="k">say</span> ai's answer(claude, <span class="s">&quot;Name three moths.&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="stream">
+          <h3><a href="#stream"><code>ai's stream(client, messages, on_text, options)</code></a></h3>
+          <p>The model's answer, given to on_text a piece at a time as it's written (server-sent events), then the whole reply, as chat gives it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>messages</code></li><li><code>on_text</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to stream with client, messages, on_text, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L355">ai.moth line 355</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">to</span> shown_as_written <span class="k">with</span> piece
+    <span class="k">say</span> piece                                       <span class="c"># each piece of the answer as it comes</span>
+<span class="k">end</span>
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+ai's stream(claude, <span class="s">&quot;Write a haiku.&quot;</span>, shown_as_written)</code></pre></div>
+        </section>
+        <section class="fn" id="tool">
+          <h3><a href="#tool"><code>ai's tool(name, description, parameters, run)</code></a></h3>
+          <p>a tool the model can use: its name, what it does, the JSON Schema of what it takes, and a Moth function given that (a dictionary) that gives back text, or anything JSON can say</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>description</code></li><li><code>parameters</code></li><li><code>run</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to tool with name, description, parameters, run</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L716">ai.moth line 716</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> weather <span class="k">to</span> ai's tool(<span class="s">&quot;get_weather&quot;</span>, <span class="s">&quot;The weather&quot;</span>, (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;object&quot;</span>), <span class="k">function</span> <span class="k">with</span> input <span class="k">gives</span> <span class="s">&quot;sunny&quot;</span>)
+<span class="k">say</span> weather</code></pre><pre class="says"><code>(record with name &quot;get_weather&quot;, description &quot;The weather&quot;, parameters (dictionary where &quot;type&quot; is &quot;object&quot;), run &lt;function function on line 2&gt;)</code></pre></div>
+        </section>
+        <section class="fn" id="chat_with_tools">
+          <h3><a href="#chat_with_tools"><code>ai's chat_with_tools(client, messages, tools, options)</code></a></h3>
+          <p>A conversation in which the model uses the tools as it likes: each use run, and what it gave sent back, until it answers (at most <code>rounds</code> times, 20 if the options don't say): the last reply</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>messages</code></li><li><code>tools</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to chat_with_tools with client, messages, tools, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L722">ai.moth line 722</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+<span class="k">say</span> ai's chat_with_tools(claude, <span class="s">&quot;Is it sunny in Paris?&quot;</span>, <span class="k">list</span> <span class="k">of</span> weather)'s text</code></pre></div>
+        </section>
+        <section class="fn" id="answer_json">
+          <h3><a href="#answer_json"><code>ai's answer_json(client, prompt, schema, options)</code></a></h3>
+          <p>the model's answer to a prompt as JSON of the shape a JSON Schema gives (structured outputs), read: a dictionary, list, number, text, yes or no</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>prompt</code></li><li><code>schema</code></li><li><code>options</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to answer_json with client, prompt, schema, options or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L783">ai.moth line 783</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> claude <span class="k">to</span> ai's anthropic(<span class="s">&quot;claude-opus-5-5&quot;</span>)     <span class="c"># its key from ANTHROPIC_API_KEY</span>
+<span class="k">say</span> ai's answer(claude, <span class="s">&quot;Name three moths.&quot;</span>)
+<span class="k">set</span> reply <span class="k">to</span> ai's chat(claude, (<span class="k">list</span> <span class="k">of</span> (<span class="k">record</span> <span class="k">with</span> role <span class="s">&quot;user&quot;</span>, content <span class="s">&quot;Hi&quot;</span>)), <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;system&quot;</span> <span class="k">is</span> <span class="s">&quot;Be brief.&quot;</span>)
+<span class="k">say</span> reply's text <span class="s">&quot; &quot;</span> reply's stop_reason <span class="s">&quot; &quot;</span> reply's usage's output_tokens
+<span class="k">to</span> shown_as_written <span class="k">with</span> piece
+    <span class="k">say</span> piece                                       <span class="c"># each piece of the answer as it comes</span>
+<span class="k">end</span>
+ai's stream(claude, <span class="s">&quot;Write a haiku.&quot;</span>, shown_as_written)
+<span class="k">set</span> weather <span class="k">to</span> ai's tool(<span class="s">&quot;get_weather&quot;</span>, <span class="s">&quot;The weather in a city&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;object&quot;</span>,
+    <span class="s">&quot;properties&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;city&quot;</span> <span class="k">is</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;string&quot;</span>), <span class="k">function</span> <span class="k">with</span> input <span class="k">gives</span> <span class="s">&quot;sunny&quot;</span>)
+<span class="k">say</span> ai's chat_with_tools(claude, <span class="s">&quot;Is it sunny in Paris?&quot;</span>, <span class="k">list</span> <span class="k">of</span> weather)'s text
+<span class="k">say</span> ai's answer_json(claude, <span class="s">&quot;A moth's name and wingspan in mm&quot;</span>, <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;object&quot;</span>,
+    <span class="s">&quot;properties&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;name&quot;</span> <span class="k">is</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;string&quot;</span>), <span class="s">&quot;wingspan&quot;</span> <span class="k">is</span>
+    (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;type&quot;</span> <span class="k">is</span> <span class="s">&quot;number&quot;</span>)))
+<span class="k">set</span> local <span class="k">to</span> ai's openai_compatible(<span class="s">&quot;http://localhost:11434/v1&quot;</span>, <span class="s">&quot;nomic-embed-text&quot;</span>)   <span class="c"># Ollama, no key</span>
+<span class="k">set</span> vectors <span class="k">to</span> ai's embed(local, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;moths fly at night&quot;</span>, <span class="s">&quot;bees fly by day&quot;</span>)   <span class="c"># an array, a row each</span></code></pre></div>
+        </section>
+        <section class="fn" id="embed">
+          <h3><a href="#embed"><code>ai's embed(client, texts)</code></a></h3>
+          <p>each text's embedding, from a server that speaks OpenAI's API (OpenAI, Ollama, LM Studio, vLLM, Voyage AI): an array with a row for each. Anthropic's API has none.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>client</code></li><li><code>texts</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to embed with client, texts</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L801">ai.moth line 801</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> local <span class="k">to</span> ai's openai_compatible(<span class="s">&quot;http://localhost:11434/v1&quot;</span>, <span class="s">&quot;nomic-embed-text&quot;</span>)   <span class="c"># Ollama, no key</span>
+<span class="k">set</span> vectors <span class="k">to</span> ai's embed(local, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;moths fly at night&quot;</span>, <span class="s">&quot;bees fly by day&quot;</span>)   <span class="c"># an array, a row each</span></code></pre></div>
+        </section>
+        <section class="fn" id="cosine">
+          <h3><a href="#cosine"><code>ai's cosine(a, b)</code></a></h3>
+          <p>how alike two vectors are: their dot product over their lengths, from -1 to 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to cosine with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L823">ai.moth line 823</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">say</span> ai's cosine((<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">0</span>, <span class="n">0</span>), (<span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">1</span>, <span class="n">0</span>))</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="vectors">
+          <h3><a href="#vectors"><code>ai's vectors()</code></a></h3>
+          <p>vectors to search, each kept with a key (text, a number, or anything)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to vectors</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L844">ai.moth line 844</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> index <span class="k">to</span> ai's vectors()
+<span class="k">say</span> index</code></pre><pre class="says"><code>vectors (0)</code></pre></div>
+        </section>
+        <section class="fn" id="add_vector">
+          <h3><a href="#add_vector"><code>ai's add_vector(index, key, vector)</code></a></h3>
+          <p>a vector, of numbers or an array of one axis, added with its key; or an array of rows, each with a key from a list of them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>index</code></li><li><code>key</code></li><li><code>vector</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_vector with index, key, vector</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L850">ai.moth line 850</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> index <span class="k">to</span> ai's vectors()
+ai's add_vector(index, <span class="s">&quot;east&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">0</span>)
+<span class="k">say</span> <span class="k">length</span> <span class="k">of</span> ai's search(index, <span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">1</span>)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="search">
+          <h3><a href="#search"><code>ai's search(index, query, k)</code></a></h3>
+          <p>the k vectors most like the query (a vector, or an array of one row, as embed gives for one text), by cosine similarity, most alike first: each a record of key and score</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>index</code></li><li><code>query</code></li><li><code>k</code> <span class="optional">optional: 5 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to search with index, query, k or 5</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/ai.moth#L878">ai.moth line 878</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;ai.moth&quot;</span> <span class="k">as</span> ai
+<span class="k">set</span> index <span class="k">to</span> ai's vectors()
+ai's add_vector(index, <span class="s">&quot;east&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">0</span>)
+ai's add_vector(index, <span class="s">&quot;north&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">0</span>, <span class="n">3</span>)
+ai's add_vector(index, <span class="s">&quot;north east&quot;</span>, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">1</span>)
+<span class="k">set</span> found <span class="k">to</span> ai's search(index, (<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">1</span>), <span class="n">2</span>)
+<span class="k">say</span> found</code></pre><pre class="says"><code>[(record with key &quot;north east&quot;, score 0.948683298050514), (record with key &quot;east&quot;, score 0.894427190999916)]</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

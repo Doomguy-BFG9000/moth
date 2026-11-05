@@ -82,12 +82,14 @@ to push with q, x
     set item (last of q) of kept to x
 end
 
+# x put at the front of a queue
 to push_front with q, x
     set first of q to first of q - 1
     set kept to slots of q
     set item (first of q) of kept to x
 end
 
+# how many things a queue holds
 to size with q
     return last of q - first of q + 1
 end
@@ -116,6 +118,7 @@ to pop with q
     return x
 end
 
+# the thing at the front of a queue, left there; a mistake if it's empty
 to peek_front with q
     if size(q) is 0
         fail with "the queue is empty"
@@ -123,6 +126,7 @@ to peek_front with q
     return item (first of q) of slots of q
 end
 
+# the thing at the back of a queue, left there; a mistake if it's empty
 to peek with q
     if size(q) is 0
         fail with "the queue is empty"
@@ -148,10 +152,12 @@ to heap
     return record with things empty list, count 0
 end
 
+# how many things a heap holds
 to heap_size with h
     return count of h
 end
 
+# x put in a heap, which keeps its smallest on top
 to heap_push with h, x
     set t to things of h
     set k to count of h + 1
@@ -173,6 +179,7 @@ to heap_push with h, x
     end
 end
 
+# the smallest thing in a heap, left there; a mistake if it's empty
 to heap_peek with h
     if count of h is 0
         fail with "the heap is empty"

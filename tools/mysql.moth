@@ -39,6 +39,8 @@ set my_hex to "0123456789abcdef"
 
 # ---------- connecting ----------
 
+# a connection to MySQL or MariaDB, logged in, from a record of host, port (3306), user, password, database,
+# tls and trust, as postgres.moth's connect has them; each but user can be left out
 to connect with options
     set given to my_fields(options)
     if not ("user" is in given)
@@ -344,10 +346,13 @@ end
 
 # ---------- statements ----------
 
+# the rows a query gives, each a dictionary of its columns' values; ?s in the SQL are `values`, sent apart
+# from it as a prepared statement's
 to query with db, sql, values or empty list
     return rows of run(db, sql, values)
 end
 
+# the first row a query gives, or nothing if it gives none
 to query_one with db, sql, values or empty list
     set found to rows of run(db, sql, values)
     if length of found is 0
@@ -746,14 +751,17 @@ end
 
 # ---------- transactions ----------
 
+# a transaction begun: what follows is kept only once commit is called (in_transaction does all three)
 to begin with db
     run_script(db, "START TRANSACTION")
 end
 
+# the transaction's changes kept
 to commit with db
     run_script(db, "COMMIT")
 end
 
+# the transaction's changes undone
 to rollback with db
     run_script(db, "ROLLBACK")
 end
@@ -776,6 +784,7 @@ to in_transaction with db, work
     return given
 end
 
+# the connection closed, after telling the server
 to close with db
     try
         set db's sequence to 0

@@ -39,11 +39,13 @@ to stats_sum with numbers
     return sum
 end
 
+# the average: their sum divided by how many there are
 to mean with numbers
     stats_needs(numbers, 1, "mean")
     return stats_sum(numbers) / length of numbers
 end
 
+# the middle one once they're in order, or the mean of the two in the middle if there's an even number
 to median with numbers
     stats_needs(numbers, 1, "median")
     set sorted_numbers to numbers in order
@@ -54,6 +56,7 @@ to median with numbers
     return (item (n / 2) of sorted_numbers + item (n / 2 + 1) of sorted_numbers) / 2
 end
 
+# the middle one once they're in order, or the lower of the two in the middle
 to median_low with numbers
     stats_needs(numbers, 1, "median_low")
     set sorted_numbers to numbers in order
@@ -61,6 +64,7 @@ to median_low with numbers
     return item ((n + 1 - remainder of (n + 1) divided by 2) / 2) of sorted_numbers
 end
 
+# the middle one once they're in order, or the higher of the two in the middle
 to median_high with numbers
     stats_needs(numbers, 1, "median_high")
     set sorted_numbers to numbers in order
@@ -112,21 +116,25 @@ to stats_squares with numbers
     return stats_sum(made)
 end
 
+# how spread out a sample is: the squares of how far each is from the mean, added, over n - 1
 to variance with numbers
     stats_needs(numbers, 2, "variance")
     return stats_squares(numbers) / (length of numbers - 1)
 end
 
+# how spread out a whole population is: the mean of the squares of how far each is from the mean
 to pvariance with numbers
     stats_needs(numbers, 1, "pvariance")
     return stats_squares(numbers) / length of numbers
 end
 
+# a sample's standard deviation: the square root of its variance, in the numbers' own units
 to stdev with numbers
     stats_needs(numbers, 2, "stdev")
     return stats_root(variance(numbers))
 end
 
+# a whole population's standard deviation: the square root of its pvariance
 to pstdev with numbers
     stats_needs(numbers, 1, "pstdev")
     return stats_root(pvariance(numbers))
@@ -182,6 +190,8 @@ to covariance with xs, ys
     return stats_sum(made) / (length of xs - 1)
 end
 
+# Pearson's correlation of two lists as long as each other: from -1 (one goes down as the other goes up)
+# through 0 (no straight line) to 1 (both go up together)
 to correlation with xs, ys
     stats_pair_check(xs, ys, "correlation")
     set sx to stats_squares(xs)
@@ -203,6 +213,8 @@ to straight_line with xs, ys
     return record with slope slope, intercept mean(ys) - slope * mean(xs)
 end
 
+# the nth root of the numbers multiplied together, for numbers above 0: the middle of things that grow by
+# multiplying, like rates
 to geometric_mean with numbers
     stats_needs(numbers, 1, "geometric_mean")
     set logs to empty list
@@ -215,6 +227,7 @@ to geometric_mean with numbers
     return stats_math's exp(stats_sum(logs) / length of logs)
 end
 
+# n over the sum of 1 over each, for numbers above 0: the middle of rates, like speeds over the same distance
 to harmonic_mean with numbers
     stats_needs(numbers, 1, "harmonic_mean")
     set made to empty list

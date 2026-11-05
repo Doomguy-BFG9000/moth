@@ -752,6 +752,8 @@ to grouped with n
     return grouped_with(n, ",")
 end
 
+# a number with `separator` between each three of its whole part's digits: grouped_with(1234567, " ") is "1
+# 234 567"
 to grouped_with with n, separator
     set shown to "" + n
     if position of "e" in shown is greater than 0
@@ -792,6 +794,7 @@ to padded_left with words, width
     return made
 end
 
+# text made `width` characters wide with spaces after it; longer text stays as it is
 to padded_right with words, width
     set made to "" + words
     repeat while length of made is less than width

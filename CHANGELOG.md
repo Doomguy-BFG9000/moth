@@ -22,6 +22,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
 - **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
   question, `wait`'s amount or `play note`'s note or time found it had no value.
+- **The standard library's reference**, at [samyyy2423.github.io/moth/docs/](https://samyyy2423.github.io/moth/docs/):
+  a page for each library, with what it's for and each of its functions, what it takes and an example with
+  what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,
+  and the tests fail when it's behind them. Every public function now has a comment, so the editors' hovers
+  say what each does too.
 - **Workers: every core.** `start work(x) on another core` runs the call on a worker, a thread with memory of
   its own, given copies of what it's called with and of the program's variables; `wait for` gives a copy of
   what it gave back, or fails with its mistake. In a program `moth build` makes, workers run at the same

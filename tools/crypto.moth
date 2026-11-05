@@ -303,6 +303,8 @@ to encrypt with key, message
     return made as bytes
 end
 
+# the message encrypt hid, as bytes, if the key is right and no byte of it changed; a mistake if either isn't
+# so
 to decrypt with key, sealed
     set all to as_bytes_of(sealed)
     if length of all is less than 28

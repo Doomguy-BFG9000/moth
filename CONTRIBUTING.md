@@ -48,9 +48,13 @@ keep it working:
 - **The compiler written in Moth matches the JIT byte for byte.** `compiler.moth` writes the same JavaScript
   as `jit.js`, so a change to what the JIT writes is made in both. Changes to the JIT's helpers and to
   `wasm.js` need nothing in `compiler.moth`.
-- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs`; after changing
-  `index.html` or an engine, `node make-web.mjs`; after changing `moth.moth` or `machine.moth`,
-  `node bootstrap.mjs`. The tests say when one is out of date.
+- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs` and
+  `node make-docs.mjs` (the standard library's reference, `docs/`); after changing `index.html` or an engine,
+  `node make-web.mjs`; after changing `moth.moth` or `machine.moth`, `node bootstrap.mjs`. The tests say when
+  one is out of date.
+- **A library's public functions say what they do,** in a comment just above each `to`, which the editors'
+  hovers and the reference show; a helper starts with the library's own prefix (`stats_`), or is named in
+  make-docs.mjs's `HELPERS`.
 - **The VS Code extension is tested in VS Code.** `editors/vscode` has tools of its own, for packing and testing
   it: `npm ci` there, then `npx @vscode/vsce package` and `xvfb-run -a node e2e/run.mjs` (CI runs both).
   [docs/publishing-the-extension.md](docs/publishing-the-extension.md) says how it's published to the Visual
