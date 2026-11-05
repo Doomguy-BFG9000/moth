@@ -96,7 +96,7 @@ end
 to properties_random with source, most
     set state of source to remainder of (state of source * 48271) divided by properties_modulus
     set share to (state of source - 1) / (properties_modulus - 1)
-    if most is at least 1000000 # 31 more bits, for a range wider than 31 bits tell apart well
+    if most is at least 1000000 # a second number, so a wide range's numbers are told apart finely
         set state of source to remainder of (state of source * 48271) divided by properties_modulus
         set share to share + (state of source - 1) / (properties_modulus - 1) / (properties_modulus - 1)
     end
@@ -128,8 +128,8 @@ to properties_choice with source, most
     return chosen
 end
 
-# whether there's another item, after `count` of them: always, up to fewest; never, at most; else a choice,
-# of 8 to 1 for (0, no more, is the simplest)
+# whether there's another item, after `count` of them: always, up to fewest; never, at most; else a choice
+# from 0 to 7, of which only 0, the simplest, says no more, so a list is 7 items long, as a rule
 to properties_more with source, count, fewest, most
     if count is less than fewest
         return yes
