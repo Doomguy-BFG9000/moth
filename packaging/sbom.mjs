@@ -32,6 +32,7 @@ export const BUILT_IN = {
   "checker-rules.moth": "the types moth check works out, made by make-checker-rules.mjs from checker.js and vm.js",
   "tools/hash.moth": "SHA-256, for the sums of packages' files in moth.sums",
   "moth-debugger.moth": "the debugger moth debug builds into a program, built into moth with --include",
+  "moth-coverage.moth": "what moth coverage builds into a program, in the debugger's place, to count the lines that ran",
 };
 const WEB = ["index.html", "docs/moth.svg", ...MODULES];
 
