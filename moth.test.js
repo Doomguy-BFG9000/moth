@@ -283,6 +283,43 @@ test("the checker finds what goes against what the code says it is, and what kin
   for (const source of [...Object.values(examples), ...PROGRAMS.map(([s]) => s)]) assert.ok(!check(source).some((p) => p.kind === "doesn't fit"), source);
 });
 
+// Code that says nothing of its types gets no alarm from them, on more than the examples: the lessons, the
+// programs machine.test.js makes machine code of (made to go wrong in every way a line can), and each file of
+// the standard library with the files it uses. No "doesn't fit", and each "fails" is where the run stops, in
+// its words, or on a line that never runs (a run that stops somewhere else first can't say, as above).
+test("the types raise no false alarm in code that says nothing of them", async () => {
+  const { LESSONS } = await import("./learn-lessons.js");
+  const { MACHINE_CASES, machinePrograms } = await import("./machine-programs.js");
+  const tool = (name) => readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+  const programs = [...LESSONS.map((l) => [l.code]), ...MACHINE_CASES.filter((s) => typeof s === "string").map((s) => [s]), ...machinePrograms(7, 300).map((s) => [s]),
+    ...readdirSync(new URL("./tools/", import.meta.url)).filter((f) => f.endsWith(".moth")).map((f) => [tool(f), (name) => (readdirSync(new URL("./tools/", import.meta.url)).includes(name) ? tool(name) : undefined)])];
+  const saysTypes = (source) => source.split("\n").some((line) => /^\s*(to|kind)\s+\w+\b[^#]*\b(as|gives)\b/i.test(line.replace(/"(\\.|[^"\\])*"/g, '""')));
+  let held = 0;
+  for (const [source, files] of programs) {
+    if (saysTypes(source)) continue;
+    const found = check(source, { files });
+    assert.ok(!found.some((p) => p.kind === "doesn't fit"), source);
+    const fails = found.filter((p) => p.kind === "fails" && !p.file);
+    if (!fails.length || catches(source)) continue;
+    let ran;
+    try {
+      ran = trace(source, files);
+    } catch (err) {
+      if (err instanceof MothError) continue; // a program that can't be compiled here, as one using a C library
+      throw err;
+    }
+    const { lines, error } = ran;
+    for (const p of fails) {
+      if (error && error.line === p.line && error.col === p.col) {
+        if (!/has no value yet|there is no function called/.test(error.reason)) assert.equal(error.reason, p.message, source);
+        held++;
+      } else if (!error) assert.ok(!lines.has(p.line), `said line ${p.line} fails, but it ran fine:\n${source}`);
+      else if (!lines.has(p.line)) held++;
+    }
+  }
+  assert.ok(held > 100, `only ${held} "fails" were checked against a run`);
+});
+
 test("checker-rules.moth is what make-checker-rules.mjs makes of the checker's rules as they are", async () => {
   const { checkerRules } = await import("./make-checker-rules.mjs");
   assert.ok(readFileSync(new URL("./checker-rules.moth", import.meta.url), "utf8") === checkerRules().made, "checker-rules.moth is behind: run node make-checker-rules.mjs");
@@ -313,9 +350,9 @@ test("the checker raises no false alarms on working programs", () => {
 
 // The lines a program really runs (its LINE markers), and the mistake it stops at, if any. A program that
 // stops itself (`stop the program with 2`) ran its lines and made no mistake.
-function trace(source) {
+function trace(source, files) {
   const lines = new Set();
-  const machine = new Machine(compile(source, { debug: true }), () => {}, { maxSteps: 10_000 });
+  const machine = new Machine(compile(source, { debug: true, files }), () => {}, { maxSteps: 10_000 });
   try {
     while (machine.run({ pauseAtLines: true }) === "line") lines.add(machine.line);
   } catch (err) {
