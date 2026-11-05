@@ -1316,7 +1316,12 @@ problems as you type from Moth's own checker (with a Quick Fix for a misspelled
 name or a symbol from another language), Format Document as `moth tidy` writes
 code, snippets, a debugger (through `moth debug`), and Run and Build, which
 start `moth` on the file; and, where moth is installed, the outline, Go to
-Definition, hovers and completion from `moth lsp`. Make it and install it:
+Definition, hovers and completion from `moth lsp`. It finds moth from the
+`moth.path` setting, or else your PATH, and says so, with a link to the
+releases, if there's none. Its [README](editors/vscode/README.md) is its page
+on the Visual Studio Marketplace and Open VSX, where
+[docs/publishing-the-extension.md](docs/publishing-the-extension.md) says how
+it's published. Make it from here and install it:
 
 ```text
 node editors/vscode/make-vsix.mjs
@@ -1398,7 +1403,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
 | [`moth-debugger.moth`](moth-debugger.moth) | The debugger `moth debug` builds into the program it debugs, in Moth; moth.exe carries it |
-| [`editors/vscode/`](editors/vscode) | The VS Code extension, and `make-vsix.mjs`, which packs it with Moth's engine inside |
+| [`editors/vscode/`](editors/vscode) | The VS Code extension; `make-vsix.mjs`, which packs it with Moth's engine inside; and `e2e/`, its tests in VS Code itself |
 | [`editors/jupyter/`](editors/jupyter) | The Jupyter kernel, in Python, which runs cells through `moth kernel`, and its tests |
 | [`editors/tree-sitter-moth/`](editors/tree-sitter-moth) | Moth's tree-sitter grammar, which Zed, Helix and Neovim colour it with |
 | [`editors/`](editors) | Neovim's plugin folder, Helix's settings, Zed's extension, and how to set up each editor with `moth lsp` |
@@ -1537,9 +1542,13 @@ calls that led there.
   tests' own, on the words the playground colours, values in text and every
   example; its indenting; its problems, fixes, tidying, outline, definitions
   and commands, against a stand-in for VS Code's API, and what it asks of
-  `moth lsp` and does without it, against a stand-in for that; the .vsix,
-  unzipped and compared with the files here; VS Code installing it; and, with
-  MOTH_VSCODE=1, the extension in VS Code's own extension host
+  `moth lsp` and does without it, against a stand-in for that; finding moth,
+  on Linux's paths and Windows'; the .vsix, unzipped and compared with the
+  files here; VS Code installing it; and, in CI, the .vsix vsce packs, checked
+  file by file, and tested in VS Code itself, the newest and 1.75, with moth
+  in a folder with spaces in its name and without it: problems, Quick Fixes,
+  Format Document, the outline, Go to Definition, hovers, completion,
+  snippets, Run, Build, a question answered, a task and the debugger
 - the debug adapter, spoken to as an editor speaks to it, on moth.exe's `moth
   debug`: breakpoints in two files, the calls in progress, variables, hovers,
   the debug console, stepping, the program's question answered, a mistake

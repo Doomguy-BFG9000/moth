@@ -556,7 +556,7 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
 });
 
-// A package uses the standard library as a program does (DESIGN §126): `use "text.moth"` in packages/datey is
+// A package uses the standard library as a program does (DESIGN §127): `use "text.moth"` in packages/datey is
 // the package's own text.moth if it has one, and moth's if not, from its main file and from a file it uses; a
 // file beside the program, of the same name, is the program's alone. Every command that reads the program's
 // files finds them so: run, check, build, build --web, build --target wasm and test.

@@ -1,0 +1,26 @@
+# A shop's till: what a basket comes to, and the change
+
+use "prices.moth"
+
+kind basket with things
+    to total with self gives a number
+        set sum to 0
+        for each thing in self's things
+            add price_of(thing) to sum
+        end
+        return sum
+    end
+end
+
+# change_for: what's given back when `paid` is handed over for `cost`
+to change_for with paid as a number, cost as a number gives a number
+    if paid is less than cost
+        fail with "that isn't enough"
+    end
+    return paid - cost
+end
+
+set shopping to basket(list of "apples", "bread", "tea")
+set cost to shopping's total()
+say "Your basket comes to £{cost}"
+say "Your change: £{change_for(20, cost)}"
