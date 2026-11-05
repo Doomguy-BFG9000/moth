@@ -6,6 +6,10 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **Property-based testing.** `properties.moth` tries what should hold for every value of a sort on a hundred
+  made at random, small first, from `whole_number`, `decimal`, `yes_or_no`, `any_text`, `text_of`, `one_of`,
+  `either_of`, `list_of`, `dictionary_of`, `mapped` and `kept`. A value that shows it doesn't hold is made as
+  simple as it can be, and the mistake says it, with the seed that makes the same values again.
 - **Workers: every core.** `start work(x) on another core` runs the call on a worker, a thread with memory of
   its own, given copies of what it's called with and of the program's variables; `wait for` gives a copy of
   what it gave back, or fails with its mistake. In a program `moth build` makes, workers run at the same

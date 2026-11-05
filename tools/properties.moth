@@ -1,0 +1,498 @@
+# Property-based testing, as Python's Hypothesis and Haskell's QuickCheck do it: say what should be so for
+# every value of a sort, and for_all tries it on a hundred values made at random, small ones first. When one
+# shows it isn't so, that value is made as small as it can be while it still shows it, and the mistake says the
+# simplest one, with the seed that makes the same values again. In Moth alone, so it works everywhere.
+#
+#   use "properties.moth" as p
+#
+#   to test_sorting_twice_is_sorting_once
+#       set numbers to p's list_of(p's whole_number(-1000, 1000))
+#       p's for_all(numbers, (function with xs gives ((xs in order) in order) is (xs in order)))
+#   end
+#
+# A property gives yes when it holds and no when it doesn't, or uses expect as a test does: a mistake inside it
+# counts as its not holding. What makes the values, a generator, is one of these, or made from them:
+#
+#   whole_number(low, high)       whole numbers from low to high: near 0 first, and the two ends now and then
+#   decimal(low, high)            numbers with up to 3 decimals, from low to high
+#   yes_or_no()                   yes or no
+#   any_text()                    text of letters, digits, spaces, punctuation, tabs and new lines, and some
+#                                 letters beyond ASCII (é, ß, λ, 中)
+#   text_of(letters)              text of only those letters: text_of("ab") makes "", "b", "ab", "abba", ...
+#   one_of(values)                one of the list's values; the first is the simplest
+#   either_of(generators)         a value one of the generators makes
+#   list_of(generator)            lists of up to 20 of what the generator makes
+#   dictionary_of(keys, values)   dictionaries of up to 10 keys, each made by the first generator, and values
+#                                 by the second
+#   mapped(generator, change)     what change makes of each value: mapped(whole_number(1, 9), double)
+#   kept(generator, test)         only the values test says yes to
+#
+# for_all_with(settings, generator, property) takes a dictionary of "tries" (100 if it isn't given) and "seed"
+# (one at random if it isn't): the seed a mistake says makes the same values again, so the same mistake.
+# sample(generator, seed, count) gives count values, to see what a generator makes.
+
+# ----- generators -----
+
+# A generator is a record of three functions: make(state, size) gives a value's raw form, from the state's
+# random numbers, bigger as size grows from 1 to 100; shrink(raw) a list of simpler raw forms to try in its
+# place; and view(raw) the value a property is given. A list's raw form is its items' raw forms, so a list of
+# what mapped makes still shrinks item by item.
+to properties_generator with make, shrink, view
+    return record with make make, shrink shrink, view view
+end
+
+to properties_make with generator, state, size
+    set making to make of generator
+    return making(state, size)
+end
+
+to properties_shrinks with generator, raw
+    set shrinking to shrink of generator
+    return shrinking(raw)
+end
+
+to properties_view with generator, raw
+    set viewing to view of generator
+    return viewing(raw)
+end
+
+to properties_same with raw
+    return raw
+end
+
+to properties_none with raw
+    return empty list
+end
+
+to whole_number with low, high
+    properties_check_range("whole_number", low, high)
+    if (low rounded) is not low or (high rounded) is not high
+        fail with "whole_number needs whole numbers, not " + low + " and " + high
+    end
+    set target to properties_nearest_zero(low, high)
+    return properties_generator((function with state, size gives properties_whole_made(state, size, low, high, target)), (function with raw gives properties_toward(raw, target)), properties_same)
+end
+
+to decimal with low, high
+    properties_check_range("decimal", low, high)
+    set bottom to ((low * 1000) rounded up)
+    set top to ((high * 1000) rounded down)
+    if bottom is greater than top
+        fail with "decimal has no number with 3 decimals from " + low + " to " + high
+    end
+    set target to properties_nearest_zero(bottom, top)
+    return properties_generator((function with state, size gives properties_whole_made(state, size * 10, bottom, top, target)), (function with raw gives properties_decimal_shrinks(raw, target, bottom, top)), (function with raw gives raw / 1000))
+end
+
+to yes_or_no
+    return properties_generator((function with state, size gives properties_below(state, 2) is 1), properties_yes_shrinks, properties_same)
+end
+
+to any_text
+    return text_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:!?'-_()+=*/<>@#$%&\"\\\n\téßλ中")
+end
+
+to text_of with letters
+    set pool to split letters by ""
+    if length of pool is 0
+        fail with "text_of needs at least one letter to make text of"
+    end
+    set simplest to item 1 of pool
+    set one_letter to properties_generator((function with state, size gives item (properties_below(state, length of pool) + 1) of pool), (function with raw gives properties_letter_shrinks(raw, simplest)), properties_same)
+    return properties_generator((function with state, size gives properties_list_made(state, size, one_letter, 40)), (function with raw gives properties_list_shrinks(raw, one_letter)), (function with raw gives join raw with ""))
+end
+
+to one_of with values
+    if length of values is 0
+        fail with "one_of needs a list with at least one value in it"
+    end
+    return properties_generator((function with state, size gives properties_below(state, length of values) + 1), properties_earlier, (function with raw gives item raw of values))
+end
+
+to either_of with generators
+    if length of generators is 0
+        fail with "either_of needs a list with at least one generator in it"
+    end
+    return properties_generator((function with state, size gives properties_either_made(state, size, generators)), (function with raw gives properties_either_shrinks(raw, generators)), (function with raw gives properties_view(item (which of raw) of generators, inner of raw)))
+end
+
+to list_of with generator
+    return properties_generator((function with state, size gives properties_list_made(state, size, generator, 20)), (function with raw gives properties_list_shrinks(raw, generator)), (function with raw gives properties_views(generator, raw)))
+end
+
+to dictionary_of with key_maker, value_maker
+    set pair to properties_pair(key_maker, value_maker)
+    return properties_generator((function with state, size gives properties_list_made(state, size, pair, 10)), (function with raw gives properties_list_shrinks(raw, pair)), (function with raw gives properties_dictionary(raw, key_maker, value_maker)))
+end
+
+to mapped with generator, change
+    return properties_generator(make of generator, shrink of generator, (function with raw gives change(properties_view(generator, raw))))
+end
+
+to kept with generator, test
+    return properties_generator((function with state, size gives properties_kept_made(state, size, generator, test)), (function with raw gives properties_kept_shrinks(raw, generator, test)), view of generator)
+end
+
+# ----- trying a property -----
+
+to for_all with generator, property
+    for_all_with(empty dictionary, generator, property)
+end
+
+to for_all_with with settings, generator, property
+    set tries to 100
+    if "tries" is in settings
+        set tries to item "tries" of settings
+    end
+    set seed to random number from 1 to 2147483646
+    if "seed" is in settings
+        set seed to item "seed" of settings
+    end
+    set state to properties_state(seed)
+    for each k from 1 to tries
+        set raw to properties_make(generator, state, properties_size(k))
+        set why to properties_why(generator, property, raw)
+        if why is not nothing
+            properties_failed(generator, property, raw, why, k, tries, seed)
+        end
+    end
+end
+
+to sample with generator, seed, count
+    set state to properties_state(seed)
+    set made to empty list
+    for each k from 1 to count
+        add properties_view(generator, properties_make(generator, state, properties_size(k))) to made
+    end
+    return made
+end
+
+# nothing if the property holds for the value, or why it doesn't
+to properties_why with generator, property, raw
+    set value to properties_view(generator, raw)
+    set held to yes
+    try
+        set held to property(value)
+    if it fails with problem
+        return "it failed: " + problem
+    end
+    if held is no
+        return "it gave no"
+    end
+    return nothing
+end
+
+# Makes the value that showed the property doesn't hold as simple as it can: tries each simpler form the
+# generator gives, takes the first that still shows it, and goes on from there, until none does (or after
+# 5,000 tries). Then it's a mistake, with the simplest value, why, and the seed.
+to properties_failed with generator, property, raw, why, try_number, tries, seed
+    set best to raw
+    set best_why to why
+    set steps to 0
+    set checked to 0
+    set going to yes
+    repeat while going and checked is less than 5000
+        set going to no
+        for each candidate in properties_shrinks(generator, best)
+            set got to properties_why(generator, property, candidate)
+            add 1 to checked
+            if got is not nothing
+                set best to candidate
+                set best_why to got
+                add 1 to steps
+                set going to yes
+                stop
+            end
+            if checked is at least 5000
+                stop
+            end
+        end
+    end
+    set message to "the property doesn't hold for " + properties_shown(properties_view(generator, best)) + ": " + best_why
+    set message to message + " (try " + try_number + " of " + tries + ", seed " + seed
+    if steps is greater than 0
+        set message to message + "; made simpler in " + steps + " steps from " + properties_shown(properties_view(generator, raw))
+    end
+    fail with message + ")"
+end
+
+to properties_shown with value
+    try
+        return value as json
+    if it fails
+        return "" + value
+    end
+end
+
+to properties_size with k
+    if k is greater than 100
+        return 100
+    end
+    return k
+end
+
+to properties_check_range with name, low, high
+    if low is greater than high
+        fail with name + " needs low to be at most high, not " + low + " and " + high
+    end
+end
+
+# 0 if it's from low to high, or else the end nearer it
+to properties_nearest_zero with low, high
+    if low is greater than 0
+        return low
+    end
+    if high is less than 0
+        return high
+    end
+    return 0
+end
+
+# ----- random numbers -----
+
+# The state is a record of the last of Park and Miller's minimal standard numbers (with 48271): the same seed
+# gives the same numbers on every engine, since each step is a whole number below 2^53, exactly kept.
+to properties_state with seed
+    set first to (remainder of (seed rounded down) divided by 2147483646) + 1
+    set state to record with seed first
+    properties_next(state)
+    return state
+end
+
+to properties_next with state
+    set seed of state to remainder of (seed of state * 48271) divided by 2147483647
+    return seed of state
+end
+
+# a whole number from 0 to n - 1
+to properties_below with state, n
+    if n is at most 2147483646
+        return remainder of properties_next(state) divided by n
+    end
+    set high to remainder of properties_next(state) divided by 67108864
+    set low to remainder of properties_next(state) divided by 67108864
+    return remainder of (high * 67108864 + low) divided by n
+end
+
+# A whole number from low to high: one time in ten an end, and otherwise from a window around the target that
+# grows with size, so small values come first.
+to properties_whole_made with state, size, low, high, target
+    set pick to properties_below(state, 10)
+    if pick is 0
+        return low
+    end
+    if pick is 1
+        return high
+    end
+    set reach to size * size
+    set bottom to low
+    if target - reach is greater than bottom
+        set bottom to target - reach
+    end
+    set top to high
+    if target + reach is less than top
+        set top to target + reach
+    end
+    return bottom + properties_below(state, top - bottom + 1)
+end
+
+# ----- simpler forms -----
+
+# the target, halfway there, and one step nearer it
+to properties_toward with raw, target
+    set made to empty list
+    if raw is target
+        return made
+    end
+    add target to made
+    set step to (raw - target) / 2
+    if step is greater than 0
+        set step to (step rounded down)
+    else
+        set step to (step rounded up)
+    end
+    set halfway to target + step
+    if halfway is not target and halfway is not raw
+        add halfway to made
+    end
+    set nearer to raw - 1
+    if raw is less than target
+        set nearer to raw + 1
+    end
+    if nearer is not target and nearer is not halfway
+        add nearer to made
+    end
+    return made
+end
+
+# in thousandths: the target, the whole number nearer it, then as a whole number
+to properties_decimal_shrinks with raw, target, bottom, top
+    set made to empty list
+    if raw is target
+        return made
+    end
+    add target to made
+    set units to ((raw / 1000) rounded down) * 1000
+    if raw is less than 0
+        set units to ((raw / 1000) rounded up) * 1000
+    end
+    if units is not raw and units is not target and units is at least bottom and units is at most top
+        add units to made
+    end
+    for each c in properties_toward(raw, target)
+        if not (c is in made)
+            add c to made
+        end
+    end
+    return made
+end
+
+to properties_yes_shrinks with raw
+    if raw
+        return list of no
+    end
+    return empty list
+end
+
+to properties_letter_shrinks with raw, simplest
+    if raw is simplest
+        return empty list
+    end
+    return list of simplest
+end
+
+to properties_earlier with raw
+    set made to empty list
+    if raw is greater than 1
+        add 1 to made
+    end
+    if raw is greater than 2
+        add raw - 1 to made
+    end
+    return made
+end
+
+to properties_either_made with state, size, generators
+    set which to properties_below(state, length of generators) + 1
+    return record with which which, inner properties_make(item which of generators, state, size)
+end
+
+to properties_either_shrinks with raw, generators
+    set made to empty list
+    for each c in properties_shrinks(item (which of raw) of generators, inner of raw)
+        add (record with which which of raw, inner c) to made
+    end
+    return made
+end
+
+to properties_list_made with state, size, generator, longest
+    set most to size
+    if most is greater than longest
+        set most to longest
+    end
+    set made to empty list
+    for each k from 1 to properties_below(state, most + 1)
+        add properties_make(generator, state, size) to made
+    end
+    return made
+end
+
+# empty, each half, each item left out, then each item made simpler
+to properties_list_shrinks with raw, generator
+    set made to empty list
+    set n to length of raw
+    if n is 0
+        return made
+    end
+    add empty list to made
+    if n is greater than 1
+        set half to ((n / 2) rounded down)
+        add (items 1 to half of raw) to made
+        add (items (half + 1) to n of raw) to made
+    end
+    if n is greater than 2
+        for each k from 1 to n
+            add properties_without(raw, k) to made
+        end
+    end
+    for each k from 1 to n
+        for each c in properties_shrinks(generator, item k of raw)
+            add properties_replaced(raw, k, c) to made
+        end
+    end
+    return made
+end
+
+to properties_without with things, k
+    set made to empty list
+    for each j from 1 to length of things
+        if j is not k
+            add item j of things to made
+        end
+    end
+    return made
+end
+
+to properties_replaced with things, k, c
+    set made to empty list
+    for each j from 1 to length of things
+        if j is k
+            add c to made
+        else
+            add item j of things to made
+        end
+    end
+    return made
+end
+
+to properties_views with generator, raw
+    set made to empty list
+    for each r in raw
+        add properties_view(generator, r) to made
+    end
+    return made
+end
+
+# a key's raw form and a value's, as one generator of the two, for dictionary_of's list of them
+to properties_pair with key_maker, value_maker
+    return properties_generator((function with state, size gives list of properties_make(key_maker, state, size), properties_make(value_maker, state, size)), (function with raw gives properties_pair_shrinks(raw, key_maker, value_maker)), properties_same)
+end
+
+to properties_pair_shrinks with raw, key_maker, value_maker
+    set made to empty list
+    for each c in properties_shrinks(key_maker, item 1 of raw)
+        add (list of c, item 2 of raw) to made
+    end
+    for each c in properties_shrinks(value_maker, item 2 of raw)
+        add (list of item 1 of raw, c) to made
+    end
+    return made
+end
+
+to properties_dictionary with raw, key_maker, value_maker
+    set made to empty dictionary
+    for each pair in raw
+        set item properties_view(key_maker, item 1 of pair) of made to properties_view(value_maker, item 2 of pair)
+    end
+    return made
+end
+
+to properties_kept_made with state, size, generator, test
+    for each k from 1 to 100
+        set raw to properties_make(generator, state, size)
+        if test(properties_view(generator, raw))
+            return raw
+        end
+    end
+    fail with "kept found no value its test says yes to in 100 tries"
+end
+
+to properties_kept_shrinks with raw, generator, test
+    set made to empty list
+    for each c in properties_shrinks(generator, raw)
+        if test(properties_view(generator, c))
+            add c to made
+        end
+    end
+    return made
+end

@@ -5088,3 +5088,43 @@ hold them to agreeing.
   coverage shows as moth test does and still counts; the same files named,
   with --lcov after them; lcov.info word for word; nothing left behind; and
   moth test as it was.
+
+## 128. Property-based testing
+
+A test says what one example gives. A property says what holds for every value of a sort: sorting twice is
+sorting once, JSON reads back what `as json` wrote, splitting text by commas and joining it with them gives it
+back. `properties.moth` tries a property on many values made at random, as Python's Hypothesis and Haskell's
+QuickCheck do, and when one shows it doesn't hold, makes that value as simple as it can.
+
+- **What it is.** `for_all(generator, property)` makes 100 values and gives each to the property, which holds
+  if it gives yes or nothing (so a property can use `expect`, as a test does) and doesn't if it gives no or
+  makes a mistake. `for_all_with(settings, ...)` takes `"tries"` and `"seed"`; `sample(generator, seed,
+  count)` shows what a generator makes. Generators: `whole_number(low, high)`, `decimal(low, high)` (3
+  decimals), `yes_or_no()`, `any_text()`, `text_of(letters)`, `one_of(values)`, `either_of(generators)`,
+  `list_of(generator)` (up to 20), `dictionary_of(keys, values)` (up to 10), `mapped(generator, change)` and
+  `kept(generator, test)`.
+- **Small first.** The k-th try has size k, up to 100: a whole number comes from a window around 0 (or the end
+  of the range nearer it) as wide as size squared, and one time in ten is an end of the range, where mistakes
+  gather; a list or text is up to size long. Small values that show a mistake are found before big ones.
+- **Shrinking.** A generator is three functions: make(state, size) gives a value's raw form, shrink(raw) the
+  simpler raw forms to try in its place, and view(raw) the value. Shrinking works on raw forms, so a list of
+  what `mapped` makes shrinks item by item, and a `kept` value only to ones its test still allows. Whole
+  numbers try the target, halfway there and one step nearer; decimals the whole number too; lists and text
+  empty, each half, each item left out, then each item simpler; `one_of` its first value; yes becomes no. The
+  first simpler value that still shows the mistake is taken, and shrinking goes on from it, until none does or
+  after 5,000 tries. `n is less than 10` over 0 to 1,000 always ends at 10; a list with a number above 5 at
+  `[6]`; text with a "b" in it at `"b"`.
+- **Seeds.** Values come from Park and Miller's minimal standard generator (multiplier 48271, modulus 2^31 -
+  1). Each step is a whole number below 2^53, which every engine keeps exactly, so a seed makes the same
+  values on the VM, the JIT, WebAssembly and in machine code; the tests pin the first 12 of seed 42. A
+  mistake says its seed, and `for_all_with((dictionary where "seed" is s), ...)` makes the same values again.
+  Without a seed, one is picked at random.
+- **Showing values.** A value in a mistake is shown `as json`, so text is in quotes and `"1"` isn't `1`; one
+  JSON can't show is shown as `say` would.
+- **Tested.** properties.test.moth, on the three JS engines (moth.test.js) and in machine code (`moth test`):
+  what each generator makes, its range and mistakes; the same seed giving the same values, and seed 42's
+  pinned; properties that hold, with a function, a property using expect, and settings; the simplest value
+  for whole numbers, decimals, lists, text and dictionaries; a mistake inside a property; and two of the
+  standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
+  text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
+  text.moth's split_by joining back.
