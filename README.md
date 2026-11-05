@@ -348,7 +348,7 @@ other compiler, and builds itself into exactly the bytes Node.js built it into,
 in about 9 seconds:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
@@ -1171,6 +1171,7 @@ source with Node.js: `node bootstrap.mjs`.
 
 ```text
 moth                                     the Moth shell: type Moth and see what it does (also moth shell --allow-...)
+moth --version                          say which Moth this is (also moth version)
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
 moth build --web hello.moth              or hello.html: a page that runs it in any browser, Moth's engine in it
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
@@ -1197,13 +1198,17 @@ moth test                                the same for every .test.moth file here
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-libraries, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
-moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth    moth, built by itself
+moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json    moth, built by itself
 moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (.ico or .png) and version
 moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
 moth build app.moth --installer --name "Notes"   and app-setup.exe, which installs it: a Start menu entry, removable in Settings
 moth build app.moth --sign "signtool sign /fd SHA256 /a"   run a command on each program made, its name after it
 moth build fast.moth --library           a shared library of its functions, for C: libfast.so, or fast.dll, and fast.h
 ```
+
+`moth --version` (or `moth version`) prints one line, such as `moth 1.11.0`,
+and ends with 0. The release version comes from `package.json`, built into
+moth when it is made, so it works wherever the standalone program is installed.
 
 `moth run` is `moth build` and then the program: it builds it into a file
 beside the source (`hello-run.exe`, or `hello-run` on Linux), gives it
@@ -1273,6 +1278,28 @@ gcc main.c -L. -lfast -Wl,-rpath,'$ORIGIN'     (on Windows, gcc main.c fast.dll)
 - **What a library can't do:** stop the program (`fail with` instead), start
   tasks or workers, draw, play sounds, or take callbacks from C. Each is a
   mistake when it's built. Names starting with `moth_` are the library's own.
+
+### From Python: mothlang
+
+`pip install mothlang` gives Python Moth, with `moth` itself in the wheel
+(Windows and Linux, x86-64), and the `moth` command:
+
+```python
+import mothlang as moth
+
+print(moth.run('say "Hello from Moth"').output)
+
+fast = moth.load("fast.moth")      # built into a library the first time, then cached
+print(fast.fib(30))                # 832040, 10 to 13 times as fast as in Python
+```
+
+`moth.load` builds a file with `moth build --library` and calls its
+functions through `ctypes`: no compiled extension. Numbers, text, yes and no,
+nothing, bytes, lists and dictionaries go across as Python's own, a record
+comes back as a `Record`, and a mistake in Moth raises `MothError`, with its
+message and line. [python/README.md](python/README.md) has the rest,
+[`python/benchmarks`](python/benchmarks) times Moth against Python, and
+[docs/python-package.md](docs/python-package.md) is how it gets to PyPI.
 
 ### Installers and signing
 
@@ -1544,7 +1571,7 @@ by byte, with no assembler, linker or other compiler, and
 machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 ```
 
@@ -1796,6 +1823,10 @@ calls that led there.
   matmul through OpenBLAS, an ONNX model the tests write run through ONNX
   Runtime, and Python run inside a program, where each is installed (CI
   installs them)
+- mothlang, the Python package: a wheel built with moth in it, installed,
+  and its pytest tests run on Linux (Python 3.10 and 3.14) and Windows:
+  values both ways, mistakes, threads, deep recursion, the cache, moth.run
+  and the moth command; then the benchmark
 - libraries for C: a C program, built with gcc, calling a library's
   functions with every kind of value, mistakes as records, a top level that
   fails, eight threads at once, recursion 50,000 deep from a 256 KB thread

@@ -167,7 +167,7 @@ jobs:
         run: |
           $first = Join-Path $env:RUNNER_TEMP 'moth-first.exe'
           Copy-Item dist\moth-windows.exe $first
-          $self = 'moth.moth', '--allow-read', '--allow-write', '--allow-run', '--include', 'moth-debugger.moth'
+          $self = 'moth.moth', '--allow-read', '--allow-write', '--allow-run', '--include', 'moth-debugger.moth', '--include', 'package.json'
           & $first build @self
           if ($LASTEXITCODE) { throw 'moth.exe failed to build itself' }
           & $first build @self --target linux

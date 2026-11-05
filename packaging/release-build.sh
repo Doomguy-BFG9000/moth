@@ -24,7 +24,7 @@ if [ $# -eq 2 ]; then release=$(cd "$2" && pwd); fi
 cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-self="moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth"
+self="moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json"
 
 node bootstrap.mjs linux
 mv moth "$work/moth-first"
