@@ -1104,7 +1104,8 @@ number of files, and `moth test` with none finds every file ending in
 
 `moth build fast.moth --library` makes the program a shared library:
 `libfast.so` on Linux, or `fast.dll` on Windows (`--target` picks the other),
-and `fast.h`, which declares it for C. Its functions are the ones `fast.moth`
+and `fast.h`, which declares it for C, beside the file (or in the folder
+`--into build` names). Its functions are the ones `fast.moth`
 makes at its top level (not the files it uses), each called by its own name
 through the system's own C convention, so anything that calls C calls Moth:
 C itself, Python's `ctypes`, Rust, Go, C#, Node's FFI.

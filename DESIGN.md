@@ -5056,7 +5056,8 @@ hold them to agreeing.
   are for what makes or finds values: `moth_text`, `moth_bytes`,
   `moth_numbers`, `moth_list`, `moth_list_add`, `moth_list_item`,
   `moth_dictionary`, its `_set`, `_get` and `_keys`, `moth_record_names` and
-  `_values`, `moth_call`, and `moth_free`. `fast.h` declares them, with the
+  `_values`, `moth_call`, `moth_keep` (a value kept once more), and
+  `moth_free`. `fast.h` declares them, with the
   program's own functions.
 - **Whose a value is.** What the library gives C is kept from the collector
   in a list among its roots until C gives it to moth_free, which takes the
