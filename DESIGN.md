@@ -5022,7 +5022,166 @@ hold them to agreeing.
   four workers taking far less time than four calls; and a Windows program's
   imports. server.moth with three workers: twenty requests answered while one
   handler works for a second and a half.
-## 125. A library for C: moth build --library
+## 125. A WebAssembly back end written in Moth
+
+Moth's web side is about 18,000 lines of JavaScript, and even a program the
+WebAssembly engine compiles calls back into `vm.js` for text, dictionaries,
+built-ins and every mistake. The plan is a Moth compiler written in Moth that
+runs in the browser as WebAssembly, with JavaScript left as a small loader, in
+four stages: a WebAssembly back end in Moth; the runtime in WebAssembly, so a
+module imports nothing from `vm.js`; `moth.wasm`, the compiler built into a
+module that rebuilds itself to the same bytes; and the playground on
+`moth.wasm`. This is the first. The rest are still to come, and the JavaScript
+engines stay: as the fallback, and as what the tests compare against.
+
+- **A port, byte for byte.** [`wasm.moth`](wasm.moth) is `wasm.js` written in
+  Moth: the same encoder, the same runtime functions, the same escape analysis
+  and unboxed numbers, the same fast paths for `remainder`, `rounded` and
+  `item n of`, and numbers as `wasm.js` keeps them (an i31 from -2^30 to
+  2^30-1 that isn't 0 or 1, which are no and yes, and a box otherwise). It
+  reads programs with `compiler.moth`'s tokenizer, parser and scope rules, as
+  `machine.moth` does, and makes exactly the bytes `wasm.js` makes, as
+  `compiler.moth` makes exactly the JIT's JavaScript. Matching byte for byte
+  is the strongest check there is: every local, global, type and position
+  must come in the same order, so any difference in what the two back ends
+  think a program means shows up as a byte.
+- **The tree is `compiler.moth`'s.** Its fields differ from `moth.js`'s where
+  `of`, `to` and `bytes` can't be field names (`subject`, `start` and `limit`,
+  `over`, `binary`), and a number is kept as written, so `wasm.moth` works out
+  a double's 8 bytes itself, with exact steps (halving, doubling and
+  subtracting), as `machine.moth` does, and keeps one global for each
+  different double, keyed by its bytes.
+- **Writing code from text.** The runtime is about 450 lines of instruction
+  chains in `wasm.js`. In Moth each chain is a line of text, such as
+  `local.get 0 ref.test i31 if i32 ...`, which a small assembler turns into
+  bytes, knowing each instruction's immediates and the names of the module's
+  types, functions, imports, globals and a function's own locals. That kept
+  the port close enough to `wasm.js` to check line by line.
+- **The runtime once.** Every module starts with the same types, imports,
+  runtime functions, exports and globals, so they are made once per run of
+  the compiler and copied, with each function's encoded body kept. A program
+  then costs only its own code: about 1.5 ms a program through the JIT, 12
+  seconds for the 7,822 programs of the test corpora.
+- **The escape analysis missed three places.** Making `wasm.moth` meant
+  reading every field the parser makes, and `wasm.js`'s escape analysis never
+  looked inside `ask`'s question, `wait`'s amount, or `play note`'s note and
+  time. A function that used an outer variable only there kept it in a local
+  of the program's, not in the heap, and found it unset. Both back ends now
+  look there, and a test runs the four programs that showed it on every
+  engine.
+- **It compiles itself.** `wasm.moth` with `compiler.moth` is a program like
+  any other: compiled by itself, it is a 977,707-byte module, `wasm.js`'s bytes
+  exactly, in about a second, and that module, run, compiles a program into
+  the same bytes again. That is the start of `moth.wasm`; what's missing is
+  the runtime, which the module still imports from `vm.js`.
+- **Half an emoji.** Holding `wasm.moth`'s mistakes to the VM's, column and
+  all, found one more difference, in `compiler.moth`'s tokenizer: half of a
+  character past the first 65,536, on its own, sorts among those characters,
+  so it counted 2 columns where JavaScript counts 1. It now counts 2 only for
+  a character that is 4 bytes of UTF-8.
+- **`moth build --target wasm`.** `moth.moth` carries `wasm.moth`, made into
+  machine code by `machine.moth` with the rest, and writes `<file>.wasm`:
+  `wasm.js`'s module, byte for byte, then a custom section called `moth`
+  holding, as JSON, what the JavaScript side needs to run it (each position,
+  the names, the messages, the text, and what typed inputs must be).
+  `runWasm` in `moth.js` reads that section and runs it. Until the runtime is
+  in WebAssembly too, the module still imports `vm.js`'s checks, and with no
+  source to hand to the VM, calls past 2,000 deep are a mistake there.
+- **Tested.** `wasm.moth`, run through the JIT, makes `wasm.js`'s bytes, or
+  stops at the same mistake, on every playground example, every hand-written
+  case, the 1,500 programs the grammar makes, the 5,000 broken ones and 500 of
+  machine code's random programs; what it makes says, draws and stops at what
+  the VM does, mistakes, positions and trails included, on all of them but
+  machine code's, and the hand-written cases say what they should. `moth`
+  itself, with `wasm.moth` in machine code, builds a module whose bytes are
+  `wasm.js`'s, which runs as the VM runs the program, and moth still builds
+  itself into the same bytes.
+
+
+## 126. The VS Code extension, ready to publish
+
+- **Why.** People find VS Code extensions in VS Code's Extensions view, from
+  the Visual Studio Marketplace, and editors built from VS Code (VSCodium,
+  Cursor, Gitpod) from Open VSX. The extension was a .vsix to make from the
+  repository, and it ran whatever `moth.path` said, `moth` by default.
+- **Finding moth.** find-moth.js, which needs no VS Code, looks where
+  `moth.path` says (the file, or the folder it's in; `~`, a path from the
+  workspace's folder, and the quotes Windows' "Copy as path" puts round one,
+  all taken), or else in each folder on the PATH, in order: `moth.exe` on
+  Windows, where the PATH is Path, split at `;`, with folders in quotes, and
+  `moth` on Linux, which must be marked as a program. It's looked for each
+  time it's needed, so one installed since is found, and the language server
+  starts again when `moth.path` changes. Run, Build, the debugger and moth
+  lsp all start the full path found, never a name a shell or Windows would
+  look for in the program's own folder first. Where there's none, one
+  warning says why (not on the PATH, not where moth.path says, or not marked
+  as a program), with **Get Moth**, which opens the releases, and **Don't
+  Show Again**, kept between sessions; Run, Build and Debug say it again, as
+  they can't do what was asked. Nothing waits for it to be answered. The
+  checker and tidying are the engine built in, so the problems, Format
+  Document, colours and snippets go on without moth.
+- **Folders not trusted.** `moth.path` is a restricted setting
+  (`untrustedWorkspaces: limited`): in VS Code's Restricted Mode a folder's
+  own settings can't say which program to run, and a moth.path that doesn't
+  start at the top is taken from the folder only once it's trusted.
+- **Run and Build as tasks.** A terminal whose program is moth closes the
+  moment the program ends, so what it said was gone at once. A task with a
+  ProcessExecution starts moth the same way, with nothing for a shell to
+  quote, but its terminal stays, says how it ended, and gives the program
+  its input for `ask`. `"type": "moth"` tasks in tasks.json are made the
+  same, from a task provider.
+- **The Marketplace's page.** The manifest has an icon (the site's lantern on
+  its cord and its moth flying to it, drawn in SVG, images/icon.svg, and made
+  a 128-pixel PNG by Chromium), the site's night as the banner, keywords,
+  the site as its homepage, issues as its bugs, no Q&A, and Education among
+  its categories. The README is for someone who has never heard of Moth:
+  what it is, how to get moth, then each feature with a picture taken in VS
+  Code. Its pictures are the repository's, by their full address, as vsce
+  would make a relative one point at the repository's top, not this folder,
+  so the .vsix holds none of them but the icon. e2e/screenshots.mjs takes
+  them again: VS Code on a display of Xvfb's, each scene put on it with
+  VS Code's API from its extension host, the screen taken by ImageMagick,
+  cut, and the GIFs made of its frames.
+- **Packing.** vsce, pinned with ovsx and @vscode/test-electron in a
+  package-lock.json of the extension's own, so the repository itself still
+  needs nothing installed. Its vscode:prepublish script copies the engine
+  into engine/, and .vscodeignore lets through only make-vsix.mjs's FILES:
+  23 files, about 180 KB. make-vsix.mjs stays, for a .vsix with nothing to
+  install, and check-package.mjs holds `vsce ls` and the .vsix to the same
+  list, the engine to the repository's, the manifest to package.json, the
+  README to pictures on the web, and the whole to under a megabyte.
+- **Publishing.** publish-extension.yml runs only by hand, and only from
+  main. Its first job packs the extension once, checks it and tests it in VS
+  Code; its second, the only one given the tokens or an identity, publishes
+  that same .vsix: to the Marketplace with VSCE_PAT and to Open VSX with
+  OVSX_PAT, each skipped with a notice where its secret isn't set. vsce and
+  ovsx read them from the environment. Azure DevOps retires the global
+  tokens the Marketplace takes on December 1, 2026, so where there's no
+  VSCE_PAT and the VSCE_TRUSTED_PUBLISHING variable is true, it publishes
+  with `vsce publish --oidc`, the Marketplace's Trusted Publishing, which
+  takes the run's own GitHub identity. docs/publishing-the-extension.md
+  says how to set each up. The extension's version is its own, 0.1.0.
+- **What it needs of moth.** Run, Build, questions and tasks work with
+  moth 1.11.0, the latest release; moth lsp and the debugger need a newer
+  one, so it's best published with Moth's next release.
+- **Tested.** editor.test.js: finding moth on Linux's paths, and on
+  Windows' (with a stand-in for the disk); the message, its buttons, Don't
+  Show Again kept, and nothing waiting for an answer; the server started
+  again with a new moth.path; Run, Build and a tasks.json task as tasks;
+  the .vsix's files, its licence the repository's, and .vscodeignore's list.
+  e2e/suite.js, in VS Code itself, on the extension as the .vsix has it, with
+  moth in a folder with spaces in its name and with none: it starts, a
+  broken file's problem, a problem as it's typed and its Quick Fix, Format
+  Document, the outline and Go to Definition, the snippets, and with moth,
+  Go to Definition into a used file, a hover and completion from moth lsp,
+  Build and Run (moth build's program made, both ending with 0, and the
+  output kept), a question answered in the terminal, a tasks.json task, and
+  the debugger stopped at a breakpoint with its variables. CI runs it in the
+  newest VS Code and in 1.75, the oldest the extension says it works in;
+  it replaces in-vscode.js, which needed MOTH_VSCODE=1 and an installed
+  VS Code.
+
+## 127. A library for C: moth build --library
 
 - **Why.** Moth could call C (§45) and Python (§120), but nothing could call
   Moth: a fast function written in it was only any use to another Moth

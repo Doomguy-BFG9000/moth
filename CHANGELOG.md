@@ -6,6 +6,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
+  [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
+  bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
+- **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
+  question, `wait`'s amount or `play note`'s note or time found it had no value.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
@@ -51,6 +56,13 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   ([editors/README.md](editors/README.md)).
 - **`ask for 64 bytes`** gives the input's next 64 bytes without waiting for a line's end, in programs moth
   builds.
+- **The VS Code extension, ready for the Visual Studio Marketplace and Open VSX.** It finds moth from the
+  `moth.path` setting, or else the PATH (`moth.exe` on Windows, paths with spaces too), and where there's none
+  says so once, with a button to the releases, while colours, snippets, problems and Format Document go on
+  without it. Run and Build keep what the program said in the terminal once it has ended, as tasks, which
+  tasks.json can have too. It has an icon, a Marketplace page with a picture of each feature, and a changelog
+  of its own; CI packs it with vsce and tests it in VS Code itself, and a workflow publishes it when it's run
+  by hand ([docs/publishing-the-extension.md](docs/publishing-the-extension.md)).
 - **A debugger in your editor.** A debug adapter for `moth debug` gives VS Code (*Moth: Debug this file*, or
   F5), Neovim, Helix and JetBrains' IDEs breakpoints, stepping, the calls in progress and the variables.
 - **Libraries for a company's work.** `postgres.moth` and `mysql.moth` query PostgreSQL and MySQL over their
