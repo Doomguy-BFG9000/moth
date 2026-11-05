@@ -4294,7 +4294,191 @@ hold them to agreeing.
   program starts can do anything, a flag allows all of what it names, and
   there are no limits on memory or time.
 
-## 107. Arrays of numbers, and Moth's own loops
+## 107. Types you can add, checked before the program runs
+
+- **Why.** A company's code is read by people who didn't write it, and its
+  mistakes are cheapest before it runs. TypeScript and Python's type hints say
+  what a value is where it matters and nowhere else; Moth's inputs could say
+  only one of eight kinds, and the checker could only speak where values were
+  written out.
+- **What the code can say.** An input can be `a dog` (or `an owl`): a record a
+  kind makes. It can be `a list of numbers`, or of `text`, `yes or no`,
+  `lists of numbers`, `records`, `dictionaries`, `bytes`, `functions`, or what
+  a kind makes, `dogs` (`boxes`, `puppies`). After its inputs, a function can
+  say `gives a number`, `gives a dog`, `gives nothing`, or `gives a dog or
+  nothing`. A kind's inputs say so too: `kind point with x as a number`.
+- **Gradual, so nothing old changes.** A run checks only what it always
+  could, cheaply, at each call: `a dog` is checked as a record, `a list of
+  numbers` as a list, and `gives` not at all. What's beyond that is for the
+  checker. Code that says nothing is checked exactly as it was. `gives` is a
+  word only after a function's inputs, so it stays a name (VERSIONING.md's
+  promise), and `as` already was a word.
+- **Two passes.** checker.js works out every variable's type twice: from
+  what's sure (values written out, what each operation and builtin gives, an
+  input whose `as` each call checks, what a kind makes, and now what a function
+  returns, from its `return`s, again until nothing changes), and then with
+  what the code says of itself too. A check that fails on the first is
+  "will fail": that line stops the program whenever it runs. One that fails
+  only on the second is "doesn't fit": the code goes against what it says,
+  which no run would catch (`greet(cat("Tom"))` when greet takes `a dog`, or a
+  `return 5` in a function that `gives nothing`, or one that `gives a number`
+  and can reach its end). A type is a string ("record:dog", "list:number"), so
+  joining two of them is cheap: a list of numbers and a list of text are a
+  list. A field of a record a kind makes has the type its input says, unless
+  the program sets a field of that name anywhere, when any record may have it.
+  A kind named that the program doesn't make is said once, with the nearest
+  name (`there is no kind called 'dgo'`).
+- **moth check does the same in Moth.** It can't run vm.js's checks, so
+  make-checker-rules.mjs runs each of checker.js's rules on a sample of every
+  type, and of every unit and turtle action, and writes what each does into
+  checker-rules.moth: a line per rule and types, saying which operands' values
+  (not just types) can change the outcome, and which message it stops with.
+  moth.moth works the types out as checker.js does and looks each check up
+  there. So moth check says what the checker says, word for word, but leaves
+  out what rests on a value written out (`1 / 0`, `item 0 of x`, `repeat "x"
+  times`), which needs the value, not its type; the playground finds those
+  too. moth.test.js says when checker-rules.moth is behind.
+- **Everywhere alike.** moth check ends with 1 for "will fail" and "doesn't
+  fit"; the editors and the playground show both in red, "doesn't fit"
+  named as such (the playground showed it in yellow before).
+- **Tested.** Each kind of input type, `gives`, kinds made from kinds, and
+  every message, in moth.test.js, word for word; moth check against the
+  checker on every example, working program, typed program and 120 broken
+  ones, through moth.exe. And that unannotated code gets no false alarm: the
+  checker's claims held against runs of the examples, the table programs, the
+  lessons, the programs machine.test.js makes machine code of, and every file
+  of the standard library (no "doesn't fit", and each "will fail" where the run
+  stops, in its words, or on a line that never runs). Done once by hand,
+  further: main's checker and this one on 2,970 unannotated programs differ
+  only in a mistake's wording (`expected what kind of value it is ... or a
+  kind's name`) and in true "will fail"s from what a function returns
+  (`f() + 1` where f gives nothing); and moth check and the checker agree word
+  for word on 2,360 programs, and the playground's Problems pane with moth check
+  on every typed program, in Chromium.
+
+## 108. The language server, and every major editor
+
+- **Why.** People write code in their own editor. One language server gives
+  them all what the VS Code extension had, and more.
+- **moth lsp** speaks the Language Server Protocol on its input and output, in
+  Moth (moth.moth), from what moth check and moth tidy already know: the
+  problems as you type (moth check's, types and all), formatting (moth tidy's),
+  the outline (each function, kind with its own functions in it, and variable,
+  each to its `end`), go to definition (in the file, in a file it `use`s, and
+  on a `use` line, the file itself), hover (what a name is, what a variable or
+  input holds, what a function takes and gives, with the comment above it),
+  and completion (the names the position can see, Moth's words, and after
+  `rex's`, what rex's kind has). Hovers and `rex's` use the checker's types:
+  it notes where each variable, input and function's returns are made, and
+  hovers look them up.
+- **Reading what an editor sends.** A message is a header, an empty line, and
+  as many bytes of JSON as the header says, with no new line after. `ask for 64
+  bytes` gives the next 64 bytes of the input, waited for but not to a line's
+  end, or as many as come before it ends (machine code only; the playground's
+  engines say so). The answers are said with `say`, whose new line the
+  Content-Length counts.
+- **Code being typed.** Most keystrokes leave code that can't be read. The
+  problems then are its first mistake, as moth check says it; for everything
+  else the server leaves out the line with the mistake (made empty, so the
+  lines after keep their numbers), or the line before when the mistake is at
+  a line's start (`set x to`, then the next line), or ends a block left open,
+  and reads it again, 12 times at most. So the outline, hovers and completion
+  still know the rest of the file.
+- **One reading per change.** What it works out of a document is kept until
+  its text, or a file it uses, changes. The editor's copies of the files it has
+  open are read in place of the disk's, so a change not yet saved counts, and
+  the documents that use a changed file get their problems again. An editor
+  that finds the problems itself can ask for none (`initializationOptions:
+  { diagnostics: no }`).
+- **VS Code.** The extension now starts moth lsp where moth is installed
+  (client.js, which needs no VS Code, speaks the protocol) for the outline,
+  definitions, hovers and completion, which only the server can do across
+  files. It keeps Moth's engine, built in, for the problems, the quick fixes and
+  tidying: that needs no install, and finds what rests on a value written out
+  too. Without moth, or with `moth.languageServer` off, it does as it did.
+- **Neovim, Helix and Zed** colour with tree-sitter, so editors/tree-sitter-moth
+  is a grammar: each line as Moth's tokenizer reads it, with a call, `to name`,
+  `kind name`, `x's` and the values in text as parts of their own, and VS
+  Code's words. Whether a `{` in text starts a value rests on the character
+  after it, which a regular expression can't look at, so src/scanner.c reads the
+  text between values. editors/neovim is a plugin folder (filetype, comments,
+  Moth's indenting, moth lsp, the colours once the parser is built),
+  editors/helix a languages.toml and its queries in Helix's names, and
+  editors/zed an extension whose Rust starts moth lsp, as Zed runs a language
+  server only for a language with a grammar. Zed and Helix build the grammar
+  from the commit of this repository that added it. **JetBrains' IDEs** use
+  LSP4IJ, which runs any language server, with the VS Code extension's
+  TextMate grammar for the colours. editors/README.md says how to set up each.
+- **Tested.** machine.test.js starts moth lsp and speaks the protocol to it,
+  checking each message's framing: the problems as a document opens, against
+  the checker's; the outline; definitions here and in two files it uses; each
+  kind of hover; completion, and after `rex's` and `shapes's`; a document as
+  it's typed; an unsaved change to a file it uses, and that file closed again;
+  tidying, against format(); a message in pieces and two in one; shutdown and
+  exit; no problems when asked for none; and the extension's client.js against
+  it. editor.test.js runs the extension against stand-ins for VS Code and for
+  the server, with and without it; and checks the grammar has VS Code's words,
+  the colours' copies match, Zed and Neovim indent as VS Code does, and Zed and
+  Helix name the commit the grammar is at. Done by hand: every Moth file here,
+  and every example and test program (563), reads with tree-sitter with no
+  error; Neovim 0.11, headless, showed the problems, hovered, went to a
+  definition, tidied, indented and coloured; Helix 25.07 built the grammar and
+  found the server and the queries; and the Zed extension built for
+  WebAssembly.
+
+## 109. A debug adapter for moth debug
+
+- **Why.** An editor's debugger shows breakpoints in the margin, the calls in
+  progress and the variables, and steps with a key. moth debug (§59) had all
+  of that, as commands typed in a terminal.
+- **What.** editors/vscode/debug-adapter.js speaks the Debug Adapter
+  Protocol to the editor and moth debug's commands to the program: a
+  breakpoint is `break lib.moth 4` (or `clear`), step in, over and out and
+  continue are `step`, `next`, `out` and `go`, the calls in progress are
+  `where`, the variables `vars`, and what's under the pointer, in a watch or
+  in the debug console is `show` (the console's `where`, `list`, `breaks` and
+  `help` are said as they are). The mistake that ends a program is a stop
+  with its words, whose variables can still be looked at. While the program
+  runs, a line typed in the debug console answers its `ask`.
+- **Reading it.** The debugger answers on the program's own output, and asks
+  for each command with `(moth) `, which the command is said after, as `ask`
+  says an answer when the input isn't a terminal; a text value's new line is
+  `\n`. So what comes before `(moth) ` after a command that only looks is its
+  answer; after one that runs the program, it's what the program said, then
+  the line it stopped at, whose shape (`prog.moth:5, in 'bump': ...`, or
+  `stopped at the mistake, at ...`) the adapter reads. What the program says
+  is shown as it comes, but for its last line, which may be that line: held
+  until the next line comes, `(moth) ` does, or 200 ms go by.
+- **In JavaScript, for now.** Driving a program's input and output both,
+  while reading the editor's, needs a process with pipes for both, which
+  tasks.moth hasn't, and moth isn't built with --allow-libraries. So the
+  adapter is Node.js's: VS Code runs it inside the extension, and Neovim
+  (nvim-dap, which editors/neovim sets up), Helix and LSP4IJ start it with
+  node. A `moth dap` in Moth can come once tasks.moth can give a program its
+  input.
+- **What moth debug can't do.** It's told things only while the program is
+  stopped, so a breakpoint set while it runs counts from where it next stops,
+  and a pause is refused, saying so. A program stopped while it runs is ended
+  with moth, as a group, and the program moth built (prog-debug) is taken
+  away by the adapter, as moth can't, if this session made it.
+- **VS Code.** *Moth: Debug this file* (and F5 with no launch.json) starts a
+  debugging session in place of `moth debug` in a terminal, with moth.path's
+  moth.
+- **Tested.** machine.test.js runs the adapter as a program of its own, as an
+  editor other than VS Code does, on moth.exe's moth debug: breakpoints in the
+  program and a file it uses, taken away, the calls in progress, variables, a
+  hover, a watch that fails, the console's `where` and an answer to `ask`,
+  step out and over, a refused pause, what the program said and the number it
+  ended with; a mistake stopped at, with its calls and variables; stopping on
+  entry; a program stopped while it runs, and the program moth built taken
+  away; and a moth that isn't there. editor.test.js checks the extension
+  starts a session for Debug, fills a launch configuration in, and runs the
+  adapter inside itself. Done by hand: Neovim 0.11 with nvim-dap, headless,
+  set a breakpoint, stopped there, read a variable, continued, stepped and
+  ran to the end, through editors/neovim's setup; and Helix 25.07 took the
+  debugger's settings.
+
+## 110. Arrays of numbers, and Moth's own loops
 
 - **Why.** NumPy is what makes Python the language of data and machine
   learning: numbers in a shape, and maths on all of them at once. Moth had
@@ -4327,7 +4511,7 @@ hold them to agreeing.
   Moth's give; Moth's own library used without `--allow-libraries` and not
   linked; and memcpy and memset on a list of numbers.
 
-## 108. BLAS and ONNX Runtime: calls at an address
+## 111. BLAS and ONNX Runtime: calls at an address
 
 - **Why.** NumPy's matmul is BLAS's, and a model trained in PyTorch runs
   anywhere as an ONNX file through ONNX Runtime, whose C API is a table of
@@ -4354,12 +4538,12 @@ hold them to agreeing.
   Each runs where ONNX Runtime and OpenBLAS are installed, and is skipped
   where they aren't; CI installs both.
 
-## 109. Python inside Moth
+## 112. Python inside Moth
 
 - **Why.** Most of machine learning's libraries are Python's. A Moth
   program that can use them needn't wait for Moth to have its own.
 - **tools/python.moth** loads CPython's own library, through its C API at
-  addresses (§108): where PYTHON_LIBRARY says, else beside a folder in PATH,
+  addresses (§111): where PYTHON_LIBRARY says, else beside a folder in PATH,
   else as Linux installs it. It runs code, evaluates expressions, imports
   modules, calls functions (with inputs by name), and reads and sets
   attributes and variables. Numbers, text, yes and no, nothing, lists and
@@ -4371,7 +4555,7 @@ hold them to agreeing.
   module that isn't there, and with NumPy, arrays both ways. It's skipped
   where Python's library isn't installed.
 
-## 110. Large language models: tools/ai.moth
+## 113. Large language models: tools/ai.moth
 
 - **Why.** Programs ask models now: for an answer, for JSON of a shape, to
   use the program's own functions, or for embeddings to search by meaning.
@@ -4403,7 +4587,7 @@ hold them to agreeing.
   a wrong key and none, each key only in its own API's header and in no
   request's body. The keys are made up.
 
-## 111. Jupyter
+## 114. Jupyter
 
 - **Why.** Jupyter is where data work is done, and its notebooks run in
   JupyterLab, VS Code and the rest. `moth notebook` (§77) runs Markdown,
