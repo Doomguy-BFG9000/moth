@@ -510,6 +510,21 @@ bytes and dictionaries:
   end
   ai's stream(quick, "Write a haiku about a moth.", as_written)
   ```
+- [`properties.moth`](tools/properties.moth) is property-based testing, as
+  Hypothesis and QuickCheck do it: say what should hold for every value of a
+  sort, and `for_all` tries a hundred made at random, small ones first; a
+  value that shows it doesn't hold is made as simple as it can be, and the
+  mistake says it with the seed that makes it again:
+  ```
+  use "properties.moth" as p
+  to test_sorting_twice_is_sorting_once
+      set numbers to p's list_of(p's whole_number(-1000, 1000))
+      p's for_all(numbers, (function with xs gives ((xs in order) in order) is (xs in order)))
+  end
+  ```
+  Values come from `whole_number`, `decimal`, `yes_or_no`, `any_text`,
+  `text_of`, `one_of`, `either_of`, `list_of`, `dictionary_of`, `mapped` and
+  `kept`.
 - [`sets.moth`](tools/sets.moth) is Python's set: each thing once, found at
   once, with `union`, `both`, `only_in` and `in_one`, shown as `{1, 2, 3}`;
   it holds numbers and text, as a dictionary's keys can be.
