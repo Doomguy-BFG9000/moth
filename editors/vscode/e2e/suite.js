@@ -65,7 +65,10 @@ test("a misspelled name gets a problem as it's typed, and a Quick Fix", async ()
   const found = await until(() => vscode.languages.getDiagnostics(document.uri), (d) => d.length === 1); // 'totl' is used now
   assert.deepEqual(found.map((d) => [d.range.start.line, d.range.start.character, d.severity, d.message]),
     [[1, 4, vscode.DiagnosticSeverity.Error, "'total' has no value yet. Did you mean 'totl'?"]]);
-  const fixes = await vscode.commands.executeCommand("vscode.executeCodeActionProvider", document.uri, found[0].range);
+  // Moth's fix comes from the language server, which can answer after VS Code's own actions (Fix, Explain and
+  // Modify, where Copilot's are built in), so it's waited for, as the problems are
+  const fixes = await until(() => vscode.commands.executeCommand("vscode.executeCodeActionProvider", document.uri, found[0].range),
+    (actions) => actions.some((a) => a.title === "Change to 'totl'"));
   assert.ok(fixes.some((a) => a.title === "Change to 'totl'"), fixes.map((a) => a.title).join(", "));
   await vscode.commands.executeCommand("workbench.action.files.revert");
 });
