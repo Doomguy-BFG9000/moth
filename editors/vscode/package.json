@@ -1,24 +1,62 @@
 {
   "name": "moth",
   "displayName": "Moth",
-  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, Go to Definition, hovers, completion, a debugger, and Run and Build",
+  "description": "Moth, the programming language that reads like plain English: colours, problems as you type, Format Document, the outline, Go to Definition, hovers, completion, a debugger, and Run and Build",
   "version": "0.1.0",
   "publisher": "samyyy2423",
   "license": "Apache-2.0",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#120e0a",
+    "theme": "dark"
+  },
+  "homepage": "https://samyyy2423.github.io/moth/",
+  "bugs": {
+    "url": "https://github.com/samyyy2423/moth/issues"
+  },
+  "qna": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/samyyy2423/moth"
+    "url": "https://github.com/samyyy2423/moth",
+    "directory": "editors/vscode"
   },
+  "keywords": [
+    "moth",
+    "plain english",
+    "english",
+    "beginners",
+    "learn to code",
+    "teaching",
+    "language server",
+    "lsp",
+    "debugger",
+    "formatter",
+    "native",
+    "compiler"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
     "Programming Languages",
+    "Debuggers",
     "Formatters",
     "Linters",
-    "Debuggers",
-    "Snippets"
+    "Snippets",
+    "Education"
   ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a folder you haven't trusted, the extension uses the moth.path from your own settings, not the folder's, so opening a folder can't choose a program for it to run.",
+      "restrictedConfigurations": [
+        "moth.path"
+      ]
+    }
+  },
   "main": "./extension.js",
   "activationEvents": [
     "onLanguage:moth",
@@ -99,8 +137,8 @@
       "properties": {
         "moth.path": {
           "type": "string",
-          "default": "moth",
-          "description": "The moth command line that Run, Debug, Build and the language server use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+          "default": "",
+          "markdownDescription": "Where `moth`, Moth's command line, is: the path to `moth.exe` on Windows or `moth` on Linux, or to the folder it's in. Leave it empty to use the `moth` on your PATH. Run, Build, the debugger and the language server all use it."
         },
         "moth.languageServer": {
           "type": "boolean",
@@ -155,8 +193,7 @@
               },
               "mothPath": {
                 "type": "string",
-                "description": "moth, if it isn't moth.path's.",
-                "default": "moth"
+                "description": "The moth to debug with, if it isn't the one moth.path or the PATH has."
               }
             }
           }
@@ -183,5 +220,13 @@
         ]
       }
     ]
+  },
+  "scripts": {
+    "vscode:prepublish": "node make-vsix.mjs --engine"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "ovsx": "1.3.0"
   }
 }
