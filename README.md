@@ -1171,7 +1171,7 @@ import mothlang as moth
 print(moth.run('say "Hello from Moth"').output)
 
 fast = moth.load("fast.moth")      # built into a library the first time, then cached
-print(fast.fib(30))                # 832040, about 14 times as fast as in Python
+print(fast.fib(30))                # 832040, 10 to 13 times as fast as in Python
 ```
 
 `moth.load` builds a file with `moth build --library` and calls its
