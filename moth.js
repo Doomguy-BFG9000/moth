@@ -4,7 +4,7 @@
 import { MothError, Ended, fail, closest, startTasks, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
-import { wasm, wasmProgram, compileToWasmModule } from "./wasm.js";
+import { wasm, wasmProgram, wasmFile, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt, describeTrail, seeded, soundSamples, soundWav, SOUND_RATE } from "./vm.js";
@@ -2727,6 +2727,20 @@ export function machineCompiler(machineSource, compilerSource) {
   };
 }
 
+// Runs a module `moth build --target wasm` made, from its bytes, with run()'s options. With no source to hand to the
+// VM, calls more than 2,000 deep are a mistake here, and an app's handlers aren't called.
+export function runWasm(bytes, print = console.log, { maxSteps = Infinity, draw, ask, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock(), play } = {}) {
+  startTasks();
+  const timer = { now: () => clock.now(), since: () => clock.since(), sleep: (ms) => clock.sleep(ms) };
+  try {
+    wasmFile(bytes).run(print, draw, maxSteps, ask, disk, args, random, { handlers: [] }, printError, timer, play);
+  } catch (err) {
+    if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "calls went more than 2,000 deep, which a module made by moth build --target wasm can't go yet");
+    if (!(err instanceof Ended)) throw err;
+    exit?.(err.code);
+  }
+}
+
 // Moth's WebAssembly back end written in Moth (wasm.moth, which reads programs with compiler.moth): give it both
 // files' text and get back a function that turns a program, and the files it uses ({ "name.moth": text }), into
 // what compileToWasmModule in wasm.js gives: { bytes, ats, names, messages, texts, kinds }, the same bytes and all.
@@ -2735,7 +2749,9 @@ export function wasmMothCompiler(wasmSource, compilerSource) {
   return (source, files = {}) => {
     try {
       const made = compileWasm(source, Object.keys(files), Object.values(files));
-      return { bytes: Uint8Array.from(made.code), ats: made.ats, names: made.names, messages: made.messages, texts: made.texts, kinds: made.kinds };
+      // a position as moth.js's tokens have one: the program's own file is no file
+      const ats = made.ats.map((at) => ({ type: at.type, line: at.line, col: at.col, file: at.file || undefined }));
+      return { bytes: Uint8Array.from(made.code), ats, names: made.names, messages: made.messages, texts: made.texts, kinds: made.kinds };
     } catch (err) {
       if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
       if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");
