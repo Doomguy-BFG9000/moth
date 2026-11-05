@@ -5074,6 +5074,11 @@ engines stay: as the fallback, and as what the tests compare against.
   exactly, in about a second, and that module, run, compiles a program into
   the same bytes again. That is the start of `moth.wasm`; what's missing is
   the runtime, which the module still imports from `vm.js`.
+- **Half an emoji.** Holding `wasm.moth`'s mistakes to the VM's, column and
+  all, found one more difference, in `compiler.moth`'s tokenizer: half of a
+  character past the first 65,536, on its own, sorts among those characters,
+  so it counted 2 columns where JavaScript counts 1. It now counts 2 only for
+  a character that is 4 bytes of UTF-8.
 - **`moth build --target wasm`.** `moth.moth` carries `wasm.moth`, made into
   machine code by `machine.moth` with the rest, and writes `<file>.wasm`:
   `wasm.js`'s module, byte for byte, then a custom section called `moth`
