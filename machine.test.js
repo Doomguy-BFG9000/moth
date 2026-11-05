@@ -3160,8 +3160,9 @@ say read site + "/stop"`, ["--allow-net"]);
 
 // tools/server.moth's connections (DESIGN §107), on raw sockets, so what's checked is what goes over the wire:
 // each says something, in pieces with pauses if it likes, and gets back everything until the server closes it,
-// or until it has waited `patience` ms for more
-function exchange(port, pieces, { pause = 0, patience = 3000, readLate = 0 } = {}) {
+// or until it has waited `patience` ms for more; reading nothing for `readLate` ms, and then, with `stalls`,
+// stopping for each in turn after each 2 MB it reads
+function exchange(port, pieces, { pause = 0, patience = 3000, readLate = 0, stalls = [] } = {}) {
   return new Promise((resolve) => {
     const socket = net.connect(port, "127.0.0.1");
     const got = [];
@@ -3175,7 +3176,17 @@ function exchange(port, pieces, { pause = 0, patience = 3000, readLate = 0 } = {
       clearTimeout(timer);
       timer = setTimeout(() => done(false), patience);
     };
-    socket.on("data", (d) => (got.push(d), wait()));
+    let read = 0;
+    let stalled = 0;
+    socket.on("data", (d) => {
+      got.push(d);
+      read += d.length;
+      wait();
+      if (stalled < stalls.length && read >= (stalled + 1) * 2_000_000) {
+        socket.pause();
+        setTimeout(() => socket.resume(), stalls[stalled++]);
+      }
+    });
     socket.on("end", () => done(true));
     socket.on("error", () => done(true));
     socket.on("close", () => done(true));
@@ -3218,7 +3229,7 @@ test("tools/server.moth keeps connections open, answers requests sent together i
     const exe = executable(dir, "site");
     writeFileSync(exe, machine(`use "server.moth" as web
 set lines to empty list
-for each i from 1 to 100000
+for each i from 1 to 400000
     add "0123456789abcdefghijklmnopqrstu" to lines
 end
 set big to (join lines with "\\n") + "\\n"
@@ -3274,9 +3285,10 @@ say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries"], files
     assert.deepEqual(brief(await exchange(port, chunked.match(/[^]{1,3}/g), { pause: 1 })),
       ["HTTP/1.1 200 OK keep-alive PUT HTTP/1.1 12 [hello, world] c", "HTTP/1.1 200 OK keep-alive page /after"]);
 
-    // an answer far bigger than a socket holds, to a client that waits before it reads any of it
-    const huge = answers((await exchange(port, [get("/big", "Connection: close\r\n")], { readLate: 500 })).said);
-    assert.deepEqual([huge.length, huge[0].length, huge[0].body.length, huge[0].body.slice(0, 33)], [1, 3200000, 3200000, "0123456789abcdefghijklmnopqrstu\n0"]);
+    // an answer far bigger than a socket holds, to a client that waits before it reads any of it, then stops
+    // five times as it reads: far longer than the time limit in all, so the limit is from the last it took
+    const huge = answers((await exchange(port, [get("/big", "Connection: close\r\n")], { readLate: 150, stalls: [150, 150, 150, 150, 150] })).said);
+    assert.deepEqual([huge.length, huge[0].length, huge[0].body.length, huge[0].body.slice(0, 33)], [1, 12800000, 12800000, "0123456789abcdefghijklmnopqrstu\n0"]);
 
     // a query, with a % that isn't one
     assert.deepEqual(answers((await exchange(port, [get("/query?a=1&b=two%20words&c=100%zz&d", "Connection: close\r\n")])).said)[0].body,
