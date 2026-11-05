@@ -123,6 +123,7 @@ to shaped with values, shape
     return arrays_make(shape, items 1 to length of values of values)
 end
 
+# an array of a shape (a list of how long each axis is, or a number for one axis) with every number `value`
 to filled with shape, value
     set shape to arrays_shape(shape, "filled")
     if not arrays_is_number(value)
@@ -135,10 +136,12 @@ to filled with shape, value
     return arrays_make(shape, data)
 end
 
+# an array of a shape with every number 0
 to zeros with shape
     return filled(shape, 0)
 end
 
+# an array of a shape with every number 1
 to ones with shape
     return filled(shape, 1)
 end
@@ -208,6 +211,7 @@ to identity with n
     return made
 end
 
+# an array of its own with the same shape and numbers, so changing one leaves the other as it was
 to copy_of with t
     set t to arrays_need(t, "copy_of")
     return arrays_make(items 1 to length of t's shape of t's shape, items 1 to length of t's data of t's data)
@@ -215,10 +219,12 @@ end
 
 # ---------- what they are ----------
 
+# how many numbers the array holds: its shape's lengths multiplied together
 to size with t
     return length of arrays_need(t, "size")'s data
 end
 
+# how many axes the array has: 1 for a row of numbers, 2 for a table
 to rank with t
     return length of arrays_need(t, "rank")'s shape
 end
@@ -229,6 +235,8 @@ to value_at with t, place
     return item arrays_place(t, place, "value_at") of t's data
 end
 
+# the number at a place changed to `value`: a list of where on each axis, from 1, or a number for an array of
+# one axis
 to set_value_at with t, place, value
     set t to arrays_need(t, "set_value_at")
     if not arrays_is_number(value)
@@ -274,18 +282,22 @@ end
 
 # ---------- element by element ----------
 
+# a + b, number by number: each an array or a number, and two arrays of shapes that go together (broadcasting)
 to plus with a, b
     return arrays_binary(1, a, b, "plus")
 end
 
+# a - b, number by number, broadcasting as plus does
 to minus with a, b
     return arrays_binary(2, a, b, "minus")
 end
 
+# a times b, number by number (not matmul), broadcasting as plus does
 to times with a, b
     return arrays_binary(3, a, b, "times")
 end
 
+# a divided by b, number by number, broadcasting as plus does
 to divided_by with a, b
     return arrays_binary(4, a, b, "divided_by")
 end
@@ -295,14 +307,17 @@ to maximum with a, b
     return arrays_binary(5, a, b, "maximum")
 end
 
+# the smaller of each two, or NaN if either is
 to minimum with a, b
     return arrays_binary(6, a, b, "minimum")
 end
 
+# each number with its sign the other way
 to negate with t
     return arrays_unary(7, t, "negate")
 end
 
+# each number without its sign
 to absolute with t
     return arrays_unary(8, t, "absolute")
 end
@@ -312,6 +327,7 @@ to relu with t
     return arrays_unary(9, t, "relu")
 end
 
+# each number times itself
 to square with t
     return arrays_binary(3, t, t, "square")
 end
@@ -330,22 +346,27 @@ to apply with t, f
     return arrays_make(items 1 to length of t's shape of t's shape, data)
 end
 
+# each number's square root
 to sqrt with t
     return apply(arrays_need(t, "sqrt"), arrays_math's sqrt)
 end
 
+# e to the power of each number
 to exp with t
     return apply(arrays_need(t, "exp"), arrays_math's exp)
 end
 
+# each number's natural logarithm
 to ln with t
     return apply(arrays_need(t, "ln"), arrays_math's ln)
 end
 
+# each number's hyperbolic tangent, from -1 to 1
 to tanh with t
     return apply(arrays_need(t, "tanh"), arrays_tanh)
 end
 
+# 1 / (1 + e^-x) for each number x, from 0 to 1
 to sigmoid with t
     return apply(arrays_need(t, "sigmoid"), arrays_sigmoid)
 end
@@ -418,6 +439,7 @@ to reshape with t, shape
     return arrays_make(made, numbers_of(t))
 end
 
+# the same numbers as an array of one axis, row after row
 to flatten with t
     return reshape(t, -1)
 end
@@ -635,6 +657,7 @@ to sum with t, axis or nothing
     return arrays_reduce(1, t, axis, "sum")
 end
 
+# the average of all its numbers, or along an axis: an array of one axis fewer
 to mean with t, axis or nothing
     set t to arrays_need(t, "mean")
     set summed to arrays_reduce(1, t, axis, "mean")
@@ -656,6 +679,7 @@ to max with t, axis or nothing
     return arrays_reduce(2, t, axis, "max")
 end
 
+# the smallest, or along an axis; NaN if any is NaN
 to min with t, axis or nothing
     return arrays_reduce(3, t, axis, "min")
 end
@@ -743,6 +767,7 @@ to close with a, b, tolerance or 0.000000001
     return yes
 end
 
+# whether two arrays have the same shape and exactly the same numbers (close allows a little difference)
 to same with a, b
     set a to arrays_need(a, "same")
     set b to arrays_need(b, "same")

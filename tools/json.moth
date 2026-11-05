@@ -10,6 +10,8 @@
 set letters to empty list # the text being read, a letter at a time, then "" to mark the end
 set at to 1 # the letter being read
 
+# the value the JSON text stands for: an object as a dictionary, an array as a list, true and false as yes and
+# no, and null as nothing; a mistake in the JSON is a `fail with` that says where
 to parse with text
     set letters to split text by ""
     add "" to letters

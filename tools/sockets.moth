@@ -550,10 +550,13 @@ to connect_secure with host, port
     return c
 end
 
+# a listener on this port of this computer alone (127.0.0.1), where only its own programs can connect; 0 for
+# any port the system picks
 to listen with port
     return net_listener(net_four(list of 127, 0, 0, 1), port, "127.0.0.1")
 end
 
+# a listener on this port of every network the computer is on (0.0.0.0, IPv4)
 to listen_everywhere with port
     return net_listener(net_four(list of 0, 0, 0, 0), port, "0.0.0.0")
 end
@@ -627,6 +630,7 @@ to port_of with s
     return port of peer of s
 end
 
+# the next connection to a listener, waiting for one: a connection, as connect gives
 to accept with listener
     set address to 128 bytes
     set size to 4 bytes
@@ -760,6 +764,7 @@ to finish_sending with connection
     end
 end
 
+# a connection, or a listener, closed: a secure one says so to the other end first
 to close with connection
     if session of connection is not nothing
         tls_shutdown(session of connection)
@@ -973,6 +978,7 @@ to net_messages with address, port, host
     return record with handle handle, peer net_own(handle), family family of address, session nothing
 end
 
+# a UDP message, text or bytes, sent to a host and port from a socket open_messages made
 to send_message with s, host, port, data
     set block to data as bytes
     set chosen to nothing

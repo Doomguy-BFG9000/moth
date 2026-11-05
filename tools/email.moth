@@ -64,6 +64,7 @@ to server with host, port
         name "localhost", trust nothing, time_limit 30000
 end
 
+# a server's user name and password, for send to log in with first
 to log_in with server, user, password
     set user of server to user
     set password of server to password
@@ -88,6 +89,7 @@ to attach with m, file
     attach_bytes(m, named, read bytes file, mail_type_of(named))
 end
 
+# bytes sent with a message as a file, with its name and its type, as "application/pdf"
 to attach_bytes with m, name, data, type
     set kept to attachments of m
     add (record with name name, data (data as bytes), type type) to kept
@@ -1017,6 +1019,7 @@ to pop_delete with box, n
     mail_pop_expect(link of box, "DELE " + n)
 end
 
+# a POP3 mailbox left: messages marked with pop_delete are deleted then
 to pop_close with box
     try
         mail_pop_expect(link of box, "QUIT")
@@ -1160,6 +1163,7 @@ to imap_mark with box, uid, flag
     mail_imap(box, "UID STORE " + uid + " +FLAGS (" + flag + ")")
 end
 
+# an IMAP mailbox logged out of, and its connection closed
 to imap_close with box
     try
         mail_imap(box, "LOGOUT")

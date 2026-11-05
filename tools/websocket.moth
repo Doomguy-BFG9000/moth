@@ -99,14 +99,17 @@ to listen with port
     return ws_net's listen(port)
 end
 
+# a listener for WebSocket connections on this port of every network the computer is on
 to listen_everywhere with port
     return ws_net's listen_everywhere(port)
 end
 
+# a listener for WebSocket connections on an address of this computer's, as sockets.moth's listen_on
 to listen_on with host, port
     return ws_net's listen_on(host, port)
 end
 
+# the port a listener is on: the one the system picked, when it was asked for 0
 to port_of with listener
     return ws_net's port_of(listener)
 end

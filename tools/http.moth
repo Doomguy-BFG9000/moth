@@ -26,34 +26,43 @@ set http_time_limit to 30000
 set http_line_end to (list of 13, 10) as bytes as text
 set http_hex to "0123456789ABCDEF"
 
+# how long an answer may take, in milliseconds, from now on (30000 to begin with)
 to wait_at_most with milliseconds
     set http_time_limit to milliseconds
 end
 
+# a PEM file's certificates trusted for HTTPS, besides the system's own: a company's own certificate
+# authority, say
 to trust with file
     http_net's trust(file)
 end
 
+# a HEAD request: the response's status and headers, with no body
 to head with url
     return request("HEAD", url, nothing, empty dictionary)
 end
 
+# a GET request: the response, a record with status, reason, headers, body (bytes), text and url
 to get with url
     return request("GET", url, nothing, empty dictionary)
 end
 
+# a POST request with a body: text, bytes, or a record, list or dictionary sent as JSON
 to post with url, body
     return request("POST", url, body, empty dictionary)
 end
 
+# a PUT request with a body, as post sends one
 to put with url, body
     return request("PUT", url, body, empty dictionary)
 end
 
+# a PATCH request with a body, as post sends one
 to patch with url, body
     return request("PATCH", url, body, empty dictionary)
 end
 
+# a DELETE request
 to delete with url
     return request("DELETE", url, nothing, empty dictionary)
 end

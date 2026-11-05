@@ -218,6 +218,7 @@ to writer
     return record with pieces empty list, size 0
 end
 
+# bytes added to what a writer has
 to add_bytes with w, b
     set kept to pieces of w
     add b to kept
@@ -229,6 +230,7 @@ to add_text with w, words
     add_bytes(w, words as bytes)
 end
 
+# one byte, a number from 0 to 255, added to what a writer has
 to add_byte with w, b
     add_bytes(w, (list of b) as bytes)
 end

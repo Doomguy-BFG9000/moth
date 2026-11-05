@@ -76,6 +76,7 @@ to system_stat with path
     return record with mode system_number(room, 25, 4), size system_number(room, 49, 8), changed system_number(room, 89, 8)
 end
 
+# whether there's a file of that name (not a folder)
 to is_file with path
     if system_windows
         set attributes to GetFileAttributesW(path)
@@ -85,6 +86,7 @@ to is_file with path
     return found is not nothing and (mode of found bit and 61440) is 32768
 end
 
+# whether there's a folder of that name
 to is_folder with path
     if system_windows
         set attributes to GetFileAttributesW(path)
@@ -94,6 +96,7 @@ to is_folder with path
     return found is not nothing and (mode of found bit and 61440) is 16384
 end
 
+# whether there's a file or a folder of that name
 to exists with path
     return is_file(path) or is_folder(path)
 end
@@ -157,6 +160,7 @@ to move_file with from, to_path
     end
 end
 
+# a file removed; a mistake if it can't be
 to remove_file with path
     if system_windows
         if not DeleteFileW(path)
@@ -292,6 +296,7 @@ to current_folder
     return made as text
 end
 
+# the folder the program is working in changed, so names that aren't whole paths are from there
 to change_folder with path
     set changed to no
     if system_windows
@@ -304,6 +309,7 @@ to change_folder with path
     end
 end
 
+# the person's own folder: USERPROFILE on Windows, HOME on Linux
 to home_folder
     if system_windows
         return environment("USERPROFILE")
