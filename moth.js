@@ -4,7 +4,7 @@
 import { MothError, Ended, fail, closest, startTasks, seeded, fakeClock, NOW_WORDS, EVENTS, KINDS, Turtle, callFunction, makeRecord, catchable, caughtValue, COMPARISONS, COMPARE_OPS, OP, OPCODES, TURTLE_ACTIONS, BUILTINS, UNSET, Closure, Machine, execute, isRecord, UNITS, unitNamed } from "./vm.js";
 import { Scope, declarations } from "./scope.js";
 import { jit, fromJs, TooDeep } from "./jit.js";
-import { wasm, compileToWasmModule } from "./wasm.js";
+import { wasm, wasmProgram, compileToWasmModule } from "./wasm.js";
 import { check as checkProgram } from "./checker.js";
 
 export { MothError, excerpt, describeTrail, seeded, soundSamples, soundWav, SOUND_RATE } from "./vm.js";
@@ -2466,7 +2466,9 @@ export function format(source) {
 // `clock` the time and the waiting (fakeClock() unless given: see vm.js).
 // A program that sets up handlers with `when` or `every` is an app: run() returns it, to be sent events.
 // Each sound the program makes goes to `play`, as { hertz, seconds } (see soundOf in vm.js).
-export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock(), play } = {}) {
+// `wasm`, with engine "wasm", compiles the program to a module another way: a function from the source to what
+// compileToWasmModule gives, such as the one wasmMothCompiler makes.
+export function run(source, print = console.log, { maxSteps = Infinity, draw, engine = "jit", ask, files, file, disk, args = [], random = seeded(), printError = console.error, exit, clock = fakeClock(), play, wasm: wasmModule } = {}) {
   const reading = { files, file };
   startTasks();
   // What the program got from outside, in order: each answer, each file it read, and how each write went.
@@ -2491,7 +2493,8 @@ export function run(source, print = console.log, { maxSteps = Infinity, draw, en
   let program = null;
   if (engine !== "vm") {
     try {
-      program = engine === "wasm" ? compileToWasm(source, reading) : compileToJs(source, reading);
+      if (engine === "wasm") program = wasmModule ? wasmProgram(wasmModule(source)) : compileToWasm(source, reading);
+      else program = compileToJs(source, reading);
     } catch (err) {
       if (!(err instanceof EvalError)) throw err; // a page whose security policy forbids making code from text
     }
@@ -2716,6 +2719,23 @@ export function machineCompiler(machineSource, compilerSource) {
       if (debug) return Uint8Array.from(compileDebugging(source, Object.keys(files), Object.values(files), target, name, allow));
       return Uint8Array.from(compileMachine(source, Object.keys(files), Object.values(files), target, name, allow, icon, version,
         Object.keys(include), Object.values(include).map((b) => Uint8Array.from(b))));
+    } catch (err) {
+      if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
+      if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");
+      throw err;
+    }
+  };
+}
+
+// Moth's WebAssembly back end written in Moth (wasm.moth, which reads programs with compiler.moth): give it both
+// files' text and get back a function that turns a program, and the files it uses ({ "name.moth": text }), into
+// what compileToWasmModule in wasm.js gives: { bytes, ats, names, messages, texts, kinds }, the same bytes and all.
+export function wasmMothCompiler(wasmSource, compilerSource) {
+  const { wasm_compile: compileWasm } = loadProgram(compileToJs(wasmSource, { files: (name) => (name === "compiler.moth" ? compilerSource : undefined), file: "wasm.moth" }));
+  return (source, files = {}) => {
+    try {
+      const made = compileWasm(source, Object.keys(files), Object.values(files));
+      return { bytes: Uint8Array.from(made.code), ats: made.ats, names: made.names, messages: made.messages, texts: made.texts, kinds: made.kinds };
     } catch (err) {
       if (err instanceof MothError && isRecord(err.value) && Object.hasOwn(err.value, "reason")) fail(err.value.at, err.value.reason);
       if (err instanceof TooDeep) fail({ line: 1, col: 1 }, "the code is nested too deeply");
