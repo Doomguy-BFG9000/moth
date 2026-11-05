@@ -1,0 +1,2330 @@
+# Moth's WebAssembly back end, written in Moth. wasm_compile() turns a program into the bytes of a WebAssembly
+# module, using WebAssembly GC and exception handling, exactly as wasm.js does: it reads the program with
+# compiler.moth's tokenizer, parser and scope rules, and writes every byte itself. The tests hold it to
+# wasm.js byte for byte, on every program the engines are tested with, and run what it makes against the VM.
+#
+# Moth's values live inside the module: a number is an i31 if it's whole, from -2^30 to 2^30 - 1, and isn't 0
+# or 1, and a struct holding an f64 otherwise; yes and no are the i31 values 1 and 0; nothing is null; text,
+# lists, records, functions and bytes are structs. The common cases run in WebAssembly, and the rest, and
+# every mistake, call out to the module's imports (see IMPORTS in wasm.js), so it says what the VM says.
+#
+# Every top-level name here starts with wasm_, so no function's own variable can be one of them.
+
+use "compiler.moth" as front
+
+# ---------- bytes ----------
+
+to wasm_put_all with out, more
+    for each b in more
+        add b to out
+    end
+end
+
+# unsigned LEB128: 7 bits at a time, lowest first, the top bit saying more follows
+to wasm_uleb with out, n
+    set v to n
+    repeat while yes
+        set low to v bit and 127
+        set v to shift v right by 7
+        if v is 0
+            add low to out
+            return out
+        end
+        add low + 128 to out
+    end
+end
+
+# signed LEB128, for i32 constants and type indices: the low 7 bits, as two's complement has them
+to wasm_sleb with out, n
+    set v to n
+    repeat while yes
+        set low to remainder of v divided by 128
+        set v to (v - low) / 128
+        if (v is 0 and low is less than 64) or (v is -1 and low is at least 64)
+            add low to out
+            return out
+        end
+        add low + 128 to out
+    end
+end
+
+to wasm_uleb_of with n
+    return wasm_uleb(empty list, n)
+end
+
+to wasm_sleb_of with n
+    return wasm_sleb(empty list, n)
+end
+
+# a name: its length in bytes, then its UTF-8
+to wasm_name with out, text
+    set raw to text as bytes
+    wasm_uleb(out, length of raw)
+    for each b in raw
+        add b to out
+    end
+end
+
+# The 8 bytes of a double that isn't negative, worked out with exact steps: halving and doubling, and a
+# subtraction to compare, since Moth's own comparisons round to 15 digits (as machine.moth does it).
+to wasm_double with v
+    set out to empty list
+    if v is 0
+        repeat 8 times
+            add 0 to out
+        end
+        return out
+    end
+    if v - v is not 0 # too big for a double: infinity
+        return list of 0, 0, 0, 0, 0, 0, 240, 127
+    end
+    set power to 1
+    set e to 0
+    repeat while v - power * 2 is at least 0
+        set power to power * 2
+        add 1 to e
+    end
+    repeat while v - power is less than 0
+        set power to power / 2
+        set e to e - 1
+    end
+    set exponent to e + 1023
+    set mant to v
+    if e is less than -1022 # subnormal: a whole number of 2^-1074
+        set exponent to 0
+        repeat 1074 times
+            set mant to mant * 2
+        end
+    else
+        set mant to v / power
+        repeat 52 times
+            set mant to mant * 2
+        end
+        set mant to mant - 4503599627370496
+    end
+    repeat 6 times
+        add mant bit and 255 to out
+        set mant to shift mant right by 8
+    end
+    add mant + (exponent bit and 15) * 16 to out
+    add shift exponent right by 4 to out
+    return out
+end
+
+# a number as the program wrote it: digits, maybe a point, or 0x and 0b whole numbers
+to wasm_literal with written
+    set chars to front's letters(written)
+    if length of chars is at least 2 and item 1 of chars is "0" and (item 2 of chars is "x" or item 2 of chars is "b")
+        set base to 16
+        if item 2 of chars is "b"
+            set base to 2
+        end
+        set v to 0
+        for each n from 3 to length of chars
+            set digit to (position of item n of chars in "0123456789abcdef") - 1
+            if digit is -1
+                set digit to (position of item n of chars in "ABCDEF") + 9
+            end
+            set v to v * base + digit
+        end
+        return wasm_double(v)
+    end
+    return wasm_double(number of written)
+end
+
+# a list of bytes as text, to tell lists apart as a dictionary's key
+to wasm_key with things
+    set out to ""
+    for each b in things
+        set out to out + b + ","
+    end
+    return out
+end
+
+# ---------- types ----------
+# A value type is its bytes; a composite type (a function's, a struct's or an array's) is its bytes too.
+
+set wasm_i32 to list of 127
+set wasm_f64 to list of 124
+set wasm_i8 to list of 120
+set wasm_funcref to list of 112
+set wasm_externref to list of 111
+set wasm_eq to list of 99, 109 # (ref null eq): any Moth value
+
+to wasm_ref with index
+    set out to list of 100
+    return wasm_sleb(out, index)
+end
+
+to wasm_ref_null with index
+    set out to list of 99
+    return wasm_sleb(out, index)
+end
+
+# the module's own types, as wasm.js's declareTypes numbers them
+set wasm_t_num to 0
+set wasm_t_text to 1
+set wasm_t_items to 2
+set wasm_t_list to 3
+set wasm_t_ids to 4
+set wasm_t_record to 5
+set wasm_t_env to 6
+set wasm_t_closure to 7
+set wasm_t_unset to 8
+set wasm_t_host to 9
+set wasm_t_u8 to 10
+set wasm_t_bytes to 11
+set wasm_t_qty to 12
+
+# ---------- the module ----------
+
+to wasm_new_module
+    return record with types empty list, type_keys empty dictionary, imports empty list, funcs empty list, globals empty list,
+        exports empty list, declared empty list, declared_keys empty dictionary
+end
+
+# the index of a composite type, added once
+to wasm_type with m, made
+    set key to wasm_key(made)
+    set keys_known to type_keys of m
+    if key is in keys_known
+        return item key of keys_known
+    end
+    set kept to types of m
+    add made to kept
+    set item key of keys_known to length of kept - 1
+    return length of kept - 1
+end
+
+to wasm_func_type with m, params, results
+    set made to list of 96
+    wasm_uleb(made, length of params)
+    for each p in params
+        wasm_put_all(made, p)
+    end
+    wasm_uleb(made, length of results)
+    for each r in results
+        wasm_put_all(made, r)
+    end
+    return wasm_type(m, made)
+end
+
+# a struct's fields: each a list of its value type and yes if it's mutable
+to wasm_struct_type with m, fields
+    set made to list of 95
+    wasm_uleb(made, length of fields)
+    for each field in fields
+        wasm_put_all(made, item 1 of field)
+        if item 2 of field
+            add 1 to made
+        else
+            add 0 to made
+        end
+    end
+    return wasm_type(m, made)
+end
+
+to wasm_array_type with m, element, mutable
+    set made to list of 94
+    wasm_put_all(made, element)
+    if mutable
+        add 1 to made
+    else
+        add 0 to made
+    end
+    return wasm_type(m, made)
+end
+
+# a Moth function with n inputs: the scope it was made in, then each input
+to wasm_fn_type with m, n
+    set params to list of wasm_ref_null(wasm_t_env)
+    repeat n times
+        add wasm_eq to params
+    end
+    return wasm_func_type(m, params, (list of wasm_eq))
+end
+
+to wasm_import with m, field, params, results
+    set kept to imports of m
+    add record with field field, type wasm_func_type(m, params, results) to kept
+    set item ("im." + field) of wasm_syms to length of kept - 1
+end
+
+# A function to fill in: its index, its type, how many parameters it has, its locals and its code. The code
+# keeps how many blocks are open where it's being written (see wasm_asm).
+to wasm_func with m, label, params, results
+    set type_index to wasm_func_type(m, params, results)
+    set made to record with label label, type type_index, index (length of imports of m) + (length of funcs of m), params length of params,
+        locals empty list, named empty dictionary, code (record with out empty list, labels 0), encoded nothing
+    set kept to funcs of m
+    add made to kept
+    return made
+end
+
+# a new local of `type`, and its index
+to wasm_local with f, type
+    set kept to locals of f
+    add type to kept
+    return params of f + length of kept - 1
+end
+
+# the same, with a name the assembler knows it by in this function
+to wasm_named with f, label, type
+    set index to wasm_local(f, type)
+    set known to named of f
+    set item label of known to index
+    return index
+end
+
+# `init` is the global's starting value, as the bytes of a constant expression
+to wasm_global with m, label, type, mutable, init
+    set kept to globals of m
+    add record with type type, mutable mutable, init init to kept
+    set item ("g." + label) of wasm_syms to length of kept - 1
+    return length of kept - 1
+end
+
+to wasm_export with m, field, index
+    set kept to exports of m
+    add record with field field, index index to kept
+end
+
+# ---------- writing code ----------
+# wasm_asm writes code from text, an instruction and then its immediates, separated by spaces, as in
+# "local.get 0 ref.test i31 if i32 i32.const 1 else i32.const 0 end". A block, loop, if or try may be followed
+# by its type (i32, f64, eq or externref). An index can be a number, or a name: a local's, by the name
+# wasm_named gave it, or one of wasm_syms: the module's types (num, list...), the runtime's functions (R.box),
+# the imports (im.say) and the globals (g.unset).
+
+set wasm_ops to empty dictionary
+set wasm_syms to empty dictionary
+
+to wasm_op with label, codes, how
+    set item label of wasm_ops to record with codes codes, how how
+end
+
+set wasm_one_labels to list of "unreachable", "else", "end", "return", "drop", "select", "catch_all", "i32.eqz", "i32.eq", "i32.ne",
+    "i32.lt_s", "i32.lt_u", "i32.gt_s", "i32.gt_u", "i32.le_s", "i32.le_u", "i32.ge_s", "i32.ge_u", "f64.eq", "f64.ne", "f64.lt", "f64.gt",
+    "f64.le", "f64.ge", "i32.add", "i32.sub", "i32.mul", "i32.rem_s", "i32.and", "i32.or", "i32.xor", "i32.shl", "i32.shr_u", "f64.abs",
+    "f64.neg", "f64.ceil", "f64.floor", "f64.trunc", "f64.add", "f64.sub", "f64.mul", "f64.div", "f64.max", "f64.copysign",
+    "i32.trunc_f64_s", "f64.convert_i32_s", "f64.convert_i32_u", "ref.is_null", "ref.eq", "ref.as_non_null"
+set wasm_one_codes to list of 0, 5, 11, 15, 26, 27, 25, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 97, 98, 99, 100, 101, 102, 106,
+    107, 108, 111, 113, 114, 115, 116, 118, 153, 154, 155, 156, 157, 160, 161, 162, 163, 165, 166, 170, 183, 184, 209, 211, 212
+for each wasm_k from 1 to length of wasm_one_labels
+    wasm_op(item wasm_k of wasm_one_labels, (list of item wasm_k of wasm_one_codes), "none")
+end
+
+wasm_op("array.len", (list of 251, 15), "none")
+wasm_op("ref.i31", (list of 251, 28), "none")
+wasm_op("i31.get_s", (list of 251, 29), "none")
+wasm_op("i31.get_u", (list of 251, 30), "none")
+wasm_op("try", (list of 6), "block")
+wasm_op("block", (list of 2), "block")
+wasm_op("loop", (list of 3), "block")
+wasm_op("if", (list of 4), "block")
+wasm_op("br", (list of 12), "index")
+wasm_op("br_if", (list of 13), "index")
+wasm_op("rethrow", (list of 9), "index")
+wasm_op("call", (list of 16), "index")
+wasm_op("call_ref", (list of 20), "index")
+wasm_op("ref.func", (list of 210), "index")
+wasm_op("local.get", (list of 32), "local")
+wasm_op("local.set", (list of 33), "local")
+wasm_op("local.tee", (list of 34), "local")
+wasm_op("global.get", (list of 35), "index")
+wasm_op("global.set", (list of 36), "index")
+wasm_op("struct.new", (list of 251, 0), "index")
+wasm_op("array.new", (list of 251, 6), "index")
+wasm_op("array.new_default", (list of 251, 7), "index")
+wasm_op("array.get", (list of 251, 11), "index")
+wasm_op("array.get_u", (list of 251, 13), "index")
+wasm_op("array.set", (list of 251, 14), "index")
+wasm_op("struct.get", (list of 251, 2), "two")
+wasm_op("struct.set", (list of 251, 5), "two")
+wasm_op("array.new_fixed", (list of 251, 8), "two")
+wasm_op("array.copy", (list of 251, 17), "two")
+wasm_op("ref.null", (list of 208), "heap")
+wasm_op("ref.test", (list of 251, 20), "heap")
+wasm_op("ref.cast", (list of 251, 22), "heap")
+wasm_op("i32.const", (list of 65), "i32")
+wasm_op("f64.const", (list of 68), "f64")
+
+set wasm_block_types to empty dictionary
+set item "i32" of wasm_block_types to wasm_i32
+set item "f64" of wasm_block_types to wasm_f64
+set item "eq" of wasm_block_types to wasm_eq
+set item "externref" of wasm_block_types to wasm_externref
+
+set wasm_heaps to empty dictionary # the abstract heap types, by name
+set item "i31" of wasm_heaps to list of 108
+set item "eq" of wasm_heaps to list of 109
+set item "extern" of wasm_heaps to list of 111
+
+# the doubles the runtime uses, by the names it writes them with
+set wasm_f64s to empty dictionary
+set item "0" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 0, 0
+set item "1" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 240, 63
+set item "255" of wasm_f64s to list of 0, 0, 0, 0, 0, 224, 111, 64
+set item "0.5" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 224, 63
+set item "2^52" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 48, 67
+set item "2^28" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 176, 65
+set item "-2^30" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 208, 193
+set item "2^30-1" of wasm_f64s to list of 0, 0, 128, 255, 255, 255, 207, 65
+set item "-2^31+1" of wasm_f64s to list of 0, 0, 192, 255, 255, 255, 223, 193
+set item "2^31-1" of wasm_f64s to list of 0, 0, 192, 255, 255, 255, 223, 65
+set item "1e-14" of wasm_f64s to list of 155, 43, 161, 134, 155, 132, 6, 61
+set item "2e-14" of wasm_f64s to list of 155, 43, 161, 134, 155, 132, 22, 61
+set item "inf" of wasm_f64s to list of 0, 0, 0, 0, 0, 0, 240, 127
+
+to wasm_index with f, word, locally
+    set first to item 1 of word
+    if front's is_digit(first) or first is "-"
+        return number of word
+    end
+    if locally
+        set known to named of f
+        if word is in known
+            return item word of known
+        end
+        fail with "wasm.moth: no local called " + word + " in " + label of f
+    end
+    if word is in wasm_syms
+        return item word of wasm_syms
+    end
+    fail with "wasm.moth: nothing called " + word
+end
+
+to wasm_asm with f, source
+    set c to code of f
+    set out to out of c
+    set words to split source by " "
+    set n to length of words
+    set k to 1
+    repeat while k is at most n
+        set word to item k of words
+        add 1 to k
+        if word is not ""
+            if not (word is in wasm_ops)
+                fail with "wasm.moth: no such instruction: " + word
+            end
+            set op to item word of wasm_ops
+            set how to how of op
+            wasm_put_all(out, codes of op)
+            if how is "none"
+                if word is "end"
+                    set labels of c to labels of c - 1
+                end
+            else if how is "block"
+                set labels of c to labels of c + 1
+                set typed to no
+                if k is at most n
+                    if item k of words is in wasm_block_types
+                        wasm_put_all(out, item (item k of words) of wasm_block_types)
+                        add 1 to k
+                        set typed to yes
+                    end
+                end
+                if not typed
+                    add 64 to out
+                end
+            else if how is "i32"
+                wasm_sleb(out, number of item k of words)
+                add 1 to k
+            else if how is "f64"
+                set wanted to item k of words
+                if not (wanted is in wasm_f64s)
+                    fail with "wasm.moth: no double called " + wanted
+                end
+                wasm_put_all(out, item wanted of wasm_f64s)
+                add 1 to k
+            else if how is "heap"
+                set wanted to item k of words
+                if wanted is in wasm_heaps
+                    wasm_put_all(out, item wanted of wasm_heaps)
+                else
+                    wasm_sleb(out, wasm_index(f, wanted, no))
+                end
+                add 1 to k
+            else if how is "local"
+                wasm_uleb(out, wasm_index(f, item k of words, yes))
+                add 1 to k
+            else if how is "index"
+                wasm_uleb(out, wasm_index(f, item k of words, no))
+                add 1 to k
+            else # two indices
+                wasm_uleb(out, wasm_index(f, item k of words, no))
+                wasm_uleb(out, wasm_index(f, item (k + 1) of words, no))
+                set k to k + 2
+            end
+        end
+    end
+end
+
+# an f64.const of a number the program wrote, or a unit's
+to wasm_f64_const with f, eight
+    set out to out of code of f
+    add 68 to out
+    wasm_put_all(out, eight)
+end
+
+# ---------- small pieces of code, as text for wasm_asm ----------
+
+# a number: an i31 that isn't 0 or 1 (no and yes), so at least 2 as unsigned, or a box
+to wasm_is_num with x
+    return " local.get " + x + " ref.test i31 if i32 local.get " + x + " ref.cast i31 i31.get_u i32.const 2 i32.ge_u else local.get " + x + " ref.test num end "
+end
+
+to wasm_num_of with x
+    return " local.get " + x + " ref.test i31 if f64 local.get " + x + " ref.cast i31 i31.get_s f64.convert_i32_s else local.get " + x + " ref.cast num struct.get num 0 end "
+end
+
+to wasm_both_nums with a, b
+    return wasm_is_num(a) + wasm_is_num(b) + " i32.and "
+end
+
+to wasm_map_of with x
+    return " local.get " + x + " ref.cast host struct.get host 0 "
+end
+
+to wasm_text_of with x
+    return " local.get " + x + " ref.cast text struct.get text 0 "
+end
+
+to wasm_bytes_of with x
+    return " local.get " + x + " ref.cast bytes struct.get bytes 0 "
+end
+
+# 1 if the f64 in x is a whole number from low to high (names in wasm_f64s)
+to wasm_whole_in with x, low, high
+    return " local.get " + x + " local.get " + x + " f64.trunc f64.eq local.get " + x + " f64.const " + low + " f64.ge i32.and local.get " + x + " f64.const " + high + " f64.le i32.and "
+end
+
+# ncmp's answer (-1, 0, 1, or 2 for NaN) made 1 or 0, for each comparison of two numbers
+to wasm_order_test with op
+    if op is "is"
+        return " i32.eqz "
+    else if op is "less than"
+        return " i32.const -1 i32.eq "
+    else if op is "greater than"
+        return " i32.const 1 i32.eq "
+    else if op is "at least"
+        return " i32.const 1 i32.le_u "
+    end
+    return " i32.const 1 i32.add i32.const 1 i32.le_u " # at most: -1 or 0
+end
+
+# ---------- the runtime every module has ----------
+# Built once, the same for every program: the types, the imports, the runtime's functions, what JavaScript
+# calls to look inside values, and the globals. wasm_module copies it and adds the program.
+
+set wasm_base to nothing
+
+to wasm_rt with m, label, params, results
+    set f to wasm_func(m, label, params, results)
+    set item ("R." + label) of wasm_syms to index of f
+    return f
+end
+
+to wasm_runtime
+    if wasm_base is not nothing
+        return wasm_base
+    end
+    set m to wasm_new_module()
+    set eq to wasm_eq
+    set i32 to wasm_i32
+    set f64 to wasm_f64
+    set ext to wasm_externref
+    set made to list of wasm_struct_type(m, (list of (list of f64, no))), wasm_struct_type(m, (list of (list of ext, no))), wasm_array_type(m, eq, yes)
+    add wasm_struct_type(m, (list of (list of wasm_ref(wasm_t_items), yes), (list of i32, yes))) to made
+    add wasm_array_type(m, i32, yes) to made
+    add wasm_struct_type(m, (list of (list of wasm_ref(wasm_t_ids), yes), (list of wasm_ref(wasm_t_items), yes), (list of i32, yes))) to made
+    add wasm_struct_type(m, (list of (list of wasm_ref_null(wasm_t_env), no), (list of wasm_ref(wasm_t_items), no))) to made
+    add wasm_struct_type(m, (list of (list of wasm_funcref, no), (list of wasm_ref_null(wasm_t_env), no), (list of i32, no), (list of i32, no), (list of i32, no))) to made
+    add wasm_struct_type(m, empty list) to made
+    add wasm_struct_type(m, (list of (list of ext, no), (list of i32, no))) to made
+    add wasm_array_type(m, wasm_i8, yes) to made
+    add wasm_struct_type(m, (list of (list of wasm_ref(wasm_t_u8), no))) to made
+    add wasm_struct_type(m, (list of (list of f64, no), (list of i32, no))) to made
+    set type_names to list of "num", "text", "items", "list", "ids", "record", "env", "closure", "unset", "host", "u8", "bytes", "qty"
+    for each n from 1 to length of made
+        if item n of made is not n - 1
+            fail with "wasm.moth: the types are out of order"
+        end
+        set item (item n of type_names) of wasm_syms to n - 1
+    end
+
+    # what the module imports, in the order of IMPORTS in wasm.js
+    set none to empty list
+    wasm_import(m, "say", (list of eq), none)
+    wasm_import(m, "sayError", (list of eq), none)
+    wasm_import(m, "exit", (list of eq, i32), none)
+    wasm_import(m, "fail", (list of i32, i32), none)
+    wasm_import(m, "unset", (list of i32, i32), none)
+    wasm_import(m, "plus", (list of eq, eq, i32), (list of eq))
+    wasm_import(m, "arithmetic", (list of i32, eq, eq, i32), (list of eq))
+    wasm_import(m, "negate", (list of eq, i32), (list of eq))
+    wasm_import(m, "compare", (list of i32, eq, eq, i32), (list of i32))
+    wasm_import(m, "remainder", (list of f64, f64), (list of f64))
+    wasm_import(m, "numberOrder", (list of f64, f64), (list of i32))
+    wasm_import(m, "divisible", (list of f64, f64), (list of i32))
+    wasm_import(m, "equal", (list of eq, eq), (list of i32))
+    wasm_import(m, "sameText", (list of ext, ext), (list of i32))
+    wasm_import(m, "concat", (list of ext, ext), (list of ext))
+    wasm_import(m, "textNum", (list of ext, f64), (list of ext))
+    wasm_import(m, "numText", (list of f64, ext), (list of ext))
+    wasm_import(m, "text", (list of i32), (list of ext))
+    wasm_import(m, "lengthOf", (list of eq, i32), (list of f64))
+    wasm_import(m, "item", (list of eq, eq, i32), (list of eq))
+    wasm_import(m, "itemRef", (list of eq, eq, i32), none)
+    wasm_import(m, "put", (list of eq, eq, eq, i32), none)
+    wasm_import(m, "dict", (list of eq, i32), (list of eq))
+    wasm_import(m, "remove", (list of eq, eq, i32), none)
+    wasm_import(m, "dictGetText", (list of ext, ext, i32), (list of eq))
+    wasm_import(m, "dictGetNum", (list of ext, f64, i32), (list of eq))
+    wasm_import(m, "dictSetText", (list of ext, ext, eq), none)
+    wasm_import(m, "dictSetNum", (list of ext, f64, eq), none)
+    wasm_import(m, "dictHasText", (list of ext, ext), (list of i32))
+    wasm_import(m, "dictHasNum", (list of ext, f64), (list of i32))
+    wasm_import(m, "addInto", (list of eq, eq, i32, i32), (list of eq))
+    wasm_import(m, "checkRepeat", (list of eq, i32), (list of f64))
+    wasm_import(m, "checkRange", (list of eq, eq, i32), none)
+    wasm_import(m, "itemsOf", (list of eq, i32), (list of eq))
+    wasm_import(m, "callable", (list of eq, i32, i32), none)
+    wasm_import(m, "checkInputs", (list of eq, i32, i32, i32), none)
+    wasm_import(m, "checkKind", (list of i32, i32, eq, i32, i32), none)
+    wasm_import(m, "stopped", (list of i32), none)
+    wasm_import(m, "refill", (list of i32), (list of i32))
+    wasm_import(m, "grant", none, (list of i32))
+    wasm_import(m, "tooDeep", none, none)
+    wasm_import(m, "turtle", (list of i32, eq, i32), none)
+    wasm_import(m, "field", (list of eq, i32, i32), none)
+    wasm_import(m, "recordFor", (list of eq, i32, i32), none)
+    wasm_import(m, "failWith", (list of eq, i32), none)
+    wasm_import(m, "builtin", (list of i32, eq, i32), (list of eq))
+    wasm_import(m, "ask", (list of eq, i32), (list of eq))
+    wasm_import(m, "read", (list of eq, i32, i32), (list of eq))
+    wasm_import(m, "write", (list of eq, eq, i32), none)
+    wasm_import(m, "removeFile", (list of eq, i32), none)
+    wasm_import(m, "readFolder", (list of eq, i32), (list of eq))
+    wasm_import(m, "args", none, (list of eq))
+    wasm_import(m, "random", (list of eq, eq, i32), (list of eq))
+    wasm_import(m, "now", (list of i32), (list of eq))
+    wasm_import(m, "wait", (list of eq, f64, i32), none)
+    wasm_import(m, "handle", (list of i32, eq, i32), none)
+    wasm_import(m, "handleLabel", (list of i32, eq, i32, eq), none)
+    wasm_import(m, "every", (list of eq, f64, eq, i32), none)
+    wasm_import(m, "expect", (list of i32, i32, eq, eq, i32), none)
+    wasm_import(m, "expectYes", (list of eq, i32), none)
+    wasm_import(m, "tryStart", none, none)
+    wasm_import(m, "caught", none, (list of i32))
+    wasm_import(m, "caughtValue", none, (list of eq))
+    wasm_import(m, "play", (list of eq, eq, f64, i32), none)
+    wasm_import(m, "beep", none, none)
+
+    wasm_runtime_functions(m)
+    wasm_runtime_exports(m)
+
+    # the globals every program has, after the runtime's own two
+    set unset_init to empty list
+    wasm_put_all(unset_init, (list of 251, 0))
+    wasm_uleb(unset_init, wasm_t_unset)
+    wasm_global(m, "unset", wasm_ref(wasm_t_unset), no, unset_init)
+    wasm_global(m, "left", i32, yes, (list of 65, 0))
+    set steps_init to list of 68
+    wasm_put_all(steps_init, item "inf" of wasm_f64s)
+    wasm_global(m, "maxSteps", f64, yes, steps_init)
+    wasm_global(m, "depth", i32, yes, (list of 65, 0))
+    set calls_init to list of 65
+    wasm_sleb(calls_init, 4000) # two for each of the 2,000 calls a run goes to before the VM takes it
+    wasm_put_all(calls_init, (list of 251, 7))
+    wasm_uleb(calls_init, wasm_t_ids)
+    wasm_global(m, "calls", wasm_ref(wasm_t_ids), no, calls_init)
+    set wasm_base to m
+    return m
+end
+
+# The functions every module has: fast paths for the common cases, calling out to JavaScript for the rest.
+to wasm_runtime_functions with m
+    set eq to wasm_eq
+    set i32 to wasm_i32
+    set f64 to wasm_f64
+
+    set f to wasm_rt(m, "truthy", (list of eq), (list of i32))
+    wasm_asm(f, "local.get 0 ref.is_null if i32 i32.const 0 else local.get 0 ref.test i31 if i32 local.get 0 ref.cast i31 i31.get_u i32.const 0 i32.ne else i32.const 1 end end")
+
+    # An f64 as a Moth value: an i31 if it's whole, fits in 31 bits and isn't 0 or 1; 1 and 0 as boxes made once
+    # (-0 a box of its own); anything else a new box
+    set one to list of 68
+    wasm_put_all(one, item "1" of wasm_f64s)
+    wasm_put_all(one, (list of 251, 0, wasm_t_num))
+    wasm_global(m, "one", wasm_ref(wasm_t_num), no, one)
+    set zero to list of 68
+    wasm_put_all(zero, item "0" of wasm_f64s)
+    wasm_put_all(zero, (list of 251, 0, wasm_t_num))
+    wasm_global(m, "zero", wasm_ref(wasm_t_num), no, zero)
+    set f to wasm_rt(m, "box", (list of f64), (list of eq))
+    wasm_named(f, "n", i32)
+    wasm_asm(f, wasm_whole_in(0, "-2^30", "2^30-1") + " if eq")
+    wasm_asm(f, "local.get 0 i32.trunc_f64_s local.tee n i32.const 2 i32.ge_u if eq local.get n ref.i31")
+    wasm_asm(f, "else local.get n if eq global.get g.one")
+    wasm_asm(f, "else f64.const 1 local.get 0 f64.copysign f64.const 0 f64.gt if eq global.get g.zero")
+    wasm_asm(f, "else local.get 0 struct.new num end end end else local.get 0 struct.new num end")
+
+    set f to wasm_rt(m, "unbox", (list of eq), (list of f64))
+    wasm_asm(f, wasm_num_of(0))
+
+    # + - * /: two numbers here, anything else (joining text, or a mistake) in JavaScript
+    set signs to list of "+", "-", "*", "/"
+    set labels to list of "add", "sub", "mul", "div"
+    set f64_ops to list of "f64.add", "f64.sub", "f64.mul", "f64.div"
+    for each k from 1 to 4
+        set sign to item k of signs
+        set op to k - 1
+        set f to wasm_rt(m, item k of labels, (list of eq, eq, i32), (list of eq))
+        set slow to " i32.const " + op + " local.get 0 local.get 1 local.get 2 call im.arithmetic " # an amount, or a mistake
+        if sign is "+"
+            set slow to " local.get 0 local.get 1 local.get 2 call im.plus "
+        end
+        wasm_asm(f, wasm_both_nums(0, 1) + " if eq")
+        if sign is "/"
+            wasm_asm(f, wasm_num_of(1) + " f64.const 0 f64.ne if eq")
+        end
+        wasm_asm(f, wasm_num_of(0) + wasm_num_of(1) + item k of f64_ops + " call R.box")
+        if sign is "/"
+            wasm_asm(f, "else i32.const " + op + " local.get 0 local.get 1 local.get 2 call im.arithmetic unreachable end")
+        end
+        wasm_asm(f, "else")
+        if sign is "+" # text and text, or text and a number, joined by one call; the rest as before
+            wasm_asm(f, "local.get 0 ref.test text if eq local.get 1 ref.test text if eq")
+            wasm_asm(f, wasm_text_of(0) + wasm_text_of(1) + " call im.concat struct.new text")
+            wasm_asm(f, "else " + wasm_is_num(1) + " if eq")
+            wasm_asm(f, wasm_text_of(0) + wasm_num_of(1) + " call im.textNum struct.new text")
+            wasm_asm(f, "else " + slow + " end end")
+            wasm_asm(f, "else local.get 1 ref.test text " + wasm_is_num(0) + " i32.and if eq")
+            wasm_asm(f, wasm_num_of(0) + wasm_text_of(1) + " call im.numText struct.new text")
+            wasm_asm(f, "else " + slow + " end end")
+        else
+            wasm_asm(f, slow)
+        end
+        wasm_asm(f, "end")
+    end
+
+    set f to wasm_rt(m, "neg", (list of eq, i32), (list of eq))
+    wasm_asm(f, wasm_is_num(0) + " if eq " + wasm_num_of(0) + " f64.neg call R.box else local.get 0 local.get 1 call im.negate end")
+
+    # How two numbers compare, to 15 digits (numberOrder in vm.js): -1, 0, 1, or 2 if either is NaN. Two that are
+    # equal, two whole numbers, and two further apart than 15 digits tell are answered here; the rest, which
+    # agree to 15 digits or nearly, in JavaScript.
+    set f to wasm_rt(m, "ncmp", (list of f64, f64), (list of i32))
+    wasm_asm(f, "local.get 0 local.get 1 f64.eq if i32.const 0 return end")
+    wasm_asm(f, "local.get 0 local.get 0 f64.trunc f64.eq local.get 1 local.get 1 f64.trunc f64.eq i32.and i32.eqz")
+    wasm_asm(f, "local.get 0 local.get 1 f64.sub f64.abs local.get 0 f64.abs local.get 1 f64.abs f64.max f64.const 1e-14 f64.mul f64.le")
+    wasm_asm(f, "i32.and if local.get 0 local.get 1 call im.numberOrder return end")
+    wasm_asm(f, "local.get 0 local.get 1 f64.lt if i32.const -1 return end")
+    wasm_asm(f, "local.get 0 local.get 1 f64.gt if i32.const 1 return end")
+    wasm_asm(f, "i32.const 2")
+
+    # `is`: numbers by value, text by its letters, lists, records, dictionaries and bytes (in JavaScript) by
+    # what they hold, everything else (yes, no, nothing, functions) by identity
+    set f to wasm_rt(m, "eq", (list of eq, eq), (list of i32))
+    wasm_asm(f, wasm_both_nums(0, 1) + " if " + wasm_num_of(0) + wasm_num_of(1) + " call R.ncmp i32.eqz return end")
+    wasm_asm(f, "local.get 0 local.get 1 ref.eq if i32.const 1 return end")
+    wasm_asm(f, "local.get 0 ref.test text local.get 1 ref.test text i32.and if")
+    wasm_asm(f, "local.get 0 ref.cast text struct.get text 0 local.get 1 ref.cast text struct.get text 0 call im.sameText return end")
+    wasm_asm(f, "local.get 0 ref.test list local.get 1 ref.test list i32.and local.get 0 ref.test record local.get 1 ref.test record i32.and i32.or")
+    wasm_asm(f, "local.get 0 ref.test host local.get 1 ref.test host i32.and i32.or local.get 0 ref.test bytes local.get 1 ref.test bytes i32.and i32.or")
+    wasm_asm(f, "local.get 0 ref.test qty local.get 1 ref.test qty i32.or") # 1 km is 1000 m, and not 1000
+    wasm_asm(f, "i32.or if local.get 0 local.get 1 call im.equal return end i32.const 0")
+
+    # less than, greater than, at least, at most: numbers here, text and mistakes in JavaScript
+    set orders to list of "less than", "greater than", "at least", "at most"
+    set labels to list of "lt", "gt", "ge", "le"
+    for each k from 1 to 4
+        set f to wasm_rt(m, item k of labels, (list of eq, eq, i32), (list of i32))
+        wasm_asm(f, wasm_both_nums(0, 1) + " if i32 " + wasm_num_of(0) + wasm_num_of(1) + " call R.ncmp " + wasm_order_test(item k of orders))
+        wasm_asm(f, "else i32.const " + k + " local.get 0 local.get 1 local.get 2 call im.compare end")
+    end
+
+    # `is divisible by` on two numbers. For whole numbers below 2^52, a is divisible by b exactly when
+    # a = trunc(a / b) * b: a whole quotient divides exactly, and every product here is a whole number a
+    # float holds exactly. Fractions and huge numbers go to JavaScript's %, and 0 to the shared check's error.
+    set divisible to front's slot_of(front's comparisons, "divisible by") - 1
+    set f to wasm_rt(m, "dvf", (list of f64, f64, i32), (list of i32))
+    wasm_asm(f, "local.get 1 f64.const 0 f64.eq if i32.const " + divisible + " local.get 0 call R.box local.get 1 call R.box local.get 2 call im.compare return end")
+    wasm_asm(f, "local.get 0 local.get 0 f64.trunc f64.eq local.get 0 f64.abs f64.const 2^52 f64.lt i32.and")
+    wasm_asm(f, "local.get 1 local.get 1 f64.trunc f64.eq local.get 1 f64.abs f64.const 2^52 f64.lt i32.and")
+    wasm_asm(f, "i32.and if i32 local.get 0 local.get 0 local.get 1 f64.div f64.trunc local.get 1 f64.mul f64.eq")
+    wasm_asm(f, "else local.get 0 local.get 1 call im.divisible end") # to 15 digits, in JavaScript
+
+    set f to wasm_rt(m, "dv", (list of eq, eq, i32), (list of i32))
+    wasm_asm(f, wasm_both_nums(0, 1) + " if i32 " + wasm_num_of(0) + wasm_num_of(1) + " local.get 2 call R.dvf")
+    wasm_asm(f, "else i32.const " + divisible + " local.get 0 local.get 1 local.get 2 call im.compare end")
+
+    set f to wasm_rt(m, "lengthOf", (list of eq, i32), (list of eq))
+    wasm_asm(f, "local.get 0 ref.test list if f64 local.get 0 ref.cast list struct.get list 1 f64.convert_i32_s")
+    wasm_asm(f, "else local.get 0 ref.test bytes if f64 " + wasm_bytes_of(0) + " array.len f64.convert_i32_s")
+    wasm_asm(f, "else local.get 0 local.get 1 call im.lengthOf end end call R.box")
+
+    # The 0-based place of item n in a list, if n is a whole number from 1 to its length, or -1.
+    set f to wasm_rt(m, "place", (list of eq, eq), (list of i32))
+    wasm_named(f, "x", f64)
+    wasm_asm(f, "local.get 0 ref.test list " + wasm_is_num(1) + " i32.and i32.eqz if i32.const -1 return end")
+    wasm_asm(f, wasm_num_of(1) + " local.tee x local.get x f64.trunc f64.eq local.get x f64.const 1 f64.ge i32.and")
+    wasm_asm(f, "local.get x local.get 0 ref.cast list struct.get list 1 f64.convert_i32_s f64.le i32.and")
+    wasm_asm(f, "if i32 local.get x i32.trunc_f64_s i32.const 1 i32.sub else i32.const -1 end")
+
+    # The same for bytes.
+    set f to wasm_rt(m, "bytePlace", (list of eq, eq), (list of i32))
+    wasm_named(f, "x", f64)
+    wasm_asm(f, "local.get 0 ref.test bytes " + wasm_is_num(1) + " i32.and i32.eqz if i32.const -1 return end")
+    wasm_asm(f, wasm_num_of(1) + " local.tee x local.get x f64.trunc f64.eq local.get x f64.const 1 f64.ge i32.and")
+    wasm_asm(f, "local.get x " + wasm_bytes_of(0) + " array.len f64.convert_i32_s f64.le i32.and")
+    wasm_asm(f, "if i32 local.get x i32.trunc_f64_s i32.const 1 i32.sub else i32.const -1 end")
+
+    # `item n of x`: a list's item, or a byte, here; a dictionary's value straight from its Map; the rest, and
+    # every mistake, in the shared code
+    set f to wasm_rt(m, "item", (list of eq, eq, i32), (list of eq))
+    wasm_named(f, "at", i32)
+    wasm_asm(f, "local.get 0 local.get 1 call R.place local.tee at i32.const 0 i32.ge_s if")
+    wasm_asm(f, "local.get 0 ref.cast list struct.get list 0 local.get at array.get items return end")
+    wasm_asm(f, "local.get 0 local.get 1 call R.bytePlace local.tee at i32.const 0 i32.ge_s if")
+    wasm_asm(f, wasm_bytes_of(0) + " local.get at array.get_u u8 f64.convert_i32_u call R.box return end")
+    wasm_asm(f, "local.get 0 ref.test host if local.get 1 ref.test text if " + wasm_map_of(0) + wasm_text_of(1) + " local.get 2 call im.dictGetText return end")
+    wasm_asm(f, wasm_is_num(1) + " if " + wasm_map_of(0) + wasm_num_of(1) + " local.get 2 call im.dictGetNum return end end")
+    wasm_asm(f, "local.get 0 local.get 1 local.get 2 call im.item")
+
+    # where `set item n of x to ...` goes: the place in a list, or -1 for a byte or a dictionary's key (see
+    # put), checked before the value is worked out; anything else fails in the shared code
+    set f to wasm_rt(m, "itemRef", (list of eq, eq, i32), (list of i32))
+    wasm_named(f, "at", i32)
+    wasm_asm(f, "local.get 0 local.get 1 call R.place local.tee at i32.const 0 i32.ge_s if local.get at return end")
+    wasm_asm(f, "local.get 0 local.get 1 call R.bytePlace i32.const 0 i32.ge_s if i32.const -1 return end")
+    wasm_asm(f, "local.get 0 ref.test host local.get 1 ref.test text " + wasm_is_num(1) + " i32.or i32.and if i32.const -1 return end")
+    wasm_asm(f, "local.get 0 local.get 1 local.get 2 call im.itemRef i32.const -1")
+
+    # a value into a byte (a whole number from 0 to 255), or into a dictionary's Map, where itemRef said to;
+    # anything else is a mistake, which the shared code words
+    set f to wasm_rt(m, "put", (list of eq, eq, eq, i32), empty list)
+    wasm_named(f, "at", i32)
+    wasm_named(f, "v", f64)
+    wasm_asm(f, "local.get 0 local.get 1 call R.bytePlace local.tee at i32.const 0 i32.ge_s " + wasm_is_num(2) + " i32.and if")
+    wasm_asm(f, wasm_num_of(2) + " local.set v " + wasm_whole_in("v", "0", "255") + " if")
+    wasm_asm(f, wasm_bytes_of(0) + " local.get at local.get v i32.trunc_f64_s array.set u8 return end end")
+    wasm_asm(f, "local.get 0 ref.test host if local.get 1 ref.test text if " + wasm_map_of(0) + wasm_text_of(1) + " local.get 2 call im.dictSetText return end")
+    wasm_asm(f, wasm_is_num(1) + " if " + wasm_map_of(0) + wasm_num_of(1) + " local.get 2 call im.dictSetNum return end end")
+    wasm_asm(f, "local.get 0 local.get 1 local.get 2 local.get 3 call im.put")
+
+    # `x is in d` for a dictionary, straight from its Map; anything else in the shared code
+    set f to wasm_rt(m, "isIn", (list of eq, eq, i32), (list of i32))
+    wasm_asm(f, "local.get 1 ref.test host if local.get 0 ref.test text if " + wasm_map_of(1) + wasm_text_of(0) + " call im.dictHasText return end")
+    wasm_asm(f, wasm_is_num(0) + " if " + wasm_map_of(1) + wasm_num_of(0) + " call im.dictHasNum return end end")
+    wasm_asm(f, "i32.const " + (front's slot_of(front's comparisons, "in") - 1) + " local.get 0 local.get 1 local.get 2 call im.compare")
+
+    # `remainder of a divided by b` (vm.js's remainder): of two whole numbers that fit in 32 bits, b not 0, here,
+    # exactly, with b's sign; anything else, and every mistake, through the builtin
+    set f to wasm_rt(m, "rem", (list of eq, eq, i32, i32), (list of eq))
+    wasm_named(f, "x", f64)
+    wasm_named(f, "y", f64)
+    wasm_named(f, "b", i32)
+    wasm_named(f, "r", i32)
+    wasm_asm(f, wasm_both_nums(0, 1) + " if " + wasm_num_of(0) + " local.set x " + wasm_num_of(1) + " local.set y")
+    wasm_asm(f, wasm_whole_in("x", "-2^31+1", "2^31-1") + wasm_whole_in("y", "-2^31+1", "2^31-1"))
+    wasm_asm(f, "i32.and local.get y f64.const 0 f64.ne i32.and if")
+    wasm_asm(f, "local.get x i32.trunc_f64_s local.get y i32.trunc_f64_s local.tee b i32.rem_s local.tee r i32.const 0 i32.ne")
+    wasm_asm(f, "local.get r i32.const 0 i32.lt_s local.get b i32.const 0 i32.lt_s i32.ne i32.and") # not 0, with a sign that isn't b's: b added
+    wasm_asm(f, "if local.get r local.get b i32.add local.set r end local.get r f64.convert_i32_s call R.box return end end")
+    wasm_asm(f, "local.get 2 local.get 0 local.get 1 array.new_fixed items 2 i32.const 2 struct.new list local.get 3 call im.builtin")
+
+    # rounded down, rounded up and rounded (vm.js's rounded, which rounds the number to 15 digits first): a whole
+    # number is itself; a fraction further from a whole number (and from a half, for rounded) than 15 digits can
+    # move it, which is at most half its size times 10^-14, here; anything else, and every mistake, through the
+    # builtin
+    set f to wasm_rt(m, "rnd", (list of eq, i32, i32, i32), (list of eq))
+    wasm_named(f, "x", f64)
+    wasm_named(f, "size", f64)
+    wasm_named(f, "part", f64)
+    wasm_named(f, "margin", f64)
+    wasm_asm(f, wasm_is_num(0) + " if " + wasm_num_of(0) + " local.tee x local.get x f64.trunc f64.eq if local.get 0 return end")
+    wasm_asm(f, "local.get x f64.abs local.tee size f64.const 2^52 f64.lt")
+    wasm_asm(f, "local.get size local.get size f64.floor f64.sub local.set part local.get size f64.const 2e-14 f64.mul local.set margin")
+    wasm_asm(f, "local.get part f64.const 0 f64.sub f64.abs local.get margin f64.gt i32.and")
+    wasm_asm(f, "local.get part f64.const 1 f64.sub f64.abs local.get margin f64.gt i32.and if")
+    wasm_asm(f, "local.get 1 i32.eqz if local.get x f64.floor call R.box return end")
+    wasm_asm(f, "local.get 1 i32.const 1 i32.eq if local.get x f64.ceil f64.const 0 f64.add call R.box return end")
+    wasm_asm(f, "local.get part f64.const 0.5 f64.sub f64.abs local.get margin f64.gt if") # to the nearest, a half away from 0, never -0
+    wasm_asm(f, "local.get size f64.floor f64.const 1 f64.const 0 local.get part f64.const 0.5 f64.ge select f64.add")
+    wasm_asm(f, "local.get x f64.copysign f64.const 0 f64.add call R.box return end end end")
+    wasm_asm(f, "local.get 2 local.get 0 array.new_fixed items 1 i32.const 1 struct.new list local.get 3 call im.builtin")
+
+    # `bit and`, `bit or`, `bit xor` (which = 0, 1, 2) and `shift ... left/right by` (3, 4), here when both are
+    # whole numbers below 2^31 (and a shift left is by at most 21, a right by at most 31, so the result is
+    # exact); anything else goes to the shared code, as built-in number `index`
+    set f to wasm_rt(m, "bits", (list of eq, eq, i32, i32, i32), (list of eq))
+    wasm_named(f, "x", f64)
+    wasm_named(f, "y", f64)
+    wasm_named(f, "a", i32)
+    wasm_named(f, "b", i32)
+    wasm_asm(f, wasm_both_nums(0, 1) + " if " + wasm_num_of(0) + " local.set x " + wasm_num_of(1) + " local.set y")
+    wasm_asm(f, wasm_whole_in("x", "0", "2^31-1") + wasm_whole_in("y", "0", "2^31-1") + " i32.and if")
+    wasm_asm(f, "local.get x i32.trunc_f64_s local.set a local.get y i32.trunc_f64_s local.set b")
+    set bit_ops to list of "i32.and", "i32.or", "i32.xor"
+    for each which from 0 to 2
+        wasm_asm(f, "local.get 2 i32.const " + which + " i32.eq if local.get a local.get b " + item (which + 1) of bit_ops + " f64.convert_i32_u call R.box return end")
+    end
+    wasm_asm(f, "local.get 2 i32.const 3 i32.eq local.get b i32.const 21 i32.le_u i32.and if")
+    wasm_asm(f, "local.get x i32.const 1 local.get b i32.shl f64.convert_i32_u f64.mul call R.box return end")
+    wasm_asm(f, "local.get 2 i32.const 4 i32.eq local.get b i32.const 31 i32.le_u i32.and if")
+    wasm_asm(f, "local.get a local.get b i32.shr_u f64.convert_i32_u call R.box return end end end")
+    wasm_asm(f, "local.get 3 local.get 0 local.get 1 array.new_fixed items 2 i32.const 2 struct.new list local.get 4 call im.builtin")
+
+    # `n bytes`, all 0, here when n is a whole number up to 2^28; anything else goes to the shared code
+    set f to wasm_rt(m, "newBytes", (list of eq, i32, i32), (list of eq))
+    wasm_named(f, "n", f64)
+    wasm_asm(f, wasm_is_num(0) + " if " + wasm_num_of(0) + " local.set n " + wasm_whole_in("n", "0", "2^28") + " if")
+    wasm_asm(f, "local.get n i32.trunc_f64_s array.new_default u8 struct.new bytes return end end")
+    wasm_asm(f, "local.get 1 local.get 0 array.new_fixed items 1 i32.const 1 struct.new list local.get 2 call im.builtin")
+
+    # `item i of xs` with i an f64: a list's item, or a byte, at a whole place from 1 here; anything else, and
+    # every mistake, as item does it
+    set f to wasm_rt(m, "itemN", (list of eq, f64, i32), (list of eq))
+    wasm_named(f, "at", i32)
+    wasm_asm(f, wasm_whole_in(1, "1", "2^31-1") + " if local.get 1 i32.trunc_f64_s i32.const 1 i32.sub local.set at")
+    wasm_asm(f, "local.get 0 ref.test list if local.get at local.get 0 ref.cast list struct.get list 1 i32.lt_u if")
+    wasm_asm(f, "local.get 0 ref.cast list struct.get list 0 local.get at array.get items return end end")
+    wasm_asm(f, "local.get 0 ref.test bytes if local.get at " + wasm_bytes_of(0) + " array.len i32.lt_u if")
+    wasm_asm(f, wasm_bytes_of(0) + " local.get at array.get_u u8 f64.convert_i32_u call R.box return end end end")
+    wasm_asm(f, "local.get 0 local.get 1 call R.box local.get 2 call R.item")
+
+    # grows the list's array by doubling when it's full
+    set f to wasm_rt(m, "push", (list of eq, eq), empty list)
+    wasm_named(f, "lst", wasm_ref_null(wasm_t_list))
+    wasm_named(f, "its", wasm_ref_null(wasm_t_items))
+    wasm_named(f, "n", i32)
+    wasm_named(f, "bigger", wasm_ref_null(wasm_t_items))
+    wasm_asm(f, "local.get 0 ref.cast list local.tee lst struct.get list 0 local.set its")
+    wasm_asm(f, "local.get lst struct.get list 1 local.tee n local.get its array.len i32.eq if")
+    wasm_asm(f, "local.get n i32.const 1 i32.shl i32.const 4 i32.add array.new_default items local.tee bigger")
+    wasm_asm(f, "i32.const 0 local.get its i32.const 0 local.get n array.copy items items")
+    wasm_asm(f, "local.get lst local.get bigger ref.as_non_null struct.set list 0 local.get bigger local.set its end")
+    wasm_asm(f, "local.get its local.get n local.get 1 array.set items local.get lst local.get n i32.const 1 i32.add struct.set list 1")
+
+    # `add value to name`: numbers and lists here, text and mistakes in JavaScript; returns the new value
+    set f to wasm_rt(m, "addInto", (list of eq, eq, i32, i32), (list of eq))
+    wasm_asm(f, wasm_both_nums(0, 1) + " if " + wasm_num_of(0) + wasm_num_of(1) + " f64.add call R.box return end")
+    wasm_asm(f, "local.get 0 ref.test list if local.get 0 local.get 1 call R.push local.get 0 return end")
+    wasm_asm(f, "local.get 0 local.get 1 local.get 2 local.get 3 call im.addInto")
+
+    # what `for each` goes through: a copy, so adding to the list inside the loop can't make it endless
+    set f to wasm_rt(m, "itemsOf", (list of eq, i32), (list of wasm_ref_null(wasm_t_list)))
+    wasm_named(f, "n", i32)
+    wasm_named(f, "copy", wasm_ref_null(wasm_t_items))
+    wasm_named(f, "i", i32)
+    wasm_named(f, "bs", wasm_ref_null(wasm_t_u8))
+    wasm_asm(f, "local.get 0 ref.test list if local.get 0 ref.cast list struct.get list 1 local.tee n array.new_default items local.tee copy")
+    wasm_asm(f, "i32.const 0 local.get 0 ref.cast list struct.get list 0 i32.const 0 local.get n array.copy items items")
+    wasm_asm(f, "local.get copy ref.as_non_null local.get n struct.new list return end")
+    wasm_asm(f, "local.get 0 ref.test bytes if " + wasm_bytes_of(0) + " local.tee bs array.len local.tee n array.new_default items local.set copy") # bytes: a list of their numbers
+    wasm_asm(f, "block loop local.get i local.get n i32.ge_s br_if 1")
+    wasm_asm(f, "local.get copy local.get i local.get bs local.get i array.get_u u8 f64.convert_i32_u call R.box array.set items")
+    wasm_asm(f, "local.get i i32.const 1 i32.add local.set i br 0 end end")
+    wasm_asm(f, "local.get copy ref.as_non_null local.get n struct.new list return end")
+    wasm_asm(f, "local.get 0 local.get 1 call im.itemsOf ref.cast list")
+
+    set f to wasm_rt(m, "repeatCount", (list of eq, i32), (list of f64))
+    wasm_named(f, "x", f64)
+    wasm_asm(f, wasm_is_num(0) + " if " + wasm_num_of(0) + " local.tee x local.get x f64.trunc f64.eq local.get x f64.const 0 f64.ge i32.and")
+    wasm_asm(f, "local.get x local.get x f64.sub f64.const 0 f64.eq i32.and if local.get x return end end") # not infinite
+    wasm_asm(f, "local.get 0 local.get 1 call im.checkRepeat") # whole to 15 digits, or a mistake
+
+    # where a field is in a record, or -1
+    set f to wasm_rt(m, "find", (list of eq, i32), (list of i32))
+    wasm_named(f, "i", i32)
+    wasm_named(f, "n", i32)
+    wasm_asm(f, "local.get 0 ref.cast record struct.get record 2 local.set n block loop local.get i local.get n i32.ge_s br_if 1")
+    wasm_asm(f, "local.get 0 ref.cast record struct.get record 0 local.get i array.get ids local.get 1 i32.eq if local.get i return end")
+    wasm_asm(f, "local.get i i32.const 1 i32.add local.set i br 0 end end i32.const -1")
+
+    set f to wasm_rt(m, "newRecord", empty list, (list of eq))
+    wasm_asm(f, "i32.const 4 array.new_default ids i32.const 4 array.new_default items i32.const 0 struct.new record")
+
+    # sets a field, adding it at the end if the record doesn't have it yet
+    set f to wasm_rt(m, "setField", (list of eq, i32, eq), empty list)
+    wasm_named(f, "r", wasm_ref_null(wasm_t_record))
+    wasm_named(f, "at", i32)
+    wasm_named(f, "n", i32)
+    wasm_named(f, "nids", wasm_ref_null(wasm_t_ids))
+    wasm_named(f, "vals", wasm_ref_null(wasm_t_items))
+    wasm_asm(f, "local.get 0 ref.cast record local.set r local.get 0 local.get 1 call R.find local.tee at i32.const 0 i32.ge_s if")
+    wasm_asm(f, "local.get r struct.get record 1 local.get at local.get 2 array.set items return end")
+    wasm_asm(f, "local.get r struct.get record 2 local.tee n local.get r struct.get record 0 array.len i32.eq if")
+    wasm_asm(f, "local.get n i32.const 1 i32.shl i32.const 4 i32.add array.new_default ids local.tee nids")
+    wasm_asm(f, "i32.const 0 local.get r struct.get record 0 i32.const 0 local.get n array.copy ids ids")
+    wasm_asm(f, "local.get n i32.const 1 i32.shl i32.const 4 i32.add array.new_default items local.tee vals")
+    wasm_asm(f, "i32.const 0 local.get r struct.get record 1 i32.const 0 local.get n array.copy items items")
+    wasm_asm(f, "local.get r local.get nids ref.as_non_null struct.set record 0 local.get r local.get vals ref.as_non_null struct.set record 1 end")
+    wasm_asm(f, "local.get r struct.get record 0 local.get n local.get 1 array.set ids local.get r struct.get record 1 local.get n local.get 2 array.set items")
+    wasm_asm(f, "local.get r local.get n i32.const 1 i32.add struct.set record 2")
+
+    set f to wasm_rt(m, "field", (list of eq, i32, i32), (list of eq))
+    wasm_named(f, "at", i32)
+    wasm_asm(f, "local.get 0 ref.test record if local.get 0 local.get 1 call R.find local.tee at i32.const 0 i32.ge_s if")
+    wasm_asm(f, "local.get 0 ref.cast record struct.get record 1 local.get at array.get items return end end")
+    wasm_asm(f, "local.get 0 local.get 1 local.get 2 call im.field unreachable")
+end
+
+# What JavaScript calls to look inside Moth's values, and to make them, when a check or `say` needs them.
+to wasm_out with m, field, params, results, code_text
+    set f to wasm_func(m, field, params, results)
+    wasm_asm(f, code_text)
+    wasm_export(m, field, index of f)
+    return f
+end
+
+to wasm_runtime_exports with m
+    set eq to wasm_eq
+    set i32 to wasm_i32
+    set f64 to wasm_f64
+    set ext to wasm_externref
+    set tag_code to wasm_is_num(0) + " if i32.const 1 return end" # the tags of TAGS in wasm.js
+    set tagged to list of "text", "list", "record", "closure"
+    for each k from 1 to 4
+        set tag_code to tag_code + " local.get 0 ref.test " + item k of tagged + " if i32.const " + (k + 1) + " return end"
+    end
+    set tag_code to tag_code + " local.get 0 ref.test host if local.get 0 ref.cast host struct.get host 1 return end"
+    set tag_code to tag_code + " local.get 0 ref.test bytes if i32.const 8 return end local.get 0 ref.test qty if i32.const 9 return end i32.const 6"
+    wasm_out(m, "tag", (list of eq), (list of i32), tag_code)
+    wasm_out(m, "num", (list of eq), (list of f64), wasm_num_of(0))
+    wasm_out(m, "textValue", (list of eq), (list of ext), "local.get 0 ref.cast text struct.get text 0")
+    wasm_out(m, "listLength", (list of eq), (list of i32), "local.get 0 ref.cast list struct.get list 1")
+    wasm_out(m, "listItem", (list of eq, i32), (list of eq), "local.get 0 ref.cast list struct.get list 0 local.get 1 array.get items")
+    # a list's item's JavaScript string, if it's text, or null: one call for each item of a list of text
+    set f to wasm_func(m, "listText", (list of eq, i32), (list of ext))
+    wasm_named(f, "it", eq)
+    wasm_asm(f, "local.get 0 ref.cast list struct.get list 0 local.get 1 array.get items local.tee it ref.test text if externref " + wasm_text_of("it") + " else ref.null extern end")
+    wasm_export(m, "listText", index of f)
+    wasm_out(m, "recordSize", (list of eq), (list of i32), "local.get 0 ref.cast record struct.get record 2")
+    wasm_out(m, "recordKey", (list of eq, i32), (list of i32), "local.get 0 ref.cast record struct.get record 0 local.get 1 array.get ids")
+    wasm_out(m, "recordValue", (list of eq, i32), (list of eq), "local.get 0 ref.cast record struct.get record 1 local.get 1 array.get items")
+    wasm_out(m, "functionName", (list of eq), (list of i32), "local.get 0 ref.cast closure struct.get closure 3")
+    wasm_out(m, "functionInputs", (list of eq), (list of i32), "local.get 0 ref.cast closure struct.get closure 2")
+    wasm_out(m, "makeNum", (list of f64), (list of eq), "local.get 0 call R.box")
+    wasm_out(m, "makeText", (list of ext), (list of eq), "local.get 0 struct.new text")
+    wasm_out(m, "newList", empty list, (list of eq), "i32.const 0 array.new_default items i32.const 0 struct.new list")
+    wasm_out(m, "listPush", (list of eq, eq), empty list, "local.get 0 local.get 1 call R.push")
+    wasm_out(m, "hostValue", (list of eq), (list of ext), "local.get 0 ref.cast host struct.get host 0")
+    wasm_out(m, "makeHost", (list of ext, i32), (list of eq), "local.get 0 local.get 1 struct.new host")
+    wasm_out(m, "bytesLength", (list of eq), (list of i32), wasm_bytes_of(0) + " array.len")
+    wasm_out(m, "byteAt", (list of eq, i32), (list of i32), wasm_bytes_of(0) + " local.get 1 array.get_u u8")
+    wasm_out(m, "makeBytes", (list of i32), (list of eq), "local.get 0 array.new_default u8 struct.new bytes")
+    wasm_out(m, "makeQty", (list of f64, i32), (list of eq), "local.get 0 local.get 1 struct.new qty")
+    wasm_out(m, "makeRecord", empty list, (list of eq), "call R.newRecord")
+    wasm_out(m, "putField", (list of eq, i32, eq), empty list, "local.get 0 local.get 1 local.get 2 call R.setField")
+    wasm_out(m, "qtyAmount", (list of eq), (list of f64), "local.get 0 ref.cast qty struct.get qty 0")
+    wasm_out(m, "qtyUnit", (list of eq), (list of i32), "local.get 0 ref.cast qty struct.get qty 1")
+    wasm_out(m, "setByte", (list of eq, i32, i32), empty list, wasm_bytes_of(0) + " local.get 1 local.get 2 array.set u8")
+end
+
+# ---------- which variables need the heap ----------
+
+# Escape analysis: a variable a function made inside its own function uses must outlive the call, so it goes
+# in the heap; every other variable is a WebAssembly local, which the machine can keep in a register. These
+# are the slots of the function with this scope and body that functions made inside it, however deep, use.
+to wasm_captured with scope, body
+    set found to empty dictionary
+    wasm_capture_walk(scope, body, 0, found)
+    return found
+end
+
+# a use of a name `away` functions inside the one whose slots are wanted
+to wasm_capture_use with scope, wanted, away, found
+    set where to front's resolve(scope, wanted)
+    if where is not nothing and away is greater than 0 and depth of where is away
+        set item (slot of where) of found to yes
+    end
+end
+
+to wasm_capture_expr with scope, e, away, found
+    set what to kind of e
+    if what is "name" or what is "call"
+        wasm_capture_use(scope, name of e, away, found)
+    end
+    if what is "math" or what is "compare" or what is "and" or what is "or" or what is "random"
+        wasm_capture_expr(scope, left of e, away, found)
+        wasm_capture_expr(scope, right of e, away, found)
+    else if what is "not" or what is "negate"
+        wasm_capture_expr(scope, operand of e, away, found)
+    else if what is "length" or what is "field" or what is "read" or what is "readFolder"
+        wasm_capture_expr(scope, subject of e, away, found)
+    else if what is "item"
+        wasm_capture_expr(scope, subject of e, away, found)
+        wasm_capture_expr(scope, index of e, away, found)
+    else if what is "call" or what is "builtin"
+        for each a in args of e
+            wasm_capture_expr(scope, a, away, found)
+        end
+    else if what is "list" or what is "dictionary"
+        for each a in items of e
+            wasm_capture_expr(scope, a, away, found)
+        end
+    else if what is "record"
+        for each a in values of e
+            wasm_capture_expr(scope, a, away, found)
+        end
+    else if what is "ask"
+        wasm_capture_expr(scope, question of e, away, found)
+    end
+end
+
+# an expression a statement may have, or nothing
+to wasm_maybe_expr with scope, e, away, found
+    if e is not nothing
+        wasm_capture_expr(scope, e, away, found)
+    end
+end
+
+to wasm_capture_walk with scope, body, away, found
+    for each s in body
+        set what to kind of s
+        if what is "set" or what is "add" or what is "count" or what is "each" or what is "call"
+            wasm_capture_use(scope, name of s, away, found)
+        else if what is "try"
+            if name of s is not nothing
+                wasm_capture_use(scope, name of s, away, found)
+            end
+        end
+        if what is "set" or what is "add" or what is "exit" or what is "return" or what is "do" or what is "turtle" or what is "fail"
+            wasm_maybe_expr(scope, value of s, away, found)
+        else if what is "if" or what is "while" or what is "expect"
+            wasm_capture_expr(scope, cond of s, away, found)
+        else if what is "repeat"
+            wasm_capture_expr(scope, count of s, away, found)
+        else if what is "count"
+            wasm_capture_expr(scope, start of s, away, found)
+            wasm_capture_expr(scope, limit of s, away, found)
+        else if what is "each"
+            wasm_capture_expr(scope, over of s, away, found)
+        else if what is "say"
+            for each p in parts of s
+                wasm_capture_expr(scope, p, away, found)
+            end
+        else if what is "call"
+            for each a in args of s
+                wasm_capture_expr(scope, a, away, found)
+            end
+        else if what is "setItem" or what is "setField" or what is "write"
+            wasm_capture_expr(scope, value of s, away, found)
+            wasm_capture_expr(scope, target of s, away, found)
+        else if what is "remove"
+            wasm_capture_expr(scope, key of s, away, found)
+            wasm_capture_expr(scope, target of s, away, found)
+        else if what is "removeFile"
+            wasm_capture_expr(scope, target of s, away, found)
+        else if what is "wait"
+            wasm_capture_expr(scope, amount of s, away, found)
+        else if what is "play"
+            wasm_maybe_expr(scope, note of s, away, found)
+            wasm_maybe_expr(scope, time of s, away, found)
+        end
+        set made to nothing # `when` and `every` make a function too
+        if what is "define"
+            set made to s
+        else if what is "when"
+            set made to fn of s
+            wasm_maybe_expr(scope, label of s, away, found)
+        else if what is "every"
+            set made to fn of s
+            wasm_capture_expr(scope, interval of s, away, found)
+        end
+        if made is not nothing
+            set inner to front's new_scope(scope, params of made, body of made, order of made)
+            wasm_capture_walk(inner, body of made, away + 1, found)
+        else
+            for each block in wasm_blocks(s)
+                wasm_capture_walk(scope, block, away, found)
+            end
+        end
+    end
+end
+
+# a statement's blocks, as wasm.js goes through them: then, otherwise, body and handler
+to wasm_blocks with s
+    set what to kind of s
+    if what is "if"
+        return list of then of s, otherwise of s
+    end
+    if what is "while" or what is "repeat" or what is "count" or what is "each"
+        return list of body of s
+    end
+    if what is "try"
+        return list of body of s, handler of s
+    end
+    return empty list
+end
+
+to wasm_makes_functions with body
+    for each s in body
+        set what to kind of s
+        if what is "define" or what is "when" or what is "every"
+            return yes
+        end
+        for each block in wasm_blocks(s)
+            if wasm_makes_functions(block)
+                return yes
+            end
+        end
+    end
+    return no
+end
+
+# ---------- compiling Moth ----------
+# One Moth function (or the program) as one WebAssembly function. Variables that functions made inside it use
+# live in an array of slots in a scope struct, made when it's called, so those functions can reach them later;
+# the rest are locals.
+
+to wasm_top with things
+    if length of things is 0
+        return nothing
+    end
+    return item (length of things) of things
+end
+
+to wasm_less_last with things
+    return items 1 to ((length of things) - 1) of things
+end
+
+to wasm_x with fc, source
+    wasm_asm(f of fc, source)
+end
+
+to wasm_temp with fc, type
+    return wasm_local(f of fc, type)
+end
+
+to wasm_pos with fc, at
+    set cx to cx of fc
+    set kept to ats of cx
+    add at to kept
+    return length of kept - 1
+end
+
+to wasm_id with fc, wanted
+    set cx to cx of fc
+    set known to name_ids of cx
+    if wanted is in known
+        return item wanted of known
+    end
+    set kept to names of cx
+    add wanted to kept
+    set item wanted of known to length of kept - 1
+    return length of kept - 1
+end
+
+to wasm_message with fc, text
+    set kept to messages of cx of fc
+    add text to kept
+    return length of kept - 1
+end
+
+# the global holding a number the program wrote, made once for each number
+to wasm_number with fc, eight
+    set cx to cx of fc
+    set key to wasm_key(eight)
+    set known to numbers of cx
+    if key is in known
+        return item key of known
+    end
+    set init to list of 68
+    wasm_put_all(init, eight)
+    wasm_put_all(init, (list of 251, 0, wasm_t_num))
+    set kept to globals of m of cx
+    add record with type wasm_ref(wasm_t_num), mutable no, init init to kept
+    set item key of known to length of kept - 1
+    return length of kept - 1
+end
+
+# the global holding text the program wrote, which init makes when the program starts
+to wasm_text with fc, text
+    set cx to cx of fc
+    set known to texts of cx
+    if text is in known
+        return item text of known
+    end
+    set kept to globals of m of cx
+    add record with type wasm_ref_null(wasm_t_text), mutable yes, init (list of 208, wasm_t_text) to kept
+    set global to length of kept - 1
+    set item text of known to global
+    set listed to text_list of cx
+    add text to listed
+    wasm_asm(init of cx, "i32.const " + (length of listed - 1) + " call im.text struct.new text global.set " + global)
+    return global
+end
+
+to wasm_function with cx, parent, label, params, body, place
+    set parent_scope to nothing
+    if parent is not nothing
+        set parent_scope to scope of parent
+    end
+    set scope to front's new_scope(parent_scope, params, body, place)
+    set m to m of cx
+    if parent is nothing
+        set f to wasm_func(m, "main", (list of wasm_f64), empty list)
+        wasm_asm(f, "local.get 0 global.set g.maxSteps call " + index of init of cx + " call im.grant global.set g.left")
+    else
+        set inputs to list of wasm_ref_null(wasm_t_env)
+        for each p in params
+            add wasm_eq to inputs
+        end
+        set f to wasm_func(m, label, inputs, (list of wasm_eq))
+    end
+    set fc to record with cx cx, parent parent, scope scope, f f, numbers empty dictionary, locals empty dictionary, number_set nothing,
+        slot_array nothing, env_local nothing, stops empty list, lefts empty list
+    set captured to wasm_captured(scope, body)
+    set inputs_count to 0
+    if parent is not nothing
+        set inputs_count to length of params
+    end
+    set number_set of fc to wasm_numeric_slots(fc, body, captured, inputs_count)
+    set numbers to numbers of fc
+    set locals to locals of fc
+    set slot_names to names of scope
+    for each slot from 1 to length of slot_names
+        if slot is in captured
+            set in_heap to yes
+        else if slot is in number_set of fc
+            set numbered to record with value wasm_local(f, wasm_f64), box wasm_local(f, wasm_eq)
+            set item slot of numbers to numbered
+            wasm_asm(f, "global.get g.unset local.set " + box of numbered)
+        else if parent is not nothing and slot is at most length of params
+            set item slot of locals to slot # an input, already a parameter
+        else
+            set item slot of locals to wasm_local(f, wasm_eq)
+            wasm_asm(f, "global.get g.unset local.set " + item slot of locals)
+        end
+    end
+    if length of keys of captured is greater than 0 or wasm_makes_functions(body)
+        set slot_array of fc to wasm_local(f, wasm_ref_null(wasm_t_items))
+        set env_local of fc to wasm_local(f, wasm_ref_null(wasm_t_env))
+        wasm_asm(f, "global.get g.unset i32.const " + (length of slot_names + 1) + " array.new items local.set " + slot_array of fc)
+        if parent is not nothing
+            wasm_asm(f, "local.get 0") # the scope the function was made in
+        else
+            wasm_asm(f, "ref.null env")
+        end
+        wasm_asm(f, "local.get " + slot_array of fc + " ref.as_non_null struct.new env local.set " + env_local of fc)
+        for each i from 1 to length of params
+            if i is in captured
+                wasm_asm(f, "local.get " + slot_array of fc + " i32.const " + i + " local.get " + i + " array.set items")
+            end
+        end
+    end
+    for each s in body
+        wasm_statement(fc, s)
+    end
+    if parent is not nothing
+        wasm_asm(f, "ref.null eq")
+    end
+    return fc
+end
+
+# Type-directed unboxing: the variables of this function (not captured, not inputs) that can only ever hold a
+# number, because every `set` gives them one, or they count in `for each ... from`, or `add` adds to them
+# (which gives a number or fails). Each lives in an f64 local, so arithmetic on it allocates nothing, with a
+# box made only when the number is used as a value, and kept until the number changes.
+to wasm_numeric_slots with fc, body, captured, inputs
+    set writes to empty dictionary
+    wasm_note_writes(fc, body, captured, inputs, writes)
+    set slots to empty dictionary
+    for each slot in keys of writes
+        set item slot of slots to yes
+    end
+    set changed to yes
+    repeat while changed # the most variables that stay numbers if all the others do
+        set changed to no
+        set kept to empty dictionary
+        for each slot in keys of slots
+            set numeric to yes
+            for each w in item slot of writes
+                if w is "adds" or w is "counts"
+                    set numeric to numeric # a number, or a mistake
+                else if w is nothing
+                    set numeric to no
+                else if not wasm_is_number(fc, w, slots)
+                    set numeric to no
+                end
+            end
+            if numeric
+                set item slot of kept to yes
+            else
+                set changed to yes
+            end
+        end
+        set slots to kept
+    end
+    return slots
+end
+
+to wasm_note with fc, wanted, value, captured, inputs, writes
+    set where to front's resolve(scope of fc, wanted)
+    if where is nothing or depth of where is not 0 or slot of where is at most inputs or slot of where is in captured
+        return nothing
+    end
+    if not (slot of where is in writes)
+        set item (slot of where) of writes to empty list
+    end
+    set kept to item (slot of where) of writes
+    add value to kept
+end
+
+to wasm_note_writes with fc, body, captured, inputs, writes
+    for each s in body
+        set what to kind of s
+        if what is "set"
+            wasm_note(fc, name of s, value of s, captured, inputs, writes)
+        else if what is "add"
+            wasm_note(fc, name of s, "adds", captured, inputs, writes)
+        else if what is "count"
+            wasm_note(fc, name of s, "counts", captured, inputs, writes)
+        else if what is "each" or what is "define"
+            wasm_note(fc, name of s, nothing, captured, inputs, writes)
+        else if what is "try"
+            if name of s is not nothing
+                wasm_note(fc, name of s, nothing, captured, inputs, writes)
+            end
+        end
+        for each block in wasm_blocks(s)
+            wasm_note_writes(fc, block, captured, inputs, writes)
+        end
+    end
+end
+
+# whether an expression can only give a number (or fail), when the variables in `slots` hold numbers
+to wasm_is_number with fc, e, slots
+    set what to kind of e
+    if what is "value"
+        return type of e is "number"
+    end
+    if what is "name"
+        set where to front's resolve(scope of fc, name of e)
+        return where is not nothing and depth of where is 0 and slot of where is in slots
+    end
+    if what is "math" # a number less, or over, anything gives a number or fails; times or plus an amount, an amount
+        return wasm_is_number(fc, left of e, slots) and (op of e is "-" or op of e is "/" or wasm_is_number(fc, right of e, slots))
+    end
+    if what is "negate"
+        return wasm_is_number(fc, operand of e, slots)
+    end
+    return what is "length"
+end
+
+to wasm_numeric with fc, e
+    return wasm_is_number(fc, e, number_set of fc)
+end
+
+# worth working out as an f64 and boxing once: its parts are numbers already
+to wasm_unboxed with fc, e
+    if kind of e is "math"
+        return wasm_numeric(fc, left of e) and wasm_numeric(fc, right of e)
+    end
+    return kind of e is "negate" and wasm_numeric(fc, operand of e)
+end
+
+# the f64 and box locals of a variable that only holds numbers, or nothing
+to wasm_number_slot with fc, wanted
+    set where to front's resolve(scope of fc, wanted)
+    if where is nothing or depth of where is not 0
+        return nothing
+    end
+    set numbers to numbers of fc
+    if slot of where is in numbers
+        return item (slot of where) of numbers
+    end
+    return nothing
+end
+
+# An expression wasm_numeric says gives a number, as an f64 on the stack.
+to wasm_expr_num with fc, e
+    set what to kind of e
+    if what is "value"
+        wasm_f64_const(f of fc, wasm_literal(value of e))
+        return nothing
+    end
+    if what is "name"
+        set numbered to wasm_number_slot(fc, name of e)
+        wasm_x(fc, "local.get " + box of numbered + " global.get g.unset ref.eq")
+        wasm_x(fc, "if i32.const " + wasm_id(fc, name of e) + " i32.const " + wasm_pos(fc, at of e) + " call im.unset unreachable end")
+        wasm_x(fc, "local.get " + value of numbered)
+        return nothing
+    end
+    if what is "math" and wasm_unboxed(fc, e)
+        wasm_expr_num(fc, left of e)
+        wasm_expr_num(fc, right of e)
+        if op of e is "+"
+            wasm_x(fc, "f64.add")
+        else if op of e is "-"
+            wasm_x(fc, "f64.sub")
+        else if op of e is "*"
+            wasm_x(fc, "f64.mul")
+        else
+            set a to wasm_temp(fc, wasm_f64)
+            set b to wasm_temp(fc, wasm_f64)
+            wasm_x(fc, "local.set " + b + " local.set " + a + " local.get " + b + " f64.const 0 f64.eq if")
+            wasm_x(fc, "i32.const 3 local.get " + a + " struct.new num local.get " + b + " struct.new num")
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call im.arithmetic unreachable end local.get " + a + " local.get " + b + " f64.div")
+        end
+        return nothing
+    end
+    if what is "negate" and wasm_unboxed(fc, e)
+        wasm_expr_num(fc, operand of e)
+        wasm_x(fc, "f64.neg")
+        return nothing
+    end
+    wasm_expr(fc, e) # gives a number or fails
+    wasm_x(fc, "call R.unbox")
+end
+
+# stores the f64 on the stack in a number variable, forgetting its old box
+to wasm_set_number with fc, numbered
+    wasm_x(fc, "local.set " + value of numbered + " ref.null eq local.set " + box of numbered)
+end
+
+# pushes the slots array a variable lives in, and its slot number
+to wasm_slot_of with fc, wanted
+    set where to front's resolve(scope of fc, wanted)
+    if depth of where is 0
+        wasm_x(fc, "local.get " + slot_array of fc)
+    else
+        # from this function's own scope, or, if it made none, from the one it was made in (its first parameter)
+        set own to env_local of fc is not nothing
+        set first to 1
+        if own
+            wasm_x(fc, "local.get " + env_local of fc)
+            set first to 0
+        else
+            wasm_x(fc, "local.get 0")
+        end
+        for each d from first to depth of where - 1
+            wasm_x(fc, "struct.get env 0")
+        end
+        wasm_x(fc, "struct.get env 1")
+    end
+    wasm_x(fc, "i32.const " + slot of where)
+end
+
+to wasm_load with fc, wanted
+    set numbered to wasm_number_slot(fc, wanted)
+    if numbered is not nothing # its box, made now if the number changed since the last one
+        wasm_x(fc, "local.get " + box of numbered + " ref.is_null if local.get " + value of numbered + " call R.box local.set " + box of numbered + " end local.get " + box of numbered)
+        return nothing
+    end
+    set where to front's resolve(scope of fc, wanted)
+    if depth of where is 0 and slot of where is in locals of fc
+        wasm_x(fc, "local.get " + item (slot of where) of locals of fc)
+        return nothing
+    end
+    wasm_slot_of(fc, wanted)
+    wasm_x(fc, "array.get items")
+end
+
+# Storing a value: wasm_store_start before the value is written, wasm_store_end after it.
+to wasm_store_start with fc, wanted
+    set where to front's resolve(scope of fc, wanted)
+    if depth of where is 0 and slot of where is in locals of fc
+        return item (slot of where) of locals of fc
+    end
+    wasm_slot_of(fc, wanted)
+    return nothing
+end
+
+to wasm_store_end with fc, local
+    if local is nothing
+        wasm_x(fc, "array.set items")
+    else
+        wasm_x(fc, "local.set " + local)
+    end
+end
+
+# A name nothing ever sets: fail when this runs, with the same message (and "did you mean") as the other engines.
+to wasm_undefined with fc, wanted, at, calling, statement
+    set message to wasm_message(fc, front's undefined_message(scope of fc, wanted, calling, statement))
+    wasm_x(fc, "i32.const " + message + " i32.const " + wasm_pos(fc, at) + " call im.fail unreachable")
+end
+
+# Each loop counts a step at the end of each round, and each call when it starts, as the other engines do:
+# `left` counts down the steps JavaScript has given, and when it's gone below 0 JavaScript gives more, or
+# stops the program if its steps are all taken.
+to wasm_tick with fc, k
+    set counting to wasm_top(lefts of fc)
+    if counting is not nothing # in a loop: its own count, a local
+        wasm_x(fc, "local.get " + counting + " i32.const 1 i32.sub local.tee " + counting + " i32.const 0 i32.lt_s")
+        wasm_x(fc, "if i32.const " + k + " call im.refill local.tee " + counting + " global.set g.left end")
+        return nothing
+    end
+    wasm_x(fc, "global.get g.left i32.const 1 i32.sub global.set g.left global.get g.left i32.const 0 i32.lt_s")
+    wasm_x(fc, "if i32.const " + k + " call im.refill global.set g.left end")
+end
+
+# A loop: wasm_loop_start, then its test (leaving 1 to stop), wasm_loop_body, its body, and wasm_loop_end. The
+# loop counts its steps down in a local of its own, which goes back into the global before each call and after
+# the loop; if a mistake leaves the loop, the global keeps the smaller of the two, as a count only goes down.
+to wasm_loop_start with fc
+    set outer to wasm_top(lefts of fc)
+    set counting to wasm_temp(fc, wasm_i32)
+    if outer is not nothing
+        wasm_x(fc, "local.get " + outer + " global.set g.left")
+    end
+    wasm_x(fc, "global.get g.left local.set " + counting)
+    set kept to lefts of fc
+    add counting to kept
+    wasm_x(fc, "try")
+    set kept to stops of fc
+    add labels of code of f of fc to kept
+    wasm_x(fc, "block loop")
+    return record with outer outer, counting counting
+end
+
+to wasm_loop_body with fc
+    wasm_x(fc, "br_if 1")
+end
+
+to wasm_loop_end with fc, k, state
+    set counting to counting of state
+    wasm_tick(fc, k)
+    wasm_x(fc, "br 0 end end")
+    set stops of fc to wasm_less_last(stops of fc)
+    wasm_x(fc, "local.get " + counting + " global.set g.left catch_all")
+    wasm_x(fc, "local.get " + counting + " global.get g.left local.get " + counting + " global.get g.left i32.lt_s select global.set g.left rethrow 0 end")
+    set lefts of fc to wasm_less_last(lefts of fc)
+    if outer of state is not nothing
+        wasm_x(fc, "global.get g.left local.set " + outer of state)
+    end
+end
+
+# around a call that may count steps of its own: the loop's count given to the global, and taken back after
+to wasm_hand_over with fc, call_text
+    set counting to wasm_top(lefts of fc)
+    if counting is not nothing
+        wasm_x(fc, "local.get " + counting + " global.set g.left")
+    end
+    wasm_x(fc, call_text)
+    if counting is not nothing
+        wasm_x(fc, "global.get g.left local.set " + counting)
+    end
+end
+
+to wasm_block with fc, body
+    for each s in body
+        wasm_statement(fc, s)
+    end
+end
+
+to wasm_statement with fc, s
+    set what to kind of s
+    if what is "set"
+        set numbered to wasm_number_slot(fc, name of s)
+        if numbered is nothing
+            set local to wasm_store_start(fc, name of s)
+            wasm_expr(fc, value of s)
+            wasm_store_end(fc, local)
+        else
+            wasm_expr_num(fc, value of s)
+            wasm_set_number(fc, numbered)
+        end
+    else if what is "setItem" # a list's item here, a byte or a dictionary's key in R.put
+        set target to target of s
+        set k to wasm_pos(fc, at of target)
+        set things to wasm_temp(fc, wasm_eq)
+        set key to wasm_temp(fc, wasm_eq)
+        set place to wasm_temp(fc, wasm_i32)
+        set value to wasm_temp(fc, wasm_eq)
+        wasm_expr(fc, subject of target)
+        wasm_x(fc, "local.set " + things)
+        wasm_expr(fc, index of target)
+        wasm_x(fc, "local.set " + key + " local.get " + things + " local.get " + key + " i32.const " + k + " call R.itemRef local.set " + place)
+        wasm_expr(fc, value of s)
+        wasm_x(fc, "local.set " + value + " local.get " + place + " i32.const 0 i32.ge_s if")
+        wasm_x(fc, "local.get " + things + " ref.cast list struct.get list 0 local.get " + place + " local.get " + value + " array.set items")
+        wasm_x(fc, "else local.get " + things + " local.get " + key + " local.get " + value + " i32.const " + k + " call R.put end")
+    else if what is "add"
+        set numbered to nothing
+        if front's resolve(scope of fc, name of s) is not nothing
+            set numbered to wasm_number_slot(fc, name of s)
+        end
+        if numbered is not nothing
+            wasm_add_to_number(fc, s, numbered)
+        else
+            set value to wasm_temp(fc, wasm_eq)
+            wasm_expr(fc, value of s)
+            wasm_x(fc, "local.set " + value)
+            if front's resolve(scope of fc, name of s) is nothing
+                wasm_undefined(fc, name of s, at of s, no, no)
+            else
+                set local to wasm_store_start(fc, name of s)
+                wasm_load(fc, name of s)
+                set named to wasm_id(fc, name of s)
+                wasm_x(fc, "local.get " + value + " i32.const " + named + " i32.const " + wasm_pos(fc, at of s) + " call R.addInto")
+                wasm_store_end(fc, local)
+            end
+        end
+    else if what is "say"
+        for each part in parts of s
+            wasm_expr(fc, part)
+        end
+        set n to length of parts of s
+        set said to "call im.say"
+        if errors of s
+            set said to "call im.sayError"
+        end
+        wasm_x(fc, "array.new_fixed items " + n + " i32.const " + n + " struct.new list " + said)
+    else if what is "exit"
+        if value of s is nothing
+            wasm_x(fc, "global.get " + wasm_number(fc, wasm_double(0)))
+        else
+            wasm_expr(fc, value of s)
+        end
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.exit unreachable")
+    else if what is "if"
+        wasm_expr(fc, cond of s)
+        wasm_x(fc, "call R.truthy if")
+        wasm_block(fc, then of s)
+        wasm_x(fc, "else")
+        wasm_block(fc, otherwise of s)
+        wasm_x(fc, "end")
+    else if what is "while"
+        set k to wasm_pos(fc, at of s)
+        set state to wasm_loop_start(fc)
+        wasm_expr(fc, cond of s)
+        wasm_x(fc, "call R.truthy i32.eqz")
+        wasm_loop_body(fc)
+        wasm_block(fc, body of s)
+        wasm_loop_end(fc, k, state)
+    else if what is "repeat"
+        set k to wasm_pos(fc, at of s)
+        set n to wasm_temp(fc, wasm_f64)
+        wasm_expr(fc, count of s)
+        wasm_x(fc, "i32.const " + k + " call R.repeatCount local.set " + n)
+        set state to wasm_loop_start(fc)
+        wasm_x(fc, "local.get " + n + " f64.const 0 f64.le")
+        wasm_loop_body(fc)
+        wasm_block(fc, body of s)
+        wasm_x(fc, "local.get " + n + " f64.const 1 f64.sub local.set " + n)
+        wasm_loop_end(fc, k, state)
+    else if what is "count"
+        set k to wasm_pos(fc, at of s)
+        set low to wasm_temp(fc, wasm_eq)
+        set high to wasm_temp(fc, wasm_eq)
+        set i to wasm_temp(fc, wasm_f64)
+        set last to wasm_temp(fc, wasm_f64)
+        wasm_expr(fc, start of s)
+        wasm_x(fc, "local.set " + low)
+        wasm_expr(fc, limit of s)
+        wasm_x(fc, "local.set " + high)
+        wasm_x(fc, wasm_both_nums(low, high) + " i32.eqz if local.get " + low + " local.get " + high + " i32.const " + k + " call im.checkRange unreachable end")
+        wasm_x(fc, wasm_num_of(low) + " local.set " + i + wasm_num_of(high) + " local.set " + last)
+        # as vm.js's atMost: i <= last, and only when it isn't, the comparison to 15 digits, which an end that
+        # isn't whole needs; so a loop's turn makes no call
+        set state to wasm_loop_start(fc)
+        wasm_x(fc, "local.get " + i + " local.get " + last + " f64.le if i32 i32.const 0 else local.get " + i + " local.get " + last + " call R.ncmp " + wasm_order_test("at most") + " i32.eqz end")
+        wasm_loop_body(fc)
+        set numbered to wasm_number_slot(fc, name of s)
+        if numbered is not nothing
+            wasm_x(fc, "local.get " + i)
+            wasm_set_number(fc, numbered)
+        else
+            set local to wasm_store_start(fc, name of s)
+            wasm_x(fc, "local.get " + i + " call R.box")
+            wasm_store_end(fc, local)
+        end
+        wasm_block(fc, body of s)
+        wasm_x(fc, "local.get " + i + " f64.const 1 f64.add local.set " + i)
+        wasm_loop_end(fc, k, state)
+    else if what is "each"
+        set k to wasm_pos(fc, at of s)
+        set things to wasm_temp(fc, wasm_ref_null(wasm_t_list))
+        set i to wasm_temp(fc, wasm_i32)
+        wasm_expr(fc, over of s)
+        wasm_x(fc, "i32.const " + k + " call R.itemsOf local.set " + things + " i32.const 0 local.set " + i) # locals start at 0 only once per call
+        set state to wasm_loop_start(fc)
+        wasm_x(fc, "local.get " + i + " local.get " + things + " struct.get list 1 i32.ge_s")
+        wasm_loop_body(fc)
+        set local to wasm_store_start(fc, name of s)
+        wasm_x(fc, "local.get " + things + " struct.get list 0 local.get " + i + " array.get items")
+        wasm_store_end(fc, local)
+        wasm_x(fc, "local.get " + i + " i32.const 1 i32.add local.set " + i)
+        wasm_block(fc, body of s)
+        wasm_loop_end(fc, k, state)
+    else if what is "define"
+        set made to wasm_closure(fc, s)
+        set local to wasm_store_start(fc, name of s)
+        wasm_make_closure(fc, made)
+        wasm_store_end(fc, local)
+    else if what is "when" # a handler is a function of its own, made and handed over, not kept in a variable
+        set made to wasm_closure(fc, fn of s)
+        wasm_x(fc, "i32.const " + (front's slot_of(front's event_names, event of s) - 1))
+        wasm_make_closure(fc, made)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s))
+        if label of s is not nothing
+            wasm_expr(fc, label of s)
+            wasm_x(fc, "call im.handleLabel")
+        else
+            wasm_x(fc, "call im.handle")
+        end
+    else if what is "every"
+        wasm_expr(fc, interval of s)
+        wasm_f64_const(f of fc, wasm_double(unit of s))
+        wasm_make_closure(fc, wasm_closure(fc, fn of s))
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.every")
+    else if what is "return"
+        if value of s is nothing
+            wasm_x(fc, "ref.null eq")
+        else
+            wasm_expr(fc, value of s)
+        end
+        if length of lefts of fc is greater than 0 # the loop's count kept
+            wasm_x(fc, "local.get " + wasm_top(lefts of fc) + " global.set g.left")
+        end
+        wasm_x(fc, "return")
+    else if what is "call"
+        wasm_call(fc, s, yes)
+        wasm_x(fc, "drop")
+    else if what is "do" # a value done for what it does: `start count(10)`, `wait for job`
+        wasm_expr(fc, value of s)
+        wasm_x(fc, "drop")
+    else if what is "turtle"
+        wasm_x(fc, "i32.const " + (front's slot_of(front's turtle_actions, action of s) - 1))
+        if value of s is nothing
+            wasm_x(fc, "ref.null eq")
+        else
+            wasm_expr(fc, value of s)
+        end
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.turtle")
+    else if what is "setField"
+        set k to wasm_pos(fc, at of s)
+        set target to wasm_temp(fc, wasm_eq)
+        set value to wasm_temp(fc, wasm_eq)
+        wasm_expr(fc, target of s)
+        wasm_x(fc, "local.tee " + target + " ref.test record i32.eqz")
+        wasm_x(fc, "if local.get " + target + " i32.const " + wasm_id(fc, name of s) + " i32.const " + k + " call im.recordFor unreachable end")
+        wasm_expr(fc, value of s)
+        wasm_x(fc, "local.set " + value + " local.get " + target + " i32.const " + wasm_id(fc, name of s) + " local.get " + value + " call R.setField")
+    else if what is "fail"
+        wasm_expr(fc, value of s)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.failWith unreachable")
+    else if what is "stop"
+        wasm_x(fc, "br " + (labels of code of f of fc - 1 - wasm_top(stops of fc)))
+    else if what is "remove"
+        wasm_expr(fc, key of s)
+        wasm_expr(fc, target of s)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.remove")
+    else if what is "write"
+        wasm_expr(fc, value of s)
+        wasm_expr(fc, target of s)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.write")
+    else if what is "removeFile"
+        wasm_expr(fc, target of s)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.removeFile")
+    else if what is "wait"
+        wasm_expr(fc, amount of s)
+        wasm_f64_const(f of fc, wasm_double(unit of s))
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.wait")
+    else if what is "play"
+        if note of s is nothing
+            wasm_x(fc, "call im.beep")
+        else
+            wasm_expr(fc, note of s)
+            wasm_expr(fc, time of s)
+            wasm_f64_const(f of fc, wasm_double(unit of s))
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.play")
+        end
+    else if what is "expect"
+        set c to cond of s
+        if kind of c is not "compare"
+            wasm_expr(fc, c)
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.expectYes")
+        else
+            set negated to 0
+            if negate of c
+                set negated to 1
+            end
+            wasm_x(fc, "i32.const " + (front's slot_of(front's comparisons, op of c) - 1) + " i32.const " + negated)
+            wasm_expr(fc, left of c)
+            wasm_expr(fc, right of c)
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of s) + " call im.expect")
+        end
+    else if what is "try" # what JavaScript throws is caught here; JavaScript says whether it was a mistake to handle
+        set depth to wasm_temp(fc, wasm_i32)
+        wasm_x(fc, "global.get g.depth local.set " + depth + " call im.tryStart try")
+        wasm_block(fc, body of s)
+        wasm_x(fc, "catch_all call im.caught i32.eqz if rethrow 1 end local.get " + depth + " global.set g.depth") # going too deep, say: not ours
+        if name of s is not nothing
+            set local to wasm_store_start(fc, name of s)
+            wasm_x(fc, "call im.caughtValue")
+            wasm_store_end(fc, local)
+        else
+            wasm_x(fc, "call im.caughtValue drop")
+        end
+        wasm_block(fc, handler of s)
+        wasm_x(fc, "end")
+    else
+        fail with "wasm.moth can't compile a statement of kind " + what
+    end
+end
+
+# `add value to name` where name only holds numbers: the value first, then the check that name has one
+to wasm_add_to_number with fc, s, numbered
+    set k to wasm_pos(fc, at of s)
+    set fast to wasm_numeric(fc, value of s)
+    if fast
+        set value to wasm_temp(fc, wasm_f64)
+        wasm_expr_num(fc, value of s)
+    else
+        set value to wasm_temp(fc, wasm_eq)
+        wasm_expr(fc, value of s)
+    end
+    wasm_x(fc, "local.set " + value + " local.get " + box of numbered + " global.get g.unset ref.eq")
+    wasm_x(fc, "if i32.const " + wasm_id(fc, name of s) + " i32.const " + k + " call im.unset unreachable end")
+    if fast
+        wasm_x(fc, "local.get " + value of numbered + " local.get " + value + " f64.add")
+    else # a number added here; any other value gives a number (if it is one) or fails, in the shared check
+        wasm_x(fc, wasm_is_num(value) + " if f64 local.get " + value of numbered + wasm_num_of(value) + " f64.add else")
+        wasm_load(fc, name of s)
+        wasm_x(fc, "local.get " + value + " i32.const " + wasm_id(fc, name of s) + " i32.const " + k + " call R.addInto call R.unbox end")
+    end
+    wasm_set_number(fc, numbered)
+end
+
+# A Moth function, made from `to` (or a handler's `when`), compiled now; wasm_make_closure writes the code that
+# makes it, later.
+to wasm_closure with fc, d
+    set cx to cx of fc
+    set inner to wasm_function(cx, fc, name of d, params of d, body of d, order of d)
+    set m to m of cx
+    set index to index of f of inner
+    set known to declared_keys of m
+    if not (index is in known)
+        set item index of known to yes
+        set kept to declared of m
+        add index to kept
+    end
+    set typed to 0
+    for each k in kinds of d
+        if k is at least 0
+            set typed to 1
+        end
+    end
+    if typed is 1
+        set kept to kinds of cx
+        add record with params params of d, kinds kinds of d to kept
+        set typed to length of kept - 1
+    end
+    return record with index index, inputs length of params of d, label name of d, typed typed
+end
+
+to wasm_make_closure with fc, made
+    set where to env_local of fc
+    wasm_x(fc, "ref.func " + index of made + " local.get " + where + " i32.const " + inputs of made + " i32.const " + wasm_id(fc, label of made) + " i32.const " + typed of made + " struct.new closure")
+end
+
+# The function is looked up before its inputs are worked out, and checked after, as in the other engines.
+to wasm_call with fc, e, statement
+    if front's resolve(scope of fc, name of e) is nothing
+        wasm_undefined(fc, name of e, at of e, yes, statement)
+        return nothing
+    end
+    set m to m of cx of fc
+    set k to wasm_pos(fc, at of e)
+    set callee to wasm_temp(fc, wasm_eq)
+    set temps to empty list
+    for each arg in args of e
+        add wasm_temp(fc, wasm_eq) to temps
+    end
+    wasm_load(fc, name of e)
+    wasm_x(fc, "local.tee " + callee + " ref.test closure i32.eqz")
+    wasm_x(fc, "if local.get " + callee + " i32.const " + wasm_id(fc, name of e) + " i32.const " + k + " call im.callable unreachable end")
+    set n to length of args of e
+    for each i from 1 to n
+        wasm_expr(fc, item i of args of e)
+        wasm_x(fc, "local.set " + item i of temps)
+    end
+    set get_closure to "local.get " + callee + " ref.cast closure struct.get closure "
+    wasm_x(fc, get_closure + "2 i32.const " + n + " i32.ne")
+    wasm_x(fc, "if local.get " + callee + " i32.const " + n + " i32.const " + wasm_id(fc, name of e) + " i32.const " + k + " call im.checkInputs unreachable end")
+    if n is greater than 0 # a function whose inputs say what they are: each one checked
+        wasm_x(fc, get_closure + "4 if")
+        for each i from 1 to n
+            wasm_x(fc, get_closure + "4 i32.const " + (i - 1) + " local.get " + item i of temps + " i32.const " + wasm_id(fc, name of e) + " i32.const " + k + " call im.checkKind")
+        end
+        wasm_x(fc, "end")
+    end
+    wasm_tick(fc, k)
+    wasm_x(fc, "global.get g.depth i32.const 1 i32.add global.set g.depth global.get g.depth i32.const 2000 i32.gt_s if call im.tooDeep unreachable end")
+    # for a mistake's trail: where this call is, and the function it runs, at 2 * depth - 2 and 2 * depth - 1
+    wasm_x(fc, "global.get g.calls global.get g.depth i32.const 1 i32.shl i32.const 2 i32.sub i32.const " + k + " array.set ids")
+    wasm_x(fc, "global.get g.calls global.get g.depth i32.const 1 i32.shl i32.const 1 i32.sub " + get_closure + "3 array.set ids")
+    wasm_x(fc, get_closure + "1")
+    for each t in temps
+        wasm_x(fc, "local.get " + t)
+    end
+    wasm_x(fc, get_closure + "0 ref.cast " + wasm_fn_type(m, n))
+    wasm_hand_over(fc, "call_ref " + wasm_fn_type(m, n))
+    wasm_x(fc, "global.get g.depth i32.const 1 i32.sub global.set g.depth")
+end
+
+to wasm_expr with fc, e
+    if wasm_unboxed(fc, e)
+        wasm_expr_num(fc, e)
+        wasm_x(fc, "call R.box")
+        return nothing
+    end
+    set what to kind of e
+    if what is "value"
+        set type to type of e
+        if type is "number"
+            wasm_x(fc, "global.get " + wasm_number(fc, wasm_literal(value of e)))
+        else if type is "string"
+            wasm_x(fc, "global.get " + wasm_text(fc, value of e))
+        else if type is "yes"
+            wasm_x(fc, "i32.const 1 ref.i31")
+        else if type is "no"
+            wasm_x(fc, "i32.const 0 ref.i31")
+        else
+            wasm_x(fc, "ref.null eq")
+        end
+    else if what is "name"
+        if front's resolve(scope of fc, name of e) is nothing
+            wasm_undefined(fc, name of e, at of e, no, no)
+            return nothing
+        end
+        set value to wasm_temp(fc, wasm_eq)
+        wasm_load(fc, name of e)
+        wasm_x(fc, "local.tee " + value + " global.get g.unset ref.eq")
+        wasm_x(fc, "if i32.const " + wasm_id(fc, name of e) + " i32.const " + wasm_pos(fc, at of e) + " call im.unset unreachable end local.get " + value)
+    else if what is "call"
+        wasm_call(fc, e, no)
+    else if what is "math"
+        wasm_expr(fc, left of e)
+        wasm_expr(fc, right of e)
+        set helper to item (front's slot_of((list of "+", "-", "*", "/"), op of e)) of (list of "add", "sub", "mul", "div")
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R." + helper)
+    else if what is "compare"
+        set op to op of e
+        if op is "in"
+            wasm_expr(fc, left of e)
+            wasm_expr(fc, right of e)
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.isIn")
+        else if wasm_numeric(fc, left of e) and wasm_numeric(fc, right of e) # two numbers: no boxes, no checks
+            wasm_expr_num(fc, left of e)
+            wasm_expr_num(fc, right of e)
+            if op is "divisible by"
+                wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.dvf")
+            else
+                wasm_x(fc, "call R.ncmp " + wasm_order_test(op)) # to 15 digits
+            end
+        else
+            wasm_expr(fc, left of e)
+            wasm_expr(fc, right of e)
+            if op is "is"
+                wasm_x(fc, "call R.eq")
+            else
+                set helper to item (front's slot_of((list of "less than", "greater than", "at least", "at most", "divisible by"), op)) of (list of "lt", "gt", "ge", "le", "dv")
+                wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R." + helper)
+            end
+        end
+        if negate of e
+            wasm_x(fc, "i32.eqz")
+        end
+        wasm_x(fc, "ref.i31")
+    else if what is "and" or what is "or"
+        set left to wasm_temp(fc, wasm_eq)
+        wasm_expr(fc, left of e)
+        wasm_x(fc, "local.tee " + left + " call R.truthy if eq")
+        if what is "and"
+            wasm_expr(fc, right of e)
+            wasm_x(fc, "else local.get " + left)
+        else
+            wasm_x(fc, "local.get " + left + " else")
+            wasm_expr(fc, right of e)
+        end
+        wasm_x(fc, "end")
+    else if what is "not"
+        wasm_expr(fc, operand of e)
+        wasm_x(fc, "call R.truthy i32.eqz ref.i31")
+    else if what is "negate"
+        wasm_expr(fc, operand of e)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.neg")
+    else if what is "list"
+        for each x in items of e
+            wasm_expr(fc, x)
+        end
+        set n to length of items of e
+        wasm_x(fc, "array.new_fixed items " + n + " i32.const " + n + " struct.new list")
+    else if what is "length"
+        wasm_expr(fc, subject of e)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.lengthOf")
+    else if what is "item"
+        wasm_expr(fc, subject of e)
+        if wasm_numeric(fc, index of e) # the place as an f64, never boxed
+            wasm_expr_num(fc, index of e)
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.itemN")
+        else
+            wasm_expr(fc, index of e)
+            wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call R.item")
+        end
+    else if what is "record"
+        set fields to fields of e
+        set seen to empty dictionary
+        set twice to no
+        for each field in fields
+            if field is in seen
+                set twice to yes
+            end
+            set item field of seen to yes
+        end
+        set n to length of fields
+        if not twice
+            for each field in fields
+                wasm_x(fc, "i32.const " + wasm_id(fc, field))
+            end
+            wasm_x(fc, "array.new_fixed ids " + n)
+            for each v in values of e
+                wasm_expr(fc, v)
+            end
+            wasm_x(fc, "array.new_fixed items " + n + " i32.const " + n + " struct.new record")
+        else
+            set made to wasm_temp(fc, wasm_eq) # a name given twice: the later value wins, in the place of the first
+            wasm_x(fc, "call R.newRecord local.set " + made)
+            for each i from 1 to n
+                wasm_x(fc, "local.get " + made + " i32.const " + wasm_id(fc, item i of fields))
+                wasm_expr(fc, item i of values of e)
+                wasm_x(fc, "call R.setField")
+            end
+            wasm_x(fc, "local.get " + made)
+        end
+    else if what is "dictionary"
+        for each x in items of e
+            wasm_expr(fc, x)
+        end
+        set n to length of items of e
+        wasm_x(fc, "array.new_fixed items " + n + " i32.const " + n + " struct.new list i32.const " + wasm_pos(fc, at of e) + " call im.dict")
+    else if what is "field"
+        wasm_expr(fc, subject of e)
+        wasm_x(fc, "i32.const " + wasm_id(fc, name of e) + " i32.const " + wasm_pos(fc, at of e) + " call R.field")
+    else if what is "ask"
+        wasm_expr(fc, question of e)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call im.ask")
+    else if what is "read"
+        wasm_expr(fc, subject of e)
+        set binary to 0
+        if binary of e
+            set binary to 1
+        end
+        wasm_x(fc, "i32.const " + binary + " i32.const " + wasm_pos(fc, at of e) + " call im.read")
+    else if what is "readFolder"
+        wasm_expr(fc, subject of e)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call im.readFolder")
+    else if what is "arguments"
+        wasm_x(fc, "call im.args")
+    else if what is "random"
+        wasm_expr(fc, left of e)
+        wasm_expr(fc, right of e)
+        wasm_x(fc, "i32.const " + wasm_pos(fc, at of e) + " call im.random")
+    else if what is "now"
+        wasm_x(fc, "i32.const " + which of e + " call im.now")
+    else if what is "builtin"
+        wasm_builtin(fc, e)
+    else
+        fail with "wasm.moth can't compile a value of kind " + what
+    end
+end
+
+to wasm_builtin with fc, e
+    set wanted to name of e
+    set index to front's slot_of(front's builtin_names, wanted) - 1
+    set bits to front's slot_of((list of "bit and", "bit or", "bit xor", "shift left", "shift right"), wanted) - 1
+    set rounding to front's slot_of((list of "rounded down", "rounded up", "rounded"), wanted) - 1
+    if bits is at least 0 # see R.bits
+        for each arg in args of e
+            wasm_expr(fc, arg)
+        end
+        wasm_x(fc, "i32.const " + bits + " i32.const " + index + " i32.const " + wasm_pos(fc, at of e) + " call R.bits")
+    else if wanted is "remainder" # see R.rem
+        for each arg in args of e
+            wasm_expr(fc, arg)
+        end
+        wasm_x(fc, "i32.const " + index + " i32.const " + wasm_pos(fc, at of e) + " call R.rem")
+    else if rounding is at least 0 # see R.rnd
+        wasm_expr(fc, item 1 of args of e)
+        wasm_x(fc, "i32.const " + rounding + " i32.const " + index + " i32.const " + wasm_pos(fc, at of e) + " call R.rnd")
+    else if wanted is "bytes"
+        wasm_expr(fc, item 1 of args of e)
+        wasm_x(fc, "i32.const " + index + " i32.const " + wasm_pos(fc, at of e) + " call R.newBytes")
+    else
+        wasm_x(fc, "i32.const " + index)
+        for each arg in args of e
+            wasm_expr(fc, arg)
+        end
+        set n to length of args of e
+        wasm_x(fc, "array.new_fixed items " + n + " i32.const " + n + " struct.new list i32.const " + wasm_pos(fc, at of e))
+        wasm_hand_over(fc, "call im.builtin") # `start` runs a function
+    end
+end
+
+# ---------- the whole module ----------
+
+# a copy of the runtime's module, for a program to add to: its lists copied, so the runtime's stay as they are
+to wasm_copy with base
+    set m to wasm_new_module()
+    wasm_put_all(types of m, types of base)
+    set known to type_keys of m
+    set base_keys to type_keys of base
+    for each key in keys of base_keys
+        set item key of known to item key of base_keys
+    end
+    wasm_put_all(imports of m, imports of base)
+    wasm_put_all(funcs of m, funcs of base)
+    wasm_put_all(globals of m, globals of base)
+    wasm_put_all(exports of m, exports of base)
+    return m
+end
+
+to wasm_section with out, id, payload
+    add id to out
+    wasm_uleb(out, length of payload)
+    wasm_put_all(out, payload)
+end
+
+# a function's body as the code section has it: its size, its locals (each run of one type as a count and the
+# type), its code and an end
+to wasm_body with f
+    if encoded of f is not nothing
+        return encoded of f
+    end
+    set groups to empty list
+    set counts to empty list
+    for each t in locals of f
+        if length of groups is greater than 0 and wasm_top(groups) is t
+            set item (length of counts) of counts to wasm_top(counts) + 1
+        else
+            add t to groups
+            add 1 to counts
+        end
+    end
+    set inside to empty list
+    wasm_uleb(inside, length of groups)
+    for each i from 1 to length of groups
+        wasm_uleb(inside, item i of counts)
+        wasm_put_all(inside, item i of groups)
+    end
+    wasm_put_all(inside, out of code of f)
+    add 11 to inside
+    set made to empty list
+    wasm_uleb(made, length of inside)
+    wasm_put_all(made, inside)
+    set encoded of f to made
+    return made
+end
+
+to wasm_encode with m
+    set out to list of 0, 97, 115, 109, 1, 0, 0, 0
+    set payload to list of 1, 78 # one recursive group, so the types can refer to each other
+    wasm_uleb(payload, length of types of m)
+    for each t in types of m
+        wasm_put_all(payload, t)
+    end
+    wasm_section(out, 1, payload)
+    set payload to empty list
+    wasm_uleb(payload, length of imports of m)
+    for each i in imports of m
+        wasm_name(payload, "moth")
+        wasm_name(payload, field of i)
+        add 0 to payload
+        wasm_uleb(payload, type of i)
+    end
+    wasm_section(out, 2, payload)
+    set payload to empty list
+    wasm_uleb(payload, length of funcs of m)
+    for each f in funcs of m
+        wasm_uleb(payload, type of f)
+    end
+    wasm_section(out, 3, payload)
+    set payload to empty list
+    wasm_uleb(payload, length of globals of m)
+    for each g in globals of m
+        wasm_put_all(payload, type of g)
+        if mutable of g
+            add 1 to payload
+        else
+            add 0 to payload
+        end
+        wasm_put_all(payload, init of g)
+        add 11 to payload
+    end
+    wasm_section(out, 6, payload)
+    set payload to empty list
+    wasm_uleb(payload, length of exports of m)
+    for each x in exports of m
+        wasm_name(payload, field of x)
+        add 0 to payload
+        wasm_uleb(payload, index of x)
+    end
+    wasm_section(out, 7, payload)
+    if length of declared of m is greater than 0
+        set payload to list of 1, 3, 0
+        wasm_uleb(payload, length of declared of m)
+        for each index in declared of m
+            wasm_uleb(payload, index)
+        end
+        wasm_section(out, 9, payload)
+    end
+    set payload to empty list
+    wasm_uleb(payload, length of funcs of m)
+    for each f in funcs of m
+        wasm_put_all(payload, wasm_body(f))
+    end
+    wasm_section(out, 10, payload)
+    return out
+end
+
+# A parsed program as a module: its bytes (as a list of numbers from 0 to 255), and what the JavaScript that
+# runs it needs to know (wasm.js's instantiate): the tokens its positions point at, the names its records and
+# functions use, its messages, its text, and what the inputs of each function whose inputs say so are.
+to wasm_module with program
+    set m to wasm_copy(wasm_runtime())
+    set init to wasm_func(m, "init", empty list, empty list) # makes the text the program holds
+    set cx to record with m m, init init, ats empty list, names empty list, name_ids empty dictionary, messages empty list,
+        numbers empty dictionary, texts empty dictionary, text_list empty list, kinds (list of nothing)
+    set main to wasm_function(cx, nothing, "main", empty list, program, 0)
+    wasm_export(m, "main", index of f of main)
+    # the calls in progress, for a mistake's trail: how many, and for each (outermost first), where it was made
+    # and the name of its function
+    wasm_out(m, "callDepth", empty list, (list of wasm_i32), "global.get g.depth")
+    wasm_out(m, "callSite", (list of wasm_i32), (list of wasm_i32), "global.get g.calls local.get 0 i32.const 1 i32.shl array.get ids")
+    wasm_out(m, "callName", (list of wasm_i32), (list of wasm_i32), "global.get g.calls local.get 0 i32.const 1 i32.shl i32.const 1 i32.add array.get ids")
+    # an app's handler, called from outside with its inputs (as many as it takes: 0, 1 or 2); and its steps
+    # and depth from 0 before each
+    set invoke to wasm_func(m, "invoke", (list of wasm_eq, wasm_eq, wasm_eq), (list of wasm_eq))
+    for each n from 0 to 2
+        set get_closure to "local.get 0 ref.cast closure struct.get closure "
+        set given to ""
+        for each i from 1 to n
+            set given to given + " local.get " + i
+        end
+        wasm_asm(invoke, get_closure + "2 i32.const " + n + " i32.eq if " + get_closure + "1" + given)
+        set typed to wasm_fn_type(m, n)
+        wasm_asm(invoke, get_closure + "0 ref.cast " + typed + " call_ref " + typed + " return end")
+    end
+    wasm_asm(invoke, "ref.null eq")
+    wasm_export(m, "invoke", index of invoke)
+    wasm_out(m, "restart", empty list, empty list, "call im.grant global.set g.left i32.const 0 global.set g.depth")
+    return record with code wasm_encode(m), ats ats of cx, names names of cx, messages messages of cx, texts text_list of cx, kinds kinds of cx
+end
+
+# Moth source, and the files it may use, by name and text; out comes its module, as wasm_module gives it. A
+# mistake in the program stops it with `fail with` a record of where and why, as compiler.moth's do.
+to wasm_compile with source, file_names, file_texts
+    set files to empty list
+    for each i from 1 to length of file_names
+        add record with name item i of file_names, text item i of file_texts to files
+    end
+    set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
+    return wasm_module(front's parse(front's tokenize(source, ""), reading))
+end

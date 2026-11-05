@@ -675,11 +675,11 @@ function findCaptured(program) {
     };
     const expr = (e) => {
       if (e.kind === "name" || e.kind === "call") use(e.name);
-      for (const child of [e.left, e.right, e.operand, e.of, e.index, ...(e.args ?? []), ...(e.items ?? []), ...(e.values ?? [])]) if (child) expr(child);
+      for (const child of [e.left, e.right, e.operand, e.of, e.index, e.question, ...(e.args ?? []), ...(e.items ?? []), ...(e.values ?? [])]) if (child) expr(child);
     };
     const statement = (s) => {
       if (["set", "add", "count", "each", "call"].includes(s.kind) || (s.kind === "try" && s.name)) use(s.name);
-      for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.key, s.target, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
+      for (const e of [s.value, s.cond, s.count, s.from, s.to, s.list, s.key, s.target, s.amount, s.note, s.time, ...(s.parts ?? []), ...(s.args ?? [])]) if (e) expr(e);
       const made = s.kind === "define" ? s : s.fn; // `when` and `every` make a function too
       if (made) {
         if (s.interval) expr(s.interval);
@@ -1512,7 +1512,12 @@ export function compileToWasmModule(program) {
 
 // Compiles a parsed program: { bytes, listing, run(print, draw, maxSteps) }, like jit() in jit.js.
 export function wasm(program) {
-  const made = compileToWasmModule(program);
+  return wasmProgram(compileToWasmModule(program));
+}
+
+// A module and what running it needs to know, as compileToWasmModule gives them (or wasm.moth, the same back
+// end written in Moth), made ready to run.
+export function wasmProgram(made) {
   const module = new WebAssembly.Module(made.bytes);
   return { ...made, run: (print, draw, maxSteps, ask, disk, args, random, host, printError, clock, play) => instantiate(module, made, print, draw, maxSteps, ask, disk, args, random, host, printError, clock, play).main(maxSteps) };
 }
