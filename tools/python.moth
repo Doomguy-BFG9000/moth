@@ -719,6 +719,7 @@ to set_variable with name, value
     end
 end
 
+# a name in __main__'s value, as a Moth value; a mistake if Python has no variable called that
 to variable with name
     set state to python_enter()
     try

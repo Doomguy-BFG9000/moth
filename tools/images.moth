@@ -118,6 +118,8 @@ to pixel with image, x, y
     return list of byte (at + 1) of kept, byte (at + 2) of kept, byte (at + 3) of kept, byte (at + 4) of kept
 end
 
+# the pixel at x, y, from 0 at the top left, made a colour: red, green, blue and, if it's given, opacity, each
+# 0 to 255
 to set_pixel with image, x, y, colour
     set at to place_of(image, x, y)
     set paint to colour_of(colour)
@@ -198,6 +200,7 @@ end
 
 # ---------- reading ----------
 
+# the image in a PNG or JPEG file, by what the file holds
 to read_image with path
     return image_from(read bytes path)
 end

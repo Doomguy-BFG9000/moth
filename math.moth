@@ -53,6 +53,7 @@ to sine with x
     return total
 end
 
+# the cosine of an angle in radians: sine a quarter turn on
 to cosine with x
     return sine(x + pi / 2)
 end
@@ -164,6 +165,7 @@ to log10 with x
     return ln(x) / ln10
 end
 
+# the logarithm of x to base 2: how many times 2 is multiplied to make it
 to log2 with x
     return ln(x) / ln2
 end
@@ -196,6 +198,7 @@ to ceiling with x
     return 0 - floor(0 - x)
 end
 
+# the nearest whole number, a half going up: round(2.5) is 3 and round(-2.5) is -2
 to round with x
     return floor(x + 0.5)
 end
@@ -231,6 +234,7 @@ to arctangent with x
     return total
 end
 
+# the angle in radians, from -pi/2 to pi/2, whose sine is x, a number from -1 to 1
 to arcsine with x
     if x is less than -1 or x is greater than 1
         fail with "'arcsine' needs a number from -1 to 1, not " + x
@@ -244,6 +248,7 @@ to arcsine with x
     return arctangent(x / sqrt(1 - x * x))
 end
 
+# the angle in radians, from 0 to pi, whose cosine is x, a number from -1 to 1
 to arccosine with x
     if x is less than -1 or x is greater than 1
         fail with "'arccosine' needs a number from -1 to 1, not " + x
@@ -276,6 +281,7 @@ to radians with angle
     return angle * pi / 180
 end
 
+# an angle in radians, in degrees
 to degrees with angle
     return angle * 180 / pi
 end

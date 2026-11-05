@@ -147,6 +147,7 @@ to serve_on_workers with port, handler, workers
     web_serve(no, port, handler)
 end
 
+# serve, and the rest, return once what's being sent is sent: called from a handler, or a task
 to stop_serving
     set web_running to no
 end
@@ -194,6 +195,7 @@ to serve_secure with port, handler, certificate, key
     web_serve_secure(no, port, handler, certificate, key)
 end
 
+# answers requests with HTTPS, as serve_secure does, from every network the computer is on
 to serve_secure_everywhere with port, handler, certificate, key
     web_serve_secure(yes, port, handler, certificate, key)
 end

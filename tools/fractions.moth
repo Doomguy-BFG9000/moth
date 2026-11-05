@@ -87,14 +87,17 @@ to fraction with up, down
     return divided(up, down)
 end
 
+# the top of a fraction in lowest terms (its numerator), with its sign
 to top_of with x
     return top of read_fraction(x)
 end
 
+# the bottom of a fraction in lowest terms (its denominator), never below 1
 to bottom_of with x
     return bottom of read_fraction(x)
 end
 
+# a + b
 to plus with a, b
     set x to read_fraction(a)
     set y to read_fraction(b)
@@ -102,16 +105,19 @@ to plus with a, b
     return written_of(lowest(up, big's times(bottom of x, bottom of y)))
 end
 
+# a - b
 to minus with a, b
     return plus(a, negated(b))
 end
 
+# a times b
 to times with a, b
     set x to read_fraction(a)
     set y to read_fraction(b)
     return written_of(lowest(big's times(top of x, top of y), big's times(bottom of x, bottom of y)))
 end
 
+# a divided by b, which can't be 0
 to divided with a, b
     set x to read_fraction(a)
     set y to read_fraction(b)
@@ -121,11 +127,13 @@ to divided with a, b
     return written_of(lowest(big's times(top of x, bottom of y), big's times(bottom of x, top of y)))
 end
 
+# a with its sign the other way
 to negated with a
     set x to read_fraction(a)
     return written_of(record with top big's negated(top of x), bottom bottom of x)
 end
 
+# a without its sign
 to absolute with a
     set x to read_fraction(a)
     return written_of(record with top big's absolute(top of x), bottom bottom of x)
@@ -159,10 +167,12 @@ to rounded_down with a
     return big's divided(top of x, bottom of x)
 end
 
+# the whole number at or above a
 to rounded_up with a
     return big's negated(rounded_down(negated(a)))
 end
 
+# the nearest whole number, a half going away from 0
 to rounded with a
     return as_decimal(a, 0)
 end

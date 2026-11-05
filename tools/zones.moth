@@ -109,6 +109,7 @@ to zones_parts with seconds
     return made
 end
 
+# a moment, in seconds since 1 January 1970, written in UTC as ISO 8601: "2026-11-03T14:05:09Z"
 to utc_text with moment
     set t to zones_parts(moment)
     return zones_date_text(t) + "Z"
