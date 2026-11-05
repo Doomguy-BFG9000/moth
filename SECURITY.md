@@ -63,11 +63,12 @@ You can also make moth yourself and compare: `node bootstrap.mjs` makes moth fro
 builds itself into exactly the bytes of the release, on Windows or Linux:
 
 ```text
-moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 ```
 
 `packaging/release-build.sh dist` does all of it, the Windows program included. 1.11.0's programs were
-built without `--include moth-debugger.moth`, so for 1.11.0 leave that out.
+built without `--include moth-debugger.moth` or `--include package.json` (which `moth --version` reads, from
+the release after 1.11.0), so for 1.11.0 leave both out.
 
 ## The permission model
 

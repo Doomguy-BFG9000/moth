@@ -1,0 +1,83 @@
+name: python-publish
+
+# mothlang, Moth's Python package (DESIGN §137, docs/python-package.md): its wheels for Linux and Windows, each with
+# moth in it, and its source, built and tested, then uploaded to PyPI through trusted publishing, with no token: PyPI
+# trusts this workflow, in the `pypi` environment, once it's told to. For a published release, or by hand with
+# `publish` ticked; by hand without it, a dry run, which keeps what it built as the run's artifact. A pull request
+# that changes the package or this file gets the dry run too, so what a release will do is checked before it's
+# needed; it never uploads.
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths: ["python/**", ".github/workflows/python-publish.yml"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to PyPI (unticked: build and test only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: a release's version is mothlang's
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('python/src/mothlang/__init__.py').read())[1])")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::the release is $TAG, but mothlang's __version__ is $version: make them the same"
+            exit 1
+          fi
+      - name: make moth for Linux and for Windows, from the source
+        run: |
+          node bootstrap.mjs linux
+          node bootstrap.mjs windows
+      - name: build the source and a wheel for each system
+        working-directory: python
+        run: |
+          python -m pip install -q build twine pytest
+          python -m build --sdist
+          MOTHLANG_BINARY="$GITHUB_WORKSPACE/moth" MOTHLANG_PLATFORM=manylinux_2_17_x86_64.manylinux2014_x86_64 python -m build --wheel
+          MOTHLANG_BINARY="$GITHUB_WORKSPACE/moth.exe" MOTHLANG_PLATFORM=win_amd64 python -m build --wheel
+          ls -l dist
+          python -m twine check --strict dist/*
+      - name: test the Linux wheel, installed
+        working-directory: python
+        run: |
+          python -m pip install dist/*manylinux*.whl
+          python -m pytest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mothlang-dist
+          path: python/dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mothlang/
+    permissions:
+      id-token: write # the token GitHub gives PyPI to say who's asking: trusted publishing, no secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mothlang-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

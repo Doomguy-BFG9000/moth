@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mothlang"
+dynamic = ["version"]
+description = "Moth, the programming language that reads like plain English, from Python: run Moth, and call its compiled functions for speed"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "LICENSE-DejaVu"]
+authors = [{ name = "Samyak Pudke" }]
+requires-python = ">=3.10"
+keywords = ["moth", "programming language", "compiler", "ctypes", "speed", "machine code"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Other",
+    "Topic :: Software Development :: Compilers",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/samyyy2423/moth"
+Documentation = "https://github.com/samyyy2423/moth/blob/main/python/README.md"
+Source = "https://github.com/samyyy2423/moth"
+Changelog = "https://github.com/samyyy2423/moth/blob/main/CHANGELOG.md"
+
+[project.scripts]
+moth = "mothlang._cli:main"
+
+[tool.hatch.version]
+path = "src/mothlang/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mothlang"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mothlang", "tests", "benchmarks", "hatch_build.py", "README.md", "LICENSE", "NOTICE", "LICENSE-DejaVu"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

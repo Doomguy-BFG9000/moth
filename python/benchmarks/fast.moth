@@ -1,0 +1,61 @@
+# The functions the benchmark calls from Python, written the same way in bench.py's Python
+
+to fib with n
+    if n is less than 2
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+
+# how many primes there are below n, by the sieve of Eratosthenes
+to primes_below with n
+    set sieve to empty list
+    repeat n times
+        add yes to sieve
+    end
+    set found to 0
+    for each k from 2 to n - 1
+        if item k of sieve
+            add 1 to found
+            set m to k * k
+            repeat while m is less than n
+                set item m of sieve to no
+                set m to m + k
+            end
+        end
+    end
+    return found
+end
+
+# the points of a Mandelbrot set's picture, width by height, that stay within it for 100 rounds
+to mandelbrot with width, height
+    set inside to 0
+    for each row from 0 to height - 1
+        for each col from 0 to width - 1
+            set cr to col / width * 3 - 2
+            set ci to row / height * 2 - 1
+            set zr to 0
+            set zi to 0
+            set rounds to 0
+            repeat while rounds is less than 100 and zr * zr + zi * zi is at most 4
+                set next_r to zr * zr - zi * zi + cr
+                set zi to 2 * zr * zi + ci
+                set zr to next_r
+                add 1 to rounds
+            end
+            if rounds is 100
+                add 1 to inside
+            end
+        end
+    end
+    return inside
+end
+
+# the sum of a list of numbers, given from Python
+to total_of with numbers
+    set sum to 0
+    for each x in numbers
+        set sum to sum + x
+    end
+    return sum
+end

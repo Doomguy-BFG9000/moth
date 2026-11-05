@@ -1022,6 +1022,14 @@ keep a Moth program to what it was allowed; a C library, and a program it starts
 `ask` reads a line from the standard input. Output is UTF-8. A program ends with 0, with what `stop the
 program with` gave, or with 1 for a mistake.
 
+### 11.6 The command's release version
+
+`moth --version` and `moth version`, with no other arguments, write `moth MAJOR.MINOR.PATCH` and a
+newline to the standard output, write nothing to the standard error, and end with 0. The version is the
+release version from `package.json`, built into moth when it is made; no file beside the installed program
+or in the current folder is needed. Extra arguments are wrong usage, reported on the standard error with
+exit code 2. `moth build app.moth --version 1.2.0` still sets the built program's version.
+
 ## 12. Apps
 
 A program can wait for things to happen once its top level has run:
