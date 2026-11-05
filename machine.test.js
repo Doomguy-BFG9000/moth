@@ -295,9 +295,9 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "wasm.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth"].map((f) => [f, here(f)]));
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "wasm.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth", "package.json"].map((f) => [f, here(f)]));
   const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "wasm.moth": sources["wasm.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"], "tools/hash.moth": sources["tools/hash.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
-    include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
+    include: Object.fromEntries(["moth-debugger.moth", "package.json"].map((file) => [file, Buffer.from(sources[file])])) });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
   if (target === "linux") chmodSync(exe, 0o755);
@@ -1113,9 +1113,38 @@ test("moth.exe builds a program, and itself into the same bytes", { skip }, () =
   assert.equal(built.status, 0, built.stdout + built.stderr);
   assert.match(built.stdout, /^compiled hi\.moth to machine code for (Windows|Linux) -> hi(\.exe)? \(.* bytes\)\n$/);
   assert.equal(spawnSync(executable(dir, "hi"), [], { encoding: "utf8" }).stdout, "abab\nSTRASSE\n");
-  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write", "--allow-run", "--include", "moth-debugger.moth"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+  const again = spawnSync(exe, ["build", "moth.moth", "--allow-read", "--allow-write", "--allow-run", "--include", "moth-debugger.moth", "--include", "package.json"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.ok(Buffer.from(made).equals(readFileSync(executable(dir, "moth"))), "moth.exe built itself into different bytes");
+  const version = spawnSync(executable(dir, "moth"), ["--version"], { cwd: tmpdir(), encoding: "utf8" });
+  assert.deepEqual([version.status, version.stdout, version.stderr], [0, `moth ${JSON.parse(here("package.json")).version}\n`, ""]);
+});
+
+test("moth.exe --version and version say the release version away from its source", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const away = join(dir, "version away");
+  mkdirSync(away);
+  const moved = executable(away, "renamed-moth");
+  copyFileSync(exe, moved);
+  if (target === "linux") chmodSync(moved, 0o755);
+  const want = `moth ${JSON.parse(here("package.json")).version}\n`;
+  for (const manifest of [null, '{"version":"0.0.0"}', "not JSON"]) {
+    if (manifest !== null) writeFileSync(join(away, "package.json"), manifest);
+    for (const command of ["--version", "version"]) {
+      const said = spawnSync(moved, [command], { cwd: away, encoding: "utf8", input: "", timeout: 5_000 });
+      assert.deepEqual([said.status, said.stdout, said.stderr], [0, want, ""], `${command}, package.json: ${manifest}`);
+    }
+  }
+});
+
+test("moth.exe version commands reject extra arguments", { skip }, () => {
+  const { dir, exe } = mothExe();
+  for (const args of [["--version", "extra"], ["version", "extra"], ["version", "--allow-all"]]) {
+    const said = spawnSync(exe, args, { cwd: dir, encoding: "utf8", input: "", timeout: 5_000 });
+    assert.deepEqual([said.status, said.stdout], [2, ""], args.join(" "));
+    assert.match(said.stderr, /^usage: moth /);
+    assert.match(said.stderr, /moth --version \| moth version/);
+  }
 });
 
 // --icon, --version and --include: a program shipped as one file, its files built in and found where they

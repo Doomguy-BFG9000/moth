@@ -6,6 +6,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **`moth --version` and `moth version`** say which Moth this is: one line with the release version,
+  taken from `package.json` and built into the standalone program.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.

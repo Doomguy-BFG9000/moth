@@ -5,7 +5,7 @@
 //
 // It makes the same bytes moth makes of itself, so after this moth builds moth:
 //
-//     moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+//     moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { machineCompiler } from "./moth.js";
 
@@ -15,7 +15,8 @@ if (target !== "windows" && target !== "linux") throw new Error("usage: node boo
 const machine = machineCompiler(here("machine.moth"), here("compiler.moth"));
 const files = { "machine.moth": here("machine.moth"), "compiler.moth": here("compiler.moth"), "wasm.moth": here("wasm.moth"), "stdlib.moth": here("stdlib.moth"), "webpage.moth": here("webpage.moth"), "checker-rules.moth": here("checker-rules.moth"), "tools/hash.moth": here("tools/hash.moth") };
 // moth debug builds the debugger into the programs it debugs, so moth carries it, as a file built into it
-const include = { "moth-debugger.moth": readFileSync(new URL("./moth-debugger.moth", import.meta.url)) };
+// The release manifest travels with moth, so its version never depends on the current folder.
+const include = Object.fromEntries(["moth-debugger.moth", "package.json"].map((file) => [file, readFileSync(new URL(`./${file}`, import.meta.url))]));
 const bytes = machine(here("moth.moth"), { files, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"], include });
 const out = new URL(target === "windows" ? "./moth.exe" : "./moth", import.meta.url);
 writeFileSync(out, bytes);
