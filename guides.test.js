@@ -1,4 +1,4 @@
-// The cookbook, the examples and the exercises (DESIGN §133): the pages are what make-guides.mjs makes of
+// The cookbook, the examples and the exercises (DESIGN §134): the pages are what make-guides.mjs makes of
 // guides/, every recipe says what its page says it does (or, where it needs a site, a server or a library,
 // has no problem moth check finds), every example runs, and every exercise's tests pass with its example
 // solution and fail with the file a learner starts from.

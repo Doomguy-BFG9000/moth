@@ -1141,7 +1141,7 @@ test("moth.exe coverage says which lines of a program and the files it uses ran"
   rmSync(join(dir, "lcov.info"));
 });
 
-// moth coverage of tests (DESIGN §131): each test run as moth test runs it, with what each ran added up, and said
+// moth coverage of tests (DESIGN §132): each test run as moth test runs it, with what each ran added up, and said
 // of the files the tests use: not the tests' own, nor moth's copies of the standard library, nor packages
 test("moth.exe coverage runs a file's tests, or a folder's, and says which lines of the files they test ran", { skip }, () => {
   const { dir, exe } = mothExe();
