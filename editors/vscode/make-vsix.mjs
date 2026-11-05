@@ -1,4 +1,4 @@
-// Packs the extension into moth-<version>.vsix, which VS Code installs:
+// Packs the extension into moth-<version>.vsix, which VS Code installs, with nothing to install first:
 //
 //     node editors/vscode/make-vsix.mjs
 //     code --install-extension editors/vscode/moth-0.1.0.vsix
@@ -6,22 +6,30 @@
 // A .vsix is a zip of the extension, under extension/, with a manifest and a list of content types beside
 // it. Moth's engine goes in too, as engine/, so the extension needs nothing else: the same moth.js the
 // playground runs, whose checker finds problems as you type and whose format() tidies.
-import { readFileSync, writeFileSync } from "node:fs";
-import { deflateRawSync } from "node:zlib";
+//
+// The Marketplace's own packer, vsce, makes the .vsix that's published (see docs/publishing-the-extension.md).
+// It packs the folder as .vscodeignore says, after `node make-vsix.mjs --engine`, its vscode:prepublish
+// script, has copied the engine into engine/ here. FILES is what both put in: check-package.mjs holds vsce to it.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 const here = (file) => new URL(file, import.meta.url);
 const repo = (file) => new URL(`../../${file}`, import.meta.url);
 const manifest = JSON.parse(readFileSync(here("package.json"), "utf8"));
 export const ENGINE = ["moth.js", "vm.js", "scope.js", "jit.js", "wasm.js", "wasm-binary.js", "checker.js", "pictures.js"];
-const OWN = ["package.json", "extension.js", "client.js", "debug-adapter.js", "language-configuration.json", "syntaxes/moth.tmLanguage.json", "snippets/moth.json", "README.md"];
+const OWN = ["package.json", "extension.js", "client.js", "debug-adapter.js", "find-moth.js", "language-configuration.json", "syntaxes/moth.tmLanguage.json", "snippets/moth.json", "images/icon.png", "README.md", "CHANGELOG.md"];
+const ENGINE_PACKAGE = Buffer.from('{ "type": "module" }\n'); // the engine's files are modules
+// every file of the extension's folder that goes in the package, as vsce lists them (vsce ls), the engine's
+// as they are once copied to engine/; the licence is LICENSE here, which a .vsix calls LICENSE.txt
+export const FILES = [...OWN, "LICENSE", ...ENGINE.map((file) => `engine/${file}`), "engine/package.json"];
 
 // every file in the package, by its name there
 export function contents() {
   const files = new Map();
   for (const file of OWN) files.set(`extension/${file}`, readFileSync(here(file)));
-  files.set("extension/LICENSE.txt", readFileSync(repo("LICENSE")));
+  files.set("extension/LICENSE.txt", readFileSync(here("LICENSE")));
   for (const file of ENGINE) files.set(`extension/engine/${file}`, readFileSync(repo(file)));
-  files.set("extension/engine/package.json", Buffer.from('{ "type": "module" }\n')); // the engine's files are modules
+  files.set("extension/engine/package.json", ENGINE_PACKAGE);
   const escape = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   files.set("extension.vsixmanifest", Buffer.from(`<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
@@ -39,6 +47,7 @@ export function contents() {
       <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
     </Properties>
     <License>extension/LICENSE.txt</License>
+    <Icon>extension/images/icon.png</Icon>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Code" />
@@ -47,7 +56,9 @@ export function contents() {
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/CHANGELOG.md" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.txt" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/images/icon.png" Addressable="true" />
   </Assets>
 </PackageManifest>
 `));
@@ -56,6 +67,7 @@ export function contents() {
   <Default Extension=".json" ContentType="application/json" />
   <Default Extension=".js" ContentType="application/javascript" />
   <Default Extension=".md" ContentType="text/markdown" />
+  <Default Extension=".png" ContentType="image/png" />
   <Default Extension=".txt" ContentType="text/plain" />
   <Default Extension=".vsixmanifest" ContentType="text/xml" />
 </Types>
@@ -122,7 +134,40 @@ export function zip(files) {
   return Buffer.concat([...parts, directory, end]);
 }
 
+// A zip's files, by name, read back from its central directory: this one's, or vsce's
+export function unzip(bytes) {
+  const files = new Map();
+  const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let at = bytes.readUInt32LE(end + 16);
+  for (let n = bytes.readUInt16LE(end + 10); n > 0; n--) {
+    if (bytes.readUInt32LE(at) !== 0x02014b50) throw new Error("this isn't a zip, or not all of one");
+    const method = bytes.readUInt16LE(at + 10);
+    const packed = bytes.readUInt32LE(at + 20);
+    const nameLength = bytes.readUInt16LE(at + 28);
+    const local = bytes.readUInt32LE(at + 42);
+    const name = bytes.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+    const from = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+    const data = method === 0 ? Buffer.from(bytes.subarray(from, from + packed)) : inflateRawSync(bytes.subarray(from, from + packed));
+    if (data.length !== bytes.readUInt32LE(at + 24)) throw new Error(`${name} isn't the length the zip says`);
+    files.set(name, data);
+    at += 46 + nameLength + bytes.readUInt16LE(at + 30) + bytes.readUInt16LE(at + 32);
+  }
+  return files;
+}
+
+// Moth's engine, copied into engine/ beside the extension, where vsce packs it from
+export function copyEngine() {
+  mkdirSync(here("engine/"), { recursive: true });
+  for (const file of ENGINE) writeFileSync(here(`engine/${file}`), readFileSync(repo(file)));
+  writeFileSync(here("engine/package.json"), ENGINE_PACKAGE);
+}
+
 if (process.argv[1] && new URL(import.meta.url).pathname.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop())) {
+  if (process.argv.includes("--engine")) {
+    copyEngine();
+    console.log(`copied Moth's engine into engine/ (${ENGINE.length} files)`);
+    process.exit(0);
+  }
   const out = here(`moth-${manifest.version}.vsix`);
   const bytes = zip(contents());
   writeFileSync(out, bytes);
