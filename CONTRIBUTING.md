@@ -48,6 +48,10 @@ keep it working:
 - **A library's public functions say what they do,** in a comment just above each `to`, which the editors'
   hovers and the reference show; a helper starts with the library's own prefix (`stats_`), or is named in
   make-docs.mjs's `HELPERS`.
+- **The VS Code extension is tested in VS Code.** `editors/vscode` has tools of its own, for packing and testing
+  it: `npm ci` there, then `npx @vscode/vsce package` and `xvfb-run -a node e2e/run.mjs` (CI runs both).
+  [docs/publishing-the-extension.md](docs/publishing-the-extension.md) says how it's published to the Visual
+  Studio Marketplace and Open VSX.
 - **Moth files are tidy.** `moth tidy --check file.moth` says whether a file is laid out the one way Moth
   writes code, and `moth tidy file.moth` lays it out.
 - **A name can't be a word Moth uses.** `set`, `item`, `list`, `to`, `every`, `number`, `bytes` and `read`
