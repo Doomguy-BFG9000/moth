@@ -236,8 +236,18 @@ function languageServer(output, context) {
   return { state, start, stop, restart, opened, changed, closed, ask };
 }
 
-// `moth run` or `build` on the file in front, saved first, in a terminal of its own: moth is the terminal's
-// program, not a command typed into a shell, so a path with spaces in it needs no quotes
+// `moth run` or `build` on a file, as a task: moth is the task's program, not a command typed into a shell, so a
+// path with spaces in it needs no quotes; the program's input is the terminal's, for its questions; and what it
+// said stays there once it has ended, as a terminal of its own wouldn't (it closes as its program ends)
+function mothTask(command, file, moth, scope = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file)) ?? vscode.TaskScope.Workspace) {
+  const name = `${command} ${path.basename(file)}`;
+  const task = new vscode.Task({ type: "moth", command, file }, scope, name, "moth",
+    new vscode.ProcessExecution(moth, [command, path.basename(file)], { cwd: path.dirname(file) }), []);
+  task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, focus: true, panel: vscode.TaskPanelKind.Dedicated, clear: true };
+  return task;
+}
+
+// Run or Build: the file in front, saved first
 async function start(command, context, output) {
   const document = vscode.window.activeTextEditor?.document;
   if (!document || document.languageId !== "moth") return vscode.window.showInformationMessage("Open a Moth file first.");
@@ -248,10 +258,7 @@ async function start(command, context, output) {
     return undefined;
   }
   if (document.isDirty) await document.save();
-  const file = document.uri.fsPath;
-  const terminal = vscode.window.createTerminal({ name: `moth ${command} ${path.basename(file)}`, cwd: path.dirname(file), shellPath: found.file, shellArgs: [command, path.basename(file)] });
-  terminal.show();
-  return terminal;
+  return vscode.tasks.executeTask(mothTask(command, document.uri.fsPath, found.file));
 }
 
 // `moth debug`, for VS Code's debugger: the debug adapter, inside the extension
@@ -409,6 +416,22 @@ function activate(context) {
       },
     }),
     vscode.commands.registerCommand("moth.build", () => start("build", context, output)),
+    // a moth task in tasks.json, { "type": "moth", "command": "build", "file": "app.moth" }, made into moth's
+    vscode.tasks.registerTaskProvider("moth", {
+      provideTasks: () => [],
+      resolveTask(task) {
+        const { command, file } = task.definition;
+        const found = whereIsMoth();
+        if (!["run", "build"].includes(command) || !file) return undefined;
+        if (!found.file) {
+          tellMissing(found, { context, output, asked: true });
+          return undefined;
+        }
+        const folder = typeof task.scope === "object" ? task.scope.uri.fsPath : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const made = mothTask(command, path.resolve(folder ?? "", file), found.file, task.scope);
+        return new vscode.Task(task.definition, task.scope, task.name, "moth", made.execution, []);
+      },
+    }),
   );
   vscode.workspace.textDocuments.forEach(check);
   // what the extension gives other extensions, and its tests: where moth is, and whether moth lsp is running

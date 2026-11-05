@@ -11,3 +11,7 @@ to price_of with thing as text gives a number
             fail with "we don't sell {thing}"
     end
 end
+
+to test_price_of
+    expect price_of("tea") is 3.1
+end

@@ -33,7 +33,10 @@ export function unpack(vsix, top) {
 export function programs(top, files) {
   const folder = join(top, "my programs");
   mkdirSync(folder, { recursive: true });
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(folder, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(folder, name)), { recursive: true });
+    writeFileSync(join(folder, name), text);
+  }
   return folder;
 }
 

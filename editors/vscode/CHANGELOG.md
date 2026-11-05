@@ -14,7 +14,8 @@ The first version on the Visual Studio Marketplace and Open VSX.
 - **The outline, Go to Definition, hovers and completion**, from Moth's language server, `moth lsp`, where moth
   is installed; without it, the outline and Go to Definition find the file's functions by their lines.
 - **A debugger**, through `moth debug`: breakpoints, stepping, the calls in progress and the variables.
-- **Run and Build**, which start `moth run` or `moth build` on the file in a terminal.
+- **Run and Build**, which start `moth run` or `moth build` on the file as a task, whose terminal keeps what the
+  program said once it has ended, and answers its questions; and `"type": "moth"` tasks in tasks.json.
 - **Snippets** for `to`, `if`, `repeat`, `for each`, `try` and a test.
 - **Finding moth**: from the `moth.path` setting, or else the PATH (`moth.exe` on Windows, `moth` on Linux).
   Where there's none, one message says so, with a button to Moth's releases.

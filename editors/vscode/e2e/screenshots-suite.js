@@ -50,9 +50,9 @@ function gif(name, shown) {
 }
 const settle = () => sleep(1200);
 
-// where things are on a 1300 by 850 screen, VS Code filling it
-const EDITOR = [0, 0, 1300, 610]; // the editor, with the activity bar and the top of the window
-const WINDOW = [0, 0, 1300, 850];
+// where things are on a 1300 by 850 screen, VS Code filling it, below its title bar
+const EDITOR = [0, 35, 1300, 630]; // the editor, with the activity bar
+const WINDOW = [0, 35, 1300, 815];
 
 const withMoth = [
   async function problems() {
@@ -71,13 +71,14 @@ const withMoth = [
     await run("editor.action.showHover");
     await settle();
     shown.push([shot("problems-2", EDITOR, frames), 300]);
-    shot("problems", EDITOR);
     await run("editor.action.quickFix");
     await settle();
     shown.push([shot("problems-3", EDITOR, frames), 220]);
     await run("acceptSelectedCodeAction");
     await sleep(400);
     if (editor.document.lineAt(25).text.includes("cots")) await run("editor.action.codeAction", { kind: "quickfix", apply: "first" });
+    await run("cursorEnd");
+    await run("editor.action.hideHover").then(undefined, () => {});
     await settle();
     shown.push([shot("problems-4", EDITOR, frames), 250]);
     gif("problems", shown);
@@ -86,8 +87,27 @@ const withMoth = [
 
   async function formatting() {
     // prices.moth written any old way, then Format Document
-    const messy = "# price_of: what one of an item costs, in pounds\nto  price_of with thing as text gives a number\nmatch thing\n  when \"apples\"\n      return 2.4\n  when \"bread\"\n     return 1.35\n  when \"tea\"\n  return 3.1\n  else\n   fail with \"we don't sell {thing}\"\nend\n    end\n";
     const editor = await open("prices.moth");
+    const messy = [
+      "# price_of: what one of an item costs, in pounds",
+      "to  price_of with thing as text gives a number",
+      "match thing",
+      "  when \"apples\"",
+      "      return 2.4",
+      "  when \"bread\"",
+      "     return 1.35",
+      "        when \"tea\"",
+      "  return 3.1",
+      "  else",
+      "   fail with \"we don't sell {thing}\"",
+      "end",
+      "    end",
+      "",
+      "to test_price_of",
+      "expect price_of( \"tea\" ) is 3.1",
+      "  end",
+      "",
+    ].join("\n");
     await editor.edit((e) => e.replace(new vscode.Range(0, 0, editor.document.lineCount, 0), messy));
     await settle();
     const before = shot("format-0", EDITOR, frames);
@@ -103,11 +123,15 @@ const withMoth = [
   },
 
   async function outline() {
+    // the Explorer with only the outline in it
     await open("shop.moth", 15, 3);
     await run("workbench.view.explorer");
+    for (const view of ["workbench.explorer.fileView", "timeline"]) await run(`${view}.removeView`).then(undefined, () => {});
     await run("outline.focus");
+    await run("outline.expand").then(undefined, () => {});
     await settle();
-    shot("outline", [0, 0, 1000, 850]);
+    shot("outline", [0, 35, 1000, 630]);
+    await run("workbench.action.closeSidebar");
   },
 
   async function definition() {
@@ -122,7 +146,8 @@ const withMoth = [
   },
 
   async function hover() {
-    await open("shop.moth", 25, 34);
+    await open("shop.moth", 25, 24); // change_for
+    await sleep(500);
     await run("editor.action.showHover");
     await settle();
     shot("hover", EDITOR);
@@ -130,14 +155,14 @@ const withMoth = [
   },
 
   async function completion() {
-    const editor = await open("shop.moth", 26, 0);
+    await open("shop.moth", 26, 0);
     await typeText("say shopping's ");
     await sleep(300);
     await run("editor.action.triggerSuggest");
     await settle();
     shot("completion", EDITOR);
     await run("hideSuggestWidget");
-    await editor.document.save().then(() => run("workbench.action.files.revert"));
+    await run("workbench.action.files.revert");
   },
 
   async function debugging() {
@@ -150,9 +175,12 @@ const withMoth = [
       });
     });
     await run("moth.debug");
-    await stopped;
+    await Promise.race([stopped, sleep(90_000).then(() => Promise.reject(new Error("the debugger didn't stop at the breakpoint")))]);
     await sleep(800);
     await run("workbench.debug.action.focusVariablesView");
+    await sleep(500);
+    await run("list.focusFirst");
+    await run("list.expand");
     await settle();
     shot("debugger", WINDOW);
     await vscode.debug.stopDebugging();
@@ -163,11 +191,11 @@ const withMoth = [
 
   async function running() {
     await open("shop.moth", 25, 0);
+    const ended = new Promise((resolve) => vscode.tasks.onDidEndTaskProcess((e) => e.execution.task.name === "run shop.moth" && resolve()));
     await run("moth.run");
-    const terminal = await until(() => vscode.window.terminals.find((t) => t.name === "moth run shop.moth"));
-    await until(() => terminal.exitStatus, Boolean, 60);
+    await Promise.race([ended, sleep(90_000)]);
     await sleep(1500);
-    shot("run", [0, 300, 1300, 550]);
+    shot("run", [0, 300, 1300, 550 - 35]);
   },
 ];
 
@@ -178,7 +206,7 @@ const withoutMoth = [
     await sleep(500);
     await open("shop.moth");
     await settle();
-    shot("missing-moth", [500, 560, 800, 290]);
+    shot("missing-moth", [400, 560, 900, 290 - 35]);
   },
 ];
 

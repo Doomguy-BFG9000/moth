@@ -121,14 +121,48 @@ test("with moth, Go to Definition goes into a file it uses, and hovers and compl
   for (const name of ["twice", "outer"]) assert.ok(labels.includes(name), `no ${name} in ${labels.slice(0, 30).join(", ")}`);
 }, { needsMoth: true });
 
-test("Build runs moth build on the file, from the moth with spaces in its path", async () => {
+// how a task of the extension's ended, by its name: its exit code
+const ended = (name) => new Promise((resolve) => {
+  const listening = vscode.tasks.onDidEndTaskProcess((e) => {
+    if (e.execution.task.name !== name) return;
+    listening.dispose();
+    resolve(e.exitCode);
+  });
+});
+const within = (promise, seconds, what) => Promise.race([promise, sleep(seconds * 1000).then(() => Promise.reject(new Error(`${what} took more than ${seconds} seconds`)))]);
+
+test("Build and Run start moth on the file, from the moth with spaces in its path, and what it said stays", async () => {
   await open("hello.moth");
   const made = path.join(folder, process.platform === "win32" ? "hello.exe" : "hello");
+  let end = ended("build hello.moth");
   await vscode.commands.executeCommand("moth.build");
-  assert.ok(vscode.window.terminals.some((t) => t.name === "moth build hello.moth"), vscode.window.terminals.map((t) => t.name).join(", "));
-  assert.ok(await until(() => fs.existsSync(made), Boolean, 120), `moth build didn't make ${made}`);
+  assert.equal(await within(end, 120, "moth build"), 0);
+  assert.ok(fs.existsSync(made), `moth build didn't make ${made}`);
+  end = ended("run hello.moth");
   await vscode.commands.executeCommand("moth.run");
-  assert.ok(vscode.window.terminals.some((t) => t.name === "moth run hello.moth"));
+  assert.equal(await within(end, 120, "moth run"), 0);
+  await sleep(1000);
+  const names = vscode.window.terminals.map((t) => t.name);
+  assert.ok(names.some((name) => name.includes("run hello.moth")), `the terminal with what it said has gone: ${names.join(", ")}`);
+}, { needsMoth: true });
+
+test("a program that's run can ask, and be answered in its terminal", async () => {
+  await open("ask.moth");
+  const end = ended("run ask.moth");
+  await vscode.commands.executeCommand("moth.run");
+  const terminal = await until(() => vscode.window.terminals.find((t) => t.name.includes("run ask.moth")));
+  assert.ok(terminal, vscode.window.terminals.map((t) => t.name).join(", "));
+  await sleep(3000); // built, and asking
+  terminal.sendText("Sam");
+  assert.equal(await within(end, 120, "moth run ask.moth"), 0);
+}, { needsMoth: true });
+
+test("a moth task in tasks.json runs moth", async () => {
+  const [task] = (await vscode.tasks.fetchTasks({ type: "moth" })).filter((t) => t.name === "say hello");
+  assert.ok(task, "VS Code didn't find the task");
+  const end = ended("say hello");
+  await vscode.tasks.executeTask(task);
+  assert.equal(await within(end, 120, "the task"), 0);
 }, { needsMoth: true });
 
 test("the debugger stops at a breakpoint, and shows the variables", async () => {
