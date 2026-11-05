@@ -714,9 +714,12 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     }
     if (word("to")) {
       const fnName = name("a function name");
-      const { params, kinds, defaults } = inputsOf();
+      const { params, kinds, types, defaults } = inputsOf();
+      const gives = word("gives") ? givesType() : null; // `to area with w, h gives a number`
       const made = { ...func(fnName, params, t), kinds };
       if (defaults.some((d) => d)) made.defaults = defaults;
+      if (types.some((type) => type)) made.types = types; // what the inputs say beyond KINDS, for the checker
+      if (gives) made.gives = gives;
       reading.defines.push(made);
       return made;
     }
@@ -1012,13 +1015,55 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     fail(t, `a line can't start with ${describe(t)}`);
   }
 
-  // `a number`, `text`, `yes or no`...: what an input says it is (one of KINDS in vm.js), after its `as`
-  function kind() {
+  // What an input says it is, after its `as`: [its number in KINDS (vm.js), which each call checks, and
+  // what it says beyond that, as written, which only the checker reads (DESIGN §107), or null]. `a number`,
+  // `text`, `yes or no`... are KINDS; `a dog` (or `an owl`) is a record a kind makes, checked as a record;
+  // `a list of numbers` is a list, checked as a list.
+  function inputType() {
+    if (wordsAt(pos, ["a", "list", "of"])) {
+      pos += 3;
+      return [3, `a list of ${listHolds()}`];
+    }
     const phrases = KINDS.map((k) => k.split(" "));
     const at = phrases.findIndex((words) => words.every((w, i) => tokens[pos + i].type === "word" && tokens[pos + i].value === w));
-    if (at < 0) expected(`what kind of value it is (${KINDS.map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")})`);
-    pos += phrases[at].length;
-    return at;
+    if (at >= 0) {
+      pos += phrases[at].length;
+      return [at, null];
+    }
+    const [article, named] = [peek(), tokens[pos + 1]];
+    if ((isWord("a") || isWord("an")) && !named.nl && named.type === "word" && !RESERVED.has(named.value)) {
+      pos += 2;
+      return [4, `${article.value} ${named.value}`];
+    }
+    return expected(`what kind of value it is (${KINDS.map((k) => `'${k}'`).join(", ").replace(/, ([^,]*)$/, " or $1")}, or a kind's name, like 'a dog')`);
+  }
+
+  // what `a list of` holds: `numbers`, `text`, `yes or no`, `lists` (or `lists of numbers`), `records`,
+  // `dictionaries`, `bytes`, `functions`, or what a kind makes, as `dogs`
+  function listHolds() {
+    if (wordsAt(pos, ["lists", "of"])) {
+      pos += 2;
+      return `lists of ${listHolds()}`;
+    }
+    if (wordsAt(pos, ["yes", "or", "no"])) {
+      pos += 3;
+      return "yes or no";
+    }
+    const t = peek();
+    if (t.nl || t.type !== "word" || (RESERVED.has(t.value) && t.value !== "bytes")) expected("what the list holds, like 'numbers', 'text' or 'dogs'");
+    pos++;
+    return t.value;
+  }
+
+  // what a function says it gives, after its `gives`: what an input can say it is, `nothing`, or either of
+  // those with `or nothing` after it (`gives a dog or nothing`). Only the checker reads it.
+  function givesType() {
+    if (word("nothing")) return "nothing";
+    const [kind, type] = inputType();
+    const said = type ?? KINDS[kind];
+    if (!wordsAt(pos, ["or", "nothing"])) return said;
+    pos += 2;
+    return `${said} or nothing`;
   }
 
   // the body of a function, made with `to`, or an app's handler (`when`, `every`), which starts outside any loop
@@ -1223,7 +1268,15 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
       expectWord("of");
       return { kind: "length", of: unary(), at: t };
     }
-    if (word("ask")) return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
+    if (word("ask")) {
+      // `ask for 64 bytes`: what follows `for` is `64 bytes`, the builtin that makes bytes, with the count in it
+      if (word("for")) {
+        const count = additive();
+        if (count.kind !== "builtin" || count.name !== "bytes") fail(count.at, "say how many bytes, as in 'ask for 64 bytes'");
+        return { kind: "builtin", name: "input bytes", args: count.args, at: t };
+      }
+      return { kind: "ask", question: additive(), at: t }; // `ask "How old are you? "`
+    }
     if (word("read")) { // `read "notes.txt"`, `read bytes "photo.png"`: `of` is the file's name
       if (isWord("the") && !peek().nl && wordAt(pos + 1, "folder")) { // `read the folder "tests"`
         pos += 2;
@@ -1589,19 +1642,21 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // A function's inputs, after its `with`, if it has one: each one's name, what it says it is (`with width as
   // a number`, or -1), and what it is when a call leaves it out (`greeting or "Hello"`, or null).
   function inputsOf() {
-    const [params, kinds, defaults] = [[], [], []];
+    const [params, kinds, types, defaults] = [[], [], [], []];
     if (word("with")) {
       do {
         const at = peek();
         params.push(name("an input name"));
-        kinds.push(word("as") ? kind() : -1);
+        const [kind, type] = word("as") ? inputType() : [-1, null];
+        kinds.push(kind);
+        types.push(type);
         const fallback = word("or") ? unary() : null;
         if (fallback && !fallbackFits(fallback)) fail(fallback.at, `an input's 'or' is what it is when a call leaves it out: a number, text, yes, no, nothing, or a list of them, written out`);
         if (!fallback && defaults.some((d) => d)) fail(at, `'${params.at(-1)}' needs an 'or' too, as an input before it has one`);
         defaults.push(fallback);
       } while (match(",") || word("and"));
     }
-    return { params, kinds, defaults };
+    return { params, kinds, types, defaults };
   }
 
   // whether `kind` starts a kind: a name after it, then `with` or `from` on the same line, or the line's end
@@ -1620,7 +1675,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   // instead, and `dog's speak(self)` calls dog's own. Gives the functions, as statements.
   function madeKind(t) {
     const kindName = name("a kind's name");
-    const { params, kinds, defaults } = inputsOf();
+    const { params, kinds, types, defaults } = inputsOf();
     if (params.includes("kind")) fail(t, "a kind's inputs can't include one called 'kind', as that's the field that says which kind it is");
     const from = word("from") ? expression() : null;
     if (!peek().nl) expected("a new line");
@@ -1643,8 +1698,9 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
     for (const p of params) body.push(at("setField", { name: p, target: ref(), value: at("name", { name: p }) }));
     for (const o of owns) body.push(at("setField", { name: o.own, target: ref(), value: { kind: "name", name: `${kindName}'s ${o.own}`, at: o.at } }));
     body.push(at("return", { value: ref() }));
-    const maker = { kind: "define", name: kindName, params, body, at: t, kinds };
+    const maker = { kind: "define", name: kindName, params, body, at: t, kinds, madeKind: kindName }; // the checker knows a dog by madeKind
     if (defaults.some((d) => d)) maker.defaults = defaults;
+    if (types.some((type) => type)) maker.types = types;
     reading.defines.push(maker);
     return { kind: "several", body: [...fns, maker], at: t };
   }

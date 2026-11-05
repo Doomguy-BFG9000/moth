@@ -20,12 +20,13 @@
 use "machine.moth" as machine
 use "stdlib.moth" as standard # the libraries a program anywhere can use (see cli_sources_of)
 use "webpage.moth" as webpage # the page moth build --web writes a program into
+use "checker-rules.moth" as checker_rules # what the checker's rules do with each type (see cli_rules)
 use "tools/hash.moth" as cli_hashing # SHA-256, for the sums of packages' files in moth.sums
 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -193,6 +194,10 @@ to cli_files_of with cli_names, cli_texts
     return cli_made
 end
 
+# the text of each file an editor has open, by its path, which moth lsp keeps (see cli_lsp_handle): read in
+# place of the file on the disk, so a change not yet saved counts
+set cli_open_texts to empty dictionary
+
 # every file the program uses, and the files those use, by the names their `use` lines give: beside the file
 # that uses it, or else, for one of the standard library's (json.moth, math.moth and the rest), moth's own
 # copy. A file that's neither is left out: compile_machine says there is no file called that, at the line
@@ -208,10 +213,14 @@ to cli_sources_of with cli_path, cli_source
         add 1 to cli_k
         if not (cli_name is in cli_names)
             set cli_text to nothing
-            try
-                set cli_text to read cli_folder + cli_name
-            if it fails
-                set cli_text to standard's standard_text(cli_name)
+            if (cli_folder + cli_name) is in cli_open_texts
+                set cli_text to item (cli_folder + cli_name) of cli_open_texts
+            else
+                try
+                    set cli_text to read cli_folder + cli_name
+                if it fails
+                    set cli_text to standard's standard_text(cli_name)
+                end
             end
             if cli_text is not nothing
                 add cli_name to cli_names
@@ -1026,15 +1035,184 @@ to cli_tidy_all with cli_paths, cli_checking
 end
 
 # ---------- problems, found without running it ----------
-# `moth check` finds what checker.js finds without the types it works out: a name nothing ever sets, said
-# in the same words by the same scope rules; a line that can never run; and a name set or made and never
-# used. It says them in the checker's own words and in its own order, and ends with 1 if any line will
-# fail. What it leaves out are the "will fail" warnings the checker gets by trying an operation on sample
-# values of the types it worked out, which needs every one of Moth's operations over again.
+# `moth check` finds what checker.js finds, in the same words and the same order (DESIGN §107): a name
+# nothing ever sets; a line that can never run; a name set or made and never used; and what the types say.
+# It works the types out as checker.js does, twice: from what's sure ("will fail"), then with what the code
+# says of itself that no run checks too ("doesn't fit"). Where checker.js runs one of vm.js's checks on a
+# value of each type, this looks up what that check does in checker-rules.moth, which make-checker-rules.mjs
+# makes from the same rules. So it knows types and not values: a check whose outcome rests on a value written
+# out (`1 / 0`, `item 0 of x`, `repeat "x" times`) it leaves to the playground's checker.
 
 set cli_enders to dictionary where "return" is "return", "fail" is "fail", "stop" is "stop", "exit" is "stop the program"
+# what an input that says what it is holds, by its place in vm.js's KINDS, and how a message says each
+set cli_kind_types to list of "number", "text", "yes/no", "list", "record", "dictionary", "bytes", "function"
+set cli_kind_words to list of "a number", "text", "yes or no", "a list", "a record", "a dictionary", "bytes", "a function"
+set cli_measure_types to list of "distance", "time", "weight", "volume"
+set cli_measure_words to list of "a distance", "a time", "a weight", "a volume"
+# what `a list of` says each holds as, and what each is
+set cli_item_words to dictionary where "numbers" is "number", "text" is "text", "texts" is "text", "yes or no" is "yes/no",
+    "lists" is "list", "records" is "record", "dictionaries" is "dictionary", "bytes" is "bytes", "functions" is "function"
+# checker-rules.moth's lines, as a dictionary, and its messages, made the first time they're wanted
+set cli_rules_kept to record with cached nothing, messages nothing
+# the letter checker-rules.moth writes each type as
+set cli_type_codes to dictionary where "number" is "n", "text" is "t", "yes/no" is "y", "nothing" is "0", "list" is "l", "record" is "r",
+    "dictionary" is "d", "bytes" is "b", "distance" is "D", "time" is "T", "weight" is "W", "volume" is "V"
 
-# a problem found: where it is, what kind it is ("fails", "never runs" or "unused"), and what to say
+to cli_rules
+    if cached of cli_rules_kept is nothing
+        set cli_table to empty dictionary
+        for each cli_line in split checker_rules's rules_text() by "\n"
+            set cli_cut to position of "=" in cli_line
+            if cli_cut is greater than 0
+                set item (cli_first(cli_line, cli_cut - 1)) of cli_table to cli_tail(cli_line, cli_cut + 1)
+            end
+        end
+        set messages of cli_rules_kept to split checker_rules's messages_text() by "\n"
+        set cached of cli_rules_kept to cli_table
+    end
+    return cached of cli_rules_kept
+end
+
+# whether a text starts with another
+to cli_begins_with with cli_text, cli_start
+    if length of cli_text is less than length of cli_start
+        return no
+    end
+    return (items 1 to length of cli_start of cli_text) is cli_start
+end
+
+to cli_finishes_with with cli_text, cli_end
+    set cli_n to length of cli_text - length of cli_end
+    if cli_n is less than 0
+        return no
+    end
+    return (items cli_n + 1 to length of cli_text of cli_text) is cli_end
+end
+
+# ----- types, as checker.js has them -----
+# A type is text: "number", "text", "record"..., or "record:dog", a record the kind dog makes, or "list:number",
+# a list whose every item is a number. nothing means nothing known yet, and "?" could be several.
+
+to cli_base_type with cli_t
+    if cli_t is nothing or cli_t is "?" or not (":" is in cli_t)
+        return cli_t
+    end
+    if cli_begins_with(cli_t, "record:")
+        return "record"
+    end
+    if cli_begins_with(cli_t, "list:")
+        return "list"
+    end
+    return cli_t
+end
+
+# what each item of a list of this type is, or "?" if that isn't known
+to cli_holds with cli_t
+    if cli_t is not nothing and cli_t is not "?" and ":" is in cli_t and cli_begins_with(cli_t, "list:")
+        return cli_tail(cli_t, 6)
+    end
+    return "?"
+end
+
+to cli_join with cli_a, cli_b
+    if cli_a is nothing
+        return cli_b
+    end
+    if cli_b is nothing or cli_a is cli_b
+        return cli_a
+    end
+    if cli_a is "?" or cli_b is "?" or cli_base_type(cli_a) is not cli_base_type(cli_b)
+        return "?"
+    end
+    if cli_base_type(cli_a) is "list"
+        set cli_items to cli_join(cli_holds(cli_a), cli_holds(cli_b))
+        if cli_items is "?"
+            return "list"
+        end
+        return "list:" + cli_items
+    end
+    return cli_base_type(cli_a)
+end
+
+to cli_known_type with cli_t
+    return cli_t is not nothing and cli_t is not "?" and cli_base_type(cli_t) is not "function"
+end
+
+to cli_plural with cli_name
+    set cli_n to length of cli_name
+    if cli_n is greater than 1 and item cli_n of cli_name is "y" and not (item (cli_n - 1) of cli_name is in "aeiou")
+        return cli_first(cli_name, cli_n - 1) + "ies"
+    end
+    if cli_finishes_with(cli_name, "s") or cli_finishes_with(cli_name, "x") or cli_finishes_with(cli_name, "z") or cli_finishes_with(cli_name, "ch") or cli_finishes_with(cli_name, "sh")
+        return cli_name + "es"
+    end
+    return cli_name + "s"
+end
+
+# a type as a message says it: "a number", "text", "a dog", "a list of numbers"
+to cli_described with cli_t
+    if cli_begins_with(cli_t, "record:")
+        set cli_name to cli_tail(cli_t, 8)
+        if cli_first(cli_name, 1) is in "aeiou"
+            return "an " + cli_name
+        end
+        return "a " + cli_name
+    end
+    if cli_begins_with(cli_t, "list:")
+        return "a list of " + cli_each_word(cli_tail(cli_t, 6))
+    end
+    for each cli_k from 1 to 4
+        if item cli_k of cli_measure_types is cli_t
+            return item cli_k of cli_measure_words
+        end
+    end
+    for each cli_k from 1 to 8
+        if item cli_k of cli_kind_types is cli_t and cli_k is not 2 and cli_k is not 3 and cli_k is not 7
+            return item cli_k of cli_kind_words
+        end
+    end
+    return cli_t
+end
+
+# the items of a list of this type, as `a list of` says them: "numbers", "dogs", "lists of numbers"
+to cli_each_word with cli_t
+    if cli_begins_with(cli_t, "record:")
+        return cli_plural(cli_tail(cli_t, 8))
+    end
+    if cli_begins_with(cli_t, "list:")
+        return "lists of " + cli_each_word(cli_tail(cli_t, 6))
+    end
+    for each cli_k from 1 to 4
+        if item cli_k of cli_measure_types is cli_t
+            return cli_plural(cli_t)
+        end
+    end
+    set cli_words to dictionary where "number" is "numbers", "yes/no" is "yes or no", "list" is "lists", "record" is "records",
+        "dictionary" is "dictionaries", "function" is "functions"
+    if cli_t is in cli_words
+        return item cli_t of cli_words
+    end
+    return cli_t
+end
+
+# ----- the checker's state -----
+
+to cli_new_state
+    return record with found empty list, made empty dictionary, used empty dictionary, scopes 0, sources empty dictionary,
+        sure empty dictionary, said empty dictionary, mode "sure", checks empty list, defines empty dictionary,
+        declared empty dictionary, gives empty list, kinds empty dictionary, makers empty dictionary, fields_set empty dictionary,
+        unknown_kinds empty dictionary, rulebook cli_rules(), places empty dictionary
+end
+
+# Where a variable, an input or what a function gives is made, so moth lsp can say its type once they're all
+# worked out: its file, line and column, and what it is there ("set", "input w" or "gives"), to its key.
+to cli_note_place with cli_state, cli_at, cli_what, cli_key
+    if cli_key is not nothing
+        set item (file of cli_at + ":" + line of cli_at + ":" + col of cli_at + " " + cli_what) of (places of cli_state) to cli_key
+    end
+end
+
+# a problem found: where it is, what kind it is ("fails", "doesn't fit", "never runs" or "unused"), and what to say
 to cli_note_problem with cli_state, cli_at, cli_kind, cli_message
     if cli_kind is "unused" and file of cli_at is not ""
         return nothing # a file the program uses can make more than this program needs
@@ -1045,22 +1223,698 @@ end
 
 # which variable a name means here, as a key of its own: which scope has it, and which of its slots it is
 to cli_key_for with cli_frame, cli_wanted
+    set cli_known_keys to keys_known of cli_frame
+    if cli_wanted is in cli_known_keys
+        return item cli_wanted of cli_known_keys
+    end
     set cli_found to machine's read_resolve(scope of cli_frame, cli_wanted)
-    if cli_found is nothing
+    set cli_key to nothing
+    if cli_found is not nothing
+        set cli_owner to cli_frame
+        repeat depth of cli_found times
+            set cli_owner to outer of cli_owner
+        end
+        set cli_key to (id of cli_owner) + ":" + slot of cli_found
+    end
+    set item cli_wanted of cli_known_keys to cli_key
+    return cli_key
+end
+
+# one more way a variable gets its value, worked out once the others' are known: a record whose `how` says how
+to cli_add_source with cli_state, cli_key, cli_how
+    set cli_all to sources of cli_state
+    if not (cli_key is in cli_all)
+        set item cli_key of cli_all to empty list
+    end
+    set cli_list to item cli_key of cli_all
+    add cli_how to cli_list
+end
+
+to cli_slot_type with cli_state, cli_key
+    set cli_types to sure of cli_state
+    if mode of cli_state is "said"
+        set cli_types to said of cli_state
+    end
+    if cli_key is in cli_types
+        return item cli_key of cli_types
+    end
+    return nothing
+end
+
+# a function (or the program, or an app's handler) being checked: its scope, the define it is (or nothing),
+# and what its returns give
+to cli_new_frame with cli_state, cli_outer, cli_params, cli_body, cli_order, cli_def
+    set cli_scope to nothing
+    if cli_outer is not nothing
+        set cli_scope to scope of cli_outer
+    end
+    set cli_id to scopes of cli_state
+    set scopes of cli_state to cli_id + 1
+    return record with scope machine's read_scope(cli_scope, cli_params, cli_body, cli_order), id cli_id, outer cli_outer, def cli_def,
+        skipped 0, returns empty list, ends_open no, return_key "returns " + cli_id, name "", keys_known empty dictionary
+end
+
+# checks a function's body in a frame of its own, as checker.js's Checker does
+to cli_check_function with cli_state, cli_outer, cli_name, cli_params, cli_body, cli_order, cli_def
+    set cli_frame to cli_new_frame(cli_state, cli_outer, cli_params, cli_body, cli_order, cli_def)
+    set name of cli_frame to cli_name
+    for each cli_k from 1 to length of cli_params
+        set cli_kind to -1
+        if cli_def is not nothing and cli_k is at most length of kinds of cli_def
+            set cli_kind to item cli_k of kinds of cli_def
+        end
+        set cli_type to "?"
+        if cli_kind is at least 0
+            set cli_type to item (cli_kind + 1) of cli_kind_types
+        end
+        set cli_key to cli_key_for(cli_frame, item cli_k of cli_params)
+        cli_add_source(cli_state, cli_key, record with how "fixed", type cli_type)
+        if cli_def is not nothing
+            cli_note_place(cli_state, at of cli_def, "input " + lowercase of item cli_k of cli_params, cli_key)
+        end
+        if cli_def is not nothing and types of cli_def is not nothing
+            if item cli_k of types of cli_def is not nothing
+                set item cli_key of (declared of cli_state) to record with words item cli_k of types of cli_def, at at of cli_def
+            end
+        end
+    end
+    if cli_def is not nothing and gives of cli_def is not nothing
+        set cli_gives to gives of cli_state
+        add cli_def to cli_gives
+    end
+    cli_check_block(cli_state, cli_frame, cli_body)
+    set ends_open of cli_frame to not cli_ends_block(cli_body)
+    set cli_returns to returns of cli_frame
+    if ends_open of cli_frame
+        add (record with how "fixed", type "nothing") to cli_returns
+    end
+    set item (return_key of cli_frame) of (sources of cli_state) to cli_returns
+    if cli_def is not nothing and gives of cli_def is not nothing and ends_open of cli_frame
+        cli_type_check(cli_state, at of cli_def, record with how "end", frame cli_frame)
+    end
+    return cli_frame
+end
+
+# whether a block can't reach its end: its last statement returns, fails or stops the program, or is an if
+# whose every way does
+to cli_ends_block with cli_body
+    if length of cli_body is 0
+        return no
+    end
+    set cli_last to item (length of cli_body) of cli_body
+    set cli_what to kind of cli_last
+    if cli_what is "return" or cli_what is "fail" or cli_what is "exit"
+        return yes
+    end
+    if cli_what is "if"
+        return cli_ends_block(then of cli_last) and cli_ends_block(otherwise of cli_last)
+    end
+    return no
+end
+
+# ----- what an expression is -----
+
+to cli_type_of with cli_state, cli_frame, cli_e
+    set cli_what to kind of cli_e
+    if cli_what is "value"
+        set cli_t to type of cli_e
+        if cli_t is "string"
+            return "text"
+        else if cli_t is "yes" or cli_t is "no"
+            return "yes/no"
+        end
+        return cli_t
+    else if cli_what is "name"
+        set cli_key to cli_key_for(cli_frame, name of cli_e)
+        if cli_key is nothing
+            return "?"
+        end
+        return cli_slot_type(cli_state, cli_key)
+    else if cli_what is "math"
+        set cli_a to cli_base_type(cli_type_of(cli_state, cli_frame, left of cli_e))
+        set cli_b to cli_base_type(cli_type_of(cli_state, cli_frame, right of cli_e))
+        if cli_a is nothing or cli_b is nothing
+            return nothing
+        end
+        if op of cli_e is "+" and (cli_a is "text" or cli_b is "text")
+            return "text"
+        end
+        if not cli_known_type(cli_a) or not cli_known_type(cli_b)
+            return "?"
+        end
+        set cli_key to "type|" + op of cli_e + "|" + item cli_a of cli_type_codes + item cli_b of cli_type_codes
+        if cli_key is in rulebook of cli_state
+            return item cli_key of rulebook of cli_state
+        end
+        return "?"
+    else if cli_what is "compare" or cli_what is "not"
+        return "yes/no"
+    else if cli_what is "negate"
+        set cli_t to cli_base_type(cli_type_of(cli_state, cli_frame, operand of cli_e))
+        if cli_t is nothing or cli_t is "?" or cli_t is in cli_measure_types
+            return cli_t
+        end
+        return "number"
+    else if cli_what is "length" or cli_what is "random"
+        return "number"
+    else if cli_what is "now" # the time, the date and the weekday are text; the rest are numbers
+        if which of cli_e is 0 or which of cli_e is 1 or which of cli_e is 8
+            return "text"
+        end
+        return "number"
+    else if cli_what is "builtin"
+        if name of cli_e is "unit" or name of cli_e is "in" # `5 km`, `trip in miles`
+            return item ("unit|" + value of item 2 of args of cli_e) of rulebook of cli_state
+        end
+        set cli_key to "gives|" + name of cli_e
+        if cli_key is in rulebook of cli_state
+            return item cli_key of rulebook of cli_state
+        end
+        return "?"
+    else if cli_what is "ask"
+        return "text"
+    else if cli_what is "read"
+        if binary of cli_e
+            return "bytes"
+        end
+        return "text"
+    else if cli_what is "arguments" or cli_what is "readFolder" or cli_what is "list"
+        return "list"
+    else if cli_what is "record"
+        return "record"
+    else if cli_what is "dictionary"
+        return "dictionary"
+    else if cli_what is "field"
+        return cli_field_type(cli_state, cli_type_of(cli_state, cli_frame, subject of cli_e), name of cli_e)
+    else if cli_what is "item" # where the code says what a list holds, an item of it is that
+        set cli_of to cli_type_of(cli_state, cli_frame, subject of cli_e)
+        if cli_of is nothing
+            return nothing
+        end
+        if mode of cli_state is "said"
+            return cli_holds(cli_of)
+        end
+        return "?"
+    else if cli_what is "call"
+        return cli_call_type(cli_state, cli_frame, cli_e)
+    end
+    return "?"
+end
+
+# the function a call's name means, where it's one made exactly once and never anything else, or nothing
+to cli_only_define with cli_state, cli_key
+    if cli_key is nothing or not (cli_key is in defines of cli_state)
         return nothing
     end
-    set cli_owner to cli_frame
-    repeat depth of cli_found times
-        set cli_owner to outer of cli_owner
+    set cli_made to item cli_key of defines of cli_state
+    if length of cli_made is not 1 or length of item cli_key of sources of cli_state is not 1
+        return nothing
     end
-    return (id of cli_owner) + ":" + slot of cli_found
+    return item 1 of cli_made
 end
+
+# what a call gives: what a kind makes, or what a function returns; and where the code is taken at its word,
+# what its `gives` says
+to cli_call_type with cli_state, cli_frame, cli_e
+    set cli_made to cli_only_define(cli_state, cli_key_for(cli_frame, name of cli_e))
+    if cli_made is nothing
+        return "?"
+    end
+    set cli_d to define of cli_made
+    if made_kind of cli_d is not nothing
+        return "record:" + made_kind of cli_d
+    end
+    if mode of cli_state is "said" and gives of cli_d is not nothing
+        set cli_said to cli_type_named(cli_state, gives of cli_d, at of cli_d)
+        if cli_begins_with(cli_said, "maybe:")
+            return "?"
+        end
+        return cli_said
+    end
+    return cli_slot_type(cli_state, return_key of frame of cli_made)
+end
+
+# the kind a kind is made from (`kind puppy with name from dog(name)`), or nothing
+to cli_parent_kind with cli_state, cli_kind
+    if cli_kind is nothing or parent of cli_kind is nothing or not (parent of cli_kind is in makers of cli_state)
+        return nothing
+    end
+    return item (parent of cli_kind) of makers of cli_state
+end
+
+to cli_kind_named with cli_state, cli_name
+    if cli_name is nothing or not (cli_name is in kinds of cli_state)
+        return nothing
+    end
+    return item cli_name of kinds of cli_state
+end
+
+# what field `name` of a value of type `of` is: for a record a kind makes, what the kind's input says it is
+to cli_field_type with cli_state, cli_of, cli_name
+    if cli_of is nothing
+        return nothing
+    end
+    if cli_of is "?" or not cli_begins_with(cli_of, "record:")
+        return "?"
+    end
+    set cli_kind to cli_kind_named(cli_state, cli_tail(cli_of, 8))
+    if cli_kind is nothing or cli_name is in fields_set of cli_state
+        return "?"
+    end
+    if cli_name is "kind"
+        return "text"
+    end
+    set cli_seen to 0
+    repeat while cli_kind is not nothing and cli_seen is less than 100
+        set cli_d to define of cli_kind
+        for each cli_k from 1 to length of params of cli_d
+            if item cli_k of params of cli_d is cli_name
+                set cli_input_kind to item cli_k of kinds of cli_d
+                if cli_input_kind is less than 0
+                    return "?"
+                end
+                if mode of cli_state is "said" and types of cli_d is not nothing
+                    if item cli_k of types of cli_d is not nothing
+                        return cli_type_named(cli_state, item cli_k of types of cli_d, at of cli_d)
+                    end
+                end
+                return item (cli_input_kind + 1) of cli_kind_types
+            end
+        end
+        if cli_name is in owns of cli_kind
+            return "function"
+        end
+        set cli_kind to cli_kind_named(cli_state, cli_parent_kind(cli_state, cli_kind))
+        add 1 to cli_seen
+    end
+    return "?"
+end
+
+# every field a record the kind makes has, in the order it has them, or nothing if that can't be known
+to cli_fields_of with cli_state, cli_name, cli_seen
+    set cli_kind to cli_kind_named(cli_state, cli_name)
+    if cli_kind is nothing or cli_name is in cli_seen
+        return nothing
+    end
+    set item cli_name of cli_seen to yes
+    set cli_body to body of define of cli_kind
+    set cli_start to value of item 1 of cli_body
+    set cli_fields to nothing
+    if kind of cli_start is "record"
+        set cli_fields to empty list
+        for each cli_f in fields of cli_start
+            add cli_f to cli_fields
+        end
+    else if cli_parent_kind(cli_state, cli_kind) is not nothing
+        set cli_fields to cli_fields_of(cli_state, cli_parent_kind(cli_state, cli_kind), cli_seen)
+    end
+    if cli_fields is nothing
+        return nothing
+    end
+    for each cli_k from 2 to length of cli_body
+        set cli_s to item cli_k of cli_body
+        if kind of cli_s is "setField" and not (name of cli_s is in cli_fields)
+            add name of cli_s to cli_fields
+        end
+    end
+    return cli_fields
+end
+
+# The type an input's `as`, or a `gives`, names, as written: "a number", "a dog", "a list of numbers", "a dog or
+# nothing". A kind it names that the program doesn't make is said to be wrong, at `at`, once.
+to cli_type_named with cli_state, cli_words, cli_at
+    if cli_words is "nothing"
+        return cli_words
+    end
+    if cli_finishes_with(cli_words, " or nothing") # "maybe:" before what it is when it isn't nothing
+        set cli_inner to cli_type_named(cli_state, cli_first(cli_words, length of cli_words - 11), cli_at)
+        if cli_inner is "nothing"
+            return cli_inner
+        end
+        return "maybe:" + cli_inner
+    end
+    for each cli_k from 1 to 8
+        if item cli_k of cli_kind_words is cli_words
+            return item cli_k of cli_kind_types
+        end
+    end
+    if cli_begins_with(cli_words, "a list of ")
+        set cli_items to cli_items_named(cli_state, cli_tail(cli_words, 11), cli_at)
+        if cli_items is "?"
+            return "list"
+        end
+        return "list:" + cli_items
+    end
+    set cli_name to cli_words
+    if cli_begins_with(cli_name, "an ")
+        set cli_name to cli_tail(cli_name, 4)
+    else if cli_begins_with(cli_name, "a ")
+        set cli_name to cli_tail(cli_name, 3)
+    end
+    set cli_found to cli_kind_type(cli_state, cli_name, cli_at, no)
+    if cli_found is "?"
+        return "record"
+    end
+    return cli_found
+end
+
+to cli_items_named with cli_state, cli_words, cli_at
+    if cli_begins_with(cli_words, "lists of ")
+        set cli_items to cli_items_named(cli_state, cli_tail(cli_words, 10), cli_at)
+        if cli_items is "?"
+            return "list"
+        end
+        return "list:" + cli_items
+    end
+    if cli_words is in cli_item_words
+        return item cli_words of cli_item_words
+    end
+    return cli_kind_type(cli_state, cli_words, cli_at, yes)
+end
+
+# "record:dog", for a kind the program makes called `name` (or, `many`, that `name` is more than one of:
+# dogs, boxes, puppies), or "?", having said there's none
+to cli_kind_type with cli_state, cli_name, cli_at, cli_many
+    set cli_tried to list of cli_name
+    if cli_many
+        set cli_tried to list of cli_name, cli_cut_end(cli_name, "s", ""), cli_cut_end(cli_name, "es", ""), cli_cut_end(cli_name, "ies", "y")
+    end
+    for each cli_one in cli_tried
+        if cli_one is in kinds of cli_state
+            return "record:" + cli_one
+        end
+    end
+    set cli_mark to line of cli_at + ":" + col of cli_at + ":" + cli_name
+    if not (cli_mark is in unknown_kinds of cli_state)
+        set item cli_mark of (unknown_kinds of cli_state) to yes
+        set cli_names to empty list
+        for each cli_k in kinds of cli_state
+            add cli_k to cli_names
+        end
+        set cli_guess to machine's read_closest(item (length of cli_tried) of cli_tried, cli_names)
+        if cli_guess is nothing
+            set cli_guess to machine's read_closest(cli_name, cli_names)
+        end
+        set cli_said to "there is no kind called '" + cli_name + "'"
+        if cli_guess is not nothing
+            set cli_said to cli_said + ". Did you mean '" + cli_guess + "'?"
+        end
+        cli_note_problem(cli_state, cli_at, "doesn't fit", cli_said)
+    end
+    return "?"
+end
+
+# a text with `end` at its end taken off and `instead` put there, or the text as it was if it doesn't end so
+to cli_cut_end with cli_text, cli_end, cli_instead
+    if not cli_finishes_with(cli_text, cli_end)
+        return cli_text
+    end
+    return cli_first(cli_text, length of cli_text - length of cli_end) + cli_instead
+end
+
+# whether a value of type `t` is what `wanted` (a type cli_type_named made) says: yes, no, or nothing if that
+# can't be known
+to cli_fits_type with cli_state, cli_t, cli_wanted
+    if cli_t is nothing or cli_t is "?" or cli_wanted is nothing or cli_wanted is "?"
+        return nothing
+    end
+    if cli_begins_with(cli_wanted, "maybe:")
+        if cli_t is "nothing"
+            return yes
+        end
+        return cli_fits_type(cli_state, cli_t, cli_tail(cli_wanted, 7))
+    end
+    if cli_base_type(cli_t) is not cli_base_type(cli_wanted)
+        return no
+    end
+    if cli_begins_with(cli_wanted, "record:")
+        if not cli_begins_with(cli_t, "record:")
+            return nothing
+        end
+        set cli_k to cli_tail(cli_t, 8)
+        set cli_seen to 0
+        repeat while cli_k is not nothing and cli_seen is less than 100
+            if cli_k is cli_tail(cli_wanted, 8)
+                return yes
+            end
+            set cli_k to cli_parent_kind(cli_state, cli_kind_named(cli_state, cli_k))
+            add 1 to cli_seen
+        end
+        return no
+    end
+    if cli_begins_with(cli_wanted, "list:")
+        if cli_begins_with(cli_t, "list:")
+            return cli_fits_type(cli_state, cli_tail(cli_t, 6), cli_tail(cli_wanted, 6))
+        end
+        return nothing
+    end
+    return yes
+end
+
+# ----- the checks -----
+
+# a check to make once the types are known: on what's sure, then on what the code says too
+to cli_will_fail with cli_state, cli_frame, cli_at, cli_check
+    if skipped of cli_frame is greater than 0
+        return nothing
+    end
+    set at of cli_check to cli_at
+    set frame of cli_check to cli_frame
+    set sort of cli_check to "will fail"
+    set cli_list to checks of cli_state
+    add cli_check to cli_list
+end
+
+# a check of what the code says of itself, which no run makes: never "will fail"
+to cli_type_check with cli_state, cli_at, cli_check
+    set at of cli_check to cli_at
+    set sort of cli_check to "fit"
+    set cli_list to checks of cli_state
+    add cli_check to cli_list
+end
+
+# a check of one of checker.js's RULES at `at`, on the values of `operands`, once each one's type is known
+to cli_rule with cli_state, cli_frame, cli_at, cli_name, cli_args, cli_operands
+    cli_will_fail(cli_state, cli_frame, cli_at, record with how "rule", name cli_name, args cli_args, operands cli_operands, at nothing,
+        frame nothing, sort nothing)
+end
+
+# whether an expression is a value written out: a number, text, yes, no or nothing, or a number with a - before it
+to cli_written with cli_e
+    if kind of cli_e is "value"
+        return yes
+    end
+    return kind of cli_e is "negate" and kind of operand of cli_e is "value" and type of operand of cli_e is "number"
+end
+
+# What rule `name` does on values of these types, as checker-rules.moth has it: the message, or nothing. A rule
+# whose outcome rests on a value written out gives "" instead: moth check leaves it out.
+to cli_apply with cli_state, cli_name, cli_args, cli_operands, cli_types
+    set cli_key to cli_name
+    set cli_named to nothing
+    for each cli_arg in cli_args
+        if cli_name is "add" or cli_name is "setField" or cli_name is "field"
+            set cli_named to cli_arg
+            set cli_key to cli_key + "|@NAME@"
+        else
+            set cli_key to cli_key + "|" + cli_arg
+        end
+    end
+    set cli_key to cli_key + "|"
+    for each cli_t in cli_types
+        set cli_key to cli_key + item (cli_base_type(cli_t)) of cli_type_codes
+    end
+    if not (cli_key is in rulebook of cli_state)
+        return nothing
+    end
+    set cli_rule_said to item cli_key of rulebook of cli_state
+    set cli_bar to position of "|" in cli_rule_said
+    set cli_number to cli_tail(cli_rule_said, cli_bar + 1)
+    if cli_number is ""
+        return nothing
+    end
+    set cli_message to item (number of cli_number) of messages of cli_rules_kept
+    for each cli_k from 1 to length of cli_operands
+        if cli_written(item cli_k of cli_operands) and ("" + cli_k) is in cli_first(cli_rule_said, cli_bar - 1)
+            return ""
+        end
+    end
+    if cli_named is not nothing
+        set cli_message to join (split cli_message by "@NAME@") with cli_named
+    end
+    return cli_message
+end
+
+# the turtle's actions, in vm.js's order, by name: what the rules call each
+to cli_action_number with cli_state, cli_action
+    set cli_n to 0
+    for each cli_a in split item "actions" of rulebook of cli_state by "|"
+        if cli_a is cli_action
+            return cli_n
+        end
+        add 1 to cli_n
+    end
+    return -1
+end
+
+# runs one check in the mode the state is in: the message it fails with, "" for one moth check leaves out, or
+# nothing if it doesn't fail
+to cli_run_check with cli_state, cli_c
+    set cli_how to how of cli_c
+    set cli_frame to frame of cli_c
+    if cli_how is "rule"
+        set cli_types to empty list
+        for each cli_e in operands of cli_c
+            set cli_t to cli_type_of(cli_state, cli_frame, cli_e)
+            if not cli_known_type(cli_t)
+                return nothing
+            end
+            add cli_t to cli_types
+        end
+        return cli_apply(cli_state, name of cli_c, args of cli_c, operands of cli_c, cli_types)
+    else if cli_how is "list add" # what the code says a list holds is all it gets
+        set cli_current to cli_slot_type(cli_state, key of cli_c)
+        set cli_v to cli_type_of(cli_state, cli_frame, value of cli_c)
+        if cli_known_type(cli_current) and cli_known_type(cli_v) and cli_holds(cli_current) is not "?" and cli_fits_type(cli_state, cli_v, cli_holds(cli_current)) is no
+            return "can't add " + cli_described(cli_v) + " to " + cli_described(cli_current)
+        end
+    else if cli_how is "play"
+        set cli_note to cli_type_of(cli_state, cli_frame, note of cli_c)
+        set cli_time to cli_type_of(cli_state, cli_frame, time of cli_c)
+        if not cli_known_type(cli_note)
+            return nothing
+        end
+        if not cli_known_type(cli_time)
+            return cli_apply(cli_state, "note", empty list, (list of note of cli_c), (list of cli_note))
+        end
+        return cli_apply(cli_state, "play", (list of unit of cli_c), (list of note of cli_c, time of cli_c), (list of cli_note, cli_time))
+    else if cli_how is "field"
+        set cli_t to cli_type_of(cli_state, cli_frame, subject of cli_c)
+        if not cli_known_type(cli_t)
+            return nothing
+        end
+        if cli_base_type(cli_t) is not "record"
+            return cli_apply(cli_state, "field", (list of name of cli_c), (list of subject of cli_c), (list of cli_t))
+        end
+        if cli_begins_with(cli_t, "record:") # a record a kind makes has the fields the kind gives it, unless something adds one
+            set cli_fields to cli_fields_of(cli_state, cli_tail(cli_t, 8), empty dictionary)
+            if cli_fields is not nothing and not (name of cli_c is in cli_fields) and not (name of cli_c is in fields_set of cli_state)
+                return cli_no_field(name of cli_c, cli_fields)
+            end
+        end
+    else if cli_how is "item"
+        set cli_t to cli_type_of(cli_state, cli_frame, subject of cli_c)
+        if not cli_known_type(cli_t)
+            return nothing
+        end
+        set cli_t to cli_base_type(cli_t)
+        if cli_t is not "list" and cli_t is not "text" and cli_t is not "bytes"
+            return cli_apply(cli_state, "item", empty list, (list of subject of cli_c), (list of cli_t))
+        end
+    else if cli_how is "call"
+        return cli_call_check(cli_state, cli_frame, call of cli_c)
+    else if cli_how is "return"
+        set cli_t to "nothing"
+        if value of cli_c is not nothing
+            set cli_t to cli_type_of(cli_state, cli_frame, value of cli_c)
+        end
+        set cli_d to def of cli_frame
+        if cli_fits_type(cli_state, cli_t, cli_type_named(cli_state, gives of cli_d, at of cli_d)) is no
+            return "'" + name of cli_frame + "' must give " + gives of cli_d + ", not " + cli_described(cli_t)
+        end
+    else if cli_how is "end"
+        set cli_d to def of cli_frame
+        set cli_wanted to cli_type_named(cli_state, gives of cli_d, at of cli_d)
+        if cli_wanted is not "nothing" and not cli_begins_with(cli_wanted, "maybe:")
+            return "'" + name of cli_frame + "' must give " + gives of cli_d + ", but it can reach its end without giving anything"
+        end
+    end
+    return nothing
+end
+
+to cli_no_field with cli_name, cli_fields
+    set cli_guess to machine's read_closest(cli_name, cli_fields)
+    if cli_guess is nothing
+        return "this record has no '" + cli_name + "'"
+    end
+    return "this record has no '" + cli_name + "'. Did you mean '" + cli_guess + "'?"
+end
+
+# a call, as checker.js's call() checks it: a name that isn't a function; then, where it's a function made once,
+# how many inputs it gets, and what kind each input says it is; then what each says beyond that; then a
+# record's own function a kind doesn't give
+to cli_call_check with cli_state, cli_frame, cli_e
+    set cli_key to cli_key_for(cli_frame, name of cli_e)
+    set cli_type to cli_slot_type(cli_state, cli_key)
+    if cli_known_type(cli_type)
+        return "'" + name of cli_e + "' is " + cli_described(cli_base_type(cli_type)) + ", not a function"
+    end
+    set cli_types to empty list
+    for each cli_arg in args of cli_e
+        add cli_type_of(cli_state, cli_frame, cli_arg) to cli_types
+    end
+    set cli_made to cli_only_define(cli_state, cli_key)
+    if cli_type is "function" and cli_made is not nothing
+        set cli_d to define of cli_made
+        set cli_n to length of params of cli_d
+        if length of args of cli_e is not cli_n
+            set cli_inputs to "inputs"
+            if cli_n is 1
+                set cli_inputs to "input"
+            end
+            return "'" + name of cli_e + "' needs " + cli_n + " " + cli_inputs + " but got " + length of args of cli_e
+        end
+        for each cli_k from 1 to length of kinds of cli_d
+            set cli_kind to item cli_k of kinds of cli_d
+            set cli_t to item cli_k of cli_types
+            if cli_kind is at least 0 and cli_t is not nothing and cli_t is not "?"
+                if cli_base_type(cli_t) is not item (cli_kind + 1) of cli_kind_types
+                    return "'" + name of cli_e + "' needs " + item cli_k of params of cli_d + " to be " + item (cli_kind + 1) of cli_kind_words + ", not " + cli_described(cli_base_type(cli_t))
+                end
+            end
+        end
+        if mode of cli_state is "said" and types of cli_d is not nothing
+            for each cli_k from 1 to length of types of cli_d
+                set cli_words to item cli_k of types of cli_d
+                if cli_words is not nothing
+                    if cli_fits_type(cli_state, item cli_k of cli_types, cli_type_named(cli_state, cli_words, at of cli_d)) is no
+                        return "'" + name of cli_e + "' needs " + item cli_k of params of cli_d + " to be " + cli_words + ", not " + cli_described(item cli_k of cli_types)
+                    end
+                end
+            end
+        end
+    end
+    # `rex's speak()`, where rex is surely a dog: dog has no speak, and nothing gives a record one (see own_calls in compiler.moth)
+    if cli_key is nothing or not (cli_key is in defines of cli_state) or length of cli_types is 0
+        return nothing
+    end
+    set cli_helper to define of item 1 of item cli_key of defines of cli_state
+    if length of params of cli_helper is 0 or length of body of cli_helper is 0
+        return nothing
+    end
+    set cli_tried to item 1 of body of cli_helper
+    if item 1 of params of cli_helper is not "the record" or kind of cli_tried is not "try"
+        return nothing
+    end
+    set cli_t to item 1 of cli_types
+    if cli_t is nothing or cli_t is "?" or not cli_begins_with(cli_t, "record:")
+        return nothing
+    end
+    set cli_own to name of item 1 of body of cli_tried
+    set cli_fields to cli_fields_of(cli_state, cli_tail(cli_t, 8), empty dictionary)
+    if cli_fields is not nothing and not (cli_own is in cli_fields) and not (cli_own is in fields_set of cli_state)
+        return value of value of item 1 of handler of cli_tried
+    end
+    return nothing
+end
+
+# ----- walking the program, as checker.js does -----
 
 # a name used here: whether anything sets it, and if nothing does, that it will fail
 to cli_use_name with cli_state, cli_frame, cli_wanted, cli_at, cli_call, cli_statement
     set cli_key to cli_key_for(cli_frame, cli_wanted)
     if cli_key is nothing
-        if skipped of cli_state is 0 # inside the right side of and or or, which may never run
+        if skipped of cli_frame is 0 # inside the right side of and or or, which may never run
             cli_note_problem(cli_state, cli_at, "fails", machine's read_undefined(scope of cli_frame, cli_wanted, cli_call, cli_statement))
         end
         return no
@@ -1070,13 +1924,9 @@ to cli_use_name with cli_state, cli_frame, cli_wanted, cli_at, cli_call, cli_sta
 end
 
 # a name this scope sets or makes, which may turn out to be used nowhere
-to cli_made_name with cli_state, cli_frame, cli_wanted, cli_at, cli_message
-    set cli_key to cli_key_for(cli_frame, cli_wanted)
-    if cli_key is nothing
-        return nothing
-    end
+to cli_made_name with cli_state, cli_key, cli_at, cli_message
     set cli_table to made of cli_state
-    if not (cli_key is in cli_table)
+    if cli_key is not nothing and not (cli_key is in cli_table)
         set item cli_key of cli_table to record with at cli_at, message cli_message
     end
 end
@@ -1087,12 +1937,12 @@ to cli_check_each with cli_state, cli_frame, cli_nodes
     end
 end
 
-# a call: nothing sets the name, so what it was given isn't looked at either, as the checker has it
 to cli_check_call with cli_state, cli_frame, cli_e, cli_statement
     if not cli_use_name(cli_state, cli_frame, name of cli_e, at of cli_e, yes, cli_statement)
         return nothing
     end
     cli_check_each(cli_state, cli_frame, args of cli_e)
+    cli_will_fail(cli_state, cli_frame, at of cli_e, record with how "call", call cli_e, at nothing, frame nothing, sort nothing)
 end
 
 to cli_check_expr with cli_state, cli_frame, cli_e
@@ -1106,36 +1956,59 @@ to cli_check_expr with cli_state, cli_frame, cli_e
         cli_check_call(cli_state, cli_frame, cli_e, no)
     else if cli_what is "and" or cli_what is "or"
         cli_check_expr(cli_state, cli_frame, left of cli_e)
-        set skipped of cli_state to skipped of cli_state + 1
+        set skipped of cli_frame to skipped of cli_frame + 1
         cli_check_expr(cli_state, cli_frame, right of cli_e)
-        set skipped of cli_state to skipped of cli_state - 1
-    else if cli_what is "math" or cli_what is "compare" or cli_what is "random"
+        set skipped of cli_frame to skipped of cli_frame - 1
+    else if cli_what is "math"
         cli_check_expr(cli_state, cli_frame, left of cli_e)
         cli_check_expr(cli_state, cli_frame, right of cli_e)
-    else if cli_what is "not" or cli_what is "negate"
+        cli_rule(cli_state, cli_frame, at of cli_e, "math", (list of op of cli_e), (list of left of cli_e, right of cli_e))
+    else if cli_what is "compare"
+        cli_check_expr(cli_state, cli_frame, left of cli_e)
+        cli_check_expr(cli_state, cli_frame, right of cli_e)
+        if op of cli_e is not "is"
+            cli_rule(cli_state, cli_frame, at of cli_e, "compare", (list of op of cli_e), (list of left of cli_e, right of cli_e))
+        end
+    else if cli_what is "random"
+        cli_check_expr(cli_state, cli_frame, left of cli_e)
+        cli_check_expr(cli_state, cli_frame, right of cli_e)
+        cli_rule(cli_state, cli_frame, at of cli_e, "random", empty list, (list of left of cli_e, right of cli_e))
+    else if cli_what is "not"
         cli_check_expr(cli_state, cli_frame, operand of cli_e)
+    else if cli_what is "negate"
+        cli_check_expr(cli_state, cli_frame, operand of cli_e)
+        cli_rule(cli_state, cli_frame, at of cli_e, "negate", empty list, (list of operand of cli_e))
     else if cli_what is "list" or cli_what is "dictionary"
         cli_check_each(cli_state, cli_frame, items of cli_e)
     else if cli_what is "record"
         cli_check_each(cli_state, cli_frame, values of cli_e)
     else if cli_what is "builtin"
         cli_check_each(cli_state, cli_frame, args of cli_e)
-    else if cli_what is "length" or cli_what is "field" or cli_what is "read" or cli_what is "readFolder"
+        cli_rule(cli_state, cli_frame, at of cli_e, "builtin", (list of name of cli_e), args of cli_e)
+    else if cli_what is "field"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)
+        cli_will_fail(cli_state, cli_frame, at of cli_e, record with how "field", subject subject of cli_e, name name of cli_e, at nothing,
+            frame nothing, sort nothing)
+    else if cli_what is "length"
+        cli_check_expr(cli_state, cli_frame, subject of cli_e)
+        cli_rule(cli_state, cli_frame, at of cli_e, "length", empty list, (list of subject of cli_e))
+    else if cli_what is "read"
+        cli_check_expr(cli_state, cli_frame, subject of cli_e)
+        set cli_binary to "false"
+        if binary of cli_e
+            set cli_binary to "true"
+        end
+        cli_rule(cli_state, cli_frame, at of cli_e, "read", (list of cli_binary), (list of subject of cli_e))
+    else if cli_what is "readFolder"
+        cli_check_expr(cli_state, cli_frame, subject of cli_e)
+        cli_rule(cli_state, cli_frame, at of cli_e, "readFolder", empty list, (list of subject of cli_e))
     else if cli_what is "item"
         cli_check_expr(cli_state, cli_frame, subject of cli_e)
         cli_check_expr(cli_state, cli_frame, index of cli_e)
+        cli_will_fail(cli_state, cli_frame, at of cli_e, record with how "item", subject subject of cli_e, at nothing, frame nothing, sort nothing)
     else if cli_what is "ask"
         cli_check_expr(cli_state, cli_frame, question of cli_e)
     end
-end
-
-# a function the program makes, in a scope of its own
-to cli_check_function with cli_state, cli_frame, cli_d
-    set scopes of cli_state to scopes of cli_state + 1
-    set cli_inner to record with scope machine's read_scope(scope of cli_frame, params of cli_d, body of cli_d, order of cli_d),
-        id scopes of cli_state, outer cli_frame
-    cli_check_block(cli_state, cli_inner, body of cli_d)
 end
 
 to cli_check_block with cli_state, cli_frame, cli_body
@@ -1155,10 +2028,20 @@ to cli_check_statement with cli_state, cli_frame, cli_s
     set cli_what to kind of cli_s
     if cli_what is "set"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
-        cli_made_name(cli_state, cli_frame, name of cli_s, at of cli_s, "'" + name of cli_s + "' is set but never used")
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "expr", frame cli_frame, e value of cli_s)
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
+        cli_made_name(cli_state, cli_key, at of cli_s, "'" + name of cli_s + "' is set but never used")
     else if cli_what is "add"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
-        cli_use_name(cli_state, cli_frame, name of cli_s, at of cli_s, no, no)
+        if cli_use_name(cli_state, cli_frame, name of cli_s, at of cli_s, no, no)
+            set cli_key to cli_key_for(cli_frame, name of cli_s)
+            cli_add_source(cli_state, cli_key, record with how "add", frame cli_frame, key cli_key, e value of cli_s)
+            set cli_named to record with kind "name", name name of cli_s, at at of cli_s
+            cli_rule(cli_state, cli_frame, at of cli_s, "add", (list of name of cli_s), (list of cli_named, value of cli_s))
+            cli_will_fail(cli_state, cli_frame, at of cli_s, record with how "list add", key cli_key, value value of cli_s, at nothing,
+                frame nothing, sort nothing)
+        end
     else if cli_what is "say"
         cli_check_each(cli_state, cli_frame, parts of cli_s)
     else if cli_what is "if"
@@ -1168,59 +2051,192 @@ to cli_check_statement with cli_state, cli_frame, cli_s
     else if cli_what is "while"
         cli_check_expr(cli_state, cli_frame, cond of cli_s)
         cli_check_block(cli_state, cli_frame, body of cli_s)
-    else if cli_what is "repeat"
+    else if cli_what is "repeat" # how many times rests on the value: the playground's checker says
         cli_check_expr(cli_state, cli_frame, count of cli_s)
         cli_check_block(cli_state, cli_frame, body of cli_s)
     else if cli_what is "count"
         cli_check_expr(cli_state, cli_frame, start of cli_s)
         cli_check_expr(cli_state, cli_frame, limit of cli_s)
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "fixed", type "number")
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
+        cli_rule(cli_state, cli_frame, at of cli_s, "count", empty list, (list of start of cli_s, limit of cli_s))
         cli_check_block(cli_state, cli_frame, body of cli_s)
     else if cli_what is "each"
         cli_check_expr(cli_state, cli_frame, over of cli_s)
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "each", frame cli_frame, e over of cli_s)
+        cli_note_place(cli_state, at of cli_s, "set", cli_key)
+        cli_rule(cli_state, cli_frame, at of cli_s, "each", empty list, (list of over of cli_s))
         cli_check_block(cli_state, cli_frame, body of cli_s)
-    else if cli_what is "define" # the test runner calls a test_ function at the top level, so it is used
-        if not (level of scope of cli_frame is 0 and length of name of cli_s is greater than 5 and cli_first(name of cli_s, 5) is "test_")
-            cli_made_name(cli_state, cli_frame, name of cli_s, at of cli_s, "'" + name of cli_s + "' is made but never used")
+    else if cli_what is "define"
+        set cli_key to cli_key_for(cli_frame, name of cli_s)
+        cli_add_source(cli_state, cli_key, record with how "fixed", type "function")
+        # the test runner calls a test_ function at the top level, so it is used
+        if not (outer of cli_frame is nothing and length of name of cli_s is greater than 5 and cli_first(name of cli_s, 5) is "test_")
+            cli_made_name(cli_state, cli_key, at of cli_s, "'" + name of cli_s + "' is made but never used")
         end
-        cli_check_function(cli_state, cli_frame, cli_s)
+        if made_kind of cli_s is not nothing # what a record the kind makes holds
+            set cli_from to nothing
+            if kind of value of item 1 of body of cli_s is "call"
+                set cli_from to name of value of item 1 of body of cli_s
+            end
+            set cli_owns to empty list
+            for each cli_b in body of cli_s
+                if kind of cli_b is "setField" and kind of value of cli_b is "name"
+                    if name of value of cli_b is name of cli_s + "'s " + name of cli_b
+                        add name of cli_b to cli_owns
+                    end
+                end
+            end
+            if not (made_kind of cli_s is in kinds of cli_state)
+                set item (made_kind of cli_s) of (kinds of cli_state) to record with define cli_s, parent cli_from, owns cli_owns
+            end
+            set item (name of cli_s) of (makers of cli_state) to made_kind of cli_s
+        end
+        set cli_inner to cli_check_function(cli_state, cli_frame, name of cli_s, params of cli_s, body of cli_s, order of cli_s, cli_s)
+        cli_note_place(cli_state, at of cli_s, "gives", return_key of cli_inner)
+        set cli_defines to defines of cli_state
+        if not (cli_key is in cli_defines)
+            set item cli_key of cli_defines to empty list
+        end
+        set cli_list to item cli_key of cli_defines
+        add (record with define cli_s, frame cli_inner) to cli_list
     else if cli_what is "when"
         cli_check_expr(cli_state, cli_frame, label of cli_s) # the button or text box it waits for, if any
-        cli_check_function(cli_state, cli_frame, fn of cli_s)
-    else if cli_what is "every"
+        cli_check_function(cli_state, cli_frame, name of fn of cli_s, params of fn of cli_s, body of fn of cli_s, order of fn of cli_s, nothing)
+    else if cli_what is "every" # how often must be a number
         cli_check_expr(cli_state, cli_frame, interval of cli_s)
-        cli_check_function(cli_state, cli_frame, fn of cli_s)
-    else if cli_what is "return" or cli_what is "fail" or cli_what is "exit" or cli_what is "turtle" or cli_what is "do"
+        cli_rule(cli_state, cli_frame, at of cli_s, "every", (list of ("" + unit of cli_s)), (list of interval of cli_s))
+        cli_check_function(cli_state, cli_frame, name of fn of cli_s, params of fn of cli_s, body of fn of cli_s, order of fn of cli_s, nothing)
+    else if cli_what is "return"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
+        set cli_returns to returns of cli_frame
+        if value of cli_s is nothing
+            add (record with how "fixed", type "nothing") to cli_returns
+        else
+            add (record with how "expr", frame cli_frame, e value of cli_s) to cli_returns
+        end
+        if def of cli_frame is not nothing and gives of def of cli_frame is not nothing # what it gives must be what it says it gives
+            cli_type_check(cli_state, at of cli_s, record with how "return", value value of cli_s, frame cli_frame, at nothing, sort nothing)
+        end
+    else if cli_what is "fail" or cli_what is "do"
+        cli_check_expr(cli_state, cli_frame, value of cli_s)
+    else if cli_what is "exit" # the number it stops with must be a whole number from 0 to 255
+        if value of cli_s is not nothing
+            cli_check_expr(cli_state, cli_frame, value of cli_s)
+            cli_rule(cli_state, cli_frame, at of cli_s, "exit", empty list, (list of value of cli_s))
+        end
     else if cli_what is "call"
         cli_check_call(cli_state, cli_frame, cli_s, yes)
     else if cli_what is "setItem"
         cli_check_expr(cli_state, cli_frame, subject of target of cli_s)
         cli_check_expr(cli_state, cli_frame, index of target of cli_s)
         cli_check_expr(cli_state, cli_frame, value of cli_s)
+        cli_rule(cli_state, cli_frame, at of target of cli_s, "setItem", empty list, (list of subject of target of cli_s))
     else if cli_what is "setField"
         cli_check_expr(cli_state, cli_frame, target of cli_s)
         cli_check_expr(cli_state, cli_frame, value of cli_s)
+        if def of cli_frame is nothing or made_kind of def of cli_frame is nothing # a record's field can then be anything
+            set item (name of cli_s) of (fields_set of cli_state) to yes
+        end
+        cli_rule(cli_state, cli_frame, at of cli_s, "setField", (list of name of cli_s), (list of target of cli_s))
     else if cli_what is "remove"
         cli_check_expr(cli_state, cli_frame, key of cli_s)
         cli_check_expr(cli_state, cli_frame, target of cli_s)
+        cli_rule(cli_state, cli_frame, at of cli_s, "remove", empty list, (list of target of cli_s))
     else if cli_what is "removeFile"
         cli_check_expr(cli_state, cli_frame, target of cli_s)
+        cli_rule(cli_state, cli_frame, at of cli_s, "removeFile", empty list, (list of target of cli_s))
     else if cli_what is "wait"
         cli_check_expr(cli_state, cli_frame, amount of cli_s)
+        cli_rule(cli_state, cli_frame, at of cli_s, "wait", (list of ("" + unit of cli_s)), (list of amount of cli_s))
     else if cli_what is "play" # a beep has neither
-        cli_check_expr(cli_state, cli_frame, note of cli_s)
-        cli_check_expr(cli_state, cli_frame, time of cli_s)
+        if note of cli_s is not nothing
+            cli_check_expr(cli_state, cli_frame, note of cli_s)
+            cli_check_expr(cli_state, cli_frame, time of cli_s)
+            cli_will_fail(cli_state, cli_frame, at of cli_s, record with how "play", note note of cli_s, time time of cli_s,
+                unit "" + unit of cli_s, at nothing, frame nothing, sort nothing)
+        end
     else if cli_what is "write"
         cli_check_expr(cli_state, cli_frame, value of cli_s)
         cli_check_expr(cli_state, cli_frame, target of cli_s)
-    else if cli_what is "expect"
-        cli_check_expr(cli_state, cli_frame, cond of cli_s)
+        cli_rule(cli_state, cli_frame, at of cli_s, "write", empty list, (list of target of cli_s))
+    else if cli_what is "expect" # only comparing kinds that can't be compared is certain to fail
+        set cli_c to cond of cli_s
+        if kind of cli_c is not "compare"
+            cli_check_expr(cli_state, cli_frame, cli_c)
+        else
+            cli_check_expr(cli_state, cli_frame, left of cli_c)
+            cli_check_expr(cli_state, cli_frame, right of cli_c)
+            if op of cli_c is not "is"
+                cli_rule(cli_state, cli_frame, at of cli_s, "compare", (list of op of cli_c), (list of left of cli_c, right of cli_c))
+            end
+        end
     else if cli_what is "try" # a mistake inside it is caught, so nothing in it is certain to fail
-        set skipped of cli_state to skipped of cli_state + 1
+        set skipped of cli_frame to skipped of cli_frame + 1
         cli_check_block(cli_state, cli_frame, body of cli_s)
-        set skipped of cli_state to skipped of cli_state - 1
+        set skipped of cli_frame to skipped of cli_frame - 1
+        if name of cli_s is not nothing
+            cli_add_source(cli_state, cli_key_for(cli_frame, name of cli_s), record with how "fixed", type "?")
+        end
         cli_check_block(cli_state, cli_frame, handler of cli_s)
+    else if cli_what is "turtle"
+        if value of cli_s is not nothing
+            cli_check_expr(cli_state, cli_frame, value of cli_s)
+            if action of cli_s is "picture" # whether a file is a picture isn't known: only what is neither a name nor bytes
+                cli_rule(cli_state, cli_frame, at of cli_s, "picture", empty list, (list of item 1 of items of value of cli_s))
+            else if kind of value of cli_s is not "list" or action of cli_s is "forward"
+                # the width check rests on the value, so it's only made when the width is written out
+                if action of cli_s is not "width" or kind of value of cli_s is "value"
+                    cli_rule(cli_state, cli_frame, at of cli_s, "turtle", (list of ("" + cli_action_number(cli_state, action of cli_s))), (list of value of cli_s))
+                end
+            end
+        end
     end
+end
+
+# what one way a variable gets its value gives, with the types as they stand
+to cli_source_type with cli_state, cli_how
+    set cli_way to how of cli_how
+    if cli_way is "fixed"
+        return type of cli_how
+    else if cli_way is "expr"
+        return cli_type_of(cli_state, frame of cli_how, e of cli_how)
+    else if cli_way is "each" # a list's items could be anything, unless the code says what it holds
+        set cli_list_type to cli_type_of(cli_state, frame of cli_how, e of cli_how)
+        if cli_list_type is nothing or cli_list_type is "text"
+            return cli_list_type
+        end
+        if mode of cli_state is "said"
+            return cli_holds(cli_list_type)
+        end
+        return "?"
+    else if cli_way is "add"
+        set cli_current to cli_slot_type(cli_state, key of cli_how)
+        set cli_v to cli_type_of(cli_state, frame of cli_how, e of cli_how)
+        if cli_base_type(cli_current) is "list"
+            if cli_holds(cli_current) is not "?" and cli_fits_type(cli_state, cli_v, cli_holds(cli_current)) is no
+                return "list"
+            end
+            return cli_current
+        end
+        if cli_current is "text"
+            return cli_current
+        end
+        if cli_current is "number" and cli_v is "number"
+            return "number"
+        end
+        if cli_current is not nothing and cli_current is in cli_measure_types and cli_v is cli_current # `add 300 m to trip`
+            return cli_current
+        end
+        # an add that will fail doesn't change the type: the program stops there
+        if cli_current is nothing or cli_v is nothing or (cli_known_type(cli_current) and cli_known_type(cli_v))
+            return nothing
+        end
+        return "?"
+    end
+    return "?"
 end
 
 # whether one problem comes after another: by its line, then by its column
@@ -1257,23 +2273,93 @@ to cli_sorted_problems with cli_problems
     return cli_out
 end
 
-# every problem in a program, with the files it uses in place
-to cli_problems_of with cli_source, cli_names, cli_texts
-    set cli_body to machine's read_program(cli_source, cli_files_of(cli_names, cli_texts))
-    set cli_state to record with found empty list, made empty dictionary, used empty dictionary, scopes 1, skipped 0
-    set cli_frame to record with scope machine's read_scope(nothing, empty list, cli_body, 0), id 1, outer nothing
-    cli_check_block(cli_state, cli_frame, cli_body)
+# every problem in a program's tree (the parser's, with the files it uses in place)
+to cli_problems_in with cli_body
+    return cli_sorted_problems(found of cli_checked(cli_body))
+end
+
+# the checker's state once it has checked a program's tree: what it found, and the type of every variable
+to cli_checked with cli_body
+    set cli_state to cli_new_state()
+    cli_check_function(cli_state, nothing, "main", empty list, cli_body, 0, nothing)
+    # every variable's type: again until nothing changes, first from what's sure, then with what the code says
+    for each cli_mode in list of "sure", "said"
+        set mode of cli_state to cli_mode
+        set cli_types to sure of cli_state
+        if cli_mode is "said"
+            set cli_types to said of cli_state
+        end
+        set cli_changed to yes
+        repeat while cli_changed
+            set cli_changed to no
+            for each cli_key in sources of cli_state
+                set cli_type to nothing
+                if cli_mode is "said" and cli_key is in declared of cli_state
+                    set cli_said to item cli_key of declared of cli_state
+                    set cli_type to cli_type_named(cli_state, words of cli_said, at of cli_said)
+                else
+                    for each cli_how in item cli_key of sources of cli_state
+                        set cli_type to cli_join(cli_type, cli_source_type(cli_state, cli_how))
+                    end
+                end
+                set cli_was to nothing
+                if cli_key is in cli_types
+                    set cli_was to item cli_key of cli_types
+                end
+                if cli_type is not cli_was
+                    set item cli_key of cli_types to cli_type
+                    set cli_changed to yes
+                end
+            end
+        end
+    end
+    set mode of cli_state to "said"
+    for each cli_d in gives of cli_state # a kind a `gives` names that the program doesn't make
+        cli_type_named(cli_state, gives of cli_d, at of cli_d)
+    end
+    for each cli_c in checks of cli_state
+        if sort of cli_c is "fit"
+            set mode of cli_state to "said"
+            set cli_said to cli_run_check(cli_state, cli_c)
+            if cli_said is not nothing and cli_said is not ""
+                cli_note_problem(cli_state, at of cli_c, "doesn't fit", cli_said)
+            end
+        else
+            set cli_done to no
+            for each cli_mode in list of "sure", "said"
+                if not cli_done
+                    set mode of cli_state to cli_mode
+                    set cli_said to cli_run_check(cli_state, cli_c)
+                    if cli_said is not nothing
+                        set cli_done to yes
+                        if cli_said is not "" # one moth check leaves out, resting on a value written out
+                            set cli_kind to "fails"
+                            if cli_mode is "said"
+                                set cli_kind to "doesn't fit"
+                            end
+                            cli_note_problem(cli_state, at of cli_c, cli_kind, cli_said)
+                        end
+                    end
+                end
+            end
+        end
+    end
     for each cli_key in made of cli_state
         if not (cli_key is in used of cli_state)
             set cli_entry to item cli_key of (made of cli_state)
             cli_note_problem(cli_state, at of cli_entry, "unused", message of cli_entry)
         end
     end
-    return cli_sorted_problems(found of cli_state)
+    return cli_state
+end
+
+# every problem in a program, with the files it uses in place
+to cli_problems_of with cli_source, cli_names, cli_texts
+    return cli_problems_in(machine's read_program(cli_source, cli_files_of(cli_names, cli_texts)))
 end
 
 # `moth check file.moth`: every problem, where it is, and the line with a ^ under the spot; 0 if no line
-# will fail
+# will fail and nothing doesn't fit what it says
 to cli_check_file with cli_path
     set cli_source to cli_text_of(cli_path)
     if cli_source is nothing
@@ -1302,6 +2388,8 @@ to cli_check_file with cli_path
         if cli_said is "fails"
             set cli_said to "will fail"
             set cli_wrong to 1
+        else if cli_said is "doesn't fit" # the code goes against what it says it is: a mistake too
+            set cli_wrong to 1
         end
         set cli_where to cli_path
         if file of cli_p is not ""
@@ -1314,6 +2402,1271 @@ to cli_check_file with cli_path
         say cli_path + ": no problems found"
     end
     return cli_wrong
+end
+
+# ---------- the language server ----------
+# `moth lsp` (DESIGN §108): what moth knows of a program, for any editor, over the Language Server Protocol
+# on the input and the output: the problems moth check finds, as you type; tidying, as moth tidy does; each
+# function, kind and variable a file makes, for its outline; where a name is made, in the file or one it
+# uses; what a name is, when the pointer is on it; and the names that could come next. Each message is
+# JSON after a "Content-Length" line and an empty line, each line ending with "\r\n" (ask for ... bytes
+# reads them as they come). Lines and columns are counted from 0 there, and columns as JavaScript counts
+# them, as Moth's are.
+
+set cli_cr to ((list of 13) as bytes) as text # a carriage return, which Moth text can't write
+# what can come next in a line, for completion
+set cli_lsp_words to list of "set", "to", "say", "if", "else", "end", "repeat", "while", "for each", "return", "add", "remove",
+    "kind", "use", "try", "if it fails", "either way", "fail with", "stop", "expect", "match", "when", "every", "ask", "read",
+    "write", "length of", "item", "list of", "empty list", "empty dictionary", "record with", "dictionary where", "yes", "no",
+    "nothing", "and", "or", "not", "is", "is not", "is greater than", "is less than", "is at least", "is at most", "is in",
+    "as a number", "as text", "as yes or no", "as a list", "as a record", "as a dictionary", "as bytes", "as a function",
+    "as a list of", "gives", "with"
+
+# the next message the editor sent, as a dictionary, or nothing when the input has ended
+to cli_lsp_read
+    set cli_header to ""
+    set cli_blank to cli_cr + "\n" + cli_cr + "\n"
+    repeat while not cli_finishes_with(cli_header, cli_blank)
+        set cli_byte to ask for 1 bytes
+        if length of cli_byte is 0
+            return nothing
+        end
+        set cli_header to cli_header + (cli_byte as text)
+    end
+    set cli_size to -1
+    for each cli_raw in split cli_header by "\n"
+        set cli_line to join (split cli_raw by cli_cr) with ""
+        set cli_colon to position of ":" in cli_line
+        if cli_colon is greater than 0 and lowercase of cli_first(cli_line, cli_colon - 1) is "content-length"
+            set cli_size to number of cli_trimmed(cli_tail(cli_line, cli_colon + 1))
+        end
+    end
+    if cli_size is less than 0
+        return dictionary where "method" is "?" # a message moth can't read: answered as one it doesn't know
+    end
+    set cli_body to ask for cli_size bytes
+    try
+        return json from (cli_body as text)
+    if it fails
+        return dictionary where "method" is "?"
+    end
+end
+
+# a message to the editor: its JSON, with Content-Length counting its bytes and the new line say puts after it
+to cli_lsp_send with cli_message
+    set cli_text to cli_message as json
+    say "Content-Length: " + (length of (cli_text as bytes) + 1) + cli_cr
+    say cli_cr
+    say cli_text
+end
+
+to cli_lsp_reply with cli_id, cli_result
+    cli_lsp_send(dictionary where "jsonrpc" is "2.0", "id" is cli_id, "result" is cli_result)
+end
+
+to cli_lsp_tell with cli_method, cli_params
+    cli_lsp_send(dictionary where "jsonrpc" is "2.0", "method" is cli_method, "params" is cli_params)
+end
+
+# a field of a message, or nothing if it hasn't one
+to cli_lsp_get with cli_from, cli_key
+    if cli_from is nothing or not (cli_key is in cli_from)
+        return nothing
+    end
+    return item cli_key of cli_from
+end
+
+# a file's path, from its address: file:///C:/a%20b/x.moth is C:/a b/x.moth, and file:///home/x.moth /home/x.moth
+to cli_lsp_path with cli_uri
+    set cli_rest to cli_uri
+    if cli_begins_with(cli_rest, "file://")
+        set cli_rest to cli_tail(cli_rest, 8)
+    end
+    set cli_bytes to empty list # its UTF-8, as %C3%A9 is é
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_rest
+        set cli_c to item cli_k of cli_rest
+        if cli_c is "%" and cli_k + 2 is at most length of cli_rest
+            add cli_hex_value(item (cli_k + 1) of cli_rest) * 16 + cli_hex_value(item (cli_k + 2) of cli_rest) to cli_bytes
+            add 3 to cli_k
+        else
+            for each cli_b in cli_c as bytes
+                add cli_b to cli_bytes
+            end
+            add 1 to cli_k
+        end
+    end
+    set cli_out to (cli_bytes as bytes) as text
+    if length of cli_out is at least 3 and item 1 of cli_out is "/" and item 3 of cli_out is ":"
+        set cli_out to cli_tail(cli_out, 2)
+    end
+    return cli_out
+end
+
+to cli_hex_value with cli_c
+    set cli_at to position of (lowercase of cli_c) in "0123456789abcdef"
+    if cli_at is 0
+        return 0
+    end
+    return cli_at - 1
+end
+
+# a file's address, from its path
+to cli_lsp_uri with cli_path
+    set cli_path to join (split cli_path by "\\") with "/"
+    set cli_out to "file://"
+    if length of cli_path is at least 2 and item 2 of cli_path is ":"
+        set cli_out to cli_out + "/"
+    end
+    for each cli_c in cli_path
+        if cli_c is " "
+            add "%20" to cli_out
+        else if cli_c is "%"
+            add "%25" to cli_out
+        else if cli_c is "#"
+            add "%23" to cli_out
+        else
+            add cli_c to cli_out
+        end
+    end
+    return cli_out
+end
+
+# a position in a file, as the protocol has it: a line and a column, from 0
+to cli_lsp_place with cli_line, cli_col
+    return dictionary where "line" is cli_line, "character" is cli_col
+end
+
+to cli_lsp_range with cli_line, cli_col, cli_end_line, cli_end_col
+    return dictionary where "start" is cli_lsp_place(cli_line, cli_col), "end" is cli_lsp_place(cli_end_line, cli_end_col)
+end
+
+to cli_lsp_word_char with cli_c
+    return cli_in_word(cli_c)
+end
+
+# a line's text, by its number from 1, or "" past the end
+to cli_lsp_line with cli_lines, cli_n
+    if cli_n is less than 1 or cli_n is greater than length of cli_lines
+        return ""
+    end
+    return join (split item cli_n of cli_lines by cli_cr) with ""
+end
+
+# which character of a line is at a column counted as JavaScript counts them, from 1
+to cli_lsp_char_at with cli_text, cli_col
+    set cli_width to 1
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and cli_width is less than cli_col
+        add cli_width_of(item cli_k of cli_text) to cli_width
+        add 1 to cli_k
+    end
+    return cli_k
+end
+
+# the column, from 1, after the word that starts at column `col` of a line, or after the one character there
+to cli_lsp_word_end with cli_text, cli_col
+    set cli_k to cli_lsp_char_at(cli_text, cli_col)
+    if cli_k is greater than length of cli_text
+        return cli_col + 1
+    end
+    if not cli_lsp_word_char(item cli_k of cli_text)
+        return cli_col + cli_width_of(item cli_k of cli_text)
+    end
+    set cli_end to cli_col
+    repeat while cli_k is at most length of cli_text and cli_lsp_word_char(item cli_k of cli_text)
+        add cli_width_of(item cli_k of cli_text) to cli_end
+        add 1 to cli_k
+    end
+    return cli_end
+end
+
+# ----- problems -----
+
+# what each problem kind is to an editor: 1 an error (what makes moth check end with 1), 2 a warning
+to cli_lsp_severity with cli_kind
+    if cli_kind is "fails" or cli_kind is "error" or cli_kind is "doesn't fit"
+        return 1
+    end
+    return 2
+end
+
+to cli_lsp_diagnostic with cli_lines, cli_line, cli_col, cli_kind, cli_message
+    set cli_text to cli_lsp_line(cli_lines, cli_line)
+    set cli_found to dictionary where "range" is cli_lsp_range(cli_line - 1, cli_col - 1, cli_line - 1, cli_lsp_word_end(cli_text, cli_col) - 1),
+        "severity" is cli_lsp_severity(cli_kind), "source" is "moth", "message" is cli_message
+    if cli_kind is "unused" or cli_kind is "never runs"
+        set item "tags" of cli_found to list of 1 # shown faded, as code that's not needed
+    end
+    return cli_found
+end
+
+# The problems in a document, as moth check finds them, for the editor. One in a file it uses that stops it
+# running is shown on the line that uses that file; the file's other problems show when it's opened itself.
+to cli_lsp_problems with cli_path, cli_source
+    set cli_lines to split cli_source by "\n"
+    set cli_known to cli_lsp_known(cli_path, cli_source)
+    set cli_out to empty list
+    if why of cli_known is not nothing # code that can't be read: its first mistake, as moth check says it
+        set cli_at to at of why of cli_known
+        if file of cli_at is ""
+            add cli_lsp_diagnostic(cli_lines, line of cli_at, col of cli_at, "error", reason of why of cli_known) to cli_out
+        else
+            add cli_lsp_used_problem(cli_lines, file of cli_at, line of cli_at, col of cli_at, "error", reason of why of cli_known) to cli_out
+        end
+        return cli_out
+    end
+    set cli_problems to cli_sorted_problems(found of cli_lsp_state(cli_known))
+    for each cli_p in cli_problems
+        if file of cli_p is ""
+            add cli_lsp_diagnostic(cli_lines, line of cli_p, col of cli_p, kind of cli_p, message of cli_p) to cli_out
+        else if kind of cli_p is "fails"
+            add cli_lsp_used_problem(cli_lines, file of cli_p, line of cli_p, col of cli_p, kind of cli_p, message of cli_p) to cli_out
+        end
+    end
+    return cli_out
+end
+
+# a problem in a file the document uses, on the line that uses it
+to cli_lsp_used_problem with cli_lines, cli_file, cli_line, cli_col, cli_kind, cli_message
+    set cli_at to 1
+    for each cli_k from 1 to length of cli_lines
+        if cli_at is 1 and ("\"" + cli_file + "\"") is in item cli_k of cli_lines
+            set cli_at to cli_k
+        end
+    end
+    set cli_text to cli_lsp_line(cli_lines, cli_at)
+    return dictionary where "range" is cli_lsp_range(cli_at - 1, 0, cli_at - 1, length of cli_text), "severity" is cli_lsp_severity(cli_kind),
+        "source" is "moth", "message" is cli_file + ":" + cli_line + ":" + cli_col + ": " + cli_message
+end
+
+to cli_lsp_publish with cli_uri, cli_source
+    set cli_found to empty list
+    if cli_source is not nothing
+        set cli_found to cli_lsp_problems(cli_lsp_path(cli_uri), cli_source)
+    end
+    cli_lsp_tell("textDocument/publishDiagnostics", dictionary where "uri" is cli_uri, "diagnostics" is cli_found)
+end
+
+# ----- what a program makes -----
+# Each function, kind, input and variable, from the program's tree: its name, what it is, where it's made
+# (the file, "" for the document's own, and the line and column of its `to`, `kind`, `set`...), and the
+# lines it covers.
+
+# What moth knows of each document, by its path, kept while its text and the texts of the files it uses stay
+# the same, so the outline, a hover and the problems after one change read the program once: see cli_lsp_known.
+set cli_lsp_kept to empty dictionary
+
+# What moth knows of a document: a record with source and used (what it was worked out from), why (the first
+# mistake that stops the code being read as it is, or nothing), tree (the program's tree, with the files it
+# uses in place, or nothing), and state (the checker's, once something wants it: see cli_lsp_state).
+to cli_lsp_known with cli_path, cli_source
+    set cli_used to cli_sources_of(cli_path, cli_source)
+    if cli_path is in cli_lsp_kept
+        set cli_kept to item cli_path of cli_lsp_kept
+        if cli_lsp_same(cli_kept, cli_source, cli_used)
+            return cli_kept
+        end
+    end
+    set cli_read to cli_lsp_read_tree(cli_source, cli_used)
+    set cli_kept to record with source cli_source, used cli_used, why why of cli_read, tree tree of cli_read, state nothing
+    set item cli_path of cli_lsp_kept to cli_kept
+    return cli_kept
+end
+
+# whether what's kept was worked out from this text, and these files with these texts
+to cli_lsp_same with cli_kept, cli_source, cli_used
+    if source of cli_kept is not cli_source or length of names of used of cli_kept is not length of names of cli_used
+        return no
+    end
+    for each cli_k from 1 to length of names of cli_used
+        if item cli_k of names of used of cli_kept is not item cli_k of names of cli_used
+            return no
+        end
+        if item cli_k of texts of used of cli_kept is not item cli_k of texts of cli_used
+            return no
+        end
+    end
+    return yes
+end
+
+# The checker's state for a document, its problems and the type of each variable, or nothing if its tree
+# couldn't be read; checked once, the first time it's wanted
+to cli_lsp_state with cli_kept
+    if state of cli_kept is nothing and tree of cli_kept is not nothing
+        set state of cli_kept to cli_checked(tree of cli_kept)
+    end
+    return state of cli_kept
+end
+
+# A program's tree, from code that's being typed: a record with why (the first mistake that stopped it being
+# read as it is, or nothing) and tree. Code often can't be read for a moment as it's typed, so each time it
+# can't, the line with the mistake is left out (made empty, so the lines after it keep their numbers; for a
+# mistake at the end of the code, the last line with something on it), or a block left open is ended at the
+# end, and it's read again, a few times at most. The outline, hovers and completion then still know the rest.
+to cli_lsp_read_tree with cli_source, cli_used
+    set cli_files to cli_files_of(names of cli_used, texts of cli_used)
+    set cli_lines to split cli_source by "\n"
+    set cli_first_why to nothing
+    set cli_last_mark to ""
+    repeat 12 times
+        set cli_text to join cli_lines with "\n"
+        set cli_tree to nothing
+        set cli_wrong to nothing
+        try
+            set cli_tree to machine's read_program(cli_text, cli_files)
+        if it fails with cli_why
+            if not cli_is_problem(cli_why)
+                fail with cli_why
+            end
+            set cli_wrong to cli_why
+        end
+        if cli_wrong is nothing
+            return record with why cli_first_why, tree cli_tree
+        end
+        if cli_first_why is nothing
+            set cli_first_why to cli_wrong
+        end
+        if file of at of cli_wrong is not "" # a mistake in a file it uses, which isn't the editor's to mend
+            return record with why cli_first_why, tree nothing
+        end
+        set cli_mark to line of at of cli_wrong + ":" + col of at of cli_wrong + ":" + reason of cli_wrong
+        if cli_finishes_with(reason of cli_wrong, "is missing its 'end'")
+            add "end" to cli_lines
+        else
+            set cli_n to line of at of cli_wrong
+            if cli_n is greater than length of cli_lines
+                set cli_n to length of cli_lines
+            else if cli_mark is not cli_last_mark and cli_lsp_starts_line(item cli_n of cli_lines, col of at of cli_wrong)
+                # A mistake at the start of a line is most often the line before's, left unfinished: `set x to`,
+                # then a line that isn't the value it waits for. That line's left out first; if the mistake is
+                # still here then, it's this line's own.
+                if not cli_begins_with(reason of cli_wrong, "a line can't start with")
+                    set cli_n to cli_n - 1
+                    repeat while cli_n is at least 1 and cli_trimmed(item cli_n of cli_lines) is ""
+                        set cli_n to cli_n - 1
+                    end
+                    if cli_n is less than 1
+                        set cli_n to line of at of cli_wrong
+                    end
+                end
+            end
+            repeat while cli_n is at least 1 and cli_trimmed(item cli_n of cli_lines) is ""
+                set cli_n to cli_n - 1
+            end
+            if cli_n is less than 1
+                return record with why cli_first_why, tree nothing
+            end
+            set item cli_n of cli_lines to ""
+        end
+        set cli_last_mark to cli_mark
+    end
+    return record with why cli_first_why, tree nothing
+end
+
+# whether a column of a line, counted from 1 as JavaScript counts them, is its first that isn't a space
+to cli_lsp_starts_line with cli_text, cli_col
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and (item cli_k of cli_text is " " or item cli_k of cli_text is "\t")
+        add 1 to cli_k
+    end
+    return cli_lsp_char_at(cli_text, cli_col) is cli_k
+end
+
+# what a define is called where it's written: dog's speak is speak, in the kind dog
+to cli_lsp_own_name with cli_name
+    set cli_cut to position of "'s " in cli_name
+    if cli_cut is 0
+        return cli_name
+    end
+    return cli_tail(cli_name, cli_cut + 3)
+end
+
+# whether a name is one a program can't write: what the parser makes for itself, as "the step on line 3"
+to cli_lsp_hidden with cli_name
+    return " " is in cli_lsp_own_name(cli_name)
+end
+
+# what a function says it takes and gives: `with w as a number, h as a number gives a number`
+to cli_lsp_signature with cli_d
+    set cli_out to ""
+    for each cli_k from 1 to length of params of cli_d
+        if cli_k is 1
+            set cli_out to "with "
+        else
+            add ", " to cli_out
+        end
+        add item cli_k of params of cli_d to cli_out
+        set cli_said to nothing
+        if types of cli_d is not nothing and cli_k is at most length of types of cli_d
+            set cli_said to item cli_k of types of cli_d
+        end
+        if cli_said is nothing and cli_k is at most length of kinds of cli_d and item cli_k of kinds of cli_d is at least 0
+            set cli_said to item (item cli_k of kinds of cli_d + 1) of cli_kind_words
+        end
+        if cli_said is not nothing
+            add " as " + cli_said to cli_out
+        end
+    end
+    if gives of cli_d is not nothing
+        if cli_out is not ""
+            add " " to cli_out
+        end
+        add "gives " + gives of cli_d to cli_out
+    end
+    return cli_out
+end
+
+# Everything a block makes, into `found`: records with name, what ("function", "kind", "method", "input" or
+# "variable"), define (for the first three), file, line, col, and inside (the define whose body it's in, or
+# nothing at the top level)
+to cli_lsp_made with cli_body, cli_inside, cli_found, cli_seen
+    for each cli_s in cli_body
+        set cli_what to kind of cli_s
+        if cli_what is "define" and not cli_lsp_hidden(name of cli_s)
+            set cli_sort to "function"
+            if made_kind of cli_s is not nothing
+                set cli_sort to "kind"
+            else if "'s " is in name of cli_s
+                set cli_sort to "method"
+            end
+            add (record with name name of cli_s, what cli_sort, define cli_s, file file of at of cli_s, line line of at of cli_s,
+                col col of at of cli_s, inside cli_inside) to cli_found
+            for each cli_p in params of cli_s
+                add (record with name cli_p, what "input", define cli_s, file file of at of cli_s, line line of at of cli_s,
+                    col col of at of cli_s, inside cli_s) to cli_found
+            end
+            cli_lsp_made(body of cli_s, cli_s, cli_found, empty dictionary)
+        else if cli_what is "set" or cli_what is "count" or cli_what is "each"
+            set cli_mark to lowercase of name of cli_s
+            if not cli_lsp_hidden(name of cli_s) and not (cli_mark is in cli_seen)
+                set item cli_mark of cli_seen to yes
+                add (record with name name of cli_s, what "variable", define nothing, file file of at of cli_s, line line of at of cli_s,
+                    col col of at of cli_s, inside cli_inside) to cli_found
+            end
+        end
+        for each cli_inner in cli_lsp_blocks(cli_s)
+            cli_lsp_made(cli_inner, cli_inside, cli_found, cli_seen)
+        end
+    end
+end
+
+# the blocks inside a statement that aren't a function of their own
+to cli_lsp_blocks with cli_s
+    set cli_what to kind of cli_s
+    if cli_what is "if"
+        return list of then of cli_s, otherwise of cli_s
+    else if cli_what is "while" or cli_what is "repeat" or cli_what is "count" or cli_what is "each"
+        return list of body of cli_s
+    else if cli_what is "try"
+        return list of body of cli_s, handler of cli_s
+    end
+    return empty list
+end
+
+# the line a block that starts on line n ends on: the first line after it as far in as it, or less, that
+# starts with `end`; or n itself if there's none
+to cli_lsp_end_line with cli_lines, cli_n
+    set cli_start to cli_lsp_line(cli_lines, cli_n)
+    set cli_depth to length of cli_start - length of cli_trimmed_front(cli_start)
+    for each cli_k from cli_n + 1 to length of cli_lines
+        set cli_text to cli_lsp_line(cli_lines, cli_k)
+        set cli_rest to cli_trimmed_front(cli_text)
+        if cli_rest is not ""
+            if length of cli_text - length of cli_rest is at most cli_depth
+                if cli_rest is "end" or cli_begins_with(cli_rest, "end ") or cli_begins_with(cli_rest, "end#")
+                    return cli_k
+                end
+                return cli_n
+            end
+        end
+    end
+    return cli_n
+end
+
+to cli_trimmed_front with cli_text
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and (item cli_k of cli_text is " " or item cli_k of cli_text is "\t")
+        add 1 to cli_k
+    end
+    return cli_tail(cli_text, cli_k)
+end
+
+# where the name of what's made on a line is: the column, from 1, of `name` after the `to`, `kind`, `set` or
+# `for each` at `col`, or col itself
+to cli_lsp_name_col with cli_text, cli_col, cli_name
+    set cli_k to cli_lsp_char_at(cli_text, cli_col)
+    set cli_low to lowercase of cli_text
+    set cli_want to lowercase of cli_lsp_own_name(cli_name)
+    set cli_at to cli_col
+    repeat while cli_k + length of cli_want - 1 is at most length of cli_low
+        if (items cli_k to (cli_k + length of cli_want - 1) of cli_low) is cli_want
+            set cli_before to cli_k is 1 or not cli_lsp_word_char(item (cli_k - 1) of cli_low)
+            set cli_after to cli_k + length of cli_want is greater than length of cli_low or not cli_lsp_word_char(item (cli_k + length of cli_want) of cli_low)
+            if cli_before and cli_after
+                return cli_at
+            end
+        end
+        add cli_width_of(item cli_k of cli_low) to cli_at
+        add 1 to cli_k
+    end
+    return cli_col
+end
+
+# ----- symbols, definitions, hovers and completion -----
+
+# the text of a file the document uses, or the document's own
+to cli_lsp_file_text with cli_path, cli_source, cli_file
+    if cli_file is ""
+        return cli_source
+    end
+    try
+        return read cli_folder_of(cli_path) + cli_file
+    if it fails
+        set cli_std to standard's standard_text(cli_file)
+        if cli_std is not nothing
+            return cli_std
+        end
+    end
+    return ""
+end
+
+to cli_lsp_symbol_kind with cli_what
+    if cli_what is "kind"
+        return 5
+    else if cli_what is "method"
+        return 6
+    else if cli_what is "function"
+        return 12
+    end
+    return 13
+end
+
+# the outline: each function, kind and variable the document makes, functions inside the ones they're made in
+to cli_lsp_symbols with cli_path, cli_source
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
+    if cli_tree is nothing
+        return empty list
+    end
+    set cli_lines to split cli_source by "\n"
+    set cli_made to empty list
+    cli_lsp_made(cli_tree, nothing, cli_made, empty dictionary)
+    set cli_by_define to empty dictionary # each function's and kind's symbol, by its line
+    set cli_kinds to empty dictionary # each kind's symbol, by its name, for its own functions
+    set cli_placed to empty list # each symbol, with what to put it in
+    for each cli_m in cli_made
+        if file of cli_m is "" and what of cli_m is not "input"
+            set cli_text to cli_lsp_line(cli_lines, line of cli_m)
+            set cli_name_at to cli_lsp_name_col(cli_text, col of cli_m, name of cli_m)
+            set cli_end to line of cli_m
+            if what of cli_m is not "variable"
+                set cli_end to cli_lsp_end_line(cli_lines, line of cli_m)
+            end
+            set cli_detail to ""
+            if define of cli_m is not nothing
+                set cli_detail to cli_lsp_signature(define of cli_m)
+            end
+            set cli_own to cli_lsp_own_name(name of cli_m)
+            set cli_symbol to dictionary where "name" is cli_own, "detail" is cli_detail, "kind" is cli_lsp_symbol_kind(what of cli_m),
+                "range" is cli_lsp_range(line of cli_m - 1, 0, cli_end - 1, length of cli_lsp_line(cli_lines, cli_end)),
+                "selectionRange" is cli_lsp_range(line of cli_m - 1, cli_name_at - 1, line of cli_m - 1, cli_name_at - 1 + length of cli_own),
+                "children" is empty list
+            if define of cli_m is not nothing
+                set item ("" + line of cli_m) of cli_by_define to cli_symbol
+            end
+            if what of cli_m is "kind"
+                set item (lowercase of name of cli_m) of cli_kinds to cli_symbol
+            end
+            add (record with symbol cli_symbol, made cli_m) to cli_placed
+        end
+    end
+    set cli_top to empty list
+    for each cli_one in cli_placed
+        set cli_m to made of cli_one
+        set cli_parent to nothing
+        if what of cli_m is "method"
+            set cli_owner to lowercase of cli_first(name of cli_m, (position of "'s " in name of cli_m) - 1)
+            if cli_owner is in cli_kinds
+                set cli_parent to item cli_owner of cli_kinds
+            end
+        end
+        if cli_parent is nothing and inside of cli_m is not nothing
+            if ("" + line of at of inside of cli_m) is in cli_by_define
+                set cli_parent to item ("" + line of at of inside of cli_m) of cli_by_define
+            end
+        end
+        if cli_parent is nothing
+            add symbol of cli_one to cli_top
+        else
+            set cli_children to item "children" of cli_parent
+            add symbol of cli_one to cli_children
+        end
+    end
+    return cli_top
+end
+
+# the name at a position: the word there, with what's before its 's when that's part of the name (lib's twice)
+to cli_lsp_name_at with cli_lines, cli_line, cli_char
+    set cli_text to cli_lsp_line(cli_lines, cli_line + 1)
+    set cli_k to cli_lsp_char_at(cli_text, cli_char + 1)
+    if cli_k is greater than length of cli_text or not cli_lsp_word_char(item cli_k of cli_text)
+        if cli_k is greater than 1 and cli_k - 1 is at most length of cli_text and cli_lsp_word_char(item (cli_k - 1) of cli_text)
+            set cli_k to cli_k - 1
+        else
+            return nothing
+        end
+    end
+    set cli_from to cli_k
+    repeat while cli_from is greater than 1 and cli_lsp_word_char(item (cli_from - 1) of cli_text)
+        set cli_from to cli_from - 1
+    end
+    set cli_to to cli_k
+    repeat while cli_to is less than length of cli_text and cli_lsp_word_char(item (cli_to + 1) of cli_text)
+        add 1 to cli_to
+    end
+    set cli_word to items cli_from to cli_to of cli_text
+    set cli_owner to nothing
+    if cli_from is greater than 4 and (items (cli_from - 3) to (cli_from - 1) of cli_text) is "'s "
+        set cli_o to cli_from - 4
+        repeat while cli_o is greater than 1 and cli_lsp_word_char(item (cli_o - 1) of cli_text)
+            set cli_o to cli_o - 1
+        end
+        set cli_owner to items cli_o to (cli_from - 4) of cli_text
+    end
+    return record with word cli_word, owner cli_owner
+end
+
+# what a name at a position means: the thing it's made as, the nearest first (an input of the function the
+# position is in, a variable made in it, then outside it), or nothing
+to cli_lsp_meaning with cli_path, cli_source, cli_line, cli_char
+    set cli_lines to split cli_source by "\n"
+    set cli_named to cli_lsp_name_at(cli_lines, cli_line, cli_char)
+    if cli_named is nothing
+        return nothing
+    end
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
+    if cli_tree is nothing
+        return nothing
+    end
+    set cli_made to empty list
+    cli_lsp_made(cli_tree, nothing, cli_made, empty dictionary)
+    set cli_want to lowercase of word of cli_named
+    set cli_full to nothing
+    if owner of cli_named is not nothing
+        set cli_full to lowercase of owner of cli_named + "'s " + cli_want
+    end
+    # the functions the position is in, innermost last, as lines from and to
+    set cli_best to nothing
+    set cli_best_depth to -1
+    for each cli_m in cli_made
+        set cli_name to lowercase of name of cli_m
+        set cli_fits to no
+        if cli_full is not nothing
+            set cli_fits to cli_name is cli_full or (what of cli_m is "method" and cli_lsp_own_name(cli_name) is cli_want)
+        else
+            set cli_fits to cli_name is cli_want
+        end
+        if cli_fits
+            set cli_depth to cli_lsp_scope_depth(cli_lines, cli_m, cli_line + 1)
+            if cli_depth is greater than cli_best_depth
+                set cli_best to cli_m
+                set cli_best_depth to cli_depth
+            end
+        end
+    end
+    if cli_best is nothing and cli_full is nothing # a kind's own function, on the line that makes it
+        for each cli_m in cli_made
+            if what of cli_m is "method" and file of cli_m is "" and line of cli_m is cli_line + 1
+                if lowercase of cli_lsp_own_name(name of cli_m) is cli_want
+                    set cli_best to cli_m
+                end
+            end
+        end
+    end
+    return cli_best
+end
+
+# how close what's made is to a line of the document: -1 if the line can't see it; 0 if it's made outside any
+# function; else how far in the function it's made in is written, so an input of the function the line is in
+# beats a variable of the function around it
+to cli_lsp_scope_depth with cli_lines, cli_m, cli_line
+    if inside of cli_m is nothing
+        return 0
+    end
+    set cli_d to inside of cli_m
+    if file of at of cli_d is not ""
+        return -1
+    end
+    set cli_from to line of at of cli_d
+    if cli_line is less than cli_from or cli_line is greater than cli_lsp_end_line(cli_lines, cli_from)
+        return -1
+    end
+    return col of at of cli_d
+end
+
+# Where a thing is made, as the protocol has a place in a file; or nothing for one made in a file of the
+# standard library's that's moth's own copy, which isn't on the disk for the editor to open
+to cli_lsp_location with cli_uri, cli_path, cli_source, cli_m
+    set cli_uri_of to cli_uri
+    if file of cli_m is not ""
+        if not cli_lsp_on_disk(cli_folder_of(cli_path) + file of cli_m)
+            return nothing
+        end
+        set cli_uri_of to cli_lsp_uri(cli_folder_of(cli_path) + file of cli_m)
+    end
+    set cli_lines to split cli_lsp_file_text(cli_path, cli_source, file of cli_m) by "\n"
+    set cli_text to cli_lsp_line(cli_lines, line of cli_m)
+    set cli_at to cli_lsp_name_col(cli_text, col of cli_m, name of cli_m)
+    if what of cli_m is "input"
+        set cli_at to cli_lsp_name_col(cli_text, col of cli_m + 1, name of cli_m)
+    end
+    return dictionary where "uri" is cli_uri_of, "range" is cli_lsp_range(line of cli_m - 1, cli_at - 1, line of cli_m - 1, cli_at - 1 + length of cli_lsp_own_name(name of cli_m))
+end
+
+# the comment lines just above a line, as a function's own words for what it does
+to cli_lsp_comment_above with cli_lines, cli_n
+    set cli_first_line to cli_n
+    repeat while cli_first_line is greater than 1 and cli_begins_with(cli_trimmed_front(cli_lsp_line(cli_lines, cli_first_line - 1)), "#")
+        set cli_first_line to cli_first_line - 1
+    end
+    set cli_said to ""
+    for each cli_k from cli_first_line to cli_n - 1
+        set cli_words to cli_trimmed_front(cli_tail(cli_trimmed_front(cli_lsp_line(cli_lines, cli_k)), 2))
+        if cli_said is not "" and cli_words is not ""
+            add " " to cli_said
+        end
+        add cli_trimmed(cli_words) to cli_said
+    end
+    return cli_said
+end
+
+# whether a file is there to open: one the editor has open, or one on the disk
+to cli_lsp_on_disk with cli_path
+    if cli_path is in cli_open_texts
+        return yes
+    end
+    try
+        return length of (read cli_path) is at least 0
+    if it fails
+        return no
+    end
+end
+
+# A type as a hover says it ("a number", "yes or no", "a list of dogs", "a dog or nothing"), or nothing if
+# it isn't known
+to cli_lsp_type_words with cli_t
+    if cli_t is nothing or cli_t is "?"
+        return nothing
+    end
+    if cli_begins_with(cli_t, "maybe:")
+        set cli_inner to cli_lsp_type_words(cli_tail(cli_t, 7))
+        if cli_inner is nothing
+            return nothing
+        end
+        return cli_inner + " or nothing"
+    end
+    if cli_t is "yes/no"
+        return "yes or no"
+    end
+    return cli_described(cli_t)
+end
+
+# What the checker worked out a thing holds, as words, or nothing if that isn't known: a variable's value
+# ("set"), an input's ("input w"), or what a function gives ("gives"). What the code says of itself counts.
+to cli_lsp_type_of with cli_known, cli_m, cli_what
+    return cli_lsp_type_words(cli_lsp_raw_type(cli_known, cli_m, cli_what))
+end
+
+# the same, as the checker writes a type: "number", "record:dog", "list:text"..., or nothing
+to cli_lsp_raw_type with cli_known, cli_m, cli_what
+    set cli_state to cli_lsp_state(cli_known)
+    if cli_state is nothing
+        return nothing
+    end
+    set cli_place to file of cli_m + ":" + line of cli_m + ":" + col of cli_m + " " + cli_what
+    if not (cli_place is in places of cli_state)
+        return nothing
+    end
+    set cli_key to item cli_place of places of cli_state
+    set cli_t to nothing
+    if cli_key is in said of cli_state
+        set cli_t to item cli_key of said of cli_state
+    end
+    if (cli_t is nothing or cli_t is "?") and cli_key is in sure of cli_state
+        set cli_t to item cli_key of sure of cli_state
+    end
+    return cli_t
+end
+
+# What a name is, for a hover: a variable or an input, with what it holds where that's known; or how a
+# function or a kind is made, in Moth, with what it takes and gives, and the comment above it
+to cli_lsp_hover_text with cli_path, cli_source, cli_m
+    set cli_known to cli_lsp_known(cli_path, cli_source)
+    set cli_lines to split cli_lsp_file_text(cli_path, cli_source, file of cli_m) by "\n"
+    set cli_code to ""
+    set cli_d to define of cli_m
+    set cli_in to ""
+    if file of cli_m is not ""
+        set cli_in to " of " + file of cli_m
+    end
+    if what of cli_m is "input"
+        set cli_said to nothing
+        for each cli_k from 1 to length of params of cli_d
+            if lowercase of item cli_k of params of cli_d is lowercase of name of cli_m
+                if types of cli_d is not nothing and item cli_k of types of cli_d is not nothing
+                    set cli_said to item cli_k of types of cli_d
+                else if item cli_k of kinds of cli_d is at least 0
+                    set cli_said to item (item cli_k of kinds of cli_d + 1) of cli_kind_words
+                end
+            end
+        end
+        if cli_said is nothing
+            set cli_said to cli_lsp_type_of(cli_known, cli_m, "input " + lowercase of name of cli_m)
+        end
+        set cli_code to "`" + name of cli_m + "`, an input of `" + name of cli_d + "`"
+        if cli_said is not nothing
+            set cli_code to cli_code + ": " + cli_said
+        end
+        return cli_code
+    end
+    if what of cli_m is "variable"
+        set cli_code to "`" + name of cli_m + "`, a variable"
+        set cli_holds_now to cli_lsp_type_of(cli_known, cli_m, "set")
+        if cli_holds_now is not nothing
+            set cli_code to cli_code + ": " + cli_holds_now
+        end
+        return cli_code + "\n\nFirst set on line " + line of cli_m + cli_in + "."
+    end
+    set cli_sig to cli_lsp_signature(cli_d)
+    if what of cli_m is "kind"
+        set cli_code to "kind " + made_kind of cli_d
+    else
+        set cli_code to "to " + cli_lsp_own_name(name of cli_d)
+    end
+    if cli_sig is not ""
+        set cli_code to cli_code + " " + cli_sig
+    end
+    set cli_said to "```moth\n" + cli_code + "\n```"
+    if what of cli_m is not "kind" and gives of cli_d is nothing # what it gives, as the checker works it out
+        set cli_gives to cli_lsp_type_of(cli_known, cli_m, "gives")
+        if cli_gives is not nothing
+            set cli_said to cli_said + "\n\nGives " + cli_gives + "."
+        end
+    end
+    set cli_comment to cli_lsp_comment_above(cli_lines, line of cli_m)
+    if cli_comment is not ""
+        set cli_said to cli_said + "\n\n" + cli_comment
+    end
+    if file of cli_m is not ""
+        set cli_said to cli_said + "\n\nIn " + file of cli_m + ", line " + line of cli_m + "."
+    end
+    return cli_said
+end
+
+# ----- the files a document uses -----
+
+# what a `use` line names: a record with file (the path, from the folder of the file that uses it), called (the
+# name it's used as, or nothing), and from and upto (the characters of the line its name in quotes is at),
+# or nothing for a line that isn't a use line
+to cli_lsp_use_line with cli_text
+    set cli_k to 1
+    repeat while cli_k is at most length of cli_text and (item cli_k of cli_text is " " or item cli_k of cli_text is "\t")
+        add 1 to cli_k
+    end
+    set cli_rest to cli_tail(cli_text, cli_k)
+    set cli_package to no
+    if cli_begins_with(cli_rest, "use the package \"")
+        set cli_package to yes
+        add 17 to cli_k
+    else if cli_begins_with(cli_rest, "use \"")
+        add 5 to cli_k
+    else
+        return nothing
+    end
+    set cli_from to cli_k
+    repeat while cli_k is at most length of cli_text and item cli_k of cli_text is not "\""
+        add 1 to cli_k
+    end
+    if cli_k is greater than length of cli_text
+        return nothing
+    end
+    set cli_name to ""
+    if cli_k is greater than cli_from
+        set cli_name to items cli_from to (cli_k - 1) of cli_text
+    end
+    set cli_upto to cli_k - 1
+    set cli_as to nothing
+    set cli_after to cli_trimmed(cli_tail(cli_text, cli_k + 1))
+    if cli_begins_with(cli_after, " as ")
+        set cli_as to cli_trimmed_front(cli_tail(cli_after, 5))
+        set cli_cut to position of "#" in cli_as
+        if cli_cut is greater than 0
+            set cli_as to cli_trimmed(cli_first(cli_as, cli_cut - 1))
+        end
+    end
+    set cli_file to cli_name
+    if cli_package
+        set cli_file to "packages/" + cli_name + "/" + cli_name + ".moth"
+    end
+    return record with file cli_file, called cli_as, from cli_from, upto cli_upto
+end
+
+# The file a position names: on the name in quotes of a `use` line, or on the name a file is used as
+# (shapes, in shapes's area): a record with path and text (the use line), or nothing
+to cli_lsp_used_at with cli_path, cli_lines, cli_line, cli_char
+    set cli_named to cli_lsp_name_at(cli_lines, cli_line, cli_char)
+    for each cli_k from 1 to length of cli_lines
+        set cli_text to cli_lsp_line(cli_lines, cli_k)
+        set cli_use to cli_lsp_use_line(cli_text)
+        if cli_use is not nothing
+            set cli_on to no
+            if cli_k is cli_line + 1
+                set cli_at to cli_lsp_char_at(cli_text, cli_char + 1)
+                set cli_on to cli_at is at least from of cli_use and cli_at is at most upto of cli_use + 1
+            end
+            if not cli_on and cli_named is not nothing and owner of cli_named is nothing and called of cli_use is not nothing
+                set cli_on to lowercase of word of cli_named is lowercase of called of cli_use
+            end
+            if cli_on
+                return record with path cli_folder_of(cli_path) + file of cli_use, file file of cli_use, text cli_trimmed(cli_trimmed_front(cli_text))
+            end
+        end
+    end
+    return nothing
+end
+
+# the comment a file starts with, its first paragraph, as what it's for
+to cli_lsp_file_comment with cli_text
+    set cli_said to ""
+    for each cli_line in split cli_text by "\n"
+        set cli_rest to cli_trimmed(cli_trimmed_front(cli_line))
+        if not cli_begins_with(cli_rest, "#")
+            return cli_said
+        end
+        set cli_words to cli_trimmed_front(cli_tail(cli_rest, 2))
+        if cli_words is "" and cli_said is not ""
+            return cli_said
+        end
+        if cli_said is not "" and cli_words is not ""
+            add " " to cli_said
+        end
+        add cli_words to cli_said
+    end
+    return cli_said
+end
+
+# the names that could come next: Moth's words, and what the program makes that the position can see, or
+# after `x's`, what x has
+to cli_lsp_completions with cli_path, cli_source, cli_line, cli_char
+    set cli_out to empty list
+    set cli_lines to split cli_source by "\n"
+    set cli_text to cli_lsp_line(cli_lines, cli_line + 1)
+    set cli_upto to cli_lsp_char_at(cli_text, cli_char + 1) - 1
+    set cli_before to ""
+    if cli_upto is at least 1
+        set cli_before to items 1 to cli_upto of cli_text
+    end
+    set cli_k to length of cli_before
+    repeat while cli_k is at least 1 and cli_lsp_word_char(item cli_k of cli_before)
+        set cli_k to cli_k - 1
+    end
+    set cli_owner to nothing
+    if cli_k is at least 4 and (items (cli_k - 2) to cli_k of cli_before) is "'s "
+        set cli_o to cli_k - 3
+        repeat while cli_o is greater than 1 and cli_lsp_word_char(item (cli_o - 1) of cli_before)
+            set cli_o to cli_o - 1
+        end
+        set cli_owner to lowercase of (items cli_o to (cli_k - 3) of cli_before)
+    end
+    set cli_tree to tree of cli_lsp_known(cli_path, cli_source)
+    set cli_made to empty list
+    if cli_tree is not nothing
+        cli_lsp_made(cli_tree, nothing, cli_made, empty dictionary)
+    end
+    set cli_seen to empty dictionary
+    for each cli_m in cli_made
+        set cli_name to name of cli_m
+        set cli_label to nothing
+        if cli_owner is not nothing
+            if "'s " is in cli_name and lowercase of cli_first(cli_name, (position of "'s " in cli_name) - 1) is cli_owner
+                set cli_label to cli_lsp_own_name(cli_name)
+            end
+        else if not ("'s " is in cli_name) and cli_lsp_scope_depth(cli_lines, cli_m, cli_line + 1) is at least 0
+            set cli_label to cli_name
+        end
+        if cli_label is not nothing and not (lowercase of cli_label is in cli_seen)
+            set item (lowercase of cli_label) of cli_seen to yes
+            set cli_item to dictionary where "label" is cli_label, "kind" is cli_lsp_completion_kind(what of cli_m)
+            if define of cli_m is not nothing and what of cli_m is not "input"
+                set item "detail" of cli_item to cli_lsp_signature(define of cli_m)
+            end
+            add cli_item to cli_out
+        end
+    end
+    if cli_owner is not nothing and length of cli_out is 0 # x's, for x a record a kind makes: what the kind has
+        set cli_at to cli_width_of(cli_first(cli_before, cli_o - 1))
+        set cli_m to cli_lsp_meaning(cli_path, cli_source, cli_line, cli_at)
+        if cli_m is not nothing and (what of cli_m is "variable" or what of cli_m is "input")
+            set cli_what_it_is to "set"
+            if what of cli_m is "input"
+                set cli_what_it_is to "input " + lowercase of name of cli_m
+            end
+            set cli_known to cli_lsp_known(cli_path, cli_source)
+            set cli_t to cli_lsp_raw_type(cli_known, cli_m, cli_what_it_is)
+            if cli_t is not nothing and cli_begins_with(cli_t, "maybe:")
+                set cli_t to cli_tail(cli_t, 7)
+            end
+            if cli_t is not nothing and cli_begins_with(cli_t, "record:")
+                for each cli_item in cli_lsp_kind_has(cli_lsp_state(cli_known), cli_tail(cli_t, 8), cli_made)
+                    add cli_item to cli_out
+                end
+            end
+        end
+    end
+    if cli_owner is nothing
+        for each cli_w in cli_lsp_words
+            add (dictionary where "label" is cli_w, "kind" is 14) to cli_out
+        end
+    end
+    return cli_out
+end
+
+# what a record the kind makes has, for completion: each input of the kind (and of the kind it's made from)
+# as a field, and each of its functions, with what it takes
+to cli_lsp_kind_has with cli_state, cli_name, cli_made
+    set cli_out to empty list
+    if cli_state is nothing
+        return cli_out
+    end
+    set cli_seen to empty dictionary
+    set cli_kind to cli_kind_named(cli_state, cli_name)
+    set cli_from to cli_name
+    set cli_steps to 0
+    repeat while cli_kind is not nothing and cli_steps is less than 20
+        for each cli_p in params of define of cli_kind
+            if not (lowercase of cli_p is in cli_seen)
+                set item (lowercase of cli_p) of cli_seen to yes
+                add (dictionary where "label" is cli_p, "kind" is 5) to cli_out
+            end
+        end
+        for each cli_own in owns of cli_kind
+            if not (lowercase of cli_own is in cli_seen)
+                set item (lowercase of cli_own) of cli_seen to yes
+                set cli_item to dictionary where "label" is cli_own, "kind" is 2
+                for each cli_m in cli_made
+                    if lowercase of name of cli_m is lowercase of (cli_from + "'s " + cli_own) and define of cli_m is not nothing
+                        set item "detail" of cli_item to cli_lsp_signature(define of cli_m)
+                    end
+                end
+                add cli_item to cli_out
+            end
+        end
+        set cli_from to cli_parent_kind(cli_state, cli_kind)
+        set cli_kind to cli_kind_named(cli_state, cli_from)
+        add 1 to cli_steps
+    end
+    return cli_out
+end
+
+to cli_lsp_completion_kind with cli_what
+    if cli_what is "kind"
+        return 7
+    else if cli_what is "method"
+        return 2
+    else if cli_what is "function"
+        return 3
+    end
+    return 6
+end
+
+# ----- the conversation -----
+
+to cli_lsp_handle with cli_state, cli_msg
+    set cli_method to cli_lsp_get(cli_msg, "method")
+    set cli_id to cli_lsp_get(cli_msg, "id")
+    set cli_params to cli_lsp_get(cli_msg, "params")
+    set cli_doc to cli_lsp_get(cli_params, "textDocument")
+    set cli_uri to cli_lsp_get(cli_doc, "uri")
+    set cli_docs to docs of cli_state
+    if cli_method is "initialize"
+        # an editor that finds the problems itself (the VS Code extension, with Moth's engine) can ask for none
+        set cli_options to cli_lsp_get(cli_params, "initializationOptions")
+        if cli_lsp_get(cli_options, "diagnostics") is no
+            set publish of cli_state to no
+        end
+        set cli_sync to dictionary where "openClose" is yes, "change" is 1, "save" is yes
+        set cli_can to dictionary where "textDocumentSync" is cli_sync, "documentFormattingProvider" is yes, "documentSymbolProvider" is yes,
+            "definitionProvider" is yes, "hoverProvider" is yes, "completionProvider" is (dictionary where "triggerCharacters" is (list of "'"))
+        cli_lsp_reply(cli_id, dictionary where "capabilities" is cli_can, "serverInfo" is (dictionary where "name" is "moth"))
+    else if cli_method is "shutdown"
+        set down of cli_state to yes
+        cli_lsp_reply(cli_id, nothing)
+    else if cli_method is "textDocument/didOpen"
+        cli_lsp_keep(cli_state, cli_uri, item "text" of cli_doc)
+    else if cli_method is "textDocument/didChange"
+        set cli_changes to item "contentChanges" of cli_params
+        if length of cli_changes is greater than 0
+            cli_lsp_keep(cli_state, cli_uri, item "text" of item (length of cli_changes) of cli_changes)
+        end
+    else if cli_method is "textDocument/didSave"
+        if cli_uri is in cli_docs and publish of cli_state
+            cli_lsp_publish(cli_uri, item cli_uri of cli_docs)
+        end
+    else if cli_method is "textDocument/didClose"
+        cli_lsp_keep(cli_state, cli_uri, nothing)
+    else if cli_id is not nothing and cli_method is not nothing and cli_begins_with(cli_method, "textDocument/") and cli_uri is not nothing
+        set cli_source to nothing
+        if cli_uri is in cli_docs
+            set cli_source to item cli_uri of cli_docs
+        else
+            set cli_source to read cli_lsp_path(cli_uri)
+        end
+        set cli_path to cli_lsp_path(cli_uri)
+        set cli_place to cli_lsp_get(cli_params, "position")
+        if cli_method is "textDocument/formatting"
+            set cli_tidy to nothing
+            try
+                set cli_tidy to cli_format(cli_source)
+            if it fails with cli_why
+                set cli_said to "" + cli_why
+                if cli_is_problem(cli_why)
+                    set cli_said to reason of cli_why
+                end
+                cli_lsp_tell("window/showMessage", dictionary where "type" is 2, "message" is "Moth can't tidy this until its mistake is put right: " + cli_said)
+            end
+            if cli_tidy is nothing or cli_tidy is cli_source
+                cli_lsp_reply(cli_id, empty list)
+            else
+                set cli_lines to split cli_source by "\n"
+                set cli_last to cli_lsp_line(cli_lines, length of cli_lines)
+                set cli_edit to dictionary where "range" is cli_lsp_range(0, 0, length of cli_lines - 1, cli_width_of(cli_last)), "newText" is cli_tidy
+                cli_lsp_reply(cli_id, list of cli_edit)
+            end
+        else if cli_method is "textDocument/documentSymbol"
+            cli_lsp_reply(cli_id, cli_lsp_symbols(cli_path, cli_source))
+        else if cli_method is "textDocument/definition"
+            set cli_m to cli_lsp_meaning(cli_path, cli_source, item "line" of cli_place, item "character" of cli_place)
+            set cli_file to nothing
+            if cli_m is nothing
+                set cli_file to cli_lsp_used_at(cli_path, (split cli_source by "\n"), item "line" of cli_place, item "character" of cli_place)
+            end
+            if cli_m is not nothing
+                cli_lsp_reply(cli_id, cli_lsp_location(cli_uri, cli_path, cli_source, cli_m))
+            else if cli_file is not nothing and cli_lsp_on_disk(path of cli_file) # the file itself, from its start
+                cli_lsp_reply(cli_id, dictionary where "uri" is cli_lsp_uri(path of cli_file), "range" is cli_lsp_range(0, 0, 0, 0))
+            else
+                cli_lsp_reply(cli_id, nothing)
+            end
+        else if cli_method is "textDocument/hover"
+            set cli_m to cli_lsp_meaning(cli_path, cli_source, item "line" of cli_place, item "character" of cli_place)
+            set cli_said to nothing
+            if cli_m is not nothing
+                set cli_said to cli_lsp_hover_text(cli_path, cli_source, cli_m)
+            else
+                set cli_file to cli_lsp_used_at(cli_path, (split cli_source by "\n"), item "line" of cli_place, item "character" of cli_place)
+                if cli_file is not nothing # the use line, and what the file says it's for
+                    set cli_said to "```moth\n" + text of cli_file + "\n```"
+                    set cli_about to cli_lsp_file_comment(cli_lsp_file_text(cli_path, cli_source, file of cli_file))
+                    if cli_about is not ""
+                        set cli_said to cli_said + "\n\n" + cli_about
+                    end
+                end
+            end
+            if cli_said is nothing
+                cli_lsp_reply(cli_id, nothing)
+            else
+                set cli_shown to dictionary where "kind" is "markdown", "value" is cli_said
+                cli_lsp_reply(cli_id, dictionary where "contents" is cli_shown)
+            end
+        else if cli_method is "textDocument/completion"
+            cli_lsp_reply(cli_id, cli_lsp_completions(cli_path, cli_source, item "line" of cli_place, item "character" of cli_place))
+        else
+            cli_lsp_unknown(cli_id, cli_method)
+        end
+    else if cli_id is not nothing and cli_method is not nothing
+        cli_lsp_unknown(cli_id, cli_method)
+    end
+end
+
+to cli_lsp_unknown with cli_id, cli_method
+    set cli_error to dictionary where "code" is -32601, "message" is "moth lsp doesn't do " + cli_method
+    cli_lsp_send(dictionary where "jsonrpc" is "2.0", "id" is cli_id, "error" is cli_error)
+end
+
+# A document's text as the editor has it now, or nothing once it's closed: kept, read in place of the file by
+# the documents that use it, and its problems said again, and theirs, as they may have changed with it
+to cli_lsp_keep with cli_state, cli_uri, cli_text
+    set cli_docs to docs of cli_state
+    set cli_path to cli_lsp_path(cli_uri)
+    if cli_text is nothing
+        if cli_uri is in cli_docs
+            remove cli_uri from cli_docs
+        end
+        if cli_path is in cli_open_texts
+            remove cli_path from cli_open_texts
+        end
+        if cli_path is in cli_lsp_kept
+            remove cli_path from cli_lsp_kept
+        end
+    else
+        set item cli_uri of cli_docs to cli_text
+        set item cli_path of cli_open_texts to cli_text
+    end
+    if not publish of cli_state
+        return nothing
+    end
+    cli_lsp_publish(cli_uri, cli_text)
+    for each cli_other in cli_docs
+        if cli_other is not cli_uri and cli_lsp_uses(cli_lsp_path(cli_other), cli_path)
+            cli_lsp_publish(cli_other, item cli_other of cli_docs)
+        end
+    end
+end
+
+# whether the document at one path used the file at another, when its problems were last found
+to cli_lsp_uses with cli_path, cli_used_path
+    if not (cli_path is in cli_lsp_kept)
+        return no
+    end
+    for each cli_name in names of used of item cli_path of cli_lsp_kept
+        if cli_folder_of(cli_path) + cli_name is cli_used_path
+            return yes
+        end
+    end
+    return no
+end
+
+# `moth lsp`: messages answered until the editor says exit: 0 if it said shutdown first, as the protocol has it
+to cli_lsp
+    set cli_state to record with docs empty dictionary, down no, publish yes
+    repeat while yes
+        set cli_msg to cli_lsp_read()
+        if cli_msg is nothing
+            return 1
+        end
+        set cli_method to cli_lsp_get(cli_msg, "method")
+        if cli_method is "exit"
+            if down of cli_state
+                return 0
+            end
+            return 1
+        end
+        try
+            cli_lsp_handle(cli_state, cli_msg)
+        if it fails with cli_why # a mistake in moth itself: said, and the conversation goes on
+            set cli_said to "" + cli_why
+            if cli_is_problem(cli_why)
+                set cli_said to reason of cli_why
+            end
+            set cli_id to cli_lsp_get(cli_msg, "id")
+            if cli_id is not nothing
+                set cli_error to dictionary where "code" is -32603, "message" is cli_said
+                cli_lsp_send(dictionary where "jsonrpc" is "2.0", "id" is cli_id, "error" is cli_error)
+            else
+                cli_lsp_tell("window/logMessage", dictionary where "type" is 1, "message" is cli_said)
+            end
+        end
+    end
 end
 
 # ---------- the tests a file holds ----------
@@ -3257,6 +5610,9 @@ to cli_main
             add cli_arg to cli_shell_flags
         end
         stop the program with cli_shell(cli_shell_flags)
+    end
+    if cli_command is "lsp" and length of cli_given is 1 # the language server, for an editor
+        stop the program with cli_lsp()
     end
     if cli_command is "add" or cli_command is "get" or cli_command is "update" or cli_command is "remove" or cli_command is "packages" or cli_command is "search" or cli_command is "audit"
         set cli_rest to empty list

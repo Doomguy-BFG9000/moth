@@ -1,7 +1,7 @@
 {
   "name": "moth",
   "displayName": "Moth",
-  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, and Run, Debug and Build",
+  "description": "Moth, the language that reads like English: colours, problems as you type, Format Document, the outline, Go to Definition, hovers, completion, a debugger, and Run and Build",
   "version": "0.1.0",
   "publisher": "samyyy2423",
   "license": "Apache-2.0",
@@ -16,11 +16,13 @@
     "Programming Languages",
     "Formatters",
     "Linters",
+    "Debuggers",
     "Snippets"
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:moth"
+    "onLanguage:moth",
+    "onDebugResolve:moth"
   ],
   "contributes": {
     "languages": [
@@ -98,9 +100,88 @@
         "moth.path": {
           "type": "string",
           "default": "moth",
-          "description": "The moth command line that Run, Debug and Build use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+          "description": "The moth command line that Run, Debug, Build and the language server use: the path to moth.exe (moth on Linux), or just moth if it's on your PATH."
+        },
+        "moth.languageServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start Moth's language server (moth lsp) for the outline, Go to Definition in the file and the files it uses, hovers and completion. Without it, the outline and Go to Definition find the file's functions by their lines."
         }
       }
-    }
+    },
+    "breakpoints": [
+      {
+        "language": "moth"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "moth",
+        "label": "Moth",
+        "languages": [
+          "moth"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The Moth file to debug.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The program's arguments.",
+                "default": []
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What it may do without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all.",
+                "default": []
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop before the first line runs.",
+                "default": false
+              },
+              "mothPath": {
+                "type": "string",
+                "description": "moth, if it isn't moth.path's.",
+                "default": "moth"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "moth",
+            "request": "launch",
+            "name": "Debug this file",
+            "program": "${file}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Moth: Debug a file",
+            "description": "Debug a Moth program",
+            "body": {
+              "type": "moth",
+              "request": "launch",
+              "name": "Debug ${1:program}",
+              "program": "^\"\\${workspaceFolder}/${1:program}.moth\""
+            }
+          }
+        ]
+      }
+    ]
   }
 }
