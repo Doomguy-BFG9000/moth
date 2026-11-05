@@ -4330,7 +4330,9 @@ hold them to agreeing.
   as with an answer of megabytes to a client that reads slowly) waits for poll
   to say it will, where before it was taken for a connection gone, cutting
   the answer short. A connection that's really gone says so to poll (POLLHUP,
-  POLLERR), which closes it.
+  POLLERR), which closes it. An answer has `set_timeout` from each time the
+  other end takes some of it, so a long download goes on while it's taken,
+  and one the other end has stopped taking is cut off.
 - **40 ms.** The first version answered 4,500 requests a second, each 40 ms
   late: the headers and the body went in two writes, and the second waited,
   by Nagle's algorithm, for the client to say it had the first, which the
@@ -4363,7 +4365,8 @@ hold them to agreeing.
   an answer of nothing (204); HTTP/1.0 with and without keep-alive; a body in
   pieces with a pause between, and one in chunks a few bytes at a time with
   an extension and a trailer, then another request on the same connection; an
-  answer of 3.2 MB to a client that waits half a second before reading; a
+  answer of 12.8 MB to a client that waits before reading, then stops five
+  times as it reads, far longer than the time limit in all; a
   query with a % that isn't one; 413, 431, 400 for a request that isn't one,
   a length that isn't, two lengths and chunks that can't be read; 408 for a
   request too slow to arrive, and a kept connection closed when it's idle; a

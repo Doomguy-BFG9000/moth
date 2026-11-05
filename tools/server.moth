@@ -23,11 +23,11 @@
 # stops halfway, holds up nobody. A connection is kept open for the requests after the first (HTTP/1.1
 # keep-alive), and answers them in the order they came, even when they come together. Each request is given
 # `timeout` milliseconds to arrive once it has begun, and a kept connection `idle_timeout` to begin the next;
-# one that goes over is answered 408 and closed. A request bigger than `most_bytes` is answered 413, headers over
+# one that goes over is answered 408 and closed. An answer the other end takes none of for `timeout` is cut off. A request bigger than `most_bytes` is answered 413, headers over
 # 64 KB 431, and one that can't be read 400. Only `most_connections` are held at once, and while they are, the
 # rest wait in the system's own queue.
 #
-#   web's set_timeout(30000)          # how long a request has to arrive, once it has begun
+#   web's set_timeout(30000)          # how long a request has to arrive, once begun, or an answer can wait
 #   web's set_idle_timeout(5000)      # how long a kept connection may sit with nothing on it
 #   web's set_most_bytes(16777216)    # the biggest request, headers and body together
 #   web's set_most_connections(1024)  # how many are held at once (by each worker)
@@ -744,8 +744,12 @@ to web_push with c, what_came, handler, live
     repeat while length of out of c is greater than 0
         set block to item 1 of out of c
         set piece to block
-        if out_at of c is greater than 0
-            set piece to items (out_at of c + 1) to (length of block) of block
+        if out_at of c is greater than 0 or length of block is greater than 262144 # at most 256 KB copied a time
+            set last to out_at of c + 262144
+            if last is greater than length of block
+                set last to length of block
+            end
+            set piece to items (out_at of c + 1) to last of block
         end
         set sent to web_send_some(c, piece)
         if sent is -2 or (sent is -1 and web_hung_up(what_came))
@@ -756,6 +760,7 @@ to web_push with c, what_came, handler, live
             return nothing
         end
         set out_at of c to out_at of c + sent
+        set due of c to the clock + web_timeout / 1000 # as long again for the rest, as it's taking it
         if out_at of c is at least length of block
             set out of c to items 2 to (length of out of c) of out of c
             set out_at of c to 0
