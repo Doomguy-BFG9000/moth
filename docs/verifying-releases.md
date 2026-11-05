@@ -58,8 +58,8 @@ in its extensions.
 
 ## With GitHub's CLI
 
-[`gh`](https://cli.github.com/) 2.49 or later checks GitHub's attestation of where a file was built, which
-GitHub keeps for the repository:
+[`gh`](https://cli.github.com/) checks GitHub's attestation of where a file was built, which GitHub keeps
+for the repository. Use a recent `gh`: older ones lack `--source-ref`.
 
 ```bash
 gh attestation verify moth-linux --repo samyyy2423/moth \
