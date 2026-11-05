@@ -5097,7 +5097,6 @@ engines stay: as the fallback, and as what the tests compare against.
   `wasm.js`'s, which runs as the VM runs the program, and moth still builds
   itself into the same bytes.
 
-
 ## 126. The VS Code extension, ready to publish
 
 - **Why.** People find VS Code extensions in VS Code's Extensions view, from
@@ -5181,7 +5180,133 @@ engines stay: as the fallback, and as what the tests compare against.
   it replaces in-vscode.js, which needed MOTH_VSCODE=1 and an installed
   VS Code.
 
-## 127. A library for C: moth build --library
+## 127. The standard library from a package
+
+- **Why.** A package couldn't use the standard library. `use "text.moth"`
+  in packages/datey/datey.moth names packages/datey/text.moth, from the
+  folder of the file that uses it (§60), and moth.moth's cli_sources_of
+  asked the standard library for a file by that name, which it hasn't. So
+  every package carried copies of the libraries it needed, and a file in a
+  folder of the program's own had the same trouble.
+- **The rule, kept.** SPEC.md's 10.1 and §74 already said it: a file is
+  found from the folder of the file that uses it, and if it isn't there, the
+  standard library's is used. So cli_sources_of now asks the library for the
+  name the `use` line gives in quotes (cli_uses_in keeps it beside the path),
+  not the path it makes. A file of the same name beside the file that uses
+  it still comes first: the package's own text.moth beats moth's, as the
+  program's beats it for the program. A file beside the program is the
+  program's alone, as it was: a package never saw it. `use the package` and
+  a name with a folder in it (`use "sub/text.moth"`) are never the
+  library's.
+- **A copy of its own.** The parsers ask for a file by its path from the
+  program's folder, so moth's text.moth goes to them as
+  packages/datey/text.moth, and a package's copy is its own, as the copy it
+  carried in its folder was: the same names, the same top level, and no
+  change to the parsers or engines. A mistake in it says it's in
+  packages/datey/text.moth, as one in moth's own text.moth says text.moth.
+- **Everywhere `use` is resolved.** Every command that reads a program's
+  files goes through cli_sources_of: run, build, `build --web` (whose page
+  holds the copies by those names), `build --target wasm`, test, debug,
+  profile, coverage, check, the shell, notebooks and the language server,
+  whose definitions and hovers now read a file as a run finds it.
+  machine.moth, wasm.moth and the JavaScript engines are given the files by
+  name and look nothing up themselves, and the playground fetches files
+  from its own site.
+- **Tested.** Through moth.exe: a package in a Git repository whose main
+  file uses text.moth and dates.moth, and a file of its own that uses them
+  too, added with `moth add`, then used by a program that has a text.moth of
+  its own: run, checked, built and run as a program of its own, built as a
+  page (which runs on the JavaScript engine and holds moth's copies under
+  the package's names), built as a WebAssembly module and run, and tested
+  with `moth test`; a json.moth in the package beating moth's; and a name
+  the library hasn't, still a mistake.
+
+## 128. Measuring machine code before making it faster
+
+- **Why.** machine.moth already knows what each variable holds (§32), works
+  out what each function is given (§48), puts small functions in line (§63)
+  and reads lists and records where the code is (§64). What's left to make
+  faster had to be found by measuring, not guessed: so first the benchmarks
+  cover what they didn't, and the instructions are counted where they run.
+- **More benchmarks.** `npm run bench -- --big` had loops, lists, records,
+  a dictionary and joining text. It now also has calls the compiler can't
+  put in line (a function of four inputs that sets two variables first),
+  a function with a loop of its own (Collatz's steps), records made by
+  functions, text built two letters at a time, each letter of a text compared
+  with others, a grid read by `item c of item r of grid`, and a dictionary
+  whose keys are made as text. And a real program: moth, as bootstrap.mjs
+  makes it, building compiler.moth, 2,400 lines of Moth.
+- **Counting instructions.** A short run of machine code takes 10% more or
+  less from one run to the next, on this machine at least. The number of
+  instructions it runs is the same every time, so `node bench-count.mjs
+  program.moth` counts them with valgrind's callgrind and says how many ran
+  in each of the program's functions and each of the runtime's routines. It
+  builds the program with machine.moth on Node.js with a heap of 4 GB, not
+  64, which valgrind can't give a program, and keeps machine.moth's
+  assembler, for where each function and routine starts.
+- **Where the time goes.** moth building compiler.moth runs 3.58 billion
+  instructions. 12% are comparing two values with `is` (rt_equal and
+  rt_cmp_is), nearly always a text with a text the program wrote, as in `if
+  kind of node is "call"`: about 80 instructions, through two routines and
+  `repe cmpsb`, for what can't fail. 9.5% are `bit and` and the shifts
+  (rt_bits, rt_bit_and, rt_shift_right), which machine.moth's put32 and the
+  rest do for every byte they write: each calls rt_bits twice, about 60
+  instructions, to `and` two whole numbers. 22% is the collector and making
+  blocks, 6% the code kept out of the way for when something's unusual
+  (`add x to xs` with a list, among it), and the rest is spread out. In the
+  benchmarks: a call of `distance(i, 0, 0, i bit and 1023)` spends 58% of its
+  instructions on the `bit and`; comparing letters, 54% on `is`; Collatz's
+  steps, 43 instructions each, as `n / 2` makes its loop's variable a
+  fraction as far as the compiler knows; and primes, its 64-bit division,
+  which C's 32-bit one does in 24 ms to the 40 ms the 64-bit one takes.
+- **Where it starts.** On Linux, an Intel Xeon at 2.8 GHz with 4 cores, Node
+  22, machine code timed from start to finish, starting up included:
+
+  | `npm run bench` | Machine code |
+  |:--|--:|
+  | a program that only starts | 2.5 ms |
+  | fib(25), function calls | 3.1 ms |
+  | sum 1 to 1,000,000, a loop | 2.8 ms |
+  | primes up to 5,000, lists | 18 ms |
+  | 200,000 records, made and read | 14 ms |
+  | 1,000,000 bytes, filled and summed | 37 ms |
+  | 200,000 words counted, dictionary | 14 ms |
+  | recursion 10,000 deep | 3.1 ms |
+
+  With work big enough, starting up taken off (best of two runs of five):
+
+  | `npm run bench -- --big` | JIT | WebAssembly | Machine code |
+  |:--|--:|--:|--:|
+  | 2,000,000 records | 181 ms | 78 ms | 68 ms |
+  | list: 3,000,000 adds, then summed by item | 172 ms | 117 ms | 55 ms |
+  | list: `for each` over 3,000,000 | 205 ms | 117 ms | 53 ms |
+  | list: `set item` 5,000,000 times | 285 ms | 113 ms | 28 ms |
+  | dictionary: 2,000,000 counts | 246 ms | 163 ms | 104 ms |
+  | 300,000 records in a list | 139 ms | 131 ms | 37 ms |
+  | text: join 200,000 pieces | 70 ms | 89 ms | 20 ms |
+  | calls: 4 inputs, 3,000,000 times | 375 ms | 166 ms | 44 ms |
+  | calls: a loop in each, 300,000 times | 1,135 ms | 1,092 ms | 267 ms |
+  | records: 2 calls make 2, 1,000,000 times | 204 ms | 65 ms | 68 ms |
+  | text: 2 letters added, 1,000,000 times | 202 ms | 81 ms | 35 ms |
+  | text: 2,000,000 letters, each compared | 148 ms | 579 ms | 350 ms |
+  | list: a grid, item of item, 4,000,000 | 117 ms | 93 ms | 30 ms |
+  | dictionary: 300,000 keys made, set, read | 424 ms | 386 ms | 175 ms |
+  | moth building compiler.moth | | | 697 ms |
+
+  | `npm run versus` | C (gcc -O2) | Rust | Moth, machine code |
+  |:--|--:|--:|--:|
+  | fib(32): 7 million calls | 9 ms | 13 ms | 23 ms |
+  | adding 1 to 100,000,000 | 50 ms | 4 ms | 46 ms |
+  | primes up to 300,000 | 29 ms | 29 ms | 45 ms |
+  | 30,000,000 steps of decimal maths | 41 ms | 41 ms | 41 ms |
+
+  And counted: fib(32), 152 million instructions; primes, 282 million;
+  Collatz's steps, 1,432 million; the letters compared, 1,161 million; the
+  calls of four inputs, 573 million; moth building compiler.moth, 3,579
+  million. The sections after this one each say what they changed, from
+  these.
+
+## 129. A library for C: moth build --library
 
 - **Why.** Moth could call C (§45) and Python (§120), but nothing could call
   Moth: a fast function written in it was only any use to another Moth
@@ -5259,10 +5384,10 @@ engines stay: as the fallback, and as what the tests compare against.
   to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
   CI runs the same C program against the DLL.
 
-## 128. Moth from Python: the mothlang package
+## 130. Moth from Python: the mothlang package
 
 - **Why.** Python is where most people who want speed are: a loop that's
-  slow in Python is fast in Moth's machine code (§127), if Python can call
+  slow in Python is fast in Moth's machine code (§129), if Python can call
   it. And a package is how Python gets anything: `pip install`.
 - **Its name.** `moth` on PyPI is an unrelated project (tokens kept in
   MongoDB) whose module is also called `moth`, so the package is
@@ -5275,7 +5400,7 @@ engines stay: as the fallback, and as what the tests compare against.
   install` is all there is. Linux's moth calls the kernel itself and links
   nothing, so it runs on any distribution, and a library it builds needs
   only libc.so.6. The wheels are `py3-none`: no Python extension, so one
-  wheel serves every Python from 3.9 on. hatchling builds them, its build
+  wheel serves every Python from 3.10 on. hatchling builds them, its build
   hook putting moth in and tagging the wheel when MOTHLANG_BINARY and
   MOTHLANG_PLATFORM say which; the sdist has no moth, and finds one through
   MOTHLANG_MOTH or PATH.
@@ -5310,20 +5435,21 @@ engines stay: as the fallback, and as what the tests compare against.
   bits, as a call to `moth_kind` would cost more than the rest.
 - **Mistakes as exceptions.** What a call fails with is raised as
   `MothError`, with the message, line, column and file from the record
-  (§127) and what `fail with` gave as `value`; code that can't be built is
+  (§129) and what `fail with` gave as `value`; code that can't be built is
   `BuildError`, with moth's own report. A wrong number of inputs is
   Python's TypeError, before Moth is called.
 - **Running a program.** `moth.run(source)` writes the code to a folder of
   its own and runs `moth run` there: what it said, its error output and
   the number it ended with, as a RunResult, with arguments, --allow flags,
   input and a folder to run in.
-- **What it gave.** Called from Python on Linux, fib(30) took 7.5 ms
-  against Python's 110, and a Mandelbrot set 32 ms against 445; a sieve of
-  primes 2.9 times as fast. A call costs about 2 µs, 0.7 of it ctypes'
-  own, so a sum over a list Python already has is faster in Python: the
-  benchmark says so too.
+- **What it gave.** On CI's runners, called from Python: fib(30) 10 times
+  as fast as Python's own on Linux and 13 on Windows, a Mandelbrot set 16
+  to 18 times, a sieve of primes 3.5 to 5.7 times (benchmarks/RESULTS.md).
+  A call costs 1.5 to 1.7 µs, most of it ctypes' own, and a value given to
+  Moth is copied, so a sum over a list Python already has is faster in
+  Python, which the benchmark shows too.
 - **Tested** with pytest, against a wheel built as the publishing workflow
-  builds it and installed: Linux with Python 3.9 and 3.13, and Windows. Each
+  builds it and installed: Linux with Python 3.10 and 3.14, and Windows. Each
   kind of value both ways, records and functions, every kind of mistake
   and where it was, a library's top level failing, deep recursion and
   eight threads at once, the cache (built once, again when a file it uses

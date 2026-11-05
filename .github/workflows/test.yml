@@ -81,7 +81,7 @@ jobs:
       # a display of Xvfb's, where there's one, for tools/linux.moth's GTK windows
       - run: if command -v xvfb-run > /dev/null; then xvfb-run -a npm test; else npm test; fi
 
-  # a program made a DLL (DESIGN §127) and called from C, on Windows itself: the Windows-only parts of a library
+  # a program made a DLL (DESIGN §129) and called from C, on Windows itself: the Windows-only parts of a library
   # (its lock, its stack and the TEB that says where it is) run nowhere else
   library-windows:
     runs-on: windows-latest

@@ -40024,7 +40024,7 @@ to emit_dynamic with a
     end
 end
 
-# ---------- a library: the program's functions, for C to call (DESIGN §127) ----------
+# ---------- a library: the program's functions, for C to call (DESIGN §129) ----------
 # compile_library makes a program a shared library: an ELF .so for Linux, or a DLL for Windows. What it
 # exports are the main file's own top-level functions, each `int name(moth_value *result, moth_value input,
 # ...)` in the system's convention for C (Windows x64, or System V), and Moth's value API, moth_...: making,
@@ -42322,7 +42322,7 @@ to compile_shipping with source, file_names, file_texts, target, program_name, f
         included_bytes, no, no)
 end
 
-# compile_allowing for a library (DESIGN §127): a shared library, an ELF .so or a Windows DLL, whose exported
+# compile_allowing for a library (DESIGN §129): a shared library, an ELF .so or a Windows DLL, whose exported
 # functions are the program's own, for C to call (see emit_library_runtime); library_header writes them for C
 to compile_library with source, file_names, file_texts, target, program_name, flags
     return compile_built(source, file_names, file_texts, target, program_name, flags, nothing, nothing, empty list,
@@ -47356,7 +47356,7 @@ to windows_file with a
     set library to is_library(a)
     set image_base to 0x140000000
     set exports_dir to nothing
-    if library # a DLL (DESIGN §127): what it gives, by name, loaded wherever Windows likes
+    if library # a DLL (DESIGN §129): what it gives, by name, loaded wherever Windows likes
         set image_base to 0x180000000
         set exports_dir to dll_exports(a, dat, data_rva, text_rva, library_dll_name(name of shipping of a))
     end

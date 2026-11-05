@@ -31,7 +31,7 @@ and call it from Python:
 import mothlang as moth
 
 fast = moth.load("fast.moth")
-print(fast.fib(30))      # 832040, about 14 times as fast as the same function in Python
+print(fast.fib(30))      # 832040, 10 to 13 times as fast as the same function in Python
 ```
 
 `moth.load` builds the file into a shared library (a `.so` on Linux, a `.dll` on Windows) the first time,
@@ -100,17 +100,18 @@ The wheel installs `moth`, Moth's own command line: `moth run hello.moth`, `moth
 ## Speed
 
 `benchmarks/bench.py`, in the source, times each function called from Python against the same function in
-pure Python:
+pure Python ([benchmarks/RESULTS.md](https://github.com/samyyy2423/moth/blob/main/python/benchmarks/RESULTS.md)
+has Windows too):
 
 | on Linux, x86-64, Python 3.13   | Python   | Moth    |        |
-|---------------------------------|----------|---------|--------|
-| `fib(30)`                       | 110 ms   | 7.5 ms  | 15×    |
-| `mandelbrot(400, 300)`          | 445 ms   | 32 ms   | 14×    |
-| `primes_below(5,000,000)`       | 654 ms   | 223 ms  | 2.9×   |
-| `total_of` a list of 1,000,000  | 17 ms    | 42 ms   | 0.4×   |
+|---------------------------------|---------:|--------:|-------:|
+| `fib(30)`                       | 52.6 ms  | 5.3 ms  | 10×    |
+| `mandelbrot(400, 300)`          | 355.8 ms | 19.3 ms | 18×    |
+| `primes_below(5,000,000)`       | 296.3 ms | 84.1 ms | 3.5×   |
+| `total_of` a list of 1,000,000  | 11.3 ms  | 21.9 ms | 0.5×   |
 
-A call costs about 2 µs, most of it `ctypes`'; and a value that goes across is copied. Moth is worth it for
-work that's done in it, not for a sum over a list Python already has.
+A call costs one or two microseconds, most of it `ctypes`' own, and a value that goes across is copied.
+Moth is worth it for work that's done in it, not for a sum over a list Python already has.
 
 ## Where things are
 
