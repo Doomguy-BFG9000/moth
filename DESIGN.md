@@ -5329,3 +5329,37 @@ engines stay: as the fallback, and as what the tests compare against.
   eight threads at once, the cache (built once, again when a file it uses
   changes, nothing written beside the source), moth.run with arguments,
   input and flags, and the moth command. CI runs the benchmark too.
+
+## 129. Publishing mothlang, with no token
+
+- **Why.** A package is only `pip install`-able once it's on PyPI, and
+  what uploads it must be trusted with the project. A token kept in the
+  repository's secrets works for whoever can read or misuse it; PyPI's
+  trusted publishing (OpenID Connect) has no secret at all: GitHub gives
+  the workflow a token, minutes long, saying which repository, workflow
+  and environment it is, and PyPI takes uploads only from the one it was
+  told to trust. Nothing is published yet: Samyak adds the publisher on
+  pypi.org (docs/python-package.md says how) when he wants it to be.
+- **python-publish.yml.** Runs for a published release, or by hand. It
+  makes moth for Linux and for Windows from the source on one Linux
+  runner (bootstrap.mjs makes either), builds the sdist and the two
+  wheels as python.yml builds one (§128), checks them with `twine check
+  --strict`, installs the Linux wheel and runs its tests, and keeps the
+  three files as the run's artifact. Only then, in a job of its own with
+  `id-token: write` and the `pypi` environment, does
+  pypa/gh-action-pypi-publish upload them; the building job can't. The
+  environment is where Samyak can require his approval of each upload and
+  keep it to `main` and `v*` tags.
+- **A dry run.** By hand with `publish` unticked, it builds, tests and
+  keeps everything, and uploads nothing; and a pull request that changes
+  `python/` or the workflow gets that dry run as a check, so a release
+  never finds out first that the wheels don't build. Only a release, or
+  `publish` ticked by hand, reaches the upload.
+- **Versions.** mothlang's version is Moth's, in `__init__.py`. A release
+  whose tag isn't `v` and that version stops before building anything, as
+  PyPI never takes a version twice and a wheel of the wrong version would
+  be there for good.
+- **Tested.** Its building job runs, as a dry run, on the pull request that
+  added it: the three files built, checked by twine, the Linux wheel's
+  tests passed, and the artifact kept. The upload itself has never run,
+  against PyPI or TestPyPI.

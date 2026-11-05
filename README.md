@@ -1178,8 +1178,9 @@ print(fast.fib(30))                # 832040, about 14 times as fast as in Python
 functions through `ctypes`: no compiled extension. Numbers, text, yes and no,
 nothing, bytes, lists and dictionaries go across as Python's own, a record
 comes back as a `Record`, and a mistake in Moth raises `MothError`, with its
-message and line. [python/README.md](python/README.md) has the rest, and
-[`python/benchmarks`](python/benchmarks) times Moth against Python.
+message and line. [python/README.md](python/README.md) has the rest,
+[`python/benchmarks`](python/benchmarks) times Moth against Python, and
+[docs/python-package.md](docs/python-package.md) is how it gets to PyPI.
 
 ### Installers and signing
 
