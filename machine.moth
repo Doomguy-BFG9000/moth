@@ -30287,7 +30287,6 @@ to emit_wk_wait with a, target
     # the mistake's value in xmm0 if it ended with one; or 3 if its answer couldn't be copied, with why in
     # err_why (1 alone: a function it made inside another is its own to keep, and never comes back)
     set no_worker to new_label(a)
-    set not_yet to new_label(a)
     set kept to new_label(a)
     set waiting to new_label(a)
     set there to new_label(a)
