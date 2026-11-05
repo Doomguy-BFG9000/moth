@@ -60,3 +60,15 @@ jobs:
       # the JavaScript engines, the playground's, and machine.moth's machine code against them, moth.exe included; on
       # a display of Xvfb's, where there's one, for tools/linux.moth's GTK windows
       - run: if command -v xvfb-run > /dev/null; then xvfb-run -a npm test; else npm test; fi
+
+  # a program made a DLL (DESIGN §125) and called from C, on Windows itself: the Windows-only parts of a library
+  # (its lock, its stack and the TEB that says where it is) run nowhere else
+  library-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: gcc --version
+      - run: node --test --test-name-pattern="^(a library:|a library whose|a library for Windows|moth build --library)" machine.test.js

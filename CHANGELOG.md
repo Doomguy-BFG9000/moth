@@ -6,6 +6,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
+  `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
+  system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and
+  bytes. A mistake gives 1 and a record of it, never an end to the program that loaded it; the top level
+  runs once; calls from many threads take turns; and every call has a stack as deep as a program's.
 - **Workers: every core.** `start work(x) on another core` runs the call on a worker, a thread with memory of
   its own, given copies of what it's called with and of the program's variables; `wait for` gives a copy of
   what it gave back, or fails with its mistake. In a program `moth build` makes, workers run at the same
