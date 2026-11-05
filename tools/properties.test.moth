@@ -1,0 +1,192 @@
+# properties.moth's own tests, which moth.test.js runs with Moth's test runner on every engine, and
+# machine.test.js in machine code. Those that say exactly what's made use a seed of their own; the others hold
+# whatever the seed.
+
+use "properties.moth" as properties
+
+to whole_and_small with n
+    expect n is divisible by 1
+    expect n is greater than -4294967296
+    expect n is less than 4294967296
+end
+
+to from_minus_5_to_5 with n
+    expect n is divisible by 1
+    expect n is at least -5
+    expect n is at most 5
+end
+
+to six_decimals with d
+    set off to ((d * 1000000) rounded) - d * 1000000
+    expect off is less than 0.001
+    expect off is greater than -0.001
+end
+
+to test_numbers_are_what_they_say
+    properties's for_all(properties's whole_numbers(), whole_and_small)
+    properties's for_all(properties's whole_numbers_from(-5, 5), from_minus_5_to_5)
+    expect (properties's examples(properties's whole_numbers_from(-5, 5), 300) without repeats) in order is list of -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5
+    expect (properties's examples(properties's whole_numbers_from(10, 12), 100) without repeats) in order is list of 10, 11, 12
+    expect (properties's examples(properties's whole_numbers_from(-12, -10), 100) without repeats) in order is list of -12, -11, -10
+    expect properties's examples(properties's whole_numbers_from(7, 7), 3) is list of 7, 7, 7
+    properties's for_all(properties's decimals(), six_decimals)
+    properties's for_all(properties's decimals_from(-1.5, 2.5), function with d gives d is at least -1.5 and d is at most 2.5)
+    properties's for_all(properties's decimals_from(0.25, 0.5), function with d gives d is at least 0.25 and d is at most 0.5)
+    expect length of (properties's examples(properties's decimals(), 50) without repeats) is greater than 1
+    set either to properties's examples(properties's yes_or_no(), 50)
+    expect yes is in either
+    expect no is in either
+end
+
+to text_of_length_3_to_5 with t
+    expect length of t is at least 3
+    expect length of t is at most 5
+end
+
+to test_text_of_any_character
+    properties's for_all(properties's texts(), function with t gives length of t is at most 20)
+    properties's for_all(properties's texts(3, 5), text_of_length_3_to_5)
+    properties's for_all(properties's texts_of("ab", 1, 4), function with t gives length of (join (split (join (split t by "a") with "") by "b") with "") is 0)
+    set sizes to empty list # of each character's UTF-8: 1 to 4 bytes, so letters of other scripts and past U+FFFF
+    set escapes to 0
+    for each c in properties's examples(properties's characters(), 500)
+        expect length of c is 1
+        add length of (c as bytes) to sizes
+        if c is in list of "\"", "\\", "\n", "\{", "\t"
+            add 1 to escapes
+        end
+    end
+    expect (sizes without repeats) in order is list of 1, 2, 3, 4
+    expect escapes is greater than 0
+end
+
+to two_to_four_digits with xs
+    expect length of xs is at least 2
+    expect length of xs is at most 4
+    for each x in xs
+        expect x is in list of 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+    end
+end
+
+to keys_a_or_b with d
+    for each k in keys of d
+        expect k is in list of "a", "b"
+        expect item k of d is in list of yes, no
+    end
+end
+
+# a list of n, n times
+to as_long_as_each with xs
+    expect length of xs is item 1 of xs
+    expect xs without repeats is list of item 1 of xs
+end
+
+to test_generators_made_from_others
+    properties's for_all(properties's lists_of(properties's whole_numbers_from(0, 9), 2, 4), two_to_four_digits)
+    properties's for_all(properties's dictionaries_of(properties's texts_of("ab", 1, 1), properties's yes_or_no()), keys_a_or_b)
+    properties's for_all(properties's each_of(list of properties's just(1), properties's texts_of("x", 2, 2)), function with pair gives pair is list of 1, "xx")
+    set either to properties's examples(properties's one_of(list of properties's just("a"), properties's just(2)), 50)
+    expect "a" is in either
+    expect 2 is in either
+    expect (properties's examples(properties's any_of(list of "x", "y", "z"), 100) without repeats) in order is list of "x", "y", "z"
+    properties's for_all(properties's mapped(properties's whole_numbers(), function with n gives n * 2), function with n gives n is divisible by 2)
+    properties's for_all(properties's filtered(properties's whole_numbers_from(1, 30), function with n gives n is divisible by 3), function with n gives n is divisible by 3)
+    set lengths to properties's chained(properties's whole_numbers_from(1, 3), function with n gives properties's lists_of(properties's just(n), n, n))
+    properties's for_all(lengths, as_long_as_each)
+    set trees to properties's nested(properties's just(1), function with inside gives properties's lists_of(inside, 1, 2), 2)
+    properties's for_all(trees, function with tree gives properties_depth(tree) is at most 2)
+    expect (properties's examples(trees, 100) without repeats) is not list of 1
+end
+
+# how deeply lists are in each other: 0 for what isn't one
+to properties_depth with tree
+    if tree is 1
+        return 0
+    end
+    set deepest to 0
+    for each inside in tree
+        if properties_depth(inside) is greater than deepest
+            set deepest to properties_depth(inside)
+        end
+    end
+    return deepest + 1
+end
+
+to test_a_seed_makes_the_same_values_again
+    properties's use_seed(7)
+    set first to properties's examples(properties's lists_of(properties's texts()), 20)
+    properties's use_seed(7)
+    expect properties's examples(properties's lists_of(properties's texts()), 20) is first
+    properties's use_seed(-7) # any whole number
+    expect properties's examples(properties's lists_of(properties's texts()), 20) is first
+    properties's use_seed(8)
+    expect properties's examples(properties's lists_of(properties's texts()), 20) is not first
+    properties's use_seed(nothing)
+end
+
+to test_values_made_small
+    expect properties's simplest(properties's whole_numbers(), function with n gives n is greater than 1000) is 1001
+    expect properties's simplest(properties's whole_numbers(), function with n gives n is less than -1000) is -1001
+    expect properties's simplest(properties's whole_numbers_from(10, 100), function with n gives n is divisible by 7) is 14
+    expect properties's simplest(properties's decimals(), function with d gives d is at least 0.5) is 1 # whole numbers first
+    expect properties's simplest(properties's decimals_from(0, 1), function with d gives d is at least 0.25) is 0.25
+    expect properties's simplest(properties's lists_of(properties's whole_numbers()), function with xs gives total of xs is at least 100) is list of 100
+    expect properties's simplest(properties's lists_of(properties's texts()), function with xs gives length of xs is at least 2) is list of "", ""
+    expect properties's simplest(properties's texts(), function with t gives "z" is in t) is "z"
+    expect properties's simplest(properties's mapped(properties's whole_numbers(), function with n gives n * 2), function with n gives n is greater than 10) is 12
+    set lengths to properties's chained(properties's whole_numbers_from(1, 5), function with n gives properties's lists_of(properties's just(n), n, n))
+    expect properties's simplest(lengths, function with xs gives length of xs is at least 3) is list of 3, 3, 3
+end
+
+to sorted_already with xs
+    expect xs in order is xs
+end
+
+# what failed: the smallest value, what went wrong, the seed, and how to make the same values again
+to test_for_all_says_what_failed
+    properties's use_seed(1)
+    set said to ""
+    try
+        properties's for_all(properties's lists_of(properties's whole_numbers()), sorted_already)
+    if it fails with why
+        set said to why
+    end
+    expect position of "for_all: the property fails for [1, 0] (made smaller from [" in said is 1
+    expect position of " steps), after " in said is greater than 0
+    expect position of ", with seed 1: expected [0, 1] to be [1, 0]. use_seed(1) makes the same values again." in said is greater than 0
+    set again to ""
+    try
+        properties's for_all(properties's lists_of(properties's whole_numbers()), sorted_already)
+    if it fails with why
+        set again to why
+    end
+    expect again is said
+    try
+        properties's for_all(properties's whole_numbers_from(0, 0), function with n gives no)
+    if it fails with why
+        set said to why
+    end
+    expect said is "for_all: the property fails for 0, after 1 try, with seed 1: it gave no. use_seed(1) makes the same values again."
+    properties's use_seed(nothing)
+end
+
+to test_mistakes
+    for each pair in list of (list of function with x gives properties's whole_numbers_from(5, 1), "whole_numbers_from needs the first number no more than the second, not 5 and 1"),
+        (list of function with x gives properties's whole_numbers_from(1.5, 2), "whole_numbers_from needs whole numbers, not 1.5 and 2"),
+        (list of function with x gives properties's one_of(empty list), "one_of needs a generator or more to choose from"),
+        (list of function with x gives properties's any_of(empty list), "any_of needs a value or more to choose from"),
+        (list of function with x gives properties's texts_of(""), "texts_of needs a character or more to make text of"),
+        (list of function with x gives properties's for_all(5, function with n gives yes), "a generator is wanted here, such as whole_numbers(), not 5"),
+        (list of function with x gives properties's for_all(properties's filtered(properties's whole_numbers_from(1, 3), function with n gives n is greater than 5), function with n gives yes), "filtered: none of 100 values made was one it wanted"),
+        (list of function with x gives properties's use_seed(1.5), "a seed is a whole number, not 1.5"),
+        (list of function with x gives properties's simplest(properties's whole_numbers_from(1, 3), function with n gives n is 4, 20), "simplest: none of 20 values made was one it wanted")
+        set said to nothing
+        try
+            set made to item 1 of pair
+            made(0)
+        if it fails with why
+            set said to why
+        end
+        expect said is item 2 of pair
+    end
+end

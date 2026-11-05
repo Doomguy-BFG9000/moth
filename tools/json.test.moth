@@ -1,6 +1,7 @@
 # The JSON reader's tests, which moth.test.js runs with Moth's test runner, test() in moth.js
 
 use "json.moth" as json
+use "properties.moth" as properties
 
 to test_values
     expect json's parse("42") is 42
@@ -46,4 +47,57 @@ to test_mistakes
         end
         expect caught
     end
+end
+
+# Properties (properties.moth): what's true of every value, tried on a hundred made at random each run.
+
+# any value JSON holds: whole numbers, numbers with decimals, text of any characters, yes, no and nothing, in
+# lists and dictionaries, those in each other up to three deep
+to json_values
+    set leaves to properties's one_of(list of properties's whole_numbers(), properties's decimals(), properties's texts(), properties's yes_or_no(), properties's just(nothing))
+    to holding with inside
+        return properties's one_of(list of properties's lists_of(inside, 0, 5), properties's dictionaries_of(properties's texts(), inside, 5))
+    end
+    return properties's nested(leaves, holding)
+end
+
+to reads_what_moth_writes with value
+    expect json's parse(value as json) is value
+end
+
+# whatever Moth writes as JSON reads back as it was
+to test_round_trips
+    properties's for_all(json_values(), reads_what_moth_writes)
+end
+
+# a number as JSON writes one, from its parts: a minus or not, digits, how many of them come after a point,
+# and a power of ten after an e, or none
+to number_written with parts
+    set digits to "" + item 2 of parts
+    set after to item 3 of parts
+    if after is greater than 0 and after is less than length of digits
+        set digits to (items 1 to (length of digits - after) of digits) + "." + (items (length of digits - after + 1) to (length of digits) of digits)
+    end
+    if item 4 of parts is not 0
+        set digits to digits + "e" + item 4 of parts
+    end
+    if item 1 of parts
+        return "-" + digits
+    end
+    return digits
+end
+
+to read_as_moth_reads with written
+    expect json's parse(written) is json from written
+end
+
+# numbers written any way JSON writes them read as the language's own JSON reader reads them, to the last bit.
+# This found that 3e28 was 2.9999999999999997e+28, from multiplying by ten 28 times.
+to test_numbers_read_as_the_language_reads_them
+    set parts to properties's each_of(list of properties's yes_or_no(), properties's whole_numbers_from(0, 999999999999), properties's whole_numbers_from(0, 12), properties's whole_numbers_from(-300, 300))
+    properties's for_all(properties's mapped(parts, number_written), read_as_moth_reads)
+    for each written in list of "1.5e300", "3e28", "1.2345678901234569e+23", "1e-7", "7e-320"
+        expect json's parse(written) is json from written
+    end
+    expect json's parse("-25E-6") is -0.000025
 end

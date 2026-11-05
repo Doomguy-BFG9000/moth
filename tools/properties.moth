@@ -1,0 +1,678 @@
+# Property-based testing, as Python's Hypothesis and Haskell's QuickCheck have it: say what's true of every
+# value of a kind, and for_all tries it on a hundred values made at random. If one breaks it, it makes that
+# value as small as it can, and fails with it, what went wrong, and the seed that makes the same values again.
+#
+#   use "properties.moth" as properties
+#   use "json.moth" as json
+#
+#   to test_json_reads_what_it_writes
+#       set numbers to properties's lists_of(properties's whole_numbers())
+#       properties's for_all(numbers, function with xs gives json's parse(xs as json) is xs)
+#   end
+#
+# A property is a function of one value. It holds unless it fails (an `expect` that isn't so, a `fail with`,
+# any mistake) or gives no. Under moth test a for_all that finds a value it doesn't hold for is a test that
+# fails, and says so:
+#
+#   for_all: the property fails for [-1] (made smaller from [8102, -3, 77] in 9 steps), after 12 tries, with
+#   seed 1906523788: expected 1 to be 0. use_seed(1906523788) makes the same values again.
+#
+# Each run starts from a seed of its own, so each run tries values the last didn't; use_seed(n) starts from
+# n instead, so a run makes the same values each time. Where `random number` gives the same numbers each run
+# (the playground's engines, or a program moth built run with MOTH_SEED set), so do the seeds.
+#
+# How a value is made small. A generator makes its value from choices: whole numbers from 0, each as small as
+# it can be for the simplest value (0 is no more items, the number 0, the letter a, no, the first of a few).
+# for_all keeps the choices that made the value that failed, then makes it again from fewer of them, and from
+# smaller ones, and keeps each that still fails, as Hypothesis does. So a value made from others, by mapped,
+# filtered, chained, one_of and the rest, is made small too, with nothing more to write.
+#
+# Names a program can use: the generators whole_numbers, whole_numbers_from, decimals, decimals_from,
+# yes_or_no, characters, texts, texts_of, lists_of, dictionaries_of, each_of, one_of, any_of, just, mapped,
+# filtered, chained and nested; and for_all, use_seed, examples and simplest.
+
+set properties_asked_seed to nothing # the seed use_seed asked for, or nothing for a new one each time
+set properties_most_choices to 20000 # how many choices one value may take to make
+set properties_most_runs to 2000 # how many times the property may run while its value is made smaller
+set properties_modulus to 2147483647 # the random numbers' (Park and Miller's), 2 to the 31st less 1
+
+# A character from its code point, made from its UTF-8 bytes, after an "a" that's then taken off, so U+FEFF
+# isn't read as a byte order mark and left out
+to properties_character with point
+    set made to (properties_utf8(point) as bytes) as text
+    return items 2 to (length of made) of made
+end
+
+to properties_utf8 with point
+    if point is less than 128
+        return list of 97, point
+    end
+    set sixes to empty list # the bits six at a time, the lowest first
+    set rest to point
+    repeat 3 times
+        add remainder of rest divided by 64 to sixes
+        set rest to (rest / 64) rounded down
+    end
+    if point is less than 2048
+        return list of 97, 192 + item 2 of sixes, 128 + item 1 of sixes
+    end
+    if point is less than 65536
+        return list of 97, 224 + item 3 of sixes, 128 + item 2 of sixes, 128 + item 1 of sixes
+    end
+    return list of 97, 240 + rest, 128 + item 3 of sixes, 128 + item 2 of sixes, 128 + item 1 of sixes
+end
+
+# the characters texts makes, the simplest first: letters, digits and punctuation, most of the time
+set properties_plain to split "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:;!?'-_()[]<>/@#$%^&*+=~`|" by ""
+# what a text must escape somewhere: quotes, backslashes, braces, new lines and other control characters
+set properties_escapes to list of "\"", "\\", "\{", "}", "\n", "\t", "\r", properties_character(0), properties_character(31), properties_character(127)
+# letters of other scripts, accents put on after their letter, characters past U+FFFF, and the edges of the BMP
+set properties_unicode to empty list
+for each properties_point in list of 233, 252, 223, 241, 1046, 945, 937, 1488, 1576, 2325, 20013, 26085, 54620, 769, 8205, 65279, 65533, 57344, 65535, 128512, 127881, 120120, 1114111
+    add properties_character(properties_point) to properties_unicode
+end
+
+# ---------- choices ----------
+
+# Where a value's choices come from: `prefix`, those to make it from again, or else new random ones from
+# `state` (nothing for none: past the prefix, each is 0); `made`, each choice as it was taken
+to properties_source with prefix, state
+    return record with prefix prefix, at 0, made empty list, state state
+end
+
+# the random numbers' state from a seed: any whole number
+to properties_state_of with seed
+    if not (seed is divisible by 1)
+        fail with "a seed is a whole number, not " + properties_shown(seed)
+    end
+    set size to seed
+    if size is less than 0
+        set size to 0 - size
+    end
+    return 1 + remainder of size divided by (properties_modulus - 1)
+end
+
+# a random whole number from 0 to most, each as likely
+to properties_random with source, most
+    set state of source to remainder of (state of source * 48271) divided by properties_modulus
+    set share to (state of source - 1) / (properties_modulus - 1)
+    if most is at least 1000000 # 31 more bits, for a range wider than 31 bits tell apart well
+        set state of source to remainder of (state of source * 48271) divided by properties_modulus
+        set share to share + (state of source - 1) / (properties_modulus - 1) / (properties_modulus - 1)
+    end
+    set chosen to (share * (most + 1)) rounded down
+    if chosen is greater than most
+        return most
+    end
+    return chosen
+end
+
+# A choice: a whole number from 0 to most, the next one the prefix has (no more than most), or past its end a
+# new random one, or 0 when there are none
+to properties_choice with source, most
+    set at of source to at of source + 1
+    if at of source is greater than properties_most_choices
+        fail with "a value took more than " + properties_most_choices + " choices to make: make the lists smaller, or nested less deep"
+    end
+    set chosen to 0
+    if at of source is at most length of prefix of source
+        set chosen to item (at of source) of prefix of source
+        if chosen is greater than most
+            set chosen to most
+        end
+    else if state of source is not nothing
+        set chosen to properties_random(source, most)
+    end
+    set taken to made of source
+    add chosen to taken
+    return chosen
+end
+
+# whether there's another item, after `count` of them: always, up to fewest; never, at most; else a choice,
+# of 8 to 1 for (0, no more, is the simplest)
+to properties_more with source, count, fewest, most
+    if count is less than fewest
+        return yes
+    end
+    if count is at least most
+        return no
+    end
+    return properties_choice(source, 7) is not 0
+end
+
+# ---------- generators ----------
+# A generator is a record whose `make` makes a value from a source's choices.
+
+to properties_generator with making
+    return record with generator yes, make making
+end
+
+# a value from a generator, with a source's choices
+to properties_draw with generator, source
+    set making to nothing
+    try
+        set making to make of generator
+    if it fails
+        fail with "a generator is wanted here, such as whole_numbers(), not " + properties_shown(generator)
+    end
+    return making(source)
+end
+
+# that the two ends of a range are whole numbers (or not, for decimals), the first no more than the second
+to properties_range with low, high, whole, name
+    if whole and not (low is divisible by 1 and high is divisible by 1)
+        fail with name + " needs whole numbers, not " + properties_shown(low) + " and " + properties_shown(high)
+    end
+    if low is greater than high
+        fail with name + " needs the first number no more than the second, not " + low + " and " + high
+    end
+end
+
+# Any whole number, small ones most often: of at most 32 bits, either way from 0
+to whole_numbers
+    to making with source
+        set bits to properties_choice(source, 32)
+        set size to properties_choice(source, (2 to the power of bits) - 1)
+        if size is not 0 and properties_choice(source, 1) is 1
+            return 0 - size
+        end
+        return size
+    end
+    return properties_generator(making)
+end
+
+# a whole number from low to high, both kept: the one nearest 0 is the simplest
+to whole_numbers_from with low, high
+    properties_range(low, high, yes, "whole_numbers_from")
+    to making with source
+        if low is at least 0 # from the low end up
+            return low + properties_choice(source, high - low)
+        end
+        if high is at most 0 # from the high end down
+            return high - properties_choice(source, high - low)
+        end
+        set size to properties_choice(source, properties_larger(0 - low, high)) # how far from 0, then which way
+        return properties_signed(source, size, low, high)
+    end
+    return properties_generator(making)
+end
+
+to properties_larger with a, b
+    if a is greater than b
+        return a
+    end
+    return b
+end
+
+# a number `size` from 0, from a range either side of 0: up or down, a choice where both have room
+to properties_signed with source, size, low, high
+    if size is 0
+        return 0
+    end
+    if size is greater than high
+        return 0 - size
+    end
+    if size is at most 0 - low and properties_choice(source, 1) is 1
+        return 0 - size
+    end
+    return size
+end
+
+# Any number with up to 6 decimals, small ones most often: up to a million or so, either way from 0
+to decimals
+    to making with source
+        set bits to properties_choice(source, 20)
+        set size to properties_choice(source, (2 to the power of bits) - 1) + properties_choice(source, 999999) / 1000000
+        if size is not 0 and properties_choice(source, 1) is 1
+            return 0 - size
+        end
+        return size
+    end
+    return properties_generator(making)
+end
+
+# a number from low to high, both kept, of any decimals: the one nearest 0 is the simplest
+to decimals_from with low, high
+    properties_range(low, high, no, "decimals_from")
+    to making with source
+        set share to properties_choice(source, 1000000) / 1000000
+        set made to 0
+        if low is at least 0
+            set made to low + share * (high - low)
+        else if high is at most 0
+            set made to high - share * (high - low)
+        else
+            set made to properties_signed(source, share * properties_larger(0 - low, high), low, high)
+        end
+        if made is greater than high
+            return high
+        end
+        if made is less than low
+            return low
+        end
+        if made is 0
+            return 0
+        end
+        return made
+    end
+    return properties_generator(making)
+end
+
+# yes or no: no is the simplest
+to yes_or_no
+    to making with source
+        return properties_choice(source, 1) is 1
+    end
+    return properties_generator(making)
+end
+
+# a character from a list of them
+to properties_one_character with source, these
+    return item (properties_choice(source, length of these - 1) + 1) of these
+end
+
+# Any character: letters, digits and punctuation most of the time; then quotes, backslashes, braces and
+# control characters; letters of other scripts and characters past U+FFFF; and any code point at all
+to characters
+    to making with source
+        set sort to properties_choice(source, 9)
+        if sort is at most 6
+            return properties_one_character(source, properties_plain)
+        end
+        if sort is 7
+            return properties_one_character(source, properties_escapes)
+        end
+        if sort is 8
+            return properties_one_character(source, properties_unicode)
+        end
+        set point to 128 + properties_choice(source, 1114111 - 128 - 2048) # not U+D800 to U+DFFF, which halve a pair
+        if point is at least 55296
+            set point to point + 2048
+        end
+        return properties_character(point)
+    end
+    return properties_generator(making)
+end
+
+# text of any characters (see characters), of fewest to most of them
+to texts with fewest or 0, most or 20
+    return properties_texts_from(characters(), fewest, most)
+end
+
+# text of the characters in `letters`, of fewest to most of them: texts_of("01") makes "", "1", "0110"...
+to texts_of with letters, fewest or 0, most or 20
+    if length of letters is 0
+        fail with "texts_of needs a character or more to make text of"
+    end
+    set these to split letters by ""
+    to making with source
+        return properties_one_character(source, these)
+    end
+    return properties_texts_from(properties_generator(making), fewest, most)
+end
+
+# text of fewest to most characters, each from a generator
+to properties_texts_from with letters, fewest, most
+    properties_range(fewest, most, yes, "texts")
+    to making with source
+        set made to ""
+        set count to 0
+        repeat while properties_more(source, count, fewest, most)
+            add properties_draw(letters, source) to made
+            add 1 to count
+        end
+        return made
+    end
+    return properties_generator(making)
+end
+
+# lists of fewest to most items, each from a generator
+to lists_of with items, fewest or 0, most or 20
+    properties_range(fewest, most, yes, "lists_of")
+    to making with source
+        set made to empty list
+        repeat while properties_more(source, length of made, fewest, most)
+            add properties_draw(items, source) to made
+        end
+        return made
+    end
+    return properties_generator(making)
+end
+
+# dictionaries of up to most keys, each from `names` (text or numbers), with values from `values`
+to dictionaries_of with names, values, most or 10
+    properties_range(0, most, yes, "dictionaries_of")
+    to making with source
+        set made to empty dictionary
+        set count to 0
+        repeat while properties_more(source, count, 0, most)
+            set key to properties_draw(names, source)
+            set item key of made to properties_draw(values, source)
+            add 1 to count
+        end
+        return made
+    end
+    return properties_generator(making)
+end
+
+# a list of one value from each generator: each_of(list of whole_numbers(), texts()) makes [3, "ab"]
+to each_of with generators
+    to making with source
+        set made to empty list
+        for each one in generators
+            add properties_draw(one, source) to made
+        end
+        return made
+    end
+    return properties_generator(making)
+end
+
+# a value from any one of the generators: the first is the simplest
+to one_of with generators
+    if length of generators is 0
+        fail with "one_of needs a generator or more to choose from"
+    end
+    to making with source
+        return properties_draw(item (properties_choice(source, length of generators - 1) + 1) of generators, source)
+    end
+    return properties_generator(making)
+end
+
+# one of these values: the first is the simplest
+to any_of with values
+    if length of values is 0
+        fail with "any_of needs a value or more to choose from"
+    end
+    to making with source
+        return item (properties_choice(source, length of values - 1) + 1) of values
+    end
+    return properties_generator(making)
+end
+
+# this value, always
+to just with value
+    to making with source
+        return value
+    end
+    return properties_generator(making)
+end
+
+# what a function gives for each value a generator makes: mapped(whole_numbers(), function with n gives n * 2)
+# makes even numbers
+to mapped with generator, change
+    to making with source
+        return change(properties_draw(generator, source))
+    end
+    return properties_generator(making)
+end
+
+# the values a generator makes that a function gives yes for, tried up to 100 times for each
+to filtered with generator, wanted
+    to making with source
+        for each tried from 1 to 100
+            set made to properties_draw(generator, source)
+            if wanted(made) is yes
+                return made
+            end
+        end
+        fail with "filtered: none of 100 values made was one it wanted"
+    end
+    return properties_generator(making)
+end
+
+# a value from the generator a function gives for a value of another: chained(whole_numbers_from(1, 5),
+# function with n gives lists_of(texts(), n, n)) makes 1 to 5 texts
+to chained with generator, next
+    to making with source
+        return properties_draw(next(properties_draw(generator, source)), source)
+    end
+    return properties_generator(making)
+end
+
+# Values nested up to `depth` deep: leaves, or what `branches` (a function from a generator to one of what holds
+# its values) makes of leaves, or of those, and so on: nested(whole_numbers(), function with inside gives
+# lists_of(inside)) makes 3, [3, 1] and [[2], [], 5]
+to nested with leaves, branches, depth or 3
+    to making with source
+        set levels to properties_choice(source, depth)
+        set inside to leaves
+        for each level from 1 to levels
+            set inside to one_of(list of leaves, branches(inside))
+        end
+        return properties_draw(inside, source)
+    end
+    return properties_generator(making)
+end
+
+# ---------- checking ----------
+
+# the seeds use_seed asks for, or nothing for a new one for each check
+to use_seed with seed
+    if seed is not nothing
+        properties_state_of(seed) # a mistake now, if it isn't one
+    end
+    set properties_asked_seed to seed
+end
+
+to properties_new_seed
+    if properties_asked_seed is not nothing
+        return properties_asked_seed
+    end
+    return random number from 1 to properties_modulus - 1
+end
+
+# how a value is shown, as say shows it in a list, so text is in quotes; the first 300 characters
+to properties_shown with value
+    set shown to (list of value) as text
+    set shown to items 2 to (length of shown - 1) of shown
+    if length of shown is greater than 300
+        return (items 1 to 300 of shown) + "..."
+    end
+    return shown
+end
+
+# what's wrong when the property is given a value, or nothing if it holds: it fails, or gives no
+to properties_fails with property, value
+    try
+        if property(value) is no
+            return "it gave no"
+        end
+    if it fails with why
+        return "" + why
+    end
+    return nothing
+end
+
+# a value made again from these choices: a record of the value and the choices it took; or nothing if it
+# can't be made from them
+to properties_again with generator, choices
+    set source to properties_source(choices, nothing)
+    try
+        set made to properties_draw(generator, source)
+    if it fails
+        return nothing
+    end
+    return record with value made, choices made of source
+end
+
+# whether choices a are simpler than b: fewer, or as many and smaller at the first that differs
+to properties_simpler with a, b
+    if length of a is not length of b
+        return length of a is less than length of b
+    end
+    for each k from 1 to length of a
+        if item k of a is not item k of b
+            return item k of a is less than item k of b
+        end
+    end
+    return no
+end
+
+# choices without `size` of them from `at`
+to properties_without with choices, at, size
+    set kept to empty list
+    for each k from 1 to length of choices
+        if k is less than at or k is at least at + size
+            add item k of choices to kept
+        end
+    end
+    return kept
+end
+
+# choices with the one at `at` made `value`
+to properties_with with choices, at, value
+    set kept to empty list
+    for each k from 1 to length of choices
+        if k is at
+            add value to kept
+        else
+            add item k of choices to kept
+        end
+    end
+    return kept
+end
+
+# Whether choices simpler than the smallest found so far make a value the property fails for too: if so, it's
+# the smallest now
+to properties_better with generator, property, best, choices
+    if runs of best is at least properties_most_runs or not properties_simpler(choices, choices of best)
+        return no
+    end
+    set runs of best to runs of best + 1
+    set again to properties_again(generator, choices)
+    if again is nothing
+        return no
+    end
+    if not properties_simpler(choices of again, choices of best)
+        return no
+    end
+    set why to properties_fails(property, value of again)
+    if why is nothing
+        return no
+    end
+    set choices of best to choices of again
+    set value of best to value of again
+    set why of best to why
+    set steps of best to steps of best + 1
+    return yes
+end
+
+# The value a property fails for made as small as it goes: blocks of its choices taken out, the biggest
+# first (an item of a list is a few choices: whether there's another, then its own), then each choice made 0,
+# or 1 to 8, or as small as it can be while it still fails, over and over until nothing changes or the
+# property has run properties_most_runs times. A record: value, why, choices, steps and runs.
+to properties_smallest with generator, property, choices, value, why
+    set best to record with value value, why why, choices choices, steps 0, runs 0
+    set changed to yes
+    repeat while changed and runs of best is less than properties_most_runs
+        set changed to no
+        for each size in list of 8, 7, 6, 5, 4, 3, 2, 1
+            set at to 1
+            repeat while at + size - 1 is at most length of choices of best and runs of best is less than properties_most_runs
+                if properties_better(generator, property, best, properties_without(choices of best, at, size))
+                    set changed to yes
+                else
+                    add 1 to at
+                end
+            end
+        end
+        set at to 1
+        repeat while at is at most length of choices of best and runs of best is less than properties_most_runs
+            set was to item at of choices of best
+            if was is greater than 0
+                set small to 0 # first 0, then the smallest few in turn, for a property that isn't more true the
+                # smaller a choice is (n is divisible by 7)
+                set found to no
+                repeat while not found and small is at most 8 and small is less than was and at is at most length of choices of best
+                    set found to properties_better(generator, property, best, properties_with(choices of best, at, small))
+                    add 1 to small
+                end
+                if found
+                    set changed to yes
+                else # as small as it goes, halving the distance
+                    set low to 0
+                    set high to was
+                    repeat while high - low is greater than 1 and at is at most length of choices of best and runs of best is less than properties_most_runs
+                        set middle to ((low + high) / 2) rounded down
+                        if properties_better(generator, property, best, properties_with(choices of best, at, middle))
+                            set high to middle
+                            set changed to yes
+                        else
+                            set low to middle
+                        end
+                    end
+                end
+            end
+            add 1 to at
+        end
+    end
+    return best
+end
+
+# Values from a generator, `tries` of them, given to a property until one fails: nothing if none does, or a
+# record of the smallest (see properties_smallest), the first that failed, how many were tried and the seed
+to properties_search with generator, property, tries
+    properties_range(1, tries, yes, "for_all's tries")
+    set seed to properties_new_seed()
+    set state to properties_state_of(seed)
+    for each tried from 1 to tries
+        set source to properties_source(empty list, state)
+        set made to properties_draw(generator, source)
+        set state to state of source
+        set why to properties_fails(property, made)
+        if why is not nothing
+            set found to properties_smallest(generator, property, made of source, made, why)
+            return record with best found, first made, tried tried, seed seed
+        end
+    end
+    return nothing
+end
+
+# Whether a property holds for `tries` values from a generator: if one breaks it, a mistake that says the
+# smallest value found that breaks it, what went wrong, and the seed
+to for_all with generator, property, tries or 100
+    set found to properties_search(generator, property, tries)
+    if found is nothing
+        return
+    end
+    set best to best of found
+    set told to "for_all: the property fails for " + properties_shown(value of best)
+    if steps of best is greater than 0
+        set told to told + " (made smaller from " + properties_shown(first of found) + " in " + steps of best + " steps)"
+    end
+    set tries_said to tried of found + " tries"
+    if tried of found is 1
+        set tries_said to "1 try"
+    end
+    set told to told + ", after " + tries_said + ", with seed " + seed of found + ": " + why of best
+    fail with told + ". use_seed(" + seed of found + ") makes the same values again."
+end
+
+# what a generator makes: how_many values, to see what they're like
+to examples with generator, how_many or 10
+    set source to properties_source(empty list, properties_state_of(properties_new_seed()))
+    set made to empty list
+    for each k from 1 to how_many
+        set source to properties_source(empty list, state of source)
+        add properties_draw(generator, source) to made
+    end
+    return made
+end
+
+# the simplest value from a generator that a function gives yes for, of `tries` made; a mistake if none is
+to simplest with generator, wanted, tries or 1000
+    to unwanted with value # "fails" for a value it wants, so it's made as small as it goes
+        set liked to no
+        try
+            set liked to wanted(value) is yes
+        if it fails
+            set liked to no
+        end
+        return not liked
+    end
+    set found to properties_search(generator, unwanted, tries)
+    if found is nothing
+        fail with "simplest: none of " + tries + " values made was one it wanted"
+    end
+    return value of best of found
+end

@@ -129,12 +129,12 @@ to read_number
     if it fails
         problem("this isn't a number: " + digits)
     end
-    if here() is "e" or here() is "E" # 1.5e3 is 1.5 times 10 three times
+    if here() is "e" or here() is "E" # 1.5e3 is 1.5 with its point moved three places: 1500
         set at to at + 1
-        set sign to 1
+        set sign to ""
         if here() is "-" or here() is "+"
             if here() is "-"
-                set sign to -1
+                set sign to "-"
             end
             set at to at + 1
         end
@@ -143,15 +143,55 @@ to read_number
             add here() to power
             set at to at + 1
         end
-        repeat number of power times
-            if sign is 1
-                set value to value * 10
-            else
-                set value to value / 10
-            end
+        if power is ""
+            problem("this isn't a number: " + digits + "e")
         end
+        set value to json_moved(digits, number of (sign + power))
     end
     return value
+end
+
+# The number `digits` writes, with its point moved `places` to the right (to the left, below 0), read from the
+# digits as they are then, so it's the nearest number there is, as `number of` reads one: 1.5e300 is
+# 1.5 followed by 299 zeros, not 1.5 times 10 three hundred times, which is a little off.
+to json_moved with digits, places
+    set negative to item 1 of digits is "-"
+    set rest to digits
+    if negative
+        set rest to items 2 to (length of rest) of rest
+    end
+    set point to position of "." in rest # the point is before this character
+    if point is 0
+        set point to length of rest + 1
+    else
+        set rest to (items 1 to (point - 1) of rest) + (items (point + 1) to (length of rest) of rest)
+    end
+    set far to length of rest + 400 # past this, a number is too big for a number, or too small, either way
+    if places is greater than far
+        set places to far
+    else if places is less than 0 - far
+        set places to 0 - far
+    end
+    set point to point + places
+    set made to ""
+    if point is at most 1 # 0.00 and then the digits
+        set made to "0."
+        repeat 1 - point times
+            add "0" to made
+        end
+        add rest to made
+    else if point is greater than length of rest # the digits and then 00
+        set made to rest
+        repeat point - length of rest - 1 times
+            add "0" to made
+        end
+    else
+        set made to (items 1 to (point - 1) of rest) + "." + (items point to (length of rest) of rest)
+    end
+    if negative
+        return number of ("-" + made)
+    end
+    return number of made
 end
 
 # text in quotes, with \n, \t, \" and the rest, and \u followed by four hex digits for any character

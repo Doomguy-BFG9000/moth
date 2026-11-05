@@ -886,9 +886,9 @@ Linux `"sqlite3"` is libsqlite3.so (or `.so.0` to `.so.9`). It needs `--allow-li
 moth carries these files, so `use "json.moth"` works in any folder: `math.moth`, and from `tools/`:
 `base64`, `big`, `charts`, `collections`, `cores`, `crypto`, `dates`, `email`, `fractions`, `game`, `hash`,
 `http`, `images`, `installer`, `json`, `jwt`, `linux`, `lists`, `log`, `mysql`, `oauth`, `options`,
-`postgres`, `redis`, `s3`, `secrets`, `server`, `sets`, `sockets`, `sqlite`, `stats`, `sync`, `system`,
-`tasks`, `text`, `toml`, `ui`, `websocket`, `windows`, `wire`, `xml`, `yaml`, `zip` and `zones`, each
-`.moth`. A file of the same name beside the program is used instead. Each
+`postgres`, `properties`, `redis`, `s3`, `secrets`, `server`, `sets`, `sockets`, `sqlite`, `stats`, `sync`,
+`system`, `tasks`, `text`, `toml`, `ui`, `websocket`, `windows`, `wire`, `xml`, `yaml`, `zip` and `zones`,
+each `.moth`. A file of the same name beside the program is used instead. Each
 file's own comments say what its functions do; [VERSIONING.md](VERSIONING.md) says which of them are kept.
 
 ### 10.4 Packages

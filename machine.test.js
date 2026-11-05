@@ -1886,8 +1886,8 @@ test("moth.exe runs a file's tests, each in a run of its own, and says what test
   // stops the program; a file that can't be read at all; and more than one file at once
   for (const name of ["json.moth", "json.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   const tools = testing(["json.test.moth"]);
-  assert.equal(tools.stdout, ["test_values", "test_lists_and_objects", "test_spaces_and_lines", "test_escapes", "test_mistakes"]
-    .map((name) => `✓ ${name}\n`).join("") + "5 passed\n");
+  assert.equal(tools.stdout, ["test_values", "test_lists_and_objects", "test_spaces_and_lines", "test_escapes", "test_mistakes", "test_round_trips",
+    "test_numbers_read_as_the_language_reads_them"].map((name) => `✓ ${name}\n`).join("") + "7 passed\n");
   assert.deepEqual([tools.status, tools.stderr], [0, ""]);
   writeFileSync(join(sub, "none.test.moth"), 'say 1\nexpect 1 is 2\n');
   const none = testing(["none.test.moth"]);
@@ -1901,7 +1901,7 @@ test("moth.exe runs a file's tests, each in a run of its own, and says what test
   const several = testing(["json.test.moth", "none.test.moth"]); // each file named, then how many in all
   assert.match(several.stdout, /^json\.test\.moth\n✓ test_values\n/);
   assert.match(several.stdout, /none\.test\.moth\n✗ none\.test\.moth\n/);
-  assert.equal(several.stdout.split("\n").at(-2), "5 passed, 1 failed");
+  assert.equal(several.stdout.split("\n").at(-2), "7 passed, 1 failed");
   const missing = testing(["nowhere.test.moth"]);
   assert.deepEqual([missing.status, missing.stdout, missing.stderr], [1, "0 passed, 1 failed\n", "moth: there is no file called 'nowhere.test.moth'\n"]);
 });
@@ -2387,21 +2387,21 @@ say length of sqlite's query(again, "select * from people")`);
 });
 
 // text.moth and dates.moth, in Moth alone: their own tests, run by moth.exe's test runner, in machine code
-test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, sets.moth, images.moth, crypto.moth, charts.moth, xml.moth, zip.moth and math.moth pass their own tests in machine code", { skip }, () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, sync.moth, big.moth, fractions.moth, sets.moth, images.moth, crypto.moth, charts.moth, xml.moth, zip.moth, properties.moth and math.moth pass their own tests in machine code", { skip }, () => {
   const { dir, exe } = mothExe();
   const sub = join(dir, "text-and-dates");
   mkdirSync(sub);
   for (const name of ["text.moth", "text.test.moth", "dates.moth", "dates.test.moth", "hash.moth", "hash.test.moth", "big.moth", "big.test.moth",
     "xml.moth", "xml.test.moth", "zip.moth", "zip.test.moth", "base64.moth", "base64.test.moth", "toml.moth", "toml.test.moth", "options.moth",
     "options.test.moth", "collections.moth", "collections.test.moth", "lists.moth", "lists.test.moth", "stats.moth", "stats.test.moth", "sync.moth", "sync.test.moth", "fractions.moth", "fractions.test.moth", "sets.moth", "sets.test.moth", "images.moth", "images.test.moth", "crypto.moth", "crypto.test.moth", "charts.moth", "charts.test.moth",
-    "secrets.moth"]) {
+    "secrets.moth", "properties.moth", "properties.test.moth"]) {
     writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
   }
   for (const name of ["math.moth", "math.test.moth"]) writeFileSync(join(sub, name), readFileSync(new URL(`./${name}`, import.meta.url), "utf8"));
   const ran = spawnSync(exe, ["test", "text.test.moth", "dates.test.moth", "hash.test.moth", "big.test.moth", "xml.test.moth", "zip.test.moth", "math.test.moth",
-    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth", "images.test.moth", "crypto.test.moth", "charts.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+    "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth", "images.test.moth", "crypto.test.moth", "charts.test.moth", "properties.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
-  assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
+  assert.equal(ran.stdout.split("\n").at(-2), "101 passed");
 });
 
 // tools/arrays.moth (DESIGN §118): its own tests, in machine code, where machine code's own loops do the work and

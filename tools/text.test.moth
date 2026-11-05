@@ -1,6 +1,7 @@
 # text.moth's tests: patterns, numbers, widths and CSV, which moth.test.js runs on every engine
 
 use "text.moth" as text
+use "properties.moth" as properties
 
 to test_whole_matches
     expect text's matches("^[a-z]+@[a-z]+\\.com$", "sam@moth.com")
@@ -99,4 +100,37 @@ to test_csv
     expect rows is list of (list of "name", "age"), (list of "Sam", "20"), (list of "Lee, Ana", "31"), (list of "say \"hi\"", "")
     expect text's csv_text(list of (list of "a", 1), (list of "b, c", "x\"y")) is "a,1\n\"b, c\",\"x\"\"y\"\n"
     expect text's csv_rows(text's csv_text(rows)) is rows
+end
+
+# Properties (properties.moth): what's true of every value, tried on a hundred made at random each run.
+
+# grouped: the number's own digits, in threes from the right, with a comma between
+to grouped_in_threes with n
+    set parts to split text's grouped(n) by ","
+    expect join parts with "" is "" + n
+    for each k from 2 to length of parts
+        expect length of item k of parts is 3
+    end
+end
+
+to cut_and_joined with words
+    expect join text's split_by(",", words) with "," is words
+end
+
+to replaced_every with words
+    set made to text's replace_all("\\.", words, "")
+    expect not ("." is in made)
+    expect length of made is length of words - (length of (split words by ".") - 1)
+end
+
+to rows_read_back with rows
+    expect text's csv_rows(text's csv_text(rows)) is rows
+end
+
+to test_properties
+    properties's for_all(properties's whole_numbers(), grouped_in_threes)
+    properties's for_all(properties's texts(), cut_and_joined)
+    properties's for_all(properties's texts_of("ab.c"), replaced_every)
+    properties's for_all(properties's texts_of("ab"), function with words gives text's matches("(?i)[ab]*", uppercase of words))
+    properties's for_all(properties's lists_of(properties's lists_of(properties's texts(), 1, 4), 1, 5), rows_read_back)
 end

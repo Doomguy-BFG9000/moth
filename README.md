@@ -356,6 +356,11 @@ bytes and dictionaries:
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
   tests it, with Moth's own test runner, on every push.
+- [`properties.moth`](tools/properties.moth) is property-based testing, as
+  Hypothesis and QuickCheck have it: say what's true of every value of a kind,
+  and `for_all` tries it on a hundred made at random. One that breaks it is
+  made as small as it goes, and said with the seed that makes it again
+  ([Testing with properties](#testing-with-properties)).
 - [`sqlite.moth`](tools/sqlite.moth) keeps a database in a file through SQLite
   itself, the library Windows and most Linux systems come with: `open`, `run`
   and `query`, each row a dictionary, with `?`s for values.
@@ -1234,8 +1239,69 @@ $ moth test tools/json.test.moth
 ✓ test_spaces_and_lines
 ✓ test_escapes
 ✓ test_mistakes
-5 passed
+✓ test_round_trips
+✓ test_numbers_read_as_the_language_reads_them
+7 passed
 ```
+
+### Testing with properties
+
+A test says what one example gives; a property says what's true of every
+value, and [`properties.moth`](tools/properties.moth) tries it on a hundred
+made at random, as Python's Hypothesis and Haskell's QuickCheck do. A property
+is a function of one value that holds unless it fails (an `expect` that isn't
+so, a `fail with`, any mistake) or gives no.
+
+```text
+use "properties.moth" as properties
+
+to test_my_sort
+    properties's for_all(properties's lists_of(properties's whole_numbers()), function with xs gives my_sort(xs) is xs in order)
+end
+```
+
+When a value breaks it, `for_all` makes that value as small as it goes, and
+the test fails with it, what went wrong, and the seed that made it:
+
+```text
+$ moth test sorting.test.moth
+✗ test_my_sort
+    properties.moth:648:5: for_all: the property fails for [2, 0, 1] (made smaller from [802, 14310, 10666894, 6, 601, 0, 219809591, 1, -224127] in 13 steps), after 1 try, with seed 592266326: it gave no. use_seed(592266326) makes the same values again.
+        fail with told + ". use_seed(" + seed of found + ") makes the same values again."
+        ^
+      in 'properties's for_all', called from line 21
+0 passed, 1 failed
+```
+
+Each run starts from a seed of its own, so each tries values the last didn't;
+`properties's use_seed(592266326)` at the start of the test makes the same
+values again, and `MOTH_SEED=1 moth test` makes every run's the same, as it
+does `random number`'s. `for_all(g, f, 1000)` tries a thousand.
+
+| Generator | Makes |
+|:--|:--|
+| `whole_numbers()`, `whole_numbers_from(-5, 5)` | whole numbers, small ones most often; or from a range |
+| `decimals()`, `decimals_from(0, 1)` | numbers with up to 6 decimals; or any from a range |
+| `yes_or_no()` | yes or no |
+| `characters()`, `texts()`, `texts(1, 5)`, `texts_of("01")` | characters, and text of 0 to 20 of them (or 1 to 5): letters, digits and punctuation mostly, then quotes, backslashes, braces and control characters, other scripts, accents, characters past U+FFFF and any code point; or text of only these |
+| `lists_of(g)`, `lists_of(g, 1, 3)` | lists of g's values, 0 to 20 of them, or 1 to 3 |
+| `dictionaries_of(keys, values)` | dictionaries of up to 10 keys |
+| `each_of(list of g, h)` | a list of one value of each: `[3, "ab"]` |
+| `one_of(list of g, h)`, `any_of(list of "x", "y")`, `just(v)` | a value of any of them; one of those values; always v |
+| `mapped(g, f)`, `filtered(g, f)`, `chained(g, f)` | f of g's values; those f gives yes for; a value of the generator f gives for g's |
+| `nested(leaves, f, 3)` | leaves, or what f (from a generator to one of lists of its values, say) makes of them, up to 3 deep |
+
+Every value is made from a list of choices, whole numbers whose simplest is 0,
+so making one small works for values made from others too: the property is
+tried again on the value made from fewer choices, and smaller ones, as
+Hypothesis does. `examples(g)` gives ten of g's values, to see what they're
+like, and `simplest(g, f)` the simplest one f gives yes for.
+[`json.test.moth`](tools/json.test.moth) and
+[`text.test.moth`](tools/text.test.moth) use it: whatever Moth writes as JSON
+reads back as it was, JSON's numbers read as the language's own JSON reader
+reads them (which found that `json.moth` read `3e28` as
+`2.9999999999999997e+28`), and CSV, `grouped` and patterns keep what they
+promise.
 
 A program moth makes asks before it reads a file, writes one, goes online,
 starts another program or uses a library, the way Deno does: at a terminal

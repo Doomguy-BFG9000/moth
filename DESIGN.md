@@ -5096,3 +5096,71 @@ engines stay: as the fallback, and as what the tests compare against.
   itself, with `wasm.moth` in machine code, builds a module whose bytes are
   `wasm.js`'s, which runs as the VM runs the program, and moth still builds
   itself into the same bytes.
+
+## 128. Property-based testing: tools/properties.moth
+
+- **Why.** A test says what one example gives, and the examples are the ones
+  its writer thought of. Hypothesis and QuickCheck turn that round: say what
+  must be true of every value of a kind, and let the computer try a hundred,
+  then make the one that breaks it as small as it goes, so it's a bug report
+  and not a puzzle.
+- **What it is.** A library in Moth alone, so it runs on every engine and
+  under `moth test` as `expect` does: `for_all(generator, property)` gives a
+  property values until one fails, and then fails itself, which is the test
+  failing, with a message that says the smallest value, what the property
+  said, how many tries it took, and the seed. A property holds unless it
+  fails or gives no, so it can be `expect`s in a function, or `function with
+  xs gives ...`. Generators make whole numbers (small ones most often, of up
+  to 32 bits, or from a range), decimals (up to 6 places, or any from a
+  range), yes or no, characters and text, lists, dictionaries, a list of one
+  of each, and generators made from others: one_of, any_of, just, mapped,
+  filtered, chained (QuickCheck's bind), and nested for values in values.
+- **Text of any character.** Mostly letters, digits and punctuation, so a
+  failing text is readable; then what a text must escape somewhere (quotes,
+  backslashes, braces, new lines, NUL and other control characters); letters
+  of other scripts, accents put on after their letter, a zero-width joiner,
+  a byte order mark, U+FFFF and characters past it, as UTF-8 has them in 4
+  bytes; and any code point at all but the halves of a pair. Each is made
+  from its UTF-8 bytes after an "a" that's then taken off, as a byte order
+  mark at the start of bytes is left out when they're read as text.
+- **Seeded.** Park and Miller's generator (48271 times the last, modulo 2^31
+  less 1), in Moth, whose numbers are exact in a double, so every engine
+  makes the same values from the same seed. Each check takes a seed of its
+  own from `random number`, so each run of `moth test` tries values the last
+  didn't, and says it when it fails; `use_seed(n)` starts every check after
+  it from n, so the same values are made again. Where `random number` gives
+  the same numbers each run, so do the seeds: on the JavaScript engines, and
+  in machine code with MOTH_SEED set (§30), as CI could.
+- **Making it small, from choices.** QuickCheck shrinks by type, so a value
+  made with a function from another can't be shrunk without a shrinker of
+  its own. Hypothesis records the choices the generators made and shrinks
+  those, which works for anything made from them, and that's what this does.
+  Every generator makes its value from choices: whole numbers, each 0 to
+  some most, where 0 is the simplest (no more items, the number 0, the
+  letter a, no, the first of one_of's). for_all keeps the choices behind the
+  value that failed, then makes values from simpler choices (fewer, or as
+  many and smaller at the first that differs) and keeps each that still
+  fails: blocks of 8 down to 1 taken out (an item of a list is a few choices
+  together: whether there's another, then its own), then each choice made 0,
+  or 1 to 8 in turn (for a property that isn't more true the smaller a choice
+  is: n is divisible by 7), or as small as halving finds, until nothing
+  changes or the property has run 2,000 times. Past the end of the choices,
+  each is 0, and one past its most is its most, so any list of choices makes
+  a value. A whole number is how many bits, then the number below 2 to that,
+  then its sign, so 0 is the simplest and they're small most often; a list
+  of 20 numbers comes down to `[2, 0, 1]`, and text with a z in it to "z".
+- **Tested.** Its own tests on the three engines and in machine code: what
+  each generator makes, whatever the seed, ranges at both ends included, a
+  character of each UTF-8 length and the escapes; a seed making the same
+  values again, and any other different ones; the simplest values found
+  (1001, -1001, 14 for a multiple of 7 from 10, [100], ["", ""], "z", and
+  through mapped and chained); what for_all says, word for word, and the same
+  again with the same seed; and each mistake. json.test.moth now checks that
+  any value Moth writes as JSON reads back as it was, and that JSON's numbers
+  read as the language's own `json from` reads them, which found that
+  json.moth multiplied by ten for each power of ten after an e, so `3e28` was
+  `2.9999999999999997e+28`: it now moves the point in the digits and reads
+  them once, so it's the nearest number there is. text.test.moth checks that
+  `grouped` keeps the digits in threes, `split_by` and `join` give back the
+  text, `replace_all` takes away every match, `(?i)` doesn't mind capitals,
+  and CSV of any text reads back as it was written.

@@ -58,6 +58,13 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   `wire.moth`. `s3.moth` keeps objects in S3 and the stores that speak its language, `jwt.moth` makes and
   checks JSON Web Tokens, `oauth.moth` signs a person in with OAuth 2 and PKCE, and `yaml.moth` reads and
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
+- **Property-based testing.** `properties.moth` says what's true of every value of a kind and tries it on a
+  hundred made at random, as Hypothesis and QuickCheck do: generators for whole numbers and decimals (in a
+  range too), text of any characters, yes and no, lists, dictionaries, and generators made from others.
+  `for_all` is seeded, says the seed when it fails, and makes the value that failed as small as it goes, so
+  `moth test` shows `[2, 0, 1]`, not a list of twenty. `json.test.moth` and `text.test.moth` use it.
+- **Fixes.** `json.moth` reads a number with an exponent exactly: `3e28` was `2.9999999999999997e+28`, and
+  `1.5e300` was `1.500000000000003e+300`.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 
