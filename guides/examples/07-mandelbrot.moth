@@ -1,0 +1,23 @@
+# The Mandelbrot set, in text
+# For each point of the plane, a number that starts at 0 is squared and the point added, over and over; the
+# points where it never runs away are the set. Each character is a point, darker the longer it held out.
+
+set shades to " .:-=+*#%@"
+for each row from 0 to 20
+    set line to ""
+    set y to row / 10 - 1
+    for each column from 0 to 60
+        set x to column / 24 - 2
+        set zx to 0
+        set zy to 0
+        set steps to 0
+        repeat while steps is less than 30 and zx * zx + zy * zy is at most 4
+            set next_x to zx * zx - zy * zy + x
+            set zy to 2 * zx * zy + y
+            set zx to next_x
+            add 1 to steps
+        end
+        set line to line + item (((steps * 9 / 30) rounded down) + 1) of shades
+    end
+    say line
+end

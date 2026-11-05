@@ -1,0 +1,3 @@
+to is_pangram with sentence
+    fail with "delete this line, and say whether it's a pangram"
+end

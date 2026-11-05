@@ -5563,3 +5563,31 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
   text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
   text.moth's split_by joining back.
+## 133. A cookbook, examples and exercises
+
+- **Why.** The reference (§130) says what each function does, and the Learn page teaches the language a lesson at
+  a time; neither shows a whole task done end to end, nor gives a learner problems to solve. Those are what a
+  person new to a language looks for next, and what keeps documentation honest is running it.
+- **The cookbook** (`docs/cookbook/`) is made by `make-guides.mjs` from `guides/cookbook/*.md`: a `# title`, prose,
+  ` ```moth ` blocks, and ` ```output ` blocks after the ones that can run here, which say what the code says. Ten
+  recipes: CSV, JSON, a web API, a web API with a database, the command line, statistics and a chart, dates,
+  every core, tests, and finding and changing text. A block that needs a site, a server, a database or a window
+  has no output block, and is held to having no problem `moth check` finds instead.
+- **The examples** (`docs/examples.html`) are `guides/examples/*.moth`, whole programs whose opening comment's
+  first line is the title and the rest what they are: the towers of Hanoi, the game of life, word counts, a
+  bank account (a kind), Caesar's cipher, Roman numerals both ways, the Mandelbrot set in text, and Koch's
+  snowflake drawn by the turtle. Each links to the playground with its code in the address (`#code=`, as the
+  Share button makes it).
+- **The exercises** (`exercises/`) are twenty practice exercises in Exercism's track format (a `config.json`;
+  for each, `.docs/instructions.md`, `.meta/config.json`, `.meta/example.moth`, the starting file and its
+  tests), written for Moth from Exercism's open problem descriptions: hello-world, two-fer, leap, raindrops,
+  bob, isogram, pangram, word-count, anagram, acronym, hamming, rna-transcription, difference-of-squares,
+  collatz-conjecture, armstrong-numbers, reverse-string, matching-brackets, clock, sieve and luhn. grains is
+  left out: its 2^64 is past what 15 digits keep. The starting file has each function's first line and a
+  `fail with` saying what to do, so `moth test` fails every test until it's written.
+- **The site.** The pages share the reference's frame (`page()` in make-docs.mjs), and the navigation of every
+  page under docs/ now has Cookbook and Examples.
+- **Tested** (guides.test.js): the pages are what make-guides.mjs makes; every recipe block with an output says
+  exactly that on the JavaScript engine (files in memory), and every other has no problems; every example runs,
+  says something, has no problems, and its link is its code; every exercise is listed once in config.json with
+  a uuid of its own, its tests (113 in all) pass with its example and every one fails with its starting file.

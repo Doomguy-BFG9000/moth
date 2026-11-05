@@ -1,0 +1,25 @@
+use "word_count.moth" as exercise
+
+to test_one_word
+    expect exercise's count_words("word") is dictionary where "word" is 1
+end
+
+to test_one_of_each
+    expect exercise's count_words("one of each") is dictionary where "one" is 1, "of" is 1, "each" is 1
+end
+
+to test_several_of_one
+    expect exercise's count_words("one fish two fish red fish blue fish") is dictionary where "one" is 1, "fish" is 4, "two" is 1, "red" is 1, "blue" is 1
+end
+
+to test_punctuation_and_numbers
+    expect exercise's count_words("testing, 1, 2 testing") is dictionary where "testing" is 2, "1" is 1, "2" is 1
+end
+
+to test_capitals
+    expect exercise's count_words("go Go GO Stop stop") is dictionary where "go" is 3, "stop" is 2
+end
+
+to test_apostrophes
+    expect exercise's count_words("That's the password: 'PASSWORD 123'!") is dictionary where "that's" is 1, "the" is 1, "password" is 2, "123" is 1
+end

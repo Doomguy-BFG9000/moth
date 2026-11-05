@@ -1,0 +1,34 @@
+to trimmed with words
+    set letters to split words by ""
+    set first to 1
+    set last to length of letters
+    repeat while first is at most last and item first of letters is in list of " ", "\t", "\n", "\r"
+        add 1 to first
+    end
+    repeat while last is at least first and item last of letters is in list of " ", "\t", "\n", "\r"
+        set last to last - 1
+    end
+    if last is less than first
+        return ""
+    end
+    return items first to last of words
+end
+
+to response with heard
+    set said to trimmed(heard)
+    if said is ""
+        return "Fine. Be that way!"
+    end
+    set asking to item (length of said) of said is "?"
+    set yelling to uppercase of said is said and lowercase of said is not said
+    if asking and yelling
+        return "Calm down, I know what I'm doing!"
+    end
+    if yelling
+        return "Whoa, chill out!"
+    end
+    if asking
+        return "Sure."
+    end
+    return "Whatever."
+end

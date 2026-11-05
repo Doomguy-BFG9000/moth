@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "clock.moth"
+    ],
+    "test": [
+      "clock.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "A clock with no date: add and take minutes, and write it as hh:mm."
+}
