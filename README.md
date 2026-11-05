@@ -256,7 +256,7 @@ other compiler, and builds itself into exactly the bytes Node.js built it into,
 in about 9 seconds:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 $ moth build tools/wordcount.moth --allow-read
 compiled tools/wordcount.moth to machine code for Windows -> tools/wordcount.exe (90,112 bytes)
@@ -1059,6 +1059,7 @@ source with Node.js: `node bootstrap.mjs`.
 
 ```text
 moth                                     the Moth shell: type Moth and see what it does (also moth shell --allow-...)
+moth --version                          say which Moth this is (also moth version)
 moth build hello.moth                    compile it to machine code: hello.exe, or hello on Linux
 moth build --web hello.moth              or hello.html: a page that runs it in any browser, Moth's engine in it
 moth run hello.moth Sam 3                build it beside itself, run it with those arguments, remove it again
@@ -1083,12 +1084,16 @@ moth test                                the same for every .test.moth file here
 moth build hello.moth --target linux     for the other system: --target linux or --target windows
 moth build tool.moth --allow-read        let it read files without asking (also --allow-write, --allow-net, --allow-run, --allow-libraries, --allow-all)
 moth build tool.moth --allow-read=data   only the files in data (also --allow-write=out, --allow-net=example.com)
-moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth    moth, built by itself
+moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json    moth, built by itself
 moth build app.moth --icon app.png --version 1.2.0    a Windows program's icon (.ico or .png) and version
 moth build app.moth --include data --include logo.png    files built in: read finds them before the disk
 moth build app.moth --installer --name "Notes"   and app-setup.exe, which installs it: a Start menu entry, removable in Settings
 moth build app.moth --sign "signtool sign /fd SHA256 /a"   run a command on each program made, its name after it
 ```
+
+`moth --version` (or `moth version`) prints one line, such as `moth 1.11.0`,
+and ends with 0. The release version comes from `package.json`, built into
+moth when it is made, so it works wherever the standalone program is installed.
 
 `moth run` is `moth build` and then the program: it builds it into a file
 beside the source (`hello-run.exe`, or `hello-run` on Linux), gives it
@@ -1348,7 +1353,7 @@ by byte, with no assembler, linker or other compiler, and
 machine code by machine.moth, the two are `moth.exe`, and it builds itself:
 
 ```text
-$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth
+$ moth build moth.moth --allow-read --allow-write --allow-run --include moth-debugger.moth --include package.json
 compiled moth.moth to machine code for Windows -> moth.exe (19,166,208 bytes)
 ```
 
