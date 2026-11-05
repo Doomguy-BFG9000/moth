@@ -2328,3 +2328,23 @@ to wasm_compile with source, file_names, file_texts
     set reading to record with files files, loaded empty list, open empty list, within "", layout nothing, tight nothing
     return wasm_module(front's parse(front's tokenize(source, ""), reading))
 end
+
+# What `moth build --target wasm` writes: the module, and after it a custom section called "moth" holding, as
+# JSON, what running it needs (wasmFile in wasm.js reads it): each position as its line, column and file ("" for
+# the program's own), the names, the messages, the text, and what the inputs of functions that say so are.
+to wasm_with_details with made
+    set places to empty list
+    for each where in ats of made
+        add (list of line of where, col of where, file of where) to places
+    end
+    set details to record with ats places, names names of made, messages messages of made, texts texts of made, kinds kinds of made
+    set out to empty list
+    wasm_put_all(out, code of made)
+    set payload to empty list
+    wasm_name(payload, "moth")
+    for each b in details as json as bytes
+        add b to payload
+    end
+    wasm_section(out, 0, payload)
+    return out
+end
