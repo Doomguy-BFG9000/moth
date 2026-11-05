@@ -16,3 +16,6 @@ end
 
 -- the colours, from parser/moth.so (moth.dll on Windows) beside this folder, if it's there
 pcall(vim.treesitter.start)
+
+-- the debugger, through nvim-dap, if it's installed: :DapContinue (or require("dap").continue()) debugs the file
+moth.setup_debugger()

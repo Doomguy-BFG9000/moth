@@ -35,6 +35,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   ([editors/README.md](editors/README.md)).
 - **`ask for 64 bytes`** gives the input's next 64 bytes without waiting for a line's end, in programs moth
   builds.
+- **A debugger in your editor.** A debug adapter for `moth debug` gives VS Code (*Moth: Debug this file*, or
+  F5), Neovim, Helix and JetBrains' IDEs breakpoints, stepping, the calls in progress and the variables.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 

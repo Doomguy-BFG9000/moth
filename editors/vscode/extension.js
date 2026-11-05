@@ -3,12 +3,14 @@
 // engine, built into the extension, so they need nothing else. Where moth is installed, Moth's language server
 // (`moth lsp`, client.js starts it) gives the outline, Go to Definition, in the file or one it uses, what a name
 // is when the pointer is on it, and what can come next as you type; without it, the outline and Go to Definition
-// find the file's functions by their lines. Run, Debug and Build start moth on the file.
+// find the file's functions by their lines. Run and Build start moth on the file, and Debug a debugging session,
+// through debug-adapter.js, which says `moth debug`'s commands for VS Code's breakpoints, stepping and variables.
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { startServer } = require("./client.js");
+const { MothDebugSession } = require("./debug-adapter.js");
 
 // Moth's engine, the one the playground runs: copied into engine/ when the extension is packaged (see
 // make-vsix.mjs), or the repository's own while it's worked on there
@@ -200,6 +202,43 @@ async function start(command) {
   return terminal;
 }
 
+// `moth debug`, for VS Code's debugger: the debug adapter, inside the extension
+class InlineAdapter {
+  constructor() {
+    this.emitter = new vscode.EventEmitter();
+    this.onDidSendMessage = this.emitter.event;
+    this.session = new MothDebugSession((message) => this.emitter.fire(message));
+  }
+  handleMessage(message) {
+    this.session.handle(message);
+  }
+  dispose() {
+    this.session.stop();
+    this.emitter.dispose();
+  }
+}
+
+// A debugging session's configuration, filled in: with none (F5 with no launch.json), the file in front; and
+// moth, from moth.path
+function debugConfiguration(config) {
+  if (!config.type && !config.request && !config.name) {
+    const document = vscode.window.activeTextEditor?.document;
+    if (document?.languageId !== "moth") return null;
+    config = { type: "moth", request: "launch", name: "Debug this file", program: document.uri.fsPath };
+  }
+  if (!config.program) return null;
+  return { ...config, mothPath: config.mothPath || vscode.workspace.getConfiguration("moth").get("path") || "moth" };
+}
+
+// Debug: the file in front, saved first, in a debugging session
+async function debugFile() {
+  const document = vscode.window.activeTextEditor?.document;
+  if (!document || document.languageId !== "moth") return vscode.window.showInformationMessage("Open a Moth file first.");
+  if (document.isUntitled) return vscode.window.showInformationMessage("Save the file first, so moth can find it.");
+  if (document.isDirty) await document.save();
+  return vscode.debug.startDebugging(undefined, { type: "moth", request: "launch", name: `Debug ${path.basename(document.uri.fsPath)}`, program: document.uri.fsPath });
+}
+
 let running = null; // the language server, for deactivate
 
 function activate(context) {
@@ -298,7 +337,17 @@ function activate(context) {
       },
     }, "'"),
     vscode.commands.registerCommand("moth.run", () => start("run")),
-    vscode.commands.registerCommand("moth.debug", () => start("debug")),
+    vscode.commands.registerCommand("moth.debug", debugFile),
+    vscode.debug.registerDebugAdapterDescriptorFactory("moth", {
+      createDebugAdapterDescriptor: () => new vscode.DebugAdapterInlineImplementation(new InlineAdapter()),
+    }),
+    vscode.debug.registerDebugConfigurationProvider("moth", {
+      resolveDebugConfiguration(folder, config) {
+        const made = debugConfiguration(config);
+        if (!made) vscode.window.showInformationMessage("Open a Moth file first, or say which with \"program\".");
+        return made ?? undefined;
+      },
+    }),
     vscode.commands.registerCommand("moth.build", () => start("build")),
   );
   vscode.workspace.textDocuments.forEach(check);

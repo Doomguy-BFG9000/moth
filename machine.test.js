@@ -1613,6 +1613,151 @@ test("ask for ... bytes reads the input as it comes, in machine code", { skip },
   assert.throws(() => run('say ask for "x"', () => {}), { reason: "say how many bytes, as in 'ask for 64 bytes'" });
 });
 
+// The debug adapter (editors/vscode/debug-adapter.js, DESIGN §109) as an editor other than VS Code starts it, a
+// program of its own speaking the Debug Adapter Protocol, on moth debug: breakpoints in the program and a file it
+// uses, the calls in progress, variables, hovers and the debug console, stepping, the program's question
+// answered, the mistake it stops at, and how it ended; and a program stopped while it runs, cleanly.
+function dapSession(cwd) {
+  const child = spawn(process.execPath, [new URL("./editors/vscode/debug-adapter.js", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")], { cwd });
+  const session = { said: [], output: "" };
+  const waiters = [];
+  let buffer = Buffer.alloc(0);
+  child.stdout.on("data", (data) => {
+    buffer = Buffer.concat([buffer, data]);
+    for (;;) {
+      const head = buffer.indexOf("\r\n\r\n");
+      if (head < 0) return;
+      const end = head + 4 + Number(/Content-Length: (\d+)/.exec(buffer.subarray(0, head).toString("latin1"))[1]);
+      if (buffer.length < end) return;
+      const message = JSON.parse(buffer.subarray(head + 4, end).toString("utf8"));
+      buffer = buffer.subarray(end);
+      if (message.event === "output") session.output += message.body.category === "stdout" ? message.body.output : "";
+      const k = waiters.findIndex((w) => w.fits(message));
+      if (k >= 0) waiters.splice(k, 1)[0].done(message);
+      else session.said.push(message);
+    }
+  });
+  session.next = (fits) => new Promise((done, fail) => {
+    const k = session.said.findIndex(fits);
+    if (k >= 0) return done(session.said.splice(k, 1)[0]);
+    const timer = setTimeout(() => fail(new Error(`the adapter said nothing that fits: ${JSON.stringify(session.said)}`)), 60_000);
+    waiters.push({ fits, done: (m) => (clearTimeout(timer), done(m)) });
+  });
+  let seq = 0;
+  session.ask = async (command, args = {}) => {
+    const n = ++seq;
+    const body = Buffer.from(JSON.stringify({ seq: n, type: "request", command, arguments: args }), "utf8");
+    child.stdin.write(Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]));
+    const answer = await session.next((m) => m.type === "response" && m.request_seq === n);
+    return answer.success ? answer.body ?? null : { failed: answer.message };
+  };
+  session.stopped = () => session.next((m) => m.event === "stopped").then((m) => m.body);
+  session.exited = new Promise((done) => child.on("exit", done));
+  session.kill = () => child.kill();
+  return session;
+}
+
+test("the debug adapter debugs a program through moth debug, over the Debug Adapter Protocol", { skip }, async () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "dap work");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "lib.moth"), DEBUG_LIB);
+  writeFileSync(join(sub, "prog.moth"), DEBUG_PROGRAM);
+  const file = (name) => join(sub, name);
+  const s = dapSession(sub);
+  try {
+    const can = await s.ask("initialize", { adapterID: "moth", linesStartAt1: true, columnsStartAt1: true });
+    assert.equal(can.supportsConfigurationDoneRequest, true);
+    await s.next((m) => m.event === "initialized");
+    assert.equal(await s.ask("launch", { program: file("prog.moth"), mothPath: exe }), null);
+    assert.deepEqual(await s.ask("setBreakpoints", { source: { path: file("lib.moth") }, breakpoints: [{ line: 4 }] }), { breakpoints: [{ verified: true, line: 4 }] });
+    await s.ask("setBreakpoints", { source: { path: file("prog.moth") }, breakpoints: [{ line: 5 }] });
+    await s.ask("setExceptionBreakpoints", { filters: [] });
+    await s.ask("configurationDone");
+
+    // at the breakpoint in bump: where it is, the calls in progress, what the line can see
+    assert.deepEqual(await s.stopped(), { reason: "breakpoint", threadId: 1, allThreadsStopped: true });
+    const frames = (await s.ask("stackTrace", { threadId: 1 })).stackFrames.map((f) => [f.name, f.source.path, f.line]);
+    assert.deepEqual(frames, [["bump", file("prog.moth"), 5], ["the program", file("prog.moth"), 17]]);
+    assert.deepEqual(await s.ask("scopes", { frameId: 0 }), { scopes: [{ name: "Variables", variablesReference: 1, expensive: false }] });
+    const shown = async () => (await s.ask("variables", { variablesReference: 1 })).variables.map((v) => [v.name, v.value]);
+    assert.deepEqual((await shown()).slice(0, 3), [["bump", "<function bump>"], ["count", "0"], ["tick", "<function bump>"]]);
+    assert.deepEqual(await s.ask("evaluate", { expression: "count + 1", context: "hover" }), { result: "1", variablesReference: 0 });
+    assert.deepEqual(await s.ask("evaluate", { expression: "nope", context: "watch" }), { failed: "there's no 'nope' here" });
+    assert.deepEqual(await s.ask("evaluate", { expression: "where", context: "repl" }), { result: "  prog.moth:5, in 'bump'\n  prog.moth:17", variablesReference: 0 });
+    // stepping: out of bump, then over a line
+    await s.ask("setBreakpoints", { source: { path: file("prog.moth") }, breakpoints: [] }); // taken away, at the next command
+    await s.ask("stepOut", { threadId: 1 });
+    assert.equal((await s.stopped()).reason, "step");
+    assert.deepEqual((await s.ask("stackTrace", { threadId: 1 })).stackFrames.map((f) => f.line), [18]);
+    await s.ask("next", { threadId: 1 });
+    await s.stopped();
+    assert.deepEqual((await s.ask("stackTrace", { threadId: 1 })).stackFrames.map((f) => f.line), [19]);
+    assert.deepEqual(await s.ask("pause", { threadId: 1 }), { failed: "moth debug stops only at a line it's told to: set a breakpoint there" });
+    // on to the program's question, answered in the debug console, and the breakpoint in lib.moth
+    await s.ask("continue", { threadId: 1 });
+    await s.next((m) => m.event === "output" && /Name\? $/.test(s.output));
+    await s.ask("evaluate", { expression: "Ana", context: "repl" });
+    assert.equal((await s.stopped()).reason, "breakpoint");
+    assert.deepEqual((await s.ask("stackTrace", { threadId: 1 })).stackFrames.map((f) => [f.name, f.source.path, f.line]), [["lib's twice", file("lib.moth"), 4], ["the program", file("prog.moth"), 25]]);
+    assert.deepEqual((await shown()).find(([name]) => name === "t"), ["t", '"Ana"']);
+    // on to the end: what it said, and that it ended with 0
+    await s.ask("continue", { threadId: 1 });
+    assert.deepEqual((await s.next((m) => m.event === "exited")).body, { exitCode: 0 });
+    await s.next((m) => m.event === "terminated");
+    assert.equal(s.output, 'caught none left\nName? Ana\nAnaAna (record with name "Sam", pets ["cat"])\ndone\n');
+    assert.equal(await s.ask("disconnect"), null);
+  } finally {
+    s.kill();
+  }
+  assert.ok(!existsSync(join(sub, `prog-debug${target === "windows" ? ".exe" : ""}`)), "moth debug left the program it built");
+
+  // A mistake that ends the program: stopped there, with what it could see, and then ended with 1
+  writeFileSync(join(sub, "broken.moth"), "to risky with n\n    if n is 0\n        fail with \"none left\"\n    end\n    return risky(n - 1)\nend\nsay risky(2)\n");
+  const m = dapSession(sub);
+  try {
+    await m.ask("initialize", { adapterID: "moth" });
+    await m.ask("launch", { program: file("broken.moth"), mothPath: exe });
+    await m.ask("configurationDone");
+    const stop = await m.stopped();
+    assert.deepEqual([stop.reason, stop.description, stop.text], ["exception", "Stopped at the mistake", 'fail with "none left"']);
+    assert.deepEqual((await m.ask("stackTrace", { threadId: 1 })).stackFrames.map((f) => f.line), [3, 5, 5, 7]);
+    assert.deepEqual((await m.ask("variables", { variablesReference: 1 })).variables.map((v) => [v.name, v.value]), [["n", "0"]]);
+    await m.ask("continue", { threadId: 1 });
+    assert.deepEqual((await m.next((x) => x.event === "exited")).body, { exitCode: 1 });
+  } finally {
+    m.kill();
+  }
+
+  // stopped on entry, and a program stopped while it runs: ended, and the program moth built taken away
+  writeFileSync(join(sub, "forever.moth"), "set n to 0\nrepeat while yes\n    add 1 to n\n    wait 10 milliseconds\nend\n");
+  const f = dapSession(sub);
+  try {
+    await f.ask("initialize", { adapterID: "moth" });
+    await f.ask("launch", { program: file("forever.moth"), mothPath: exe, stopOnEntry: true });
+    await f.ask("configurationDone");
+    assert.equal((await f.stopped()).reason, "entry");
+    assert.deepEqual((await f.ask("stackTrace", { threadId: 1 })).stackFrames.map((x) => x.line), [1]);
+    await f.ask("continue", { threadId: 1 });
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(await f.ask("variables", { variablesReference: 1 }), { failed: "the program isn't stopped" });
+    await f.ask("disconnect");
+    await f.next((x) => x.event === "terminated");
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.ok(!existsSync(join(sub, `forever-debug${target === "windows" ? ".exe" : ""}`)), "the program moth debug built is still there");
+  } finally {
+    f.kill();
+  }
+  // and a moth that isn't there
+  const n = dapSession(sub);
+  try {
+    await n.ask("initialize", { adapterID: "moth" });
+    assert.match((await n.ask("launch", { program: file("prog.moth"), mothPath: join(sub, "no-moth-here") })).failed, /^there's no .*no-moth-here: install moth/);
+  } finally {
+    n.kill();
+  }
+});
+
 // `moth test`: every test_ function in a file, each in a run of its own, said as test() in moth.js says it.
 const TESTS_IN_MOTH = ["set count to 0", "to average with numbers", "    return 10 / length of numbers", "end",
   "to test_one", "    add 1 to count", "    expect count is 1", "end", "to test_two", "    add 1 to count",

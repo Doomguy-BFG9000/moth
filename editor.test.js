@@ -184,7 +184,7 @@ function makeDocument(fsPath, text, languageId = "moth") {
 }
 // the stand-in, with moth.path and moth.languageServer as `settings` says
 function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }) {
-  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [], output: [], triggers: {} };
+  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [], output: [], triggers: {}, debugging: [], debug: {} };
   const on = (kind) => (f) => ((seen.listeners[kind] = f), { dispose() {} });
   const provider = (kind) => (selector, p, ...triggers) => ((seen.providers[kind] = p), (seen.triggers[kind] = triggers), { dispose() {} });
   const vscode = {
@@ -227,6 +227,22 @@ function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }
       showWarningMessage: (m) => seen.messages.push(m),
     },
     commands: { registerCommand: (name, f) => ((seen.commands[name] = f), { dispose() {} }) },
+    debug: {
+      registerDebugAdapterDescriptorFactory: (type, factory) => ((seen.debug.factory = [type, factory]), { dispose() {} }),
+      registerDebugConfigurationProvider: (type, provider) => ((seen.debug.provider = [type, provider]), { dispose() {} }),
+      startDebugging: async (folder, config) => (seen.debugging.push(config), true),
+    },
+    EventEmitter: class {
+      constructor() {
+        this.listeners = [];
+        this.event = (f) => (this.listeners.push(f), { dispose() {} });
+      }
+      fire(value) {
+        for (const f of this.listeners) f(value);
+      }
+      dispose() {}
+    },
+    DebugAdapterInlineImplementation: class { constructor(adapter) { this.adapter = adapter; } },
   };
   return { vscode, seen };
 }
@@ -309,7 +325,22 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     vscode.window.activeTextEditor = { document };
     await seen.commands["moth.run"]();
     await seen.commands["moth.debug"]();
-    assert.deepEqual(seen.terminals.map((t) => [t.shellPath, t.shellArgs, t.cwd]), [["C:/tools/moth.exe", ["run", "main.moth"], folder], ["C:/tools/moth.exe", ["debug", "main.moth"], folder]]);
+    assert.deepEqual(seen.terminals.map((t) => [t.shellPath, t.shellArgs, t.cwd]), [["C:/tools/moth.exe", ["run", "main.moth"], folder]]);
+    // Debug: a debugging session on the file, its moth.path filled in, with the debug adapter inside the extension
+    assert.deepEqual(seen.debugging, [{ type: "moth", request: "launch", name: "Debug main.moth", program: join(folder, "main.moth") }]);
+    const [type, provider] = seen.debug.provider;
+    assert.equal(type, "moth");
+    assert.deepEqual(provider.resolveDebugConfiguration(undefined, seen.debugging[0]), { ...seen.debugging[0], mothPath: "C:/tools/moth.exe" });
+    assert.deepEqual(provider.resolveDebugConfiguration(undefined, {}), { type: "moth", request: "launch", name: "Debug this file", program: join(folder, "main.moth"), mothPath: "C:/tools/moth.exe" });
+    const { adapter } = seen.debug.factory[1].createDebugAdapterDescriptor();
+    const sent = [];
+    adapter.onDidSendMessage((m) => sent.push(m));
+    adapter.handleMessage({ seq: 1, type: "request", command: "initialize", arguments: { adapterID: "moth" } });
+    adapter.handleMessage({ seq: 2, type: "request", command: "pause", arguments: { threadId: 1 } });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(sent.map((m) => [m.type, m.command ?? m.event, m.success]), [["response", "initialize", true], ["response", "pause", false], ["event", "initialized", undefined]]);
+    assert.equal(sent[0].body.supportsConfigurationDoneRequest, true);
+    adapter.dispose();
     vscode.window.activeTextEditor = { document: makeDocument(join(folder, "notes.txt"), "hi", "plaintext") };
     await seen.commands["moth.build"]();
     assert.equal(seen.messages.at(-1), "Open a Moth file first.");

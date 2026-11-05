@@ -1204,7 +1204,10 @@ included), formatting as `moth tidy` writes code, the outline (functions, kinds
 and variables), go to definition, in the file or one it `use`s, hovers (what a
 name is, what a variable holds, what a function takes and gives) and
 completion, after `rex's` too. It goes on knowing a file while a line of it is
-half typed, and counts the changes not yet saved in the files it uses.
+half typed, and counts the changes not yet saved in the files it uses. And
+[`editors/vscode/debug-adapter.js`](editors/vscode/debug-adapter.js) gives an
+editor's debugger `moth debug`: breakpoints, stepping, the calls in progress
+and the variables, in VS Code, Neovim, Helix and JetBrains' IDEs.
 
 | Editor | How |
 |:--|:--|
@@ -1221,9 +1224,9 @@ any other editor: [editors/README.md](editors/README.md).
 [`editors/vscode`](editors/vscode) is an extension for VS Code: colours,
 problems as you type from Moth's own checker (with a Quick Fix for a misspelled
 name or a symbol from another language), Format Document as `moth tidy` writes
-code, snippets, and Run, Debug and Build, which start `moth` on the file; and,
-where moth is installed, the outline, Go to Definition, hovers and completion
-from `moth lsp`. Make it and install it:
+code, snippets, a debugger (through `moth debug`), and Run and Build, which
+start `moth` on the file; and, where moth is installed, the outline, Go to
+Definition, hovers and completion from `moth lsp`. Make it and install it:
 
 ```text
 node editors/vscode/make-vsix.mjs
@@ -1417,6 +1420,10 @@ calls that led there.
   `moth lsp` and does without it, against a stand-in for that; the .vsix,
   unzipped and compared with the files here; VS Code installing it; and, with
   MOTH_VSCODE=1, the extension in VS Code's own extension host
+- the debug adapter, spoken to as an editor speaks to it, on moth.exe's `moth
+  debug`: breakpoints in two files, the calls in progress, variables, hovers,
+  the debug console, stepping, the program's question answered, a mistake
+  stopped at, and a program stopped while it runs, left tidy
 - `moth lsp`, spoken to as an editor speaks to it, each message's framing
   checked: the problems as a file opens and as it's typed, against the
   checker's; the outline; definitions in the file and the files it uses; every

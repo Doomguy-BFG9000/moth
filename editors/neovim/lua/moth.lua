@@ -37,4 +37,22 @@ function M.start_server(buffer)
   }, { bufnr = buffer })
 end
 
+-- Moth's debugger, for nvim-dap where it's installed: the debug adapter (editors/vscode/debug-adapter.js beside
+-- this folder, or vim.g.moth_debug_adapter), run by Node.js, on `moth debug`. Once, and nothing without them.
+function M.setup_debugger()
+  local ok, dap = pcall(require, "dap")
+  if not ok or dap.adapters.moth then
+    return
+  end
+  local here = debug.getinfo(1, "S").source:sub(2)
+  local adapter = vim.g.moth_debug_adapter or vim.fs.normalize(vim.fs.dirname(here) .. "/../../vscode/debug-adapter.js")
+  if vim.fn.executable("node") ~= 1 or vim.fn.filereadable(adapter) ~= 1 then
+    return
+  end
+  dap.adapters.moth = { type = "executable", command = "node", args = { adapter } }
+  dap.configurations.moth = dap.configurations.moth or {
+    { type = "moth", request = "launch", name = "Debug this file", program = "${file}", mothPath = vim.g.moth_path or "moth" },
+  }
+end
+
 return M
