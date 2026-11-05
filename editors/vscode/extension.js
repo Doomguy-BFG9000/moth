@@ -135,8 +135,8 @@ function completionsOf(found) {
 // ---------- finding moth ----------
 
 // moth, as moth.path says or from the PATH, looked for afresh each time, so one installed since is found:
-// { file } or { file: null, why, tried } (see find-moth.js)
-// A moth.path that doesn't start at the top is from the workspace's folder, if it's one the person trusts.
+// { file } or { file: null, why, tried } (see find-moth.js). A moth.path that doesn't start at the top is from
+// the workspace's folder, if it's one the person trusts.
 function whereIsMoth() {
   const trusted = vscode.workspace.isTrusted !== false;
   const folder = trusted ? vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === "file")?.uri.fsPath : undefined;
@@ -196,7 +196,10 @@ function languageServer(output, context) {
       return undefined;
     }
   };
-  const start = async () => {
+  // started once at a time: a start asked for while one is under way is that one
+  let starting = null;
+  const start = () => (starting ??= begin().finally(() => (starting = null)));
+  const begin = async () => {
     if (state.server || vscode.workspace.getConfiguration("moth").get("languageServer") === false) return;
     const found = whereIsMoth();
     if (!found.file) {
@@ -230,6 +233,7 @@ function languageServer(output, context) {
   };
   // moth.path or moth.languageServer changed: the server stopped, and started again as they now say
   const restart = async () => {
+    await starting;
     await stop();
     await start();
   };
@@ -421,10 +425,10 @@ function activate(context) {
       provideTasks: () => [],
       resolveTask(task) {
         const { command, file } = task.definition;
-        const found = whereIsMoth();
         if (!["run", "build"].includes(command) || !file) return undefined;
+        const found = whereIsMoth();
         if (!found.file) {
-          tellMissing(found, { context, output, asked: true });
+          tellMissing(found, { context, output }); // VS Code asks for this just to list the tasks, too
           return undefined;
         }
         const folder = typeof task.scope === "object" ? task.scope.uri.fsPath : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
