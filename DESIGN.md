@@ -5069,6 +5069,11 @@ engines stay: as the fallback, and as what the tests compare against.
   of the program's, not in the heap, and found it unset. Both back ends now
   look there, and a test runs the four programs that showed it on every
   engine.
+- **It compiles itself.** `wasm.moth` with `compiler.moth` is a program like
+  any other: compiled by itself, it is a 977,707-byte module, `wasm.js`'s bytes
+  exactly, in about a second, and that module, run, compiles a program into
+  the same bytes again. That is the start of `moth.wasm`; what's missing is
+  the runtime, which the module still imports from `vm.js`.
 - **`moth build --target wasm`.** `moth.moth` carries `wasm.moth`, made into
   machine code by `machine.moth` with the rest, and writes `<file>.wasm`:
   `wasm.js`'s module, byte for byte, then a custom section called `moth`
