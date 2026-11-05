@@ -26,7 +26,7 @@ use "tools/hash.moth" as cli_hashing # SHA-256, for the sums of packages' files 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n       moth kernel [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left. kernel runs cells\n  for Jupyter (editors/jupyter): each line it reads names a file of code, run as a notebook's block."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -5189,7 +5189,7 @@ to cli_sh_program with cli_sh, cli_uses, cli_names
     add "set moth_shell_kept to empty dictionary" to cli_out
     if length of cli_uses is greater than 1
         add "try" to cli_out
-        add "    set moth_shell_kept to load \"" + cli_sh_state + "\"" to cli_out
+        add "    set moth_shell_kept to load \"" + state of cli_sh + "\"" to cli_out
         add "if it fails" to cli_out
         add "end" to cli_out
     end
@@ -5201,21 +5201,21 @@ to cli_sh_program with cli_sh, cli_uses, cli_names
     add "end" to cli_out
     add "to moth_shell_keep with moth_shell_all" to cli_out
     add "    try" to cli_out
-    add "        save moth_shell_all to \"" + cli_sh_state + "\"" to cli_out
+    add "        save moth_shell_all to \"" + state of cli_sh + "\"" to cli_out
     add "        return nothing" to cli_out
     add "    if it fails" to cli_out
     add "    end" to cli_out
     add "    set moth_shell_fine to empty dictionary" to cli_out
     add "    for each moth_shell_name in keys of moth_shell_all" to cli_out
     add "        try" to cli_out
-    add "            save (dictionary where moth_shell_name is item moth_shell_name of moth_shell_all) to \"" + cli_sh_state + "\"" to cli_out
+    add "            save (dictionary where moth_shell_name is item moth_shell_name of moth_shell_all) to \"" + state of cli_sh + "\"" to cli_out
     add "            set item moth_shell_name of moth_shell_fine to item moth_shell_name of moth_shell_all" to cli_out
     add "        if it fails with moth_shell_why" to cli_out
     add "            say \"(\" + moth_shell_name + \" can't be kept for the next entry: \" + moth_shell_why + \")\" to the error output" to cli_out
     add "            set item moth_shell_name of moth_shell_fine to nothing" to cli_out
     add "        end" to cli_out
     add "    end" to cli_out
-    add "    save moth_shell_fine to \"" + cli_sh_state + "\"" to cli_out
+    add "    save moth_shell_fine to \"" + state of cli_sh + "\"" to cli_out
     add "end" to cli_out
     for each cli_name in early of cli_sh
         add "set " + cli_name + " to moth_shell_get(\"" + cli_name + "\")" to cli_out
@@ -5285,8 +5285,8 @@ to cli_sh_entry with cli_sh, cli_typed
     set cli_text to cli_sh_showing(cli_sh, cli_typed, cli_read, cli_files)
     set typed of cli_sh to typed of cli_sh + 1
     set cli_file to "[" + typed of cli_sh + "]"
-    if keeping of cli_sh # a notebook's: its blocks, by their number
-        set cli_file to "block " + typed of cli_sh
+    if piece of cli_sh is not nothing # a notebook's blocks, or the kernel's cells, by their number
+        set cli_file to piece of cli_sh + " " + typed of cli_sh
     end
     set said of cli_sh to ""
     set cli_names to empty list
@@ -5323,12 +5323,14 @@ to cli_sh_entry with cli_sh, cli_typed
             return nothing
         end
         cli_report(cli_why, "moth shell", cli_source, cli_all_names, cli_all_texts)
+        set failed of cli_sh to yes
         return nothing
     end
     try
         write cli_bytes as bytes to program of cli_sh
     if it fails with cli_whynot
         say "moth: " + cli_whynot to the error output
+        set failed of cli_sh to yes
         return nothing
     end
     if cli_sh_run(cli_sh) is not 0 # a mistake, or `stop the program`: nothing it did is kept
@@ -5371,11 +5373,13 @@ to cli_sh_run with cli_sh
     return cli_ended
 end
 
-# what the shell (or a notebook, `keeping` what each entry says) knows: the entries so far, and the rest
+# what the shell (or a notebook, `keeping` what each entry says) knows: the entries so far, and the rest; the
+# file each entry's names are kept in for the next (`state`), and what an entry is called in a mistake, if
+# not [1], [2] and so on (`piece`: "block" for a notebook's, "cell" for the kernel's)
 to cli_sh_new with cli_host_now, cli_allowing, cli_program, cli_keeping
     return record with entries empty list, labels empty list, typed 0, early empty list, known empty list, functions empty list,
         file_names empty list, file_texts empty list, host cli_host_now, allowing cli_allowing, program cli_program,
-        keeping cli_keeping, said "", failed no
+        keeping cli_keeping, said "", failed no, piece nothing, state cli_sh_state
 end
 
 # ---------- notebooks ----------
@@ -5400,6 +5404,7 @@ to cli_notebook with cli_path, cli_flags
     add "--allow-read=" + cli_sh_state to cli_allowing
     add "--allow-write=" + cli_sh_state to cli_allowing
     set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, yes)
+    set piece of cli_sh to "block"
     set cli_lines to split cli_text by "\n"
     set cli_out to empty list
     set cli_blocks to 0
@@ -5508,12 +5513,97 @@ to cli_nb_showing with cli_sh, cli_code
         cli_sh_functions(cli_body, cli_made)
         if kind of cli_final is "call" and name of cli_final is in cli_made and line of at of cli_final is cli_last
             set cli_shown to cli_rest + "\n" + "moth_shell_show(" + cli_line + ")"
+        else if kind of cli_final is "call" and line of at of cli_final is cli_last and cli_sh_strip(cli_line) is name of cli_final
+            set cli_shown to cli_rest + "\n" + "say " + cli_line # a name alone, of no function: its value
         end
     end
     if cli_shown is nothing or body of cli_sh_read(cli_shown, cli_files) is nothing
         return cli_whole
     end
     return cli_shown
+end
+
+# ---------- the kernel ----------
+# `moth kernel [--allow-...]`, for editors/jupyter's kernel: each line it reads names a file holding a cell's
+# code, which runs as a notebook's block does (so a cell has what the cells before it made, its last line's
+# value is shown, and one that fails keeps nothing), but as the shell's entries do: what it says, and its
+# mistakes, go out as they come, and it asks this program's input, so a cell can ask a question. Before
+# the cell, a line of byte 1 and "moth-cell"; after it, one of byte 1 and "moth-done" on the error output,
+# then one of byte 1 and "moth-done ok" (or "moth-done failed"). A number and a space before the file's name
+# number the cell, as Jupyter does, if that's past the last cell's number. An empty line, or the input's end,
+# ends it. Its program and the file it keeps names in are its own, so two kernels can run in one folder.
+# (DESIGN §122)
+to cli_kernel with cli_flags
+    set cli_host_now to cli_host()
+    set cli_own to ".moth-kernel-" + (random number from 100000 to 999999)
+    set cli_program to "./" + cli_own
+    if cli_host_now is "windows"
+        set cli_program to cli_program + ".exe"
+    end
+    set cli_allowing to empty list
+    for each cli_flag in cli_flags
+        add cli_flag to cli_allowing
+    end
+    add "--allow-read=" + cli_own + "-state" to cli_allowing
+    add "--allow-write=" + cli_own + "-state" to cli_allowing
+    set cli_sh to cli_sh_new(cli_host_now, cli_allowing, cli_program, no)
+    set piece of cli_sh to "cell"
+    set state of cli_sh to cli_own + "-state"
+    set cli_mark to (list of 1) as bytes as text
+    repeat while yes
+        set cli_line to nothing
+        try
+            set cli_line to ask ""
+        if it fails # the input has ended
+        end
+        if cli_line is nothing or cli_sh_strip(cli_line) is ""
+            stop
+        end
+        say cli_mark + "moth-cell"
+        set failed of cli_sh to no
+        set cli_path to cli_sh_strip(cli_line)
+        set cli_space to position of " " in cli_path
+        if cli_space is greater than 1 and cli_kernel_whole(cli_first(cli_path, cli_space - 1))
+            set cli_number to number of cli_first(cli_path, cli_space - 1)
+            set cli_path to cli_sh_strip(cli_tail(cli_path, cli_space + 1))
+            if cli_number - 1 is greater than typed of cli_sh # numbers never go back, so each cell's is its own
+                set typed of cli_sh to cli_number - 1
+            end
+        end
+        set cli_code_text to cli_text_of(cli_path)
+        if cli_code_text is nothing
+            set failed of cli_sh to yes
+        else
+            set cli_code to split cli_code_text by "\n"
+            repeat while length of cli_code is greater than 0 and cli_sh_strip(item (length of cli_code) of cli_code) is ""
+                set cli_code to items 1 to (length of cli_code - 1) of cli_code
+            end
+            if length of cli_code is greater than 0
+                cli_sh_entry(cli_sh, cli_nb_showing(cli_sh, cli_code))
+            end
+        end
+        say cli_mark + "moth-done" to the error output
+        if failed of cli_sh
+            say cli_mark + "moth-done failed"
+        else
+            say cli_mark + "moth-done ok"
+        end
+    end
+    try
+        remove the file state of cli_sh
+    if it fails
+    end
+    return 0
+end
+
+# whether a text is digits alone
+to cli_kernel_whole with cli_text
+    for each cli_c in cli_text
+        if position of cli_c in "0123456789" is 0
+            return no
+        end
+    end
+    return yes
 end
 
 to cli_shell with cli_flags
@@ -5599,7 +5689,8 @@ to cli_main
     if length of cli_given is at least 1
         set cli_command to item 1 of cli_given
     end
-    if length of cli_given is 0 or cli_command is "shell" # the shell, with what its entries may do
+    if length of cli_given is 0 or cli_command is "shell" or cli_command is "kernel" # the shell, or the kernel, with what
+        # its entries may do
         set cli_shell_flags to empty list
         for each cli_k from 2 to length of cli_given
             set cli_arg to item cli_k of cli_given
@@ -5608,6 +5699,9 @@ to cli_main
                 stop the program with 2
             end
             add cli_arg to cli_shell_flags
+        end
+        if cli_command is "kernel"
+            stop the program with cli_kernel(cli_shell_flags)
         end
         stop the program with cli_shell(cli_shell_flags)
     end

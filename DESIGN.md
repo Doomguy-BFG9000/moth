@@ -4681,7 +4681,161 @@ hold them to agreeing.
   server's address; what it says must be exactly what it said here against
   the same servers in WSL's Docker.
 
-## 118. A web server for many people at once
+## 118. Arrays of numbers, and Moth's own loops
+
+- **Why.** NumPy is what makes Python the language of data and machine
+  learning: numbers in a shape, and maths on all of them at once. Moth had
+  lists, and a loop in Moth takes a few instructions an item.
+- **tools/arrays.moth** is an array as NumPy has one: a record of a `shape`
+  and its numbers, the last axis's one after another, as C lays them out.
+  It makes arrays (from nested lists, zeros, random, counting, identity),
+  does maths element by element with NumPy's broadcasting, matrix
+  multiplication, sums, means and the largest along an axis, reshaping,
+  slicing, transposing, stacking and softmax. Axes and places count from 1,
+  as items do. A shape that can't be, or shapes that don't go together, is
+  a `fail with` that says which.
+- **Moth's own loops.** `use the library "moth"` names functions a program
+  has in it, which machine.moth writes in machine code: numbers_binary,
+  numbers_matmul and numbers_reduce (matmul and sums with SSE2, two numbers
+  at a time), and numbers_convert. Nothing is loaded, so they need no `--allow-libraries`.
+  Each is given the lists themselves and checks what it's given: every
+  place it reads or writes is in its list and every number it works out is
+  a number. For anything else (a place outside a list, a NaN, a division by
+  0) it gives 1 and arrays.moth does that work in Moth, so what happens is
+  what Moth says happens, to the last bit, on every engine. On the
+  JavaScript engines, which can't call a library, all of it is Moth.
+- **Lists of numbers for C.** `a list of numbers` as a library function's
+  input gives C where the list's numbers are, a `double*`, which C can read
+  and change; a NaN C leaves there is made the NaN Moth's arithmetic makes.
+  Only an input can be one.
+- **Tested.** arrays.test.moth on all three engines and in machine code:
+  making, element by element, broadcasting, matrices, along axes, shapes,
+  NaN and infinity, mistakes, and machine code's loops giving exactly what
+  Moth's give; Moth's own library used without `--allow-libraries` and not
+  linked; and memcpy and memset on a list of numbers.
+
+## 119. BLAS and ONNX Runtime: calls at an address
+
+- **Why.** NumPy's matmul is BLAS's, and a model trained in PyTorch runs
+  anywhere as an ONNX file through ONNX Runtime, whose C API is a table of
+  functions found through one, OrtGetApiBase.
+- **At an address.** A library's function quoted `"at an address"` has no
+  name in the library: its first input is where it is, a pointer C gave.
+  The library is still loaded, and asked for, first. A function with no
+  pointer first is turned away when the program is built, and nothing in
+  its place is a mistake that says so.
+- **use_blas.** `arrays's use_blas()` has matmul go through BLAS's dgemm:
+  OpenBLAS as its releases and Linux's packages have it, or NumPy's copy
+  (scipy_openblas64_, with 64-bit whole numbers). It says which it found, or
+  nothing, and stop_using_blas goes back to Moth's own loops.
+- **tools/onnx.moth** loads a model, says its inputs and outputs (name,
+  type and shape, -1 for an axis of any length), and runs it: arrays in and
+  arrays out, in floats, doubles or 64-bit whole numbers, which
+  numbers_convert converts to and from. Windows 11 has ONNX Runtime in
+  System32; elsewhere it goes beside the program or where Linux keeps
+  libraries. Its mistakes are a `fail with` with what ONNX Runtime said.
+- **Tested.** In machine code: abs and strlen called where dlsym (or
+  GetProcAddress) says they are; a dense layer as an ONNX model the test
+  writes, in floats and doubles, with a wrong input's name, a wrong shape
+  and a missing file; and matmul through BLAS giving what Moth's loops give.
+  Each runs where ONNX Runtime and OpenBLAS are installed, and is skipped
+  where they aren't; CI installs both.
+
+## 120. Python inside Moth
+
+- **Why.** Most of machine learning's libraries are Python's. A Moth
+  program that can use them needn't wait for Moth to have its own.
+- **tools/python.moth** loads CPython's own library, through its C API at
+  addresses (§119): where PYTHON_LIBRARY says, else beside a folder in PATH,
+  else as Linux installs it. It runs code, evaluates expressions, imports
+  modules, calls functions (with inputs by name), and reads and sets
+  attributes and variables. Numbers, text, yes and no, nothing, lists and
+  dictionaries go across as each other; an array as a NumPy array, where
+  NumPy is; anything else stays a Python object. Python's mistakes are
+  Moth's: `Python: ZeroDivisionError: division by zero`.
+- **Tested.** In machine code, with the Python the computer has: code,
+  modules, values both ways, text beyond ASCII, Python's mistakes and a
+  module that isn't there, and with NumPy, arrays both ways. It's skipped
+  where Python's library isn't installed.
+
+## 121. Large language models: tools/ai.moth
+
+- **Why.** Programs ask models now: for an answer, for JSON of a shape, to
+  use the program's own functions, or for embeddings to search by meaning.
+- **What it does.** anthropic() is Anthropic's Messages API, Claude Opus
+  5.5 unless a model is named; openai() is OpenAI's; openai_compatible()
+  any server that speaks OpenAI's API, as Ollama, LM Studio and vLLM do.
+  answer, chat (messages, a system prompt, effort, the reply's text, stop
+  reason, tool calls and usage), stream (each piece of the answer to a
+  function as it comes, from server-sent events read as they arrive, in
+  chunks or not), chat_with_tools (each tool the model uses run, and its
+  result sent back, until it answers; one that fails is sent back as an
+  error), answer_json (structured outputs, from a JSON Schema), embed (an
+  array, a row for each text), and vectors searched by cosine similarity,
+  as one matmul.
+- **Keys.** Only from the environment: ANTHROPIC_API_KEY for Anthropic, and
+  OPENAI_API_KEY for OpenAI or a server that's said to want one. They're
+  never kept in a value or shown, and each goes only to its own API.
+- **Refusals.** On Claude Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5, a
+  request goes with `fallbacks: "default"`, so one the model declines is run
+  again on another, on Anthropic's servers; `"fallbacks" is no` turns that
+  off. After a fallback part of the way through, the turn sent back holds
+  only the text from before it, not tool uses or thinking, and that tool
+  use isn't run.
+- **Tested.** ai.test.moth on all three engines: what each request says,
+  events read from bytes however they're cut, a fallback part of the way,
+  and searching vectors. In machine code, against a server of the test's
+  own that answers as both APIs do: answers, streams, tools and a tool that
+  fails, JSON, embeddings and a search of them, a server that wants no key,
+  a wrong key and none, each key only in its own API's header and in no
+  request's body. The keys are made up.
+
+## 122. Jupyter
+
+- **Why.** Jupyter is where data work is done, and its notebooks run in
+  JupyterLab, VS Code and the rest. `moth notebook` (§77) runs Markdown,
+  but people open .ipynb files.
+- **moth kernel** runs cells as notebook blocks are run, so a cell has what
+  the cells before it made, a cell whose last line is a value shows it, and
+  one that fails keeps nothing. Each line it reads names a file holding a
+  cell; a number before it numbers the cell as Jupyter does, so mistakes say
+  `cell 4:1:5`, but never back, so each cell's name is its own. Unlike a
+  notebook's blocks, a cell's output and mistakes go out as they come, and
+  it has the kernel's input, so it can ask. A line of byte 1 and
+  `moth-cell` comes before a cell's output, then one of byte 1 and
+  `moth-done` on the error output and one with `ok` or `failed` on the
+  output. Its program and the file it keeps names in have names of their
+  own, so two kernels can share a folder. A one-line cell that's a value
+  now shows it, and the shell's state file is the shell's record's.
+- **editors/jupyter** is a wrapper kernel, ipykernel's `Kernel` with
+  `do_execute`, and its kernelspec; `python moth_kernel.py install` installs
+  it for the Python that ran it. Each cell goes to `moth kernel`, its output
+  to Jupyter as it comes, a whole line at a time, and a mistake as
+  Jupyter's error. A Moth program writes a line part of the way only when it
+  asks, so output that stops part of the way for a quarter of a second is a
+  question, asked in Jupyter's input box, whose answer goes to the cell's
+  input and isn't shown twice; where the frontend can't answer, the cell is
+  stopped. moth kernel has a process group of its own, so Jupyter's
+  interrupt reaches only the Python kernel, which stops the cell's program
+  (found in /proc, or with psutil) and keeps the cells before it. If moth
+  kernel itself stops, a new one starts and the cell says so.
+- **What cells may do.** All of it, unless MOTH_KERNEL_ALLOW gives other
+  `--allow` flags: a notebook's code is the person's own, as a Python
+  notebook's is.
+- **Tested.** Through moth.exe, each line given once the one before is
+  done: values, a function, a mistake that keeps nothing, an empty cell,
+  the error output, numbering and its never going back, a file that isn't
+  there, a question answered, and nothing left behind. In Python, against
+  a stand-in for moth kernel that runs each cell as a program of its own:
+  output in pieces and in several bytes a character, questions answered and
+  not, mistakes, numbers, a cell stopped, moth kernel stopping, and the
+  programs a program started; against the moth built here: what cells keep
+  and show, a question, a cell stopped, a file beside the notebook, and two
+  kernels in one folder; and, where ipykernel and jupyter_client are
+  installed, the kernel installed and run as Jupyter runs it, interrupted
+  and restarted.
+
+## 123. A web server for many people at once
 
 - **Why.** server.moth answered one request at a time, start to finish: it
   read until a request was whole, answered, and closed the connection. One
@@ -4745,7 +4899,7 @@ hold them to agreeing.
 
   Before, connections waited in the queue for seconds, some until the client
   gave up; `slow` never ended, as the first half-sent request held the server.
-  `heavy` is limited by its work on one thread; §119's workers take it to
+  `heavy` is limited by its work on one thread; §124's workers take it to
   4,489/s on 4.
 - **Tested.** On raw sockets, with time limits of 400 ms: three requests on
   one connection, the last told it's the last; two sent together, then HEAD;
@@ -4761,7 +4915,7 @@ hold them to agreeing.
   stop_serving(). The tests from before (HTTPS, the guestbook app, http.moth's
   and websocket.moth's) pass as they were.
 
-## 119. Workers: every core, sharing nothing
+## 124. Workers: every core, sharing nothing
 
 - **Why.** Tasks (§62) take turns: one runs Moth at a time, so a server's
   handlers, or a sum split into tasks, use one core however many there are.
@@ -4840,7 +4994,7 @@ hold them to agreeing.
   except what only threads show (a worker that hasn't ended yet).
 - **server.moth on workers.** `set_workers(4)`, or `serve_on_workers(8080,
   answer, 4)`, starts 4 workers (0 for one a core) on the one listening
-  socket. Each runs §118's rounds with connections of its own, taking one new
+  socket. Each runs §123's rounds with connections of its own, taking one new
   connection a round, so those that wake for the same one share them. A
   handler that works for a second holds up only its own worker's connections.
   A worker that ends with a mistake is said and another started;
@@ -4849,7 +5003,7 @@ hold them to agreeing.
   and then on four workers, on 4 cores: the workers took 0.27 of the time.
   Eight 30,000,000-round loops: 2,340 ms one after another, 626 ms on eight
   workers. 3,000 workers started and waited for one after another: 0.10 s; 64
-  at once, 34 ms. The `heavy` load test of §118: 664/s on one thread, 4,489/s
+  at once, 34 ms. The `heavy` load test of §123: 664/s on one thread, 4,489/s
   on four workers.
 - **Tested.** The JavaScript engines, the compiler written in Moth and machine
   code agree on: the program's variables and a worker's inputs, which it
