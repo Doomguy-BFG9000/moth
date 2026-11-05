@@ -7293,7 +7293,7 @@ THREAD_FN(deep) {
 }
 
 int main(void) {
-  moth_value r, a, list, d, f, inputs;
+  moth_value r, a, b, list, d, f, inputs;
   int status;
   setvbuf(stdout, NULL, _IONBF, 0);
   printf("%s", moth_exports());
@@ -7343,7 +7343,13 @@ int main(void) {
   moth_free(inputs); moth_free(f);
   status = moth_list_item(&r, moth_nothing(), 0); said("moth_list_item(past the end)", status, r);
   said("moth_number(nan) is a number", 0, moth_number(0.0 / 0.0 * 0));
-  printf("kinds %d %d %d %d\n", moth_kind(moth_number(1)), moth_kind(moth_nothing()), moth_kind(moth_yes_or_no(1)), moth_kind(text("t")));
+  printf("kinds %d %d %d %d, yes %d %d %d\n", moth_kind(moth_number(1)), moth_kind(moth_nothing()), moth_kind(moth_yes_or_no(1)),
+    moth_kind(text("t")), moth_is_yes(moth_yes_or_no(1)), moth_is_yes(moth_yes_or_no(0)), moth_is_yes(moth_number(1)));
+  a = text("kept twice");
+  moth_keep(&b, a);
+  moth_free(a);
+  churn(&r, moth_number(200000));
+  said("moth_keep", 0, b);
 
   moth_value held[100];
   for (int i = 0; i < 100; i++) { char s[32]; sprintf(s, "held %d", i); held[i] = text(s); }
@@ -7405,7 +7411,8 @@ moth_call(adder(10), [5, 6]) -> 1 (message "'function on line 49' needs 1 input 
 moth_call(3, []) -> 1 (message "moth_call needs a function", line nothing, column nothing, file nothing, value "moth_call needs a function")
 moth_list_item(past the end) -> 1 (message "moth_list_item needs a list", line nothing, column nothing, file nothing, value "moth_list_item needs a list")
 moth_number(nan) is a number -> 0 nan
-kinds 1 4 3 2
+kinds 1 4 3 2, yes 1 0 0
+moth_keep -> 0 "kept twice"
 eight threads counted 160000, with 0 failures
 depth(50000), on a 256 KB stack -> 0 50000
 depth(200000) -> 1 "too much recursion: a function kept calling itself"
@@ -7426,7 +7433,8 @@ function libraryCall(source, cSource, name = "work") {
     const linking = target === "windows" ? [library] : [`-L${dir}`, `-l${name}`, "-Wl,-rpath,$ORIGIN", "-pthread"];
     const built = spawnSync(LIBRARY_CC, ["-O1", "-o", exe, join(dir, "main.c"), ...linking], { encoding: "utf8" });
     assert.equal(built.status, 0, built.stderr);
-    return spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+    return { ...ran, stdout: ran.stdout.replaceAll("\r\n", "\n") }; // C's own printf writes \r\n on Windows
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -7554,9 +7562,15 @@ test("moth build --library writes a library and its header, beside the file", { 
     const made = spawnSync(LIBRARY_CC, ["-o", executable(dir, "main"), join(dir, "main.c"), ...linking], { encoding: "utf8" });
     assert.equal(made.status, 0, made.stderr);
     const ran = spawnSync(executable(dir, "main"), [], { cwd: dir, encoding: "utf8" });
-    assert.deepEqual([ran.stdout, ran.status], ["0 42\n", 0]);
-    const wrong = spawnSync(exe, ["build", "fast.moth", "--library", "--installer"], { cwd: dir, encoding: "utf8" });
-    assert.equal(wrong.status, 2);
+    assert.deepEqual([ran.stdout.replace("\r\n", "\n"), ran.status], ["0 42\n", 0]);
+    mkdirSync(join(dir, "out"));
+    const into = spawnSync(exe, ["build", "fast.moth", "--library", "--into", "out", "--target", "windows"], { cwd: dir, encoding: "utf8" });
+    assert.equal(into.status, 0, into.stderr);
+    assert.deepEqual(readdirSync(join(dir, "out")).sort(), ["fast.dll", "fast.h"]);
+    for (const flags of [["--library", "--installer"], ["--into", "out"], ["--library", "--into"]]) {
+      const wrong = spawnSync(exe, ["build", "fast.moth", ...flags], { cwd: dir, encoding: "utf8" });
+      assert.equal(wrong.status, 2, flags.join(" "));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

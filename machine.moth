@@ -41053,6 +41053,13 @@ to emit_library_api with a, windows
     lib_fail(a, "moth_call needs a list of the function's inputs")
     library_api(a, windows, "moth_call", "lxr_call", 2, yes)
 
+    # moth_keep(result, value): the value again, kept once more, for another part of C's to free
+    mark(a, "lxr_keep")
+    load(a, rax, mem(rbx, 8))
+    movq_xr(a, xmm0, rax)
+    ret(a)
+    library_api(a, windows, "moth_keep", "lxr_keep", 1, yes)
+
     # moth_free(value): no longer kept for C; the last place it was kept, given the last's
     set look to new_label(a)
     set found to new_label(a)
@@ -41140,8 +41147,8 @@ to emit_library_pure with a, windows
     ret(a)
 
     mark(a, "lxp_moth_is_yes")
-    movi64(a, rcx, bits_yes)
-    alu(a, "cmp", first, rcx)
+    movi64(a, rax, bits_yes)
+    alu(a, "cmp", first, rax)
     setcc(a, cc_e, rax)
     movzx8(a, rax, rax)
     ret(a)
@@ -41713,6 +41720,7 @@ set lib_header_api to join (list of "#include <stdint.h>",
     "int moth_record_names(moth_value *result, moth_value record);",
     "int moth_record_values(moth_value *result, moth_value record);",
     "int moth_call(moth_value *result, moth_value function, moth_value inputs);   /* inputs: a list */",
+    "int moth_keep(moth_value *result, moth_value value);   /* the same value, to free once more */",
     "void moth_free(moth_value value);",
     "") with "\n"
 
