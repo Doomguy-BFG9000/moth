@@ -5022,3 +5022,69 @@ hold them to agreeing.
   four workers taking far less time than four calls; and a Windows program's
   imports. server.moth with three workers: twenty requests answered while one
   handler works for a second and a half.
+
+## 127. Coverage of tests, and LCOV
+
+- **Why.** `moth coverage` (§93) said which lines of one run of a program
+  ran. What people measure is their tests, as coverage.py does under pytest:
+  which lines of the code under test the tests ran, and where they're
+  missing it, said in CI and shown in an editor.
+- **Which engine.** Machine code, built to be watched as `moth debug` and
+  `moth profile` build it, with moth-coverage.moth in the debugger's place.
+  The other way was the JavaScript VM, whose debugger stops before each
+  statement too, but moth, the command, has no JavaScript in it, and the
+  tests would then run on another engine from `moth test`'s: one without
+  C libraries, sockets, other programs or workers on cores, where a
+  program's file and network use are pretend, and whose `wait` doesn't
+  wait. Coverage run on a different engine from the one the tests pass on
+  measures something else. In machine code the tests run as `moth test`
+  runs them, each in a run of its own, on what the program ships on; the
+  call before each statement is made whatever the compiler does (a watched
+  build guesses nothing about calls and puts no function in line, so each
+  of a function's lines is its own, §59 and §63), so
+  a statement that runs is counted, in the program and every file it uses;
+  and the watcher's last word comes however the run ends (§81): passing, an
+  `expect` that fails, a mistake or `stop the program`. The JIT, which makes
+  one JavaScript function of many lines, can't say which ran at all.
+- **Adding runs up.** wants() now counts how many times each line runs.
+  moth puts lines at the end of moth-coverage.moth when it builds it in
+  (cli_coverage_asking), which set what it's asked for: a test's run is
+  asked to keep its counts, and says them on the error output after a line
+  that marks them, each file's line by line; moth takes them off what the
+  test said, which moth test shows unchanged for a test that fails, and
+  adds them to every other test's, by each file's path from the folder moth
+  runs in, so a file two folders' tests use is one. Then it says the
+  summary §93's coverage says, with moth-coverage.moth's own functions,
+  which moth uses as cli_coverage: the lines run of all, each file's share
+  in the order of its path, and the lines that never ran, as runs. A branch
+  never taken is its lines; a function never called, its body's (its `to`
+  line ran: making a function is a statement).
+- **What's counted.** The files the tests use, not the test files, nor
+  moth's own copies of the standard library (§74), nor packages: as
+  coverage.py leaves out the standard library and site-packages, it's the
+  program's own code that's measured. A program's run leaves out the same.
+  A file the tests use counts once it has run once, with all its lines.
+- **LCOV.** `--lcov` writes lcov.info, as geninfo writes it: for each file
+  its path (SF), each line with a statement on it and how many times it ran
+  (DA), and how many there are and ran (LF, LH), which Codecov, Coveralls,
+  GitLab and editors' coverage views read. For a program's run the watcher
+  writes it, and the program is built with --allow-write=lcov.info, so it
+  isn't asked; for tests moth does, after the last.
+- **The command line.** `moth coverage x.test.moth`, any number of them, or
+  none for every .test.moth file here and in the folders inside, as moth
+  test finds them; a file ending in .test.moth is tests, anything else a
+  program, after which everything is the program's own. With tests,
+  `--lcov` and the --allow flags can come after the files too, as with
+  moth test. It ends with 1 if a test failed, as moth test does.
+- **Limits.** A worker (§124) runs on a copy of the program, the watcher's
+  counts too, which end with it: its lines aren't counted, though a task's
+  are. A line run within 16 calls of the most there can be (100,000) isn't
+  counted, as the debugger doesn't stop there either.
+- **Tested.** Through moth.exe: a program's run, its summary on the error
+  output and its lcov.info, from another folder; a file's tests, and a
+  folder's, two files of tests in two folders, with a branch never taken, a
+  function never called, a line run in a loop, moth's json.moth and a
+  package left out, and a test that fails and says something, which moth
+  coverage shows as moth test does and still counts; the same files named,
+  with --lcov after them; lcov.info word for word; nothing left behind; and
+  moth test as it was.
