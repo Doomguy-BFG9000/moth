@@ -1,0 +1,77 @@
+# wire.moth's tests: reading lines, counts and numbers from bytes, and writing them, doubles as IEEE 754 has
+# them, byte for byte as Python's struct packs them
+
+use "wire.moth" as wire
+use "hash.moth" as hash
+
+to test_reading
+    set r to wire's reader_of(hash's bytes_of_hex("2b4f4b0d0a68656c6c6f00010203fffe"))
+    expect wire's line(r) is "+OK"
+    expect wire's text_to_zero(r) is "hello"
+    expect wire's waiting(r) is 5
+    expect wire's take_byte(r) is 1
+    expect wire's take_number(r, 2, "big") is 515
+    expect wire's take(r, 2) is hash's bytes_of_hex("fffe")
+    expect wire's waiting(r) is 0
+    set why to nothing
+    try
+        wire's take(r, 1)
+    if it fails with problem
+        set why to problem
+    end
+    expect why is "the message ends too soon"
+    expect wire's take(r, 0) is 0 bytes
+end
+
+to test_numbers
+    set b to hash's bytes_of_hex("0102030405060708fffffffe80")
+    expect wire's number_of(b, 1, 4, "big") is 16909060
+    expect wire's number_of(b, 1, 4, "little") is 67305985
+    expect wire's number_of(b, 1, 6, "little") is 6618611909121
+    expect wire's signed_of(b, 9, 4, "big") is -2
+    expect wire's signed_of(b, 9, 4, "little") is -16777217
+    expect wire's signed_of(b, 13, 1, "big") is -128
+    expect wire's signed_of(b, 1, 2, "big") is 258
+    expect wire's bytes_of_number(-2, 4, "big") is hash's bytes_of_hex("fffffffe")
+    expect wire's bytes_of_number(258, 2, "little") is hash's bytes_of_hex("0201")
+    expect wire's bytes_of_number(9007199254740991, 8, "big") is hash's bytes_of_hex("001fffffffffffff")
+    expect wire's bytes_of_number(-1, 8, "little") is hash's bytes_of_hex("ffffffffffffffff")
+end
+
+to test_doubles
+    # each as Python's struct.pack(">d", x) has it
+    set tiny to 1 / (2 to the power of 1022) / (2 to the power of 52)
+    set huge to (2 - 1 / (2 to the power of 52)) * (2 to the power of 1023)
+    set cases to list of (list of 1, "3ff0000000000000"), (list of -2.5, "c004000000000000"), (list of 0.1, "3fb999999999999a"),
+        (list of 0, "0000000000000000"), (list of 123456789.125, "419d6f3454800000"), (list of tiny, "0000000000000001"),
+        (list of huge, "7fefffffffffffff"), (list of 10 to the power of 400, "7ff0000000000000"), (list of 1 / 3, "3fd5555555555555"),
+        (list of 9007199254740993, "4340000000000000"), (list of 1 / (2 to the power of 1022), "0010000000000000")
+    for each pair in cases
+        set w to wire's writer()
+        wire's add_double(w, item 1 of pair, "big")
+        expect hash's hex_of(wire's bytes_of(w)) is item 2 of pair
+        expect wire's double_of(hash's bytes_of_hex(item 2 of pair), 1, "big") is item 1 of pair
+        set little to wire's writer()
+        wire's add_double(little, item 1 of pair, "little")
+        expect wire's double_of(wire's bytes_of(little), 1, "little") is item 1 of pair
+    end
+    set why to nothing
+    try
+        wire's double_of(hash's bytes_of_hex("7ff8000000000000"), 1, "big")
+    if it fails with problem
+        set why to problem
+    end
+    expect why is "this double isn't a number (NaN)"
+end
+
+to test_writing
+    set w to wire's writer()
+    wire's add_text(w, "é")
+    wire's add_byte(w, 0)
+    wire's add_number(w, 1000, 4, "big")
+    wire's add_number(w, -1, 2, "little")
+    wire's add_bytes(w, hash's bytes_of_hex("abcd"))
+    expect hash's hex_of(wire's bytes_of(w)) is "c3a900000003e8ffffabcd"
+    expect size of w is 11
+    expect wire's joined(list of ("ab" as bytes), 0 bytes, ("c" as bytes)) is "abc" as bytes
+end

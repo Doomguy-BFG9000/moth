@@ -1,0 +1,1488 @@
+# YAML, the settings files of CI, Kubernetes, Docker Compose and many more: read into dictionaries, lists and
+# values, and written back, as Python's yaml.safe_load and yaml.safe_dump do. In Moth alone, so it works
+# everywhere.
+#
+#   use "yaml.moth" as yaml
+#   set settings to yaml's read_yaml(read "settings.yaml")
+#   say item "port" of item "server" of settings
+#   for each step in item "steps" of settings
+#       say step
+#   end
+#   set documents to yaml's read_yaml_all(read "all.yaml")   # each document, after its ---, in a list
+#   write yaml's yaml_of(settings) to "settings.yaml"
+#
+# Mappings become dictionaries, their keys text as written; sequences become lists; and scalars are read as
+# YAML 1.2 has them: true and false are yes and no; null, ~ and nothing at all are nothing; 12, -3, 0x1F,
+# 0o17, 1.5, 6.02e23 and .inf are numbers; everything else is text, quoted or not, so `on`, `no`, `1.2.3`
+# and `2026-11-04` stay text. Both styles: block (indented, a `- ` before each item) and flow ([a, b] and
+# {a: 1}); 'single' and "double" quotes, with \n, \t, é and YAML's other escapes; | and > for text of
+# many lines, with - and + for its last line ends; # comments; documents split by --- and ended by ...;
+# anchors (&base), aliases (*base) and merges (<<: *base); and the tags !!str, !!int, !!float, !!bool,
+# !!null and !!binary (bytes), while others, as !Ref, are passed over. A file that isn't YAML is a
+# `fail with` that says which line and why: catch it with `try`.
+#
+# yaml_of writes a dictionary, list or value as block YAML that reads back as it was: text quoted where it
+# would read as something else, text of many lines after a |, bytes as !!binary, records as mappings.
+
+use "base64.moth" as yaml_b64
+
+set yaml_src to ""
+set yaml_at to 1
+set yaml_size to 0
+set yaml_anchors to empty dictionary
+set yaml_hex to "0123456789abcdef"
+set yaml_indicators to "-?:,[]{}#&*!|>'\"%@`"
+set yaml_flow_ends to ",[]{}"
+set yaml_infinity to 10 to the power of 400
+set yaml_old_words to list of "y", "n", "yes", "no", "on", "off" # YAML 1.1's yes and no, which yaml_of quotes
+
+# ---------- reading ----------
+
+# the first document's value, or nothing for a file with none
+to read_yaml with words
+    set documents to read_yaml_all(words)
+    if length of documents is 0
+        return nothing
+    end
+    return item 1 of documents
+end
+
+# every document's value, in order
+to read_yaml_all with words
+    set yaml_src to yaml_no_returns(words)
+    set yaml_at to 1
+    set yaml_size to length of yaml_src
+    if yaml_size is at least 1 and (item 1 of yaml_src) as bytes is (list of 239, 187, 191) as bytes # a byte order mark
+        set yaml_at to 2
+    end
+    set documents to empty list
+    set ended to yes # whether the document before has ended, with ..., so a directive can come
+    repeat while yes
+        yaml_skip_lines()
+        repeat while yaml_here() is "%" and yaml_column() is 0
+            if not ended
+                yaml_problem("a % directive comes before a document's ---, not in it")
+            end
+            yaml_skip_to_line_end()
+            yaml_skip_lines()
+        end
+        if yaml_at is greater than yaml_size
+            return documents
+        end
+        if yaml_marker("...")
+            set yaml_at to yaml_at + 3
+            set ended to yes
+        else
+            set started to no
+            if yaml_marker("---")
+                set yaml_at to yaml_at + 3
+                set started to yes
+            end
+            set yaml_anchors to empty dictionary
+            set value to yaml_node(-1, yes, started)
+            add value to documents
+            yaml_skip_lines()
+            set ended to no
+            if yaml_at is at most yaml_size and not yaml_marker("---") and not yaml_marker("...")
+                if yaml_line_start() and yaml_column() is 0
+                    yaml_problem("this isn't part of the document: a document is one value, so is a key or a - missing?")
+                end
+                yaml_problem("this isn't part of the value before it: is it indented right?")
+            end
+        end
+    end
+end
+
+# A node, from here: on this line (after a key's :, a -, or ---), or on the lines after it, indented more
+# than `indent`. A sequence as a key's value can be as indented as the key (`same`); a mapping or sequence
+# can start on this line after a - (`compact`), but not after a key's :.
+to yaml_node with indent, compact, after_marker
+    yaml_skip_lines()
+    if yaml_at is greater than yaml_size or yaml_marker("---") or yaml_marker("...")
+        return nothing
+    end
+    set fresh to yaml_line_start()
+    set column to yaml_column()
+    if fresh and column is at most indent
+        if not (column is indent and compact is "same" and yaml_entry_here())
+            return nothing
+        end
+    end
+    set anchor to nothing
+    set tag to nothing
+    repeat while yaml_here() is "&" or yaml_here() is "!"
+        if yaml_here() is "&"
+            set yaml_at to yaml_at + 1
+            set anchor to yaml_name_here()
+            if anchor is ""
+                yaml_problem("an & needs a name after it")
+            end
+        else
+            set tag to yaml_tag_here()
+        end
+        yaml_skip_spaces()
+    end
+    set value to nothing
+    if (anchor is not nothing or tag is not nothing) and (yaml_here() is "" or yaml_here() is "\n" or yaml_comment_here())
+        set value to yaml_node(indent, compact, no) # what the anchor or tag is for is on the lines after
+        if yaml_is_text(value) and tag is not nothing
+            set value to yaml_tagged(value, tag, no)
+        else if value is nothing and tag is not nothing
+            set value to yaml_tagged("", tag, no)
+        end
+    else
+        set block to fresh or compact is yes
+        if after_marker and not fresh
+            set block to no
+        end
+        set value to yaml_content(indent, yaml_column(), block, tag)
+    end
+    if anchor is not nothing
+        set item anchor of yaml_anchors to value
+    end
+    return value
+end
+
+# the content at this column, its anchor and tag taken: a block mapping or sequence (only where one can start),
+# an alias, a flow collection, a block scalar, or a scalar
+to yaml_content with indent, column, block, tag
+    set c to yaml_here()
+    if c is "-" and yaml_space_at(1)
+        if not block
+            yaml_problem("a list can't start on the same line as its key: put its - on the next line")
+        end
+        return yaml_block_sequence(column)
+    end
+    if c is "?" and yaml_space_at(1)
+        if not block
+            yaml_problem("a mapping can't start on the same line as its key: put it on the next line, indented")
+        end
+        return yaml_block_mapping(column, yaml_explicit_key(column))
+    end
+    if c is "|" or c is ">"
+        return yaml_tagged(yaml_block_scalar(indent), tag, yes)
+    end
+    if c is "*"
+        set yaml_at to yaml_at + 1
+        set name to yaml_name_here()
+        if not (name is in yaml_anchors)
+            yaml_problem("there's no anchor &" + name + " before this *" + name)
+        end
+        set value to item name of yaml_anchors
+        yaml_skip_spaces()
+        if yaml_here() is ":" and yaml_space_at(1)
+            yaml_problem("an alias as a key isn't read by yaml.moth")
+        end
+        return value
+    end
+    if c is "[" or c is "{"
+        set value to yaml_flow_collection()
+        yaml_skip_spaces()
+        if yaml_here() is ":" and yaml_space_at(1)
+            yaml_problem("a [ ] or { } as a key isn't read by yaml.moth")
+        end
+        return value
+    end
+    set key to yaml_key_here()
+    if key is not nothing
+        if not block
+            yaml_problem("a mapping can't start on the same line as its key: put it on the next line, indented")
+        end
+        return yaml_block_mapping(column, key)
+    end
+    if c is "\"" or c is "'"
+        set words to yaml_quoted()
+        return yaml_tagged(words, tag, yes)
+    end
+    return yaml_tagged(yaml_plain(indent), tag, no)
+end
+
+# a mapping whose keys are at this column, its first key read, with its :
+to yaml_block_mapping with column, first
+    set made to empty dictionary
+    set explicit to empty dictionary # the keys written out, not merged in
+    set key to first
+    repeat while yes
+        set value to nothing
+        if not lone of key
+            set value to yaml_node(column, "same", no)
+        end
+        if text of key is "<<" and not quoted of key
+            yaml_merge(made, explicit, value)
+        else
+            if text of key is in explicit
+                yaml_problem("the key '" + text of key + "' is there twice")
+            end
+            set item (text of key) of explicit to yes
+            set item (text of key) of made to value
+        end
+        yaml_skip_lines()
+        if yaml_at is greater than yaml_size or yaml_marker("---") or yaml_marker("...")
+            return made
+        end
+        if not yaml_line_start()
+            yaml_problem("there's more on this line than one value: is a : or a , missing?")
+        end
+        set at_column to yaml_column()
+        if at_column is less than column
+            return made
+        end
+        if at_column is greater than column
+            yaml_problem("this line is indented more than the keys before it")
+        end
+        if yaml_here() is "?" and yaml_space_at(1)
+            set key to yaml_explicit_key(column)
+        else
+            set key to yaml_key_here()
+        end
+        if key is nothing
+            if yaml_entry_here()
+                return made # a sequence after this mapping, as its key's value, ends it
+            end
+            yaml_problem("a key and its : were expected here")
+        end
+    end
+end
+
+# `? key`, and on the next line, as indented, maybe `: value`: the key as a record, as yaml_key_here gives one,
+# its : taken, or lone if there's no value
+to yaml_explicit_key with column
+    set yaml_at to yaml_at + 1
+    set key to yaml_node(column, yes, no)
+    if yaml_is_list(key) or yaml_is_dictionary(key)
+        yaml_problem("a key that's a list or a mapping isn't read by yaml.moth")
+    end
+    set words to ""
+    if key is yes
+        set words to "true"
+    else if key is no
+        set words to "false"
+    else if key is not nothing
+        set words to "" + key
+    end
+    yaml_skip_lines()
+    if yaml_line_start() and yaml_column() is column and yaml_here() is ":" and yaml_space_at(1)
+        set yaml_at to yaml_at + 1
+        return record with text words, quoted yes, lone no
+    end
+    return record with text words, quoted yes, lone yes
+end
+
+# <<: a mapping, or a list of them, whose keys come in where the mapping hasn't its own
+to yaml_merge with made, explicit, value
+    set merged to value
+    if yaml_is_dictionary(value)
+        set merged to list of value
+    end
+    if not yaml_is_list(merged)
+        yaml_problem("<< merges a mapping, or a list of them, into this one")
+    end
+    for each one in merged
+        if not yaml_is_dictionary(one)
+            yaml_problem("<< merges a mapping, or a list of them, into this one")
+        end
+        for each k in one
+            if not (k is in made)
+                set item k of made to item k of one
+            end
+        end
+    end
+end
+
+# a sequence whose -s are at this column, at the first
+to yaml_block_sequence with column
+    set made to empty list
+    repeat while yes
+        set yaml_at to yaml_at + 1
+        add yaml_node(column, yes, no) to made
+        yaml_skip_lines()
+        if yaml_at is greater than yaml_size or yaml_marker("---") or yaml_marker("...")
+            return made
+        end
+        if not yaml_line_start()
+            yaml_problem("there's more on this line than one value: is a : or a , missing?")
+        end
+        set at_column to yaml_column()
+        if at_column is less than column
+            return made
+        end
+        if at_column is greater than column
+            yaml_problem("this line is indented more than the items before it")
+        end
+        if not yaml_entry_here()
+            return made
+        end
+    end
+end
+
+# A key here, on this line, and its : after it, as a record with its text and whether it was quoted; or
+# nothing, where it was, if this isn't one
+to yaml_key_here
+    set saved to yaml_at
+    set c to yaml_here()
+    set words to nothing
+    set quoted to no
+    if c is "\"" or c is "'"
+        try
+            set words to yaml_quoted()
+        if it fails
+            set yaml_at to saved
+            return nothing
+        end
+        if "\n" is in items saved to (yaml_at - 1) of yaml_src # a key is on one line
+            set yaml_at to saved
+            return nothing
+        end
+        set quoted to yes
+        yaml_skip_spaces()
+    else if yaml_plain_start(c)
+        set pieces to empty list
+        repeat while yes
+            set d to yaml_here()
+            if d is "" or d is "\n"
+                set yaml_at to saved
+                return nothing
+            end
+            if d is ":" and yaml_space_at(1)
+                set words to yaml_trimmed(join pieces with "")
+                stop
+            end
+            if d is "#" and (item (yaml_at - 1) of yaml_src is " " or item (yaml_at - 1) of yaml_src is "\t")
+                set yaml_at to saved
+                return nothing
+            end
+            add d to pieces
+            set yaml_at to yaml_at + 1
+        end
+    else
+        return nothing
+    end
+    if yaml_here() is ":" and yaml_space_at(1)
+        set yaml_at to yaml_at + 1
+        return record with text words, quoted quoted, lone no
+    end
+    set yaml_at to saved
+    return nothing
+end
+
+# A plain scalar, unquoted: to the line's end or a comment, then each line after it indented more than
+# `indent`, each line end a space, and each blank line a line end
+to yaml_plain with indent
+    set lines to empty list
+    add yaml_plain_line() to lines
+    set result to item 1 of lines
+    repeat while yes
+        set saved to yaml_at
+        if yaml_here() is not "\n"
+            return result
+        end
+        set blanks to 0
+        set yaml_at to yaml_at + 1
+        repeat while yes
+            yaml_skip_spaces()
+            if yaml_here() is "\n"
+                set blanks to blanks + 1
+                set yaml_at to yaml_at + 1
+            else
+                stop
+            end
+        end
+        if yaml_at is greater than yaml_size or yaml_column() is at most indent or yaml_here() is "#" or yaml_marker("---") or yaml_marker("...")
+            set yaml_at to saved
+            return result
+        end
+        set more to yaml_plain_line()
+        if blanks is 0
+            set result to result + " " + more
+        else
+            repeat blanks times
+                set result to result + "\n"
+            end
+            set result to result + more
+        end
+    end
+end
+
+# a plain scalar's line, from here to its end or a comment, without the spaces at its end
+to yaml_plain_line
+    set pieces to empty list
+    repeat while yes
+        set d to yaml_here()
+        if d is "" or d is "\n"
+            stop
+        end
+        if d is "#" and yaml_at is greater than 1 and (item (yaml_at - 1) of yaml_src is " " or item (yaml_at - 1) of yaml_src is "\t")
+            stop
+        end
+        if d is ":" and yaml_space_at(1)
+            yaml_problem("a : and a space can't be in a value without quotes: put it in \"double quotes\"")
+        end
+        add d to pieces
+        set yaml_at to yaml_at + 1
+    end
+    return yaml_trimmed(join pieces with "")
+end
+
+# 'single' or "double" quoted text, over as many lines as it takes
+to yaml_quoted
+    set mark to yaml_here()
+    set yaml_at to yaml_at + 1
+    set pieces to empty list
+    repeat while yes
+        if yaml_at is greater than yaml_size
+            yaml_problem("a " + mark + " is never closed")
+        end
+        set d to yaml_here()
+        if d is mark
+            if mark is "'" and yaml_peek(1) is "'"
+                add "'" to pieces
+                set yaml_at to yaml_at + 2
+            else
+                set yaml_at to yaml_at + 1
+                return join pieces with ""
+            end
+        else if d is "\\" and mark is "\""
+            if yaml_peek(1) is "\n"
+                set yaml_at to yaml_at + 2 # a line end escaped: the lines join with nothing between
+                yaml_skip_spaces()
+            else
+                add yaml_escape() to pieces
+            end
+        else if d is "\n"
+            repeat while length of pieces is greater than 0 and (item (length of pieces) of pieces is " " or item (length of pieces) of pieces is "\t")
+                set pieces to items 1 to (length of pieces - 1) of pieces
+            end
+            set blanks to 0
+            set yaml_at to yaml_at + 1
+            repeat while yes
+                yaml_skip_spaces()
+                if yaml_here() is "\n"
+                    set blanks to blanks + 1
+                    set yaml_at to yaml_at + 1
+                else
+                    stop
+                end
+            end
+            if yaml_marker("---") or yaml_marker("...")
+                yaml_problem("a " + mark + " is never closed")
+            end
+            if blanks is 0
+                add " " to pieces
+            else
+                repeat blanks times
+                    add "\n" to pieces
+                end
+            end
+        else
+            add d to pieces
+            set yaml_at to yaml_at + 1
+        end
+    end
+end
+
+# a \ escape in double quotes, as YAML has them
+to yaml_escape
+    set yaml_at to yaml_at + 1
+    set c to yaml_here()
+    set yaml_at to yaml_at + 1
+    if c is "n"
+        return "\n"
+    else if c is "t" or c is "\t"
+        return "\t"
+    else if c is "\"" or c is "\\" or c is "/" or c is " "
+        return c
+    else if c is "0"
+        return yaml_character(0)
+    else if c is "a"
+        return yaml_character(7)
+    else if c is "b"
+        return yaml_character(8)
+    else if c is "v"
+        return yaml_character(11)
+    else if c is "f"
+        return yaml_character(12)
+    else if c is "r"
+        return yaml_character(13)
+    else if c is "e"
+        return yaml_character(27)
+    else if c is "N"
+        return yaml_character(133)
+    else if c is "_"
+        return yaml_character(160)
+    else if c is "L"
+        return yaml_character(8232)
+    else if c is "P"
+        return yaml_character(8233)
+    else if c is "x" or c is "u" or c is "U"
+        set count to 2
+        if c is "u"
+            set count to 4
+        else if c is "U"
+            set count to 8
+        end
+        set code to yaml_hex_digits(count, c)
+        if code is at least 55296 and code is less than 56320 and yaml_here() is "\\" and yaml_peek(1) is "u" # a pair of halves, as JSON writes one
+            set yaml_at to yaml_at + 2
+            set low to yaml_hex_digits(4, "u")
+            set code to 65536 + (code - 55296) * 1024 + (low - 56320)
+        end
+        return yaml_character(code)
+    end
+    yaml_problem("'\\" + c + "' isn't an escape YAML has")
+end
+
+to yaml_hex_digits with count, c
+    set code to 0
+    repeat count times
+        set d to position of lowercase of yaml_here() in yaml_hex
+        if yaml_here() is "" or d is 0
+            yaml_problem("\\" + c + " needs " + count + " hex digits")
+        end
+        set code to code * 16 + d - 1
+        set yaml_at to yaml_at + 1
+    end
+    return code
+end
+
+# a character by its number, as UTF-8 bytes, which `as text` reads
+to yaml_character with code
+    if code is less than 128
+        return (list of code) as bytes as text
+    else if code is less than 2048
+        return (list of 192 + (shift code right by 6), 128 + (code bit and 63)) as bytes as text
+    else if code is less than 65536
+        return (list of 224 + (shift code right by 12), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+    end
+    return (list of 240 + (shift code right by 18), 128 + ((shift code right by 12) bit and 63), 128 + ((shift code right by 6) bit and 63), 128 + (code bit and 63)) as bytes as text
+end
+
+# | or >, and the lines after it indented more than `indent`: as they are, or folded, each line end a space
+to yaml_block_scalar with indent
+    set folded to yaml_here() is ">"
+    set yaml_at to yaml_at + 1
+    set chomp to "clip"
+    set given to 0
+    repeat 2 times
+        set c to yaml_here()
+        if c is "-"
+            set chomp to "strip"
+            set yaml_at to yaml_at + 1
+        else if c is "+"
+            set chomp to "keep"
+            set yaml_at to yaml_at + 1
+        else if c is not "" and c is in "123456789"
+            set given to number of c
+            set yaml_at to yaml_at + 1
+        end
+    end
+    yaml_skip_spaces()
+    if yaml_comment_here()
+        yaml_skip_to_line_end()
+    end
+    if yaml_here() is not "" and yaml_here() is not "\n"
+        yaml_problem("after | or > only - or +, a digit and a comment can be on its line")
+    end
+    if yaml_here() is "\n"
+        set yaml_at to yaml_at + 1
+    end
+    set floor to indent
+    if floor is less than 0
+        set floor to 0
+    end
+    # the content's indentation: given, or the first line's that isn't blank; -1 for none, so nothing is in it
+    set content to -1
+    if given is greater than 0
+        set content to floor + given
+        if indent is less than 0
+            set content to given
+        end
+    else
+        set k to yaml_at
+        set looking to yes
+        repeat while looking and k is at most yaml_size
+            set spaces to 0
+            repeat while k is at most yaml_size and item k of yaml_src is " "
+                set spaces to spaces + 1
+                set k to k + 1
+            end
+            if k is greater than yaml_size
+                set looking to no
+            else if item k of yaml_src is "\n"
+                set k to k + 1
+            else
+                set content to spaces
+                set looking to no
+            end
+        end
+        if content is at most indent
+            set content to -1
+        end
+    end
+    set lines to empty list # the lines, each without its indentation; a blank one ""
+    set last_end to yes # whether the last line had a line end after it
+    repeat while yaml_at is at most yaml_size
+        set line_start to yaml_at
+        set spaces to 0
+        repeat while yaml_here() is " "
+            set spaces to spaces + 1
+            set yaml_at to yaml_at + 1
+        end
+        if yaml_here() is "\n" or yaml_here() is ""
+            if content is not -1 and spaces is greater than content
+                add items (line_start + content) to (yaml_at - 1) of yaml_src to lines
+            else
+                add "" to lines
+            end
+            set last_end to yaml_here() is "\n"
+            if yaml_here() is "\n"
+                set yaml_at to yaml_at + 1
+            end
+        else if content is -1 or spaces is less than content or (yaml_column() is 0 and (yaml_marker("---") or yaml_marker("...")))
+            set yaml_at to line_start
+            stop
+        else
+            set start to line_start + content
+            yaml_skip_to_line_end()
+            add items start to (yaml_at - 1) of yaml_src to lines
+            set last_end to yaml_here() is "\n"
+            if yaml_here() is "\n"
+                set yaml_at to yaml_at + 1
+            end
+        end
+    end
+    # the blank lines at the end, apart from the rest
+    set trailing to 0
+    repeat while length of lines is greater than 0 and item (length of lines) of lines is ""
+        set lines to items 1 to (length of lines - 1) of lines
+        set trailing to trailing + 1
+    end
+    if length of lines is 0
+        if chomp is "keep"
+            set made to ""
+            repeat trailing times
+                set made to made + "\n"
+            end
+            return made
+        end
+        return ""
+    end
+    set body to ""
+    if folded
+        set pieces to empty list
+        set empties to 0
+        set before to "" # the line before: "" none yet, "normal", or "more", indented more
+        for each line in lines
+            if line is ""
+                set empties to empties + 1
+            else
+                set kind to "normal"
+                if item 1 of line is " " or item 1 of line is "\t"
+                    set kind to "more"
+                end
+                if before is ""
+                    repeat empties times
+                        add "\n" to pieces
+                    end
+                else if before is "normal" and kind is "normal"
+                    if empties is 0
+                        add " " to pieces
+                    else
+                        repeat empties times
+                            add "\n" to pieces
+                        end
+                    end
+                else
+                    repeat empties + 1 times
+                        add "\n" to pieces
+                    end
+                end
+                add line to pieces
+                set before to kind
+                set empties to 0
+            end
+        end
+        set body to join pieces with ""
+    else
+        set body to join lines with "\n"
+    end
+    if chomp is "strip"
+        return body
+    end
+    if trailing is 0 and not last_end
+        return body
+    end
+    set body to body + "\n"
+    if chomp is "keep"
+        repeat trailing times
+            set body to body + "\n"
+        end
+        if not last_end and trailing is greater than 0
+            set body to items 1 to (length of body - 1) of body
+        end
+    end
+    return body
+end
+
+# ---------- flow style: [a, b] and {a: 1} ----------
+
+to yaml_flow_collection
+    if yaml_here() is "["
+        return yaml_flow_sequence()
+    end
+    return yaml_flow_mapping()
+end
+
+to yaml_flow_sequence
+    set yaml_at to yaml_at + 1
+    set made to empty list
+    repeat while yes
+        yaml_skip_flow_space()
+        if yaml_here() is "]"
+            set yaml_at to yaml_at + 1
+            return made
+        end
+        if yaml_at is greater than yaml_size
+            yaml_problem("a [ is never closed with ]")
+        end
+        set one to yaml_flow_node()
+        yaml_skip_flow_space()
+        if yaml_here() is ":" # a pair: a mapping of one key
+            set yaml_at to yaml_at + 1
+            yaml_skip_flow_space()
+            set value to nothing
+            if yaml_here() is not "," and yaml_here() is not "]"
+                set value to value of yaml_flow_node()
+            end
+            set pair to empty dictionary
+            set item (yaml_flow_key(one)) of pair to value
+            add pair to made
+            yaml_skip_flow_space()
+        else
+            add value of one to made
+        end
+        if yaml_here() is ","
+            set yaml_at to yaml_at + 1
+        else if yaml_at is greater than yaml_size
+            yaml_problem("a [ is never closed with ]")
+        else if yaml_here() is not "]"
+            yaml_problem("a , or ] was expected here")
+        end
+    end
+end
+
+to yaml_flow_mapping
+    set yaml_at to yaml_at + 1
+    set made to empty dictionary
+    repeat while yes
+        yaml_skip_flow_space()
+        if yaml_here() is "}"
+            set yaml_at to yaml_at + 1
+            return made
+        end
+        if yaml_at is greater than yaml_size
+            yaml_problem("a \{ is never closed with }")
+        end
+        if yaml_here() is "?" and yaml_space_at(1)
+            set yaml_at to yaml_at + 1
+            yaml_skip_flow_space()
+        end
+        set key to yaml_flow_key(yaml_flow_node())
+        yaml_skip_flow_space()
+        set value to nothing
+        if yaml_here() is ":"
+            set yaml_at to yaml_at + 1
+            yaml_skip_flow_space()
+            if yaml_here() is not "," and yaml_here() is not "}"
+                set value to value of yaml_flow_node()
+            end
+        end
+        if key is in made
+            yaml_problem("the key '" + key + "' is there twice")
+        end
+        set item key of made to value
+        yaml_skip_flow_space()
+        if yaml_here() is ","
+            set yaml_at to yaml_at + 1
+        else if yaml_at is greater than yaml_size
+            yaml_problem("a \{ is never closed with }")
+        else if yaml_here() is not "}"
+            yaml_problem("a , or } was expected here")
+        end
+    end
+end
+
+# a node in [ ] or { }, as a record with its value and its key, the text it was written as (nothing for a
+# collection or an alias)
+to yaml_flow_node
+    set anchor to nothing
+    set tag to nothing
+    repeat while yaml_here() is "&" or yaml_here() is "!"
+        if yaml_here() is "&"
+            set yaml_at to yaml_at + 1
+            set anchor to yaml_name_here()
+        else
+            set tag to yaml_tag_here()
+        end
+        yaml_skip_flow_space()
+    end
+    set c to yaml_here()
+    set made to nothing
+    if c is "[" or c is "{"
+        set made to record with value yaml_flow_collection(), key nothing
+    else if c is "*"
+        set yaml_at to yaml_at + 1
+        set name to yaml_name_here()
+        if not (name is in yaml_anchors)
+            yaml_problem("there's no anchor &" + name + " before this *" + name)
+        end
+        set made to record with value item name of yaml_anchors, key nothing
+    else if c is "\"" or c is "'"
+        set words to yaml_quoted()
+        set made to record with value yaml_tagged(words, tag, yes), key words
+    else if c is "," or c is "]" or c is "}" or c is ":"
+        set made to record with value yaml_tagged("", tag, no), key ""
+    else
+        if c is "" or not yaml_plain_start(c)
+            yaml_problem("a value was expected here, not '" + c + "'")
+        end
+        set pieces to empty list
+        repeat while yes
+            set d to yaml_here()
+            if d is "" or d is "\n" or d is in yaml_flow_ends
+                stop
+            end
+            if d is ":" and (yaml_space_at(1) or yaml_peek(1) is in yaml_flow_ends)
+                stop
+            end
+            if d is "#" and (item (yaml_at - 1) of yaml_src is " " or item (yaml_at - 1) of yaml_src is "\t")
+                stop
+            end
+            add d to pieces
+            set yaml_at to yaml_at + 1
+        end
+        set words to yaml_trimmed(join pieces with "")
+        set made to record with value yaml_tagged(words, tag, no), key words
+    end
+    if anchor is not nothing
+        set item anchor of yaml_anchors to value of made
+    end
+    return made
+end
+
+to yaml_flow_key with one
+    if key of one is nothing
+        yaml_problem("a key in \{ } is a scalar here, not a collection or an alias")
+    end
+    return key of one
+end
+
+# spaces, line ends and comments, inside [ ] or { }
+to yaml_skip_flow_space
+    repeat while yes
+        set c to yaml_here()
+        if c is " " or c is "\t" or c is "\n"
+            set yaml_at to yaml_at + 1
+        else if yaml_comment_here()
+            yaml_skip_to_line_end()
+        else
+            return nothing
+        end
+    end
+end
+
+# ---------- scalars ----------
+
+# A scalar's text as its value: a tag's kind, or, without quotes and with no tag, what it looks like
+to yaml_tagged with words, tag, quoted
+    if not yaml_is_text(words)
+        return words
+    end
+    if tag is nothing or tag is "!"
+        if quoted or tag is "!"
+            return words
+        end
+        return yaml_resolved(words)
+    end
+    if tag is "!!str"
+        return words
+    else if tag is "!!null"
+        return nothing
+    else if tag is "!!bool"
+        set value to yaml_resolved(words)
+        if value is yes or value is no
+            return value
+        end
+        yaml_problem("'" + words + "' isn't true or false")
+    else if tag is "!!int" or tag is "!!float"
+        set value to yaml_resolved(words)
+        if yaml_is_number(value)
+            return value
+        end
+        yaml_problem("'" + words + "' isn't a number")
+    else if tag is "!!binary"
+        return yaml_b64's bytes_of_base64(words)
+    end
+    if quoted
+        return words
+    end
+    return yaml_resolved(words)
+end
+
+# plain text as YAML 1.2's core schema reads it: nothing, yes or no, a number, or text
+to yaml_resolved with words
+    if words is "" or words is "~" or words is "null" or words is "Null" or words is "NULL"
+        return nothing
+    else if words is "true" or words is "True" or words is "TRUE"
+        return yes
+    else if words is "false" or words is "False" or words is "FALSE"
+        return no
+    end
+    set first to item 1 of words
+    if not (first is in "0123456789+-.")
+        return words
+    end
+    set rest to words
+    set sign to 1
+    if first is "-" or first is "+"
+        if first is "-"
+            set sign to -1
+        end
+        set rest to items 2 to (length of words) of words
+    end
+    if rest is ".inf" or rest is ".Inf" or rest is ".INF"
+        return sign * yaml_infinity
+    end
+    if length of rest is greater than 2 and first is not "-" and first is not "+" and (items 1 to 2 of rest is "0x" or items 1 to 2 of rest is "0o")
+        set base to 16
+        if item 2 of rest is "o"
+            set base to 8
+        end
+        set value to 0
+        for each c in lowercase of items 3 to (length of rest) of rest
+            set d to position of c in yaml_hex
+            if d is 0 or d is greater than base
+                return words
+            end
+            set value to value * base + d - 1
+        end
+        return value
+    end
+    set value to yaml_decimal(rest)
+    if value is nothing
+        return words
+    end
+    return sign * value
+end
+
+# digits, with a . or an exponent or both, as a number, or nothing if they aren't one: 1, 1.5, .5, 1., 6.02e23
+to yaml_decimal with rest
+    set mantissa to rest
+    set exponent to 0
+    set lower to lowercase of rest
+    if "e" is in lower
+        set halves to split lower by "e"
+        if length of halves is not 2
+            return nothing
+        end
+        set mantissa to item 1 of halves
+        set power_text to item 2 of halves
+        set power_sign to 1
+        if power_text is not "" and (item 1 of power_text is "-" or item 1 of power_text is "+")
+            if item 1 of power_text is "-"
+                set power_sign to -1
+            end
+            set power_text to items 2 to (length of power_text) of power_text
+        end
+        if power_text is "" or not yaml_all_digits(power_text)
+            return nothing
+        end
+        set exponent to power_sign * number of power_text
+    end
+    set whole_digits to mantissa
+    set places to 0
+    if "." is in mantissa
+        set halves to split mantissa by "."
+        if length of halves is not 2
+            return nothing
+        end
+        set whole_digits to item 1 of halves + item 2 of halves
+        set places to length of item 2 of halves
+    end
+    if whole_digits is "" or not yaml_all_digits(whole_digits)
+        return nothing
+    end
+    set m to number of whole_digits
+    set e to exponent - places
+    if e is 0
+        return m
+    else if e is greater than 0 and e is at most 22
+        return m * (10 to the power of e)
+    else if e is less than 0 and e is at least -22
+        return m / (10 to the power of (0 - e))
+    else if e is greater than 0
+        return m * (10 to the power of 22) * (10 to the power of (e - 22))
+    end
+    return m / (10 to the power of 22) / (10 to the power of (0 - e - 22))
+end
+
+to yaml_all_digits with words
+    for each c in words
+        if not (c is in "0123456789")
+            return no
+        end
+    end
+    return yes
+end
+
+# ---------- where it is ----------
+
+to yaml_here
+    if yaml_at is greater than yaml_size
+        return ""
+    end
+    return item yaml_at of yaml_src
+end
+
+to yaml_peek with n
+    if yaml_at + n is greater than yaml_size
+        return ""
+    end
+    return item (yaml_at + n) of yaml_src
+end
+
+# whether the character n after this one is a space, a tab, a line end, or the end
+to yaml_space_at with n
+    set c to yaml_peek(n)
+    return c is "" or c is " " or c is "\n" or c is "\t"
+end
+
+# whether this is a list's - with a space after it
+to yaml_entry_here
+    return yaml_here() is "-" and yaml_space_at(1)
+end
+
+# whether a # here starts a comment: one after a space, or at the start of a line
+to yaml_comment_here
+    if yaml_here() is not "#"
+        return no
+    end
+    if yaml_at is 1
+        return yes
+    end
+    set before to item (yaml_at - 1) of yaml_src
+    return before is " " or before is "\t" or before is "\n"
+end
+
+to yaml_skip_spaces
+    repeat while yaml_here() is " " or yaml_here() is "\t"
+        set yaml_at to yaml_at + 1
+    end
+end
+
+to yaml_skip_to_line_end
+    repeat while yaml_at is at most yaml_size and item yaml_at of yaml_src is not "\n"
+        set yaml_at to yaml_at + 1
+    end
+end
+
+# spaces, comments and line ends, to the next thing there is
+to yaml_skip_lines
+    repeat while yes
+        yaml_skip_spaces()
+        if yaml_comment_here()
+            yaml_skip_to_line_end()
+        end
+        if yaml_here() is "\n"
+            set yaml_at to yaml_at + 1
+        else
+            return nothing
+        end
+    end
+end
+
+# whether only spaces are before this on its line
+to yaml_line_start
+    set k to yaml_at - 1
+    repeat while k is at least 1 and item k of yaml_src is not "\n"
+        if item k of yaml_src is not " "
+            return no
+        end
+        set k to k - 1
+    end
+    return yes
+end
+
+# how far along its line this is, from 0
+to yaml_column
+    set k to yaml_at - 1
+    repeat while k is at least 1 and item k of yaml_src is not "\n"
+        set k to k - 1
+    end
+    return yaml_at - k - 1
+end
+
+# whether a document's --- or ... is here, at the start of a line, with a space or the line's end after it
+to yaml_marker with word
+    if yaml_at + 2 is greater than yaml_size or yaml_column() is not 0
+        return no
+    end
+    return items yaml_at to (yaml_at + 2) of yaml_src is word and yaml_space_at(3)
+end
+
+# whether a plain scalar can start with this character: not an indicator, unless it's - ? or : before a letter
+to yaml_plain_start with c
+    if c is "" or c is " " or c is "\t" or c is "\n"
+        return no
+    end
+    if c is "-" or c is "?" or c is ":"
+        return not yaml_space_at(1)
+    end
+    return not (c is in yaml_indicators)
+end
+
+# an anchor's or alias's name: to a space, a line end, or a flow collection's , [ ] { }
+to yaml_name_here
+    set pieces to empty list
+    repeat while yes
+        set c to yaml_here()
+        if c is "" or c is " " or c is "\t" or c is "\n" or c is in yaml_flow_ends
+            return join pieces with ""
+        end
+        add c to pieces
+        set yaml_at to yaml_at + 1
+    end
+end
+
+# a tag: !, !!str, !Ref, !<tag:yaml.org,2002:str>; YAML's own long names as their short ones
+to yaml_tag_here
+    set pieces to empty list
+    repeat while yes
+        set c to yaml_here()
+        if c is "" or c is " " or c is "\t" or c is "\n" or (c is "," or c is "]" or c is "}")
+            stop
+        end
+        add c to pieces
+        set yaml_at to yaml_at + 1
+    end
+    set tag to join pieces with ""
+    set long to "!<tag:yaml.org,2002:"
+    if length of tag is greater than length of long and items 1 to (length of long) of tag is long
+        return "!!" + items (length of long + 1) to (length of tag - 1) of tag
+    end
+    return tag
+end
+
+to yaml_trimmed with words
+    set first to 1
+    set last to length of words
+    repeat while first is at most last and (item first of words is " " or item first of words is "\t")
+        set first to first + 1
+    end
+    repeat while last is at least first and (item last of words is " " or item last of words is "\t")
+        set last to last - 1
+    end
+    if first is greater than last
+        return ""
+    end
+    return items first to last of words
+end
+
+# text without its carriage returns, so \r\n line ends are \n
+to yaml_no_returns with words
+    set cr to (list of 13) as bytes as text
+    if not (cr is in words)
+        return words
+    end
+    return join (split words by cr) with ""
+end
+
+to yaml_line_number_at with at
+    set line to 1
+    set k to 1
+    repeat while k is less than at and k is at most yaml_size
+        if item k of yaml_src is "\n"
+            set line to line + 1
+        end
+        set k to k + 1
+    end
+    return line
+end
+
+# a mistake, with the line it's on
+to yaml_problem with why
+    fail with "YAML line " + yaml_line_number_at(yaml_at) + ": " + why
+end
+
+# ---------- what a value is ----------
+
+to yaml_text_check with value as text
+    return yes
+end
+
+to yaml_is_text with value
+    try
+        return yaml_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to yaml_number_check with value as a number
+    return yes
+end
+
+to yaml_is_number with value
+    try
+        return yaml_number_check(value)
+    if it fails
+        return no
+    end
+end
+
+to yaml_list_check with value as a list
+    return yes
+end
+
+to yaml_is_list with value
+    try
+        return yaml_list_check(value)
+    if it fails
+        return no
+    end
+end
+
+to yaml_dictionary_check with value as a dictionary
+    return yes
+end
+
+to yaml_is_dictionary with value
+    try
+        return yaml_dictionary_check(value)
+    if it fails
+        return no
+    end
+end
+
+to yaml_record_check with value as a record
+    return yes
+end
+
+to yaml_is_record with value
+    try
+        return yaml_record_check(value)
+    if it fails
+        return no
+    end
+end
+
+to yaml_bytes_check with value as bytes
+    return yes
+end
+
+to yaml_is_bytes with value
+    try
+        return yaml_bytes_check(value)
+    if it fails
+        return no
+    end
+end
+
+# ---------- writing ----------
+
+# a value as block YAML, ending with a line end
+to yaml_of with value
+    set v to yaml_writable(value)
+    if (yaml_is_dictionary(v) or yaml_is_list(v)) and length of v is greater than 0
+        set lines to empty list
+        yaml_write(v, 0, lines)
+        return (join lines with "\n") + "\n"
+    end
+    return yaml_inline(v, 2) + "\n"
+end
+
+# a record as a dictionary of its fields
+to yaml_writable with value
+    if yaml_is_record(value)
+        return json from (value as json)
+    end
+    return value
+end
+
+# a dictionary's or list's lines, at this indentation
+to yaml_write with value, indent, lines
+    set pad to yaml_spaces(indent)
+    if yaml_is_dictionary(value)
+        for each key in value
+            set v to yaml_writable(item key of value)
+            set k to yaml_key_text("" + key)
+            if (yaml_is_dictionary(v) or yaml_is_list(v)) and length of v is greater than 0
+                add pad + k + ":" to lines
+                yaml_write(v, indent + 2, lines)
+            else
+                add pad + k + ": " + yaml_inline(v, indent + 2) to lines
+            end
+        end
+    else
+        for each one in value
+            set v to yaml_writable(one)
+            if (yaml_is_dictionary(v) or yaml_is_list(v)) and length of v is greater than 0
+                set inner to empty list
+                yaml_write(v, indent + 2, inner)
+                set first to item 1 of inner
+                add pad + "- " + items (indent + 3) to (length of first) of first to lines
+                for each k from 2 to length of inner
+                    add item k of inner to lines
+                end
+            else
+                add pad + "- " + yaml_inline(v, indent + 2) to lines
+            end
+        end
+    end
+end
+
+# a value on the line it starts on: a scalar, {} or [], or text of many lines after a |
+to yaml_inline with value, indent
+    if value is nothing
+        return "null"
+    else if value is yes
+        return "true"
+    else if value is no
+        return "false"
+    else if yaml_is_text(value)
+        return yaml_text(value, indent)
+    else if yaml_is_number(value)
+        set shown to "" + value
+        if shown is "Infinity"
+            return ".inf"
+        else if shown is "-Infinity"
+            return "-.inf"
+        end
+        return shown
+    else if yaml_is_bytes(value)
+        return "!!binary " + yaml_b64's base64_of(value)
+    else if yaml_is_dictionary(value)
+        return "\{}"
+    else if yaml_is_list(value)
+        return "[]"
+    end
+    fail with "YAML can't hold a function"
+end
+
+# a key, plain where it reads back as the same text, else in double quotes
+to yaml_key_text with words
+    if yaml_plain_ok(words)
+        return words
+    end
+    return yaml_double_quoted(words)
+end
+
+# text: plain where it reads back as itself, after a | where it has lines, else in double quotes
+to yaml_text with words, indent
+    if yaml_plain_ok(words)
+        return words
+    end
+    if "\n" is in words and yaml_block_ok(words)
+        set parts to split words by "\n"
+        set ending to 0 # how many line ends it has at its end
+        repeat while ending is less than length of parts and item (length of parts - ending) of parts is ""
+            set ending to ending + 1
+        end
+        set header to "|"
+        if ending is 0
+            set header to "|-"
+        else if ending is greater than 1
+            set header to "|+"
+        end
+        if ending is greater than 0
+            set parts to items 1 to (length of parts - 1) of parts
+        end
+        set pad to yaml_spaces(indent)
+        set made to empty list
+        add header to made
+        for each part in parts
+            if part is ""
+                add "" to made
+            else
+                add pad + part to made
+            end
+        end
+        return join made with "\n"
+    end
+    return yaml_double_quoted(words)
+end
+
+# Whether text can be written as it is and read back as the same text, by YAML 1.1's readers too: so not
+# yes, no, on or off, nor anything starting with a digit, a sign or a dot, as dates and times do
+to yaml_plain_ok with words
+    if words is "" or not yaml_is_text(yaml_resolved(words))
+        return no
+    end
+    if lowercase of words is in yaml_old_words
+        return no
+    end
+    set first to item 1 of words
+    set last to item (length of words) of words
+    if first is in yaml_indicators or first is in "0123456789+." or first is " " or last is " " or last is ":"
+        return no
+    end
+    if ": " is in words or " #" is in words or (length of words is at least 3 and items 1 to 3 of words is "...")
+        return no
+    end
+    for each c in words
+        set code to byte 1 of (c as bytes)
+        if code is less than 32 or code is 127
+            return no
+        end
+    end
+    return yes
+end
+
+# whether text with lines can go after a |: no other control characters, no line of spaces alone, and not
+# starting with a space or a line end, which the | would need more to say
+to yaml_block_ok with words
+    if item 1 of words is " " or item 1 of words is "\n"
+        return no
+    end
+    for each c in words
+        set code to byte 1 of (c as bytes)
+        if (code is less than 32 and c is not "\n" and c is not "\t") or code is 127
+            return no
+        end
+    end
+    for each part in split words by "\n"
+        if part is not "" and yaml_trimmed(part) is ""
+            return no
+        end
+    end
+    return yes
+end
+
+# text in double quotes: " and \ escaped, and the other characters below a space as \n, \t or \xXX
+to yaml_double_quoted with words
+    set made to empty list
+    for each c in words
+        set code to byte 1 of (c as bytes)
+        if c is "\""
+            add "\\\"" to made
+        else if c is "\\"
+            add "\\\\" to made
+        else if c is "\n"
+            add "\\n" to made
+        else if c is "\t"
+            add "\\t" to made
+        else if code is less than 32 or code is 127
+            add "\\x" + item ((shift code right by 4) + 1) of yaml_hex + item ((code bit and 15) + 1) of yaml_hex to made
+        else
+            add c to made
+        end
+    end
+    return "\"" + (join made with "") + "\""
+end
+
+to yaml_spaces with n
+    set made to ""
+    repeat n times
+        set made to made + " "
+    end
+    return made
+end

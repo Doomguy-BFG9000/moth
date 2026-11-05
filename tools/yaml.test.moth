@@ -1,0 +1,211 @@
+# yaml.moth's tests: the YAML 1.2 spec's own examples, the files CI, Docker Compose and Kubernetes read, each read
+# as PyYAML reads it with YAML 1.2's core schema; and what yaml_of writes, read back as it was
+
+use "yaml.moth" as yaml
+
+# lines as one text, a line end after each
+to doc with parts
+    return (join parts with "\n") + "\n"
+end
+
+to test_spec_examples
+    # 2.1, 2.2, 2.3: a sequence, a mapping, and a mapping of sequences
+    expect yaml's read_yaml(doc(list of "- Mark McGwire", "- Sammy Sosa", "- Ken Griffey")) is list of "Mark McGwire", "Sammy Sosa", "Ken Griffey"
+    set stats to yaml's read_yaml(doc(list of "hr:  65    # Home runs", "avg: 0.278 # Batting average", "rbi: 147   # Runs Batted In"))
+    expect stats is dictionary where "hr" is 65, "avg" is 0.278, "rbi" is 147
+    set leagues to yaml's read_yaml(doc(list of "american:", "  - Boston Red Sox", "  - Detroit Tigers", "national:", "  - New York Mets", "  - Chicago Cubs"))
+    expect item "national" of leagues is list of "New York Mets", "Chicago Cubs"
+    # 2.4: a sequence of mappings, each - on a line of its own
+    set players to yaml's read_yaml(doc(list of "-", "  name: Mark McGwire", "  hr:   65", "-", "  name: Sammy Sosa", "  hr:   63"))
+    expect players is list of (dictionary where "name" is "Mark McGwire", "hr" is 65), (dictionary where "name" is "Sammy Sosa", "hr" is 63)
+    # 2.5, 2.6: flow style, over lines too
+    expect yaml's read_yaml(doc(list of "- [name        , hr, avg  ]", "- [Mark McGwire, 65, 0.278]")) is list of (list of "name", "hr", "avg"), (list of "Mark McGwire", 65, 0.278)
+    set flow to yaml's read_yaml(doc(list of "Mark McGwire: \{hr: 65, avg: 0.278}", "Sammy Sosa: \{", "    hr: 63,", "    avg: 0.288", "  }"))
+    expect item "Sammy Sosa" of flow is dictionary where "hr" is 63, "avg" is 0.288
+    # 2.7, 2.8: documents, after --- and ended by ...
+    set two to yaml's read_yaml_all(doc(list of "# Ranking of 1998 home runs", "---", "- Mark McGwire", "- Sammy Sosa", "", "# Team ranking", "---", "- Chicago Cubs"))
+    expect two is list of (list of "Mark McGwire", "Sammy Sosa"), (list of "Chicago Cubs")
+    set plays to yaml's read_yaml_all(doc(list of "---", "time: 20:03:20", "player: Sammy Sosa", "...", "---", "time: 20:03:47", "action: grand slam", "..."))
+    expect length of plays is 2
+    expect item "time" of item 1 of plays is "20:03:20"
+    expect item "action" of item 2 of plays is "grand slam"
+    # 2.10: an anchor and its alias
+    set ranked to yaml's read_yaml(doc(list of "hr:", "  - Mark McGwire", "  # Following node labeled SS", "  - &SS Sammy Sosa", "rbi:", "  - *SS # Subsequent occurrence", "  - Ken Griffey"))
+    expect item "rbi" of ranked is list of "Sammy Sosa", "Ken Griffey"
+    # 2.12: compact mappings in a sequence, with spaces before their :
+    set bought to yaml's read_yaml(doc(list of "- item    : Super Hoop", "  quantity: 1", "- item    : Basketball", "  quantity: 4"))
+    expect bought is list of (dictionary where "item" is "Super Hoop", "quantity" is 1), (dictionary where "item" is "Basketball", "quantity" is 4)
+    # 2.13 to 2.16: text kept as it is, and folded
+    expect yaml's read_yaml(doc(list of "--- |", "  \\//||\\/||", "  // ||  ||__")) is "\\//||\\/||\n// ||  ||__\n"
+    expect yaml's read_yaml(doc(list of ">", "  Mark McGwire's", "  year was crippled", "  by a knee injury.")) is "Mark McGwire's year was crippled by a knee injury.\n"
+    set season to doc(list of ">", " Sammy Sosa completed another", " fine season with great stats.", "", "   63 Home Runs", "   0.288 Batting Average", "", " What a year!")
+    expect yaml's read_yaml(season) is "Sammy Sosa completed another fine season with great stats.\n\n  63 Home Runs\n  0.288 Batting Average\n\nWhat a year!\n"
+    # 2.17, 2.18: quotes and escapes, and text over lines
+    set quoted to yaml's read_yaml(doc(list of "unicode: \"Sosa did fine.\\u263A\"", "control: \"\\b1998\\t1999\\t2000\\n\"", "single: '\"Howdy!\" he cried.'", "quoted: ' # Not a ''comment''.'", "tie-fighter: '|\\-*-/|'"))
+    expect item "unicode" of quoted is "Sosa did fine.☺"
+    expect item "control" of quoted is (list of 8) as bytes as text + "1998\t1999\t2000\n"
+    expect item "single" of quoted is "\"Howdy!\" he cried."
+    expect item "quoted" of quoted is " # Not a 'comment'."
+    expect item "tie-fighter" of quoted is "|\\-*-/|"
+    set over to yaml's read_yaml(doc(list of "plain:", "  This unquoted scalar", "  spans many lines.", "", "quoted: \"So does this", "  quoted scalar.\\n\""))
+    expect over is dictionary where "plain" is "This unquoted scalar spans many lines.", "quoted" is "So does this quoted scalar.\n"
+    # 2.19 to 2.21: numbers, nothing, yes and no
+    expect yaml's read_yaml(doc(list of "canonical: 12345", "decimal: +12345", "octal: 0o14", "hexadecimal: 0xC")) is dictionary where "canonical" is 12345, "decimal" is 12345, "octal" is 12, "hexadecimal" is 12
+    set floats to yaml's read_yaml(doc(list of "canonical: 1.23015e+3", "exponential: 12.3015e+02", "fixed: 1230.15", "negative infinity: -.inf"))
+    expect item "canonical" of floats is 1230.15
+    expect item "exponential" of floats is 1230.15
+    expect item "negative infinity" of floats is -1 * (10 to the power of 400)
+    expect yaml's read_yaml(doc(list of "null:", "booleans: [ true, false ]", "string: '012345'")) is dictionary where "null" is nothing, "booleans" is (list of yes, no), "string" is "012345"
+end
+
+to test_invoice
+    # 2.27, without its tag: an anchor of a mapping, text kept as it is, and plain text over lines
+    set lines to list of "invoice: 34843", "date   : 2001-01-23", "bill-to: &id001", "    given  : Chris", "    family : Dumars", "    address:",
+        "        lines: |", "            458 Walkman Dr.", "            Suite #292", "        city    : Royal Oak", "        postal  : 48046", "ship-to: *id001",
+        "product:", "    - sku         : BL394D", "      quantity    : 4", "      price       : 450.00", "    - sku         : BL4438H", "      quantity    : 1",
+        "tax  : 251.42", "comments:", "    Late afternoon is best.", "    Backup contact is Nancy", "    Billsmer @ 338-4338."
+    set invoice to yaml's read_yaml(doc(lines))
+    expect item "date" of invoice is "2001-01-23"
+    expect item "lines" of item "address" of item "bill-to" of invoice is "458 Walkman Dr.\nSuite #292\n"
+    expect item "postal" of item "address" of item "ship-to" of invoice is 48046
+    expect item "ship-to" of invoice is item "bill-to" of invoice
+    expect item "product" of invoice is list of (dictionary where "sku" is "BL394D", "quantity" is 4, "price" is 450), (dictionary where "sku" is "BL4438H", "quantity" is 1)
+    expect item "comments" of invoice is "Late afternoon is best. Backup contact is Nancy Billsmer @ 338-4338."
+end
+
+to test_config_files
+    # a GitHub Actions workflow: `on` is text in YAML 1.2, as it is to GitHub
+    set workflow to yaml's read_yaml(doc(list of "name: CI", "on:", "  push:", "    branches: [main]", "  pull_request:", "jobs:", "  test:",
+        "    runs-on: $\{\{ matrix.os }}", "    strategy:", "      matrix:", "        os: [ubuntu-latest, windows-latest]", "        node: [20, 22]", "    steps:",
+        "      - uses: actions/checkout@v4", "      - uses: actions/setup-node@v4", "        with:", "          node-version: $\{\{ matrix.node }}", "      - run: npm test",
+        "      - name: Build", "        run: |", "          npm run build", "          echo \"done: $?\"", "        env:", "          CI: true"))
+    expect item "on" of workflow is dictionary where "push" is (dictionary where "branches" is (list of "main")), "pull_request" is nothing
+    set test_job to item "test" of item "jobs" of workflow
+    expect item "runs-on" of test_job is "$\{\{ matrix.os }}"
+    expect item "node" of item "matrix" of item "strategy" of test_job is list of 20, 22
+    set steps to item "steps" of test_job
+    expect length of steps is 4
+    expect item 2 of steps is dictionary where "uses" is "actions/setup-node@v4", "with" is (dictionary where "node-version" is "$\{\{ matrix.node }}")
+    expect item 4 of steps is dictionary where "name" is "Build", "run" is "npm run build\necho \"done: $?\"\n", "env" is (dictionary where "CI" is yes)
+    # Docker Compose, with an anchor merged into two services, whose own keys win
+    set compose to yaml's read_yaml(doc(list of "version: \"3.9\"", "x-common: &common", "  restart: unless-stopped", "  environment:", "    TZ: UTC",
+        "services:", "  web:", "    <<: *common", "    image: \"nginx:1.27\"", "    ports:", "      - \"8080:80\"", "      - 443:443", "  db:", "    <<: *common",
+        "    image: postgres:16", "    restart: always", "volumes:", "  db-data: \{}"))
+    set web to item "web" of item "services" of compose
+    expect item "restart" of web is "unless-stopped"
+    expect item "environment" of web is dictionary where "TZ" is "UTC"
+    expect item "ports" of web is list of "8080:80", "443:443"
+    expect item "restart" of item "db" of item "services" of compose is "always"
+    expect item "version" of compose is "3.9"
+    expect item "volumes" of compose is dictionary where "db-data" is empty dictionary
+    # Kubernetes: two documents, a sequence as indented as its key, and flow inside block
+    set k8s to yaml's read_yaml_all(doc(list of "apiVersion: apps/v1", "kind: Deployment", "metadata:", "  name: web", "  labels: \{app: web, tier: \"frontend\"}",
+        "spec:", "  template:", "    spec:", "      containers:", "      - name: web", "        image: nginx:1.27", "        args: [\"--port\", \"8080\"]",
+        "        resources:", "          limits:", "            cpu: 500m", "---", "apiVersion: v1", "kind: Service", "spec:", "  ports:", "  - port: 80", "    targetPort: 8080"))
+    expect length of k8s is 2
+    set container to item 1 of item "containers" of item "spec" of item "template" of item "spec" of item 1 of k8s
+    expect item "args" of container is list of "--port", "8080"
+    expect item "cpu" of item "limits" of item "resources" of container is "500m"
+    expect item "labels" of item "metadata" of item 1 of k8s is dictionary where "app" is "web", "tier" is "frontend"
+    expect item "ports" of item "spec" of item 2 of k8s is list of (dictionary where "port" is 80, "targetPort" is 8080)
+end
+
+to test_scalars
+    set numbers to yaml's read_yaml("[0, -0, 1, -17, +3, 0x1F, 0o17, 1.5, -2.25, .5, 1., 6.02e23, 1e-3, 1E3, .inf]")
+    expect numbers is list of 0, 0, 1, -17, 3, 31, 15, 1.5, -2.25, 0.5, 1, 602000000000000000000000, 0.001, 1000, 10 to the power of 400
+    expect yaml's read_yaml("[1.2.3, 1_000, 0b101, 0x, 12e, \"12\", '3.5', 1-2, .nan]") is list of "1.2.3", "1_000", "0b101", "0x", "12e", "12", "3.5", "1-2", ".nan"
+    expect yaml's read_yaml("[null, Null, NULL, ~, ]") is list of nothing, nothing, nothing, nothing
+    expect yaml's read_yaml("[true, True, TRUE, false, False, FALSE, yes, no, on, off]") is list of yes, yes, yes, no, no, no, "yes", "no", "on", "off"
+    set odd to yaml's read_yaml(doc(list of "url: http://example.com:8080/path?q=1#frag", "time: 12:30", "colon: a:b", "hash: a#b", "spaced: a # comment", "tabs:   two  ", "emoji: \"\\U0001F600 é 😀\""))
+    expect odd is dictionary where "url" is "http://example.com:8080/path?q=1#frag", "time" is "12:30", "colon" is "a:b", "hash" is "a#b", "spaced" is "a", "tabs" is "two", "emoji" is "😀 é 😀"
+    # tags say what a scalar is
+    set tagged to yaml's read_yaml(doc(list of "- !!str 123", "- !!int \"42\"", "- !!float \"1.5\"", "- !!bool \"true\"", "- !!null \"\"", "- !Ref MyResource", "- ! 12", "- !!binary aGk="))
+    expect tagged is list of "123", 42, 1.5, yes, nothing, "MyResource", "12", "hi" as bytes
+    expect yaml's read_yaml("") is nothing
+    expect yaml's read_yaml("# only a comment\n") is nothing
+    expect yaml's read_yaml_all("") is empty list
+    expect yaml's read_yaml_all("---\n---\na: 1\n") is list of nothing, (dictionary where "a" is 1)
+    expect yaml's read_yaml("top") is "top"
+    expect yaml's read_yaml("a: 1" + (list of 13, 10) as bytes as text + "b: 2" + (list of 13, 10) as bytes as text) is dictionary where "a" is 1, "b" is 2
+end
+
+to test_block_scalars
+    set chomped to yaml's read_yaml(doc(list of "strip: |-", "  text", "clip: |", "  text", "keep: |+", "  text", "", "last: end"))
+    expect chomped is dictionary where "strip" is "text", "clip" is "text\n", "keep" is "text\n\n", "last" is "end"
+    set folded to yaml's read_yaml(doc(list of "a: >-", "  one", "  two", "", "  three", "b: >+", "  x", "  y", "", ""))
+    expect folded is dictionary where "a" is "one two\nthree", "b" is "x y\n\n\n"
+    expect yaml's read_yaml(doc(list of "empty: |", "next: 1")) is dictionary where "empty" is "", "next" is 1
+    expect yaml's read_yaml(doc(list of "given: |2", "    two extra", "  normal")) is dictionary where "given" is "  two extra\nnormal\n"
+    set kept to yaml's read_yaml(doc(list of "key: |", "  trailing spaces  ", "    indented more", "  back", "", "  after a blank"))
+    expect item "key" of kept is "trailing spaces  \n  indented more\nback\n\nafter a blank\n"
+    expect yaml's read_yaml(doc(list of "- >", "  folded with", "    more indented", "  back")) is list of "folded with\n  more indented\nback\n"
+    expect yaml's read_yaml("a: |\n  no line end at the end") is dictionary where "a" is "no line end at the end"
+end
+
+to test_flow_and_anchors
+    set flow to yaml's read_yaml("\{a: 1, b: [x, y], c: \{d: e}, \"q\": 'r', empty: , last}")
+    expect flow is dictionary where "a" is 1, "b" is (list of "x", "y"), "c" is (dictionary where "d" is "e"), "q" is "r", "empty" is nothing, "last" is nothing
+    expect yaml's read_yaml("[a: 1, b: 2]") is list of (dictionary where "a" is 1), (dictionary where "b" is 2)
+    expect yaml's read_yaml("[[], \{}, [[1]], \"a,b\", 'c]d']") is list of empty list, empty dictionary, (list of (list of 1)), "a,b", "c]d"
+    set shared to yaml's read_yaml(doc(list of "- &a [1, 2]", "- *a", "- &b \{x: 1}", "- *b"))
+    expect shared is list of (list of 1, 2), (list of 1, 2), (dictionary where "x" is 1), (dictionary where "x" is 1)
+    set merged to yaml's read_yaml(doc(list of "base: &base", "  a: 1", "  b: 2", "more: &more", "  c: 3", "derived:", "  <<: [*base, *more]", "  b: 20", "  d: 4"))
+    set derived to item "derived" of merged
+    expect item "a" of derived is 1
+    expect item "b" of derived is 20
+    expect item "c" of derived is 3
+    expect item "d" of derived is 4
+    set nested to yaml's read_yaml(doc(list of "- - a", "  - b", "- - c", "-", "  - d", "- a:", "    b: 1", "  c: 2"))
+    expect nested is list of (list of "a", "b"), (list of "c"), (list of "d"), (dictionary where "a" is (dictionary where "b" is 1), "c" is 2)
+    set keyed to yaml's read_yaml(doc(list of "\"quoted key\": 1", "'single key': 2", "? explicit", ": 3", "? alone", "\"\": empty key"))
+    expect keyed is dictionary where "quoted key" is 1, "single key" is 2, "explicit" is 3, "alone" is nothing, "" is "empty key"
+    expect yaml's read_yaml(doc(list of "k:", "  - a", "  -", "  - c")) is dictionary where "k" is (list of "a", nothing, "c")
+    expect yaml's read_yaml(doc(list of "multi: \"line one", "  line two", "", "  line four\"", "joined: \"a\\", "  b\"", "single: 'it''s", "  folded'")) is dictionary where "multi" is "line one line two\nline four", "joined" is "ab", "single" is "it's folded"
+end
+
+to test_writing
+    set config to dictionary where "name" is "web", "port" is 8080, "debug" is no, "ratio" is 0.25, "owner" is nothing,
+        "hosts" is (list of "a.example.com", "b.example.com"), "limits" is (dictionary where "cpu" is "500m", "memory" is "128Mi")
+    expect yaml's yaml_of(config) is doc(list of "name: web", "port: 8080", "debug: false", "ratio: 0.25", "owner: null", "hosts:", "  - a.example.com", "  - b.example.com",
+        "limits:", "  cpu: \"500m\"", "  memory: \"128Mi\"")
+    set items_list to list of (dictionary where "name" is "x", "tags" is (list of "a", "b")), (list of 1, 2), empty list, empty dictionary
+    expect yaml's yaml_of(items_list) is doc(list of "- name: x", "  tags:", "    - a", "    - b", "- - 1", "  - 2", "- []", "- \{}")
+    # text that would read as something else is quoted; text with lines goes after a |
+    set tricky to list of "yes", "no", "on", "true", "null", "", "12", "1.5", "2026-11-04", "a: b", "a #b", "- x", "#x", " lead", "trail ", "tab\there", "say \"hi\"", "é😀"
+    expect yaml's yaml_of(tricky) is doc(list of "- \"yes\"", "- \"no\"", "- \"on\"", "- \"true\"", "- \"null\"", "- \"\"", "- \"12\"", "- \"1.5\"", "- \"2026-11-04\"",
+        "- \"a: b\"", "- \"a #b\"", "- \"- x\"", "- \"#x\"", "- \" lead\"", "- \"trail \"", "- \"tab\\there\"", "- say \"hi\"", "- é😀")
+    expect yaml's yaml_of(dictionary where "script" is "line 1\nline 2\n", "strip" is "a\nb", "keep" is "a\n\n") is doc(list of "script: |", "  line 1", "  line 2", "strip: |-", "  a", "  b",
+        "keep: |+", "  a", "")
+    expect yaml's yaml_of("hi" as bytes) is "!!binary aGk=\n"
+    expect yaml's yaml_of(record with name "Sam", age 20) is "name: Sam\nage: 20\n"
+    expect yaml's yaml_of(42) is "42\n"
+    # and each reads back as it was
+    for each value in list of config, items_list, tricky, (dictionary where "deep" is (list of (list of (dictionary where "x" is "line\nbreak")))), "solo\n", 10 to the power of 400
+        expect yaml's read_yaml(yaml's yaml_of(value)) is value
+    end
+end
+
+to test_mistakes
+    set cases to list of (list of "a: 1\na: 2\n", "YAML line 2: the key 'a' is there twice"),
+        (list of "key: \"unclosed\n", "YAML line 2: a \" is never closed"),
+        (list of "- a\n  b: 1\n", "YAML line 2: a : and a space can't be in a value without quotes: put it in \"double quotes\""),
+        (list of "- [a]\n - b\n", "YAML line 2: this line is indented more than the items before it"),
+        (list of "[1, 2\n", "YAML line 2: a [ is never closed with ]"),
+        (list of "k: v: w\n", "YAML line 1: a mapping can't start on the same line as its key: put it on the next line, indented"),
+        (list of "k: - a\n", "YAML line 1: a list can't start on the same line as its key: put its - on the next line"),
+        (list of "a:\n  b: 1\n c: 2\n", "YAML line 3: this line is indented more than the keys before it"),
+        (list of "- *nowhere\n", "YAML line 1: there's no anchor &nowhere before this *nowhere"),
+        (list of "\"a\" b\n", "YAML line 1: this isn't part of the value before it: is it indented right?"),
+        (list of "a: 1\n- b\n", "YAML line 2: this isn't part of the document: a document is one value, so is a key or a - missing?"),
+        (list of "x: \"\\q\"\n", "YAML line 1: '\\q' isn't an escape YAML has"),
+        (list of "x: !!int abc\n", "YAML line 1: 'abc' isn't a number")
+    for each pair in cases
+        set why to nothing
+        try
+            yaml's read_yaml(item 1 of pair)
+        if it fails with problem
+            set why to problem
+        end
+        expect why is item 2 of pair
+    end
+end
