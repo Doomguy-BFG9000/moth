@@ -1,0 +1,3 @@
+to is_leap with year
+    fail with "delete this line, and say whether the year is a leap year"
+end

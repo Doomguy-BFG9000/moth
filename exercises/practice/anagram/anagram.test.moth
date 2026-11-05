@@ -1,0 +1,21 @@
+use "anagram.moth" as exercise
+
+to test_none
+    expect exercise's find_anagrams("diaper", list of "hello", "world", "zombies", "pants") is empty list
+end
+
+to test_two
+    expect exercise's find_anagrams("master", list of "stream", "pigeon", "maters") is list of "stream", "maters"
+end
+
+to test_capitals
+    expect exercise's find_anagrams("Orchestra", list of "cashregister", "Carthorse", "radishes") is list of "Carthorse"
+end
+
+to test_not_itself
+    expect exercise's find_anagrams("BANANA", list of "BANANA", "Banana", "banana") is empty list
+end
+
+to test_same_letters_different_counts
+    expect exercise's find_anagrams("galea", list of "eagle") is empty list
+end

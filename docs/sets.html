@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sets.moth · Moth's standard library</title>
+  <meta name="description" content="Sets, as Python's set has them: each thing once, found at once however many there are, with unions, intersections and differences.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>sets</em>.moth</h1>
+      <p>Sets, as Python's set has them: each thing once, found at once however many there are, with unions, intersections and differences.</p>
+      <p class="use"><code>use "sets.moth" as sets</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="sets.moth's functions">
+      <h2>14 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#set_of">set_of</a></li><li><a href="#empty_set">empty_set</a></li><li><a href="#put">put</a></li><li><a href="#take_out">take_out</a></li><li><a href="#has">has</a></li><li><a href="#size">size</a></li><li><a href="#items_of">items_of</a></li><li><a href="#copy_of">copy_of</a></li><li><a href="#union">union</a></li><li><a href="#both">both</a></li><li><a href="#only_in">only_in</a></li><li><a href="#in_one">in_one</a></li><li><a href="#is_within">is_within</a></li><li><a href="#same">same</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Sets, as Python's set has them: each thing once, found at once however many there are, with unions, intersections and differences. A set holds numbers and text, as a dictionary's keys can be, keeps them in the order they were put in, and <code>say</code> shows one as {1, 2, 3}. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+sets's put(seen, <span class="n">4</span>)
+<span class="k">say</span> seen                                   <span class="c"># {1, 2, 3, 4}</span>
+<span class="k">say</span> sets's has(seen, <span class="n">2</span>)                    <span class="c"># yes</span>
+<span class="k">say</span> sets's both(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">9</span>))    <span class="c"># {2}: in both (intersection)</span>
+<span class="k">say</span> sets's union(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">9</span>))       <span class="c"># {1, 2, 3, 4, 9}</span>
+<span class="k">say</span> sets's only_in(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>))     <span class="c"># {2, 3, 4}: in the first, not the second</span>
+<span class="k">for</span> <span class="k">each</span> x <span class="k">in</span> sets's items_of(seen)        <span class="c"># its things, as a list</span>
+    <span class="k">say</span> x
+<span class="k">end</span></code></pre></div>
+          <p><a href="#take_out">take_out</a>(s, x) takes x out if it's there, <a href="#in_one">in_one</a>(a, b) is what's in one but not both, <a href="#size">size</a>(s) how many, <a href="#is_within">is_within</a>(a, b) whether everything in a is in b, <a href="#same">same</a>(a, b) whether they hold the same things, and <a href="#copy_of">copy_of</a>(s) a set of its own with the same things.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="set_of">
+          <h3><a href="#set_of"><code>sets's set_of(things)</code></a></h3>
+          <p>a set of the list's things, each once</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_of with things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L30">sets.moth line 30</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> s <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">3</span>, <span class="n">2</span>, <span class="n">1</span>)
+<span class="k">say</span> s</code></pre><pre class="says"><code>{3, 1, 2}</code></pre></div>
+        </section>
+        <section class="fn" id="empty_set">
+          <h3><a href="#empty_set"><code>sets's empty_set()</code></a></h3>
+          <p>a set with nothing in it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to empty_set</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L40">sets.moth line 40</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">say</span> sets's size(sets's empty_set())</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="put">
+          <h3><a href="#put"><code>sets's put(s, thing)</code></a></h3>
+          <p>thing put in the set, if it isn't there already</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li><li><code>thing</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to put with s, thing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L45">sets.moth line 45</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> s <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">3</span>, <span class="n">2</span>, <span class="n">1</span>)
+sets's put(s, <span class="n">5</span>)
+<span class="k">say</span> sets's size(s)</code></pre><pre class="says"><code>4</code></pre></div>
+        </section>
+        <section class="fn" id="take_out">
+          <h3><a href="#take_out"><code>sets's take_out(s, thing)</code></a></h3>
+          <p>thing taken out, if it's there</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li><li><code>thing</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take_out with s, thing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L51">sets.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> s <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">3</span>, <span class="n">2</span>, <span class="n">1</span>)
+sets's put(s, <span class="n">5</span>)
+sets's put(s, <span class="n">5</span>)
+sets's take_out(s, <span class="n">3</span>)
+<span class="k">say</span> sets's items_of(s)</code></pre><pre class="says"><code>[1, 2, 5]</code></pre></div>
+        </section>
+        <section class="fn" id="has">
+          <h3><a href="#has"><code>sets's has(s, thing)</code></a></h3>
+          <p>whether the thing is in the set</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li><li><code>thing</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to has with s, thing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L59">sets.moth line 59</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+<span class="k">say</span> sets's has(seen, <span class="n">2</span>)                    <span class="c"># yes</span></code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="size">
+          <h3><a href="#size"><code>sets's size(s)</code></a></h3>
+          <p>how many things the set holds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to size with s</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L64">sets.moth line 64</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> s <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>, <span class="n">3</span>, <span class="n">2</span>, <span class="n">1</span>)
+<span class="k">say</span> sets's size(s)</code></pre><pre class="says"><code>3</code></pre></div>
+        </section>
+        <section class="fn" id="items_of">
+          <h3><a href="#items_of"><code>sets's items_of(s)</code></a></h3>
+          <p>its things, as a list, in the order they were put in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to items_of with s</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L69">sets.moth line 69</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+sets's put(seen, <span class="n">4</span>)
+<span class="k">say</span> seen                                   <span class="c"># {1, 2, 3, 4}</span>
+<span class="k">say</span> sets's has(seen, <span class="n">2</span>)                    <span class="c"># yes</span>
+<span class="k">say</span> sets's both(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">9</span>))    <span class="c"># {2}: in both (intersection)</span>
+<span class="k">say</span> sets's union(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">9</span>))       <span class="c"># {1, 2, 3, 4, 9}</span>
+<span class="k">say</span> sets's only_in(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>))     <span class="c"># {2, 3, 4}: in the first, not the second</span>
+<span class="k">for</span> <span class="k">each</span> x <span class="k">in</span> sets's items_of(seen)        <span class="c"># its things, as a list</span>
+    <span class="k">say</span> x
+<span class="k">end</span></code></pre><pre class="says"><code>{1, 2, 3, 4}
+yes
+{2}
+{1, 2, 3, 4, 9}
+{2, 3, 4}
+1
+2
+3
+4</code></pre></div>
+        </section>
+        <section class="fn" id="copy_of">
+          <h3><a href="#copy_of"><code>sets's copy_of(s)</code></a></h3>
+          <p>a set of its own with the same things, which changes apart from this one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>s</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to copy_of with s</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L74">sets.moth line 74</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> a <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>)
+<span class="k">set</span> c <span class="k">to</span> sets's copy_of(a)
+<span class="k">say</span> c</code></pre><pre class="says"><code>{1, 2, 3, 4}</code></pre></div>
+        </section>
+        <section class="fn" id="union">
+          <h3><a href="#union"><code>sets's union(a, b)</code></a></h3>
+          <p>what's in either</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to union with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L79">sets.moth line 79</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+<span class="k">say</span> sets's union(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">9</span>))       <span class="c"># {1, 2, 3, 4, 9}</span></code></pre><pre class="says"><code>{1, 2, 3, 9}</code></pre></div>
+        </section>
+        <section class="fn" id="both">
+          <h3><a href="#both"><code>sets's both(a, b)</code></a></h3>
+          <p>what's in both (an intersection)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to both with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L88">sets.moth line 88</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+<span class="k">say</span> sets's both(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">9</span>))    <span class="c"># {2}: in both (intersection)</span></code></pre><pre class="says"><code>{2}</code></pre></div>
+        </section>
+        <section class="fn" id="only_in">
+          <h3><a href="#only_in"><code>sets's only_in(a, b)</code></a></h3>
+          <p>what's in a and not in b (a difference)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to only_in with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L99">sets.moth line 99</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> seen <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>)
+<span class="k">say</span> sets's only_in(seen, sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>))     <span class="c"># {2, 3, 4}: in the first, not the second</span></code></pre><pre class="says"><code>{2, 3}</code></pre></div>
+        </section>
+        <section class="fn" id="in_one">
+          <h3><a href="#in_one"><code>sets's in_one(a, b)</code></a></h3>
+          <p>what's in one but not both (a symmetric difference)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to in_one with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L110">sets.moth line 110</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> a <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>)
+<span class="k">set</span> b <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>)
+<span class="k">say</span> sets's items_of(sets's in_one(a, b))</code></pre><pre class="says"><code>[1, 2, 5]</code></pre></div>
+        </section>
+        <section class="fn" id="is_within">
+          <h3><a href="#is_within"><code>sets's is_within(a, b)</code></a></h3>
+          <p>whether everything in a is in b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_within with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L115">sets.moth line 115</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">set</span> a <span class="k">to</span> sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>)
+<span class="k">say</span> sets's is_within(sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">4</span>, <span class="n">3</span>), a)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="same">
+          <h3><a href="#same"><code>sets's same(a, b)</code></a></h3>
+          <p>whether they hold the same things, in any order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>a</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to same with a, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sets.moth#L125">sets.moth line 125</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sets.moth&quot;</span> <span class="k">as</span> sets
+<span class="k">say</span> sets's same(sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">2</span>, <span class="n">1</span>), sets's set_of(<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>))</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

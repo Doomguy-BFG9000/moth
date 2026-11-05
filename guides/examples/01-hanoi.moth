@@ -1,0 +1,27 @@
+# The towers of Hanoi
+# Moves a stack of discs from one peg to another, one disc at a time, never a bigger disc on a smaller one. A
+# function that calls itself does the whole puzzle in a few lines: move all but the bottom disc out of the way,
+# move the bottom one, then move the rest back on top of it.
+
+set moves to 0
+
+to hanoi with discs, from_peg, to_peg, spare_peg, show
+    if discs is 0
+        return
+    end
+    hanoi(discs - 1, from_peg, spare_peg, to_peg, show)
+    add 1 to moves
+    if show
+        say "move disc " + discs + " from " + from_peg + " to " + to_peg
+    end
+    hanoi(discs - 1, spare_peg, to_peg, from_peg, show)
+end
+
+hanoi(3, "A", "C", "B", yes)
+say moves + " moves for 3 discs"
+
+for each discs in list of 5, 10, 15
+    set moves to 0
+    hanoi(discs, "A", "C", "B", no)
+    say moves + " moves for " + discs + " discs"
+end

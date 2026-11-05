@@ -1,0 +1,3 @@
+to response with heard
+    fail with "delete this line, and answer like Bob"
+end

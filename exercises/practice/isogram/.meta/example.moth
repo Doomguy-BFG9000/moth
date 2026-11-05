@@ -1,0 +1,12 @@
+to is_isogram with phrase
+    set seen to empty list
+    for each c in split (lowercase of phrase) by ""
+        if not (c is in list of " ", "-")
+            if c is in seen
+                return no
+            end
+            add c to seen
+        end
+    end
+    return yes
+end

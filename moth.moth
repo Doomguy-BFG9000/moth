@@ -24,12 +24,12 @@ use "stdlib.moth" as standard # the libraries a program anywhere can use (see cl
 use "webpage.moth" as webpage # the page moth build --web writes a program into
 use "checker-rules.moth" as checker_rules # what the checker's rules do with each type (see cli_rules)
 use "tools/hash.moth" as cli_hashing # SHA-256, for the sums of packages' files in moth.sums
+use "moth-coverage.moth" as cli_coverage # what moth coverage says of a program's tests, added up (see cli_say_coverage)
 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing, library no, into nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux|wasm] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth build <file.moth> --library [--into <folder>] [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n       moth kernel [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --target wasm, <file>.wasm, a WebAssembly\n  module (with GC and exceptions) that Moth's JavaScript runs, runWasm in moth.js; with --web, <file>.html, a\n  page that runs it in a browser, with Moth's engine and the files it uses in it. With --library, a shared\n  library of its functions, for C and Python's ctypes: lib<file>.so for Linux or <file>.dll for Windows, and\n  <file>.h, which declares them; --into puts them in a folder.\n  run builds it for this system into a file beside it, runs it with the arguments after it, ends with the\n  number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left. kernel runs cells\n  for Jupyter (editors/jupyter): each line it reads names a file of code, run as a notebook's block."
-set cli_usage to cli_usage + "\n  moth --version | moth version: say which Moth this is (the release version)."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux|wasm] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth build <file.moth> --library [--into <folder>] [--target windows|linux] [--allow-...]\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--lcov] [--allow-...] <file.moth> [arguments...]\n       moth coverage [--lcov] [files.test.moth...] [--allow-...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n       moth kernel [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --target wasm, <file>.wasm, a WebAssembly\n  module (with GC and exceptions) that Moth's JavaScript runs, runWasm in moth.js; with --web, <file>.html, a\n  page that runs it in a browser, with Moth's engine and the files it uses in it. With --library, a shared\n  library of its functions, for C and Python's ctypes: lib<file>.so for Linux or <file>.dll for Windows, and\n  <file>.h, which declares them; --into puts them in a folder.\n  run builds it for this system into a file beside it, runs it with the arguments after it, ends with the\n  number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't. Given .test.moth files, or\n  none (every one here and in the folders inside), it runs their tests as test does, and says that of the\n  files they use, every test's runs added up. It says nothing of moth's own copies of the standard library,\n  nor of packages. --lcov writes it to lcov.info too, for CI services and editors.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left. kernel runs cells\n  for Jupyter (editors/jupyter): each line it reads names a file of code, run as a notebook's block."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -681,8 +681,9 @@ end
 
 # `moth profile file.moth a b`: as moth run, with the profiler (moth-profiler.moth, from the standard library)
 # built into the program in the debugger's place, which counts each line and says where the time went once
-# the program has ended; `moth coverage`, with moth-coverage.moth there, which says which lines ran
-to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on, cli_watcher
+# the program has ended; `moth coverage`, with moth-coverage.moth there, which says which lines ran, and with
+# --lcov (`cli_lcov`) writes them to lcov.info, which the program is let write
+to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on, cli_watcher, cli_lcov
     set cli_temp to cli_temp_for(cli_path, cli_target, "-" + item 1 of split (item 2 of split cli_watcher by "-") by ".")
     if cli_in_the_way(cli_temp)
         return 1
@@ -692,23 +693,192 @@ to cli_profile with cli_path, cli_target, cli_allowing, cli_passed_on, cli_watch
         return 1
     end
     set cli_used to cli_sources_of(cli_path, cli_source)
-    set cli_names to names of cli_used
-    set cli_texts to texts of cli_used
-    add "moth-debugger.moth" to cli_names # the profiler, or coverage, where the debugger would be
-    add standard's standard_text(cli_watcher) to cli_texts
-    try
-        set cli_bytes to machine's compile_debugging(cli_source, cli_names, cli_texts, cli_target, cli_name_of(cli_path), cli_allowing)
-    if it fails with cli_why
-        cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
-        return 1
+    set cli_asking to ""
+    set cli_flags to empty list
+    for each cli_flag in cli_allowing
+        add cli_flag to cli_flags
     end
-    try
-        write cli_bytes as bytes to cli_temp
-    if it fails with cli_whynot
-        say "moth: " + cli_whynot to the error output
+    if cli_watcher is "moth-coverage.moth"
+        set cli_asking to cli_coverage_asking(cli_path, cli_used, no, cli_lcov)
+        if cli_lcov
+            add "--allow-write=lcov.info" to cli_flags
+        end
+    end
+    if not cli_watched(cli_path, cli_source, cli_used, cli_target, cli_flags, cli_temp, cli_name_of(cli_path), cli_watcher, cli_asking)
         return 1
     end
     return cli_run_built(cli_temp, cli_passed_on)
+end
+
+# The program built into `cli_into` with a watcher in the debugger's place, the profiler or coverage,
+# moth-profiler.moth or moth-coverage.moth from the standard library, with `cli_asking` at its end: lines of
+# Moth that set what moth asks of it. Its mistakes say they're in `cli_program`. Gives whether it was built,
+# having said why not.
+to cli_watched with cli_path, cli_source, cli_used, cli_target, cli_allowing, cli_into, cli_program, cli_watcher, cli_asking
+    set cli_names to empty list
+    set cli_texts to empty list
+    for each cli_k from 1 to length of names of cli_used
+        add item cli_k of names of cli_used to cli_names
+        add item cli_k of texts of cli_used to cli_texts
+    end
+    add "moth-debugger.moth" to cli_names # the profiler, or coverage, where the debugger would be
+    add standard's standard_text(cli_watcher) + cli_asking to cli_texts
+    try
+        set cli_bytes to machine's compile_debugging(cli_source, cli_names, cli_texts, cli_target, cli_program, cli_allowing)
+    if it fails with cli_why
+        cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
+        return no
+    end
+    try
+        write cli_bytes as bytes to cli_into
+    if it fails with cli_whynot
+        say "moth: " + cli_whynot to the error output
+        return no
+    end
+    return yes
+end
+
+# ---------- coverage ----------
+# moth coverage builds moth-coverage.moth into a program, or each file of tests, in the debugger's place
+# (DESIGN §93, §133), and tells it what's wanted with lines at its end (see its top): for tests, to say how
+# many times each line ran, which moth adds up for every test's run (cli_count_coverage) and then says as the
+# watcher says a program's (cli_say_coverage). Neither says anything of moth's own copies of the standard
+# library, nor of the packages moth add fetched: only of the program's own files.
+
+# a text as Moth code writes it, in quotes
+to cli_moth_text with cli_text
+    set cli_out to "\""
+    for each cli_c in cli_text
+        if cli_c is "\\" or cli_c is "\"" or cli_c is "{"
+            add "\\" + cli_c to cli_out
+        else if cli_c is "\n"
+            add "\\n" to cli_out
+        else
+            add cli_c to cli_out
+        end
+    end
+    return cli_out + "\""
+end
+
+# a path with / for each \, and without a ./ at its start, so two names for one file are one
+to cli_slashed with cli_path
+    set cli_out to join (split cli_path by "\\") with "/"
+    repeat while length of cli_out is greater than 2 and cli_first(cli_out, 2) is "./"
+        set cli_out to cli_tail(cli_out, 3)
+    end
+    return cli_out
+end
+
+# the files a program uses that coverage says nothing of: moth's own copies of the standard library's (found
+# neither in the editor nor on the disk), and packages' files, in packages/
+to cli_left_out with cli_path, cli_used
+    set cli_folder to cli_folder_of(cli_path)
+    set cli_out to empty list
+    for each cli_name in names of cli_used
+        if length of cli_name is greater than 9 and cli_first(cli_name, 9) is "packages/"
+            add cli_name to cli_out
+        else if not ((cli_folder + cli_name) is in cli_open_texts)
+            set cli_there to no
+            try
+                set cli_there to length of (read bytes (cli_folder + cli_name)) is at least 0
+            if it fails
+                set cli_there to no
+            end
+            if not cli_there
+                add cli_name to cli_out
+            end
+        end
+    end
+    return cli_out
+end
+
+# what moth asks of moth-coverage.moth, as lines of Moth to go at its end: whether to keep the counts for moth,
+# for a test's run, or to say them; whether to write them to lcov.info too; the program's folder, from the one
+# moth runs in, for lcov.info's paths; and the files to say nothing of
+to cli_coverage_asking with cli_path, cli_used, cli_keeping, cli_lcov
+    set cli_out to "\n"
+    if cli_keeping
+        add "set coverage_keeping to yes\n" to cli_out
+    end
+    if cli_lcov
+        add "set coverage_lcov to \"lcov.info\"\n" to cli_out
+    end
+    add "set coverage_folder to " + cli_moth_text(cli_slashed(cli_folder_of(cli_path))) + "\n" to cli_out
+    for each cli_name in cli_left_out(cli_path, cli_used)
+        add "add " + cli_moth_text(cli_name) + " to coverage_left_out\n" to cli_out
+    end
+    return cli_out
+end
+
+# What a test's run said to the error output, without the counts moth-coverage.moth said after it, which are
+# added to `cli_covering`'s: for each file the tests use, by its path from the folder moth runs in, how many
+# times each of its lines with a statement on it ran. The test file's own lines (the file "") and those of
+# the files in `cli_leaving` aren't counted.
+to cli_count_coverage with cli_covering, cli_answer, cli_path, cli_leaving
+    set cli_kept to empty list
+    set cli_counting to no
+    for each cli_line in split mistakes of cli_answer by "\n"
+        if cli_counting
+            set cli_tab to position of "\t" in cli_line
+            if cli_tab is greater than 0
+                set cli_file to cli_first(cli_line, cli_tab - 1)
+                if cli_file is not "" and not (cli_file is in cli_leaving)
+                    cli_add_counts(cli_covering, cli_slashed(cli_folder_of(cli_path) + cli_file), cli_tail(cli_line, cli_tab + 1))
+                end
+            end
+        else if cli_line is cli_coverage's coverage_mark
+            set cli_counting to yes
+        else
+            add cli_line to cli_kept
+        end
+    end
+    return record with output output of cli_answer, mistakes (join cli_kept with "\n"), code code of cli_answer
+end
+
+# one file's counts, "3:1 5:0 6:12" (line 3 ran once, 5 never, 6 twelve times), added to those kept
+to cli_add_counts with cli_covering, cli_file, cli_told
+    set cli_counts to counts of cli_covering
+    if not (cli_file is in cli_counts)
+        set item cli_file of cli_counts to empty dictionary
+        set cli_files to files of cli_covering
+        add cli_file to cli_files
+    end
+    set cli_lines to item cli_file of cli_counts
+    for each cli_pair in split cli_told by " "
+        set cli_colon to position of ":" in cli_pair
+        if cli_colon is greater than 1
+            set cli_n to number of cli_first(cli_pair, cli_colon - 1)
+            set cli_times to number of cli_tail(cli_pair, cli_colon + 1)
+            if cli_n is in cli_lines
+                set item cli_n of cli_lines to item cli_n of cli_lines + cli_times
+            else
+                set item cli_n of cli_lines to cli_times
+            end
+        end
+    end
+end
+
+# what every test's runs ran, added up: said as moth coverage says a program's, each file by its path, in
+# order; and with --lcov written to lcov.info. Gives whether lcov.info could be written.
+to cli_say_coverage with cli_covering
+    set cli_paths to files of cli_covering in order
+    set cli_kept to empty list
+    for each cli_file in cli_paths
+        add item cli_file of counts of cli_covering to cli_kept
+    end
+    for each cli_line in cli_coverage's coverage_summary(cli_paths, cli_kept)
+        say cli_line
+    end
+    if lcov of cli_covering
+        try
+            write cli_coverage's coverage_lcov_text(cli_paths, cli_kept) to "lcov.info"
+        if it fails with cli_why
+            say "moth: " + cli_why to the error output
+            return no
+        end
+        say "wrote lcov.info"
+    end
+    return yes
 end
 
 # the program built into `cli_temp` started, waited for and removed: the number it ended with
@@ -3846,8 +4016,10 @@ to cli_test_report with cli_answer, cli_last
     end
 end
 
-# one file's tests: a tick or a cross for each, and what a cross says; how many passed and how many failed
-to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
+# One file's tests: a tick or a cross for each, and what a cross says; how many passed and how many failed.
+# For moth coverage, `cli_covering` keeps the counts, each test's added to it (see cli_count_coverage); for
+# moth test it's nothing.
+to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming, cli_covering
     if cli_naming
         say cli_path
     end
@@ -3878,8 +4050,16 @@ to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
     if cli_in_the_way(cli_temp)
         return record with passed 0, failed 1
     end
-    if not cli_build_source(cli_path, cli_source + "\n" + cli_driver, cli_target, cli_allowing, cli_temp, no, cli_path)
-        return record with passed 0, failed 1
+    set cli_leaving to nothing # for coverage, the files to say nothing of
+    if cli_covering is nothing
+        if not cli_build_source(cli_path, cli_source + "\n" + cli_driver, cli_target, cli_allowing, cli_temp, no, cli_path)
+            return record with passed 0, failed 1
+        end
+    else
+        set cli_leaving to cli_left_out(cli_path, cli_used)
+        if not cli_watched(cli_path, cli_source + "\n" + cli_driver, cli_used, cli_target, cli_allowing, cli_temp, cli_path, "moth-coverage.moth", cli_coverage_asking(cli_path, cli_used, yes, no))
+            return record with passed 0, failed 1
+        end
     end
     set cli_passed to 0
     set cli_failed to 0
@@ -3894,6 +4074,9 @@ to cli_test_file with cli_path, cli_target, cli_allowing, cli_naming
             set cli_answer to run program cli_temp with cli_given keeping its output
         if it fails with cli_whyran
             say "moth: " + cli_whyran to the error output
+        end
+        if cli_answer is not nothing and cli_covering is not nothing
+            set cli_answer to cli_count_coverage(cli_covering, cli_answer, cli_path, cli_leaving)
         end
         if cli_answer is nothing
             add 1 to cli_failed
@@ -3997,6 +4180,11 @@ to cli_sorted_entries with cli_names
     return cli_entries
 end
 
+# whether a file's name says it holds tests: it ends in .test.moth
+to cli_is_tests with cli_path
+    return length of cli_path is greater than 10 and cli_tail(cli_path, length of cli_path - 9) is ".test.moth"
+end
+
 # the .test.moth files in a folder ("" for the one moth runs in) and those inside it, joined to it as Node's
 # path.join joins them, with \ on Windows
 to cli_find_tests with cli_folder, cli_sep, cli_found
@@ -4021,12 +4209,14 @@ to cli_find_tests with cli_folder, cli_sep, cli_found
     return cli_found
 end
 
-# `moth test a.test.moth b.test.moth`: every file's tests, then how many passed; 1 if any failed
-to cli_test_all with cli_paths, cli_target, cli_allowing
+# `moth test a.test.moth b.test.moth`: every file's tests, then how many passed; 1 if any failed. For moth
+# coverage (`cli_covering`, see cli_test_file), then which lines of the files they use ran, and 1 too if
+# lcov.info can't be written.
+to cli_test_all with cli_paths, cli_target, cli_allowing, cli_covering
     set cli_passed to 0
     set cli_failed to 0
     for each cli_path in cli_paths
-        set cli_counts to cli_test_file(cli_path, cli_target, cli_allowing, length of cli_paths is greater than 1)
+        set cli_counts to cli_test_file(cli_path, cli_target, cli_allowing, length of cli_paths is greater than 1, cli_covering)
         add passed of cli_counts to cli_passed
         add failed of cli_counts to cli_failed
     end
@@ -4035,10 +4225,29 @@ to cli_test_all with cli_paths, cli_target, cli_allowing
         set cli_told to cli_told + ", " + cli_failed + " failed"
     end
     say cli_told
+    if cli_covering is not nothing
+        if not cli_say_coverage(cli_covering)
+            return 1
+        end
+    end
     if cli_failed is not 0
         return 1
     end
     return 0
+end
+
+# every file ending in .test.moth in the folder moth runs in and those inside it, or nothing, said, if none is
+to cli_tests_here
+    set cli_sep to "/"
+    if cli_host() is "windows"
+        set cli_sep to "\\"
+    end
+    set cli_found to cli_find_tests("", cli_sep, empty list)
+    if length of cli_found is 0
+        say "moth: no tests found: name a file, or put tests in files ending in .test.moth" to the error output
+        return nothing
+    end
+    return cli_found
 end
 
 # ---------- packages ----------
@@ -5768,6 +5977,7 @@ end
 # --allow flags, --target for a build, and for a run whatever comes after the file, which is the program's
 # own
 to cli_main
+    set cli_usage to cli_usage + "\n  moth --version | moth version: say which Moth this is (the release version)."
     set cli_given to arguments
     set cli_target to nothing
     set cli_flags to empty list
@@ -5776,6 +5986,7 @@ to cli_main
     set cli_paths to empty list # for a tidy, every file named
     set cli_checking to no
     set cli_web to no # moth build --web
+    set cli_lcov to no # moth coverage --lcov
     set cli_command to ""
     if length of cli_given is at least 1
         set cli_command to item 1 of cli_given
@@ -5812,7 +6023,7 @@ to cli_main
         end
         stop the program with cli_package_command(cli_command, cli_rest)
     end
-    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "coverage" or cli_command is "notebook" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test"
+    set cli_fine to (length of cli_given is at least 2 and (cli_command is "build" or cli_command is "run" or cli_command is "debug" or cli_command is "profile" or cli_command is "notebook" or cli_command is "tidy" or cli_command is "check")) or cli_command is "test" or cli_command is "coverage"
     set cli_k to 2
     repeat while cli_fine and cli_k is at most length of cli_given
         set cli_arg to item cli_k of cli_given
@@ -5824,6 +6035,9 @@ to cli_main
             add 1 to cli_k
         else if (cli_command is "tidy" or cli_command is "test") and not (length of cli_arg is greater than 1 and cli_first(cli_arg, 2) is "--")
             add cli_arg to cli_paths
+            add 1 to cli_k
+        else if cli_arg is "--lcov" and cli_command is "coverage" and not cli_lcov
+            set cli_lcov to yes
             add 1 to cli_k
         else if cli_arg is "--web" and cli_command is "build" and not cli_web
             set cli_web to yes
@@ -5868,7 +6082,22 @@ to cli_main
             set cli_fine to no
         end
     end
-    if cli_file is nothing and cli_command is not "tidy" and cli_command is not "test"
+    set cli_paths_given to cli_command is "coverage" and (cli_file is nothing or cli_is_tests(cli_file)) # tests to cover
+    if cli_paths_given and cli_file is not nothing # what's after a file of tests is more files, or flags
+        add cli_file to cli_paths
+        for each cli_arg in cli_passed
+            if cli_arg is "--lcov" and not cli_lcov
+                set cli_lcov to yes
+            else if cli_allow_flag(cli_arg)
+                add cli_arg to cli_flags
+            else if length of cli_arg is greater than 1 and cli_first(cli_arg, 2) is "--"
+                set cli_fine to no
+            else
+                add cli_arg to cli_paths
+            end
+        end
+    end
+    if cli_file is nothing and cli_command is not "tidy" and cli_command is not "test" and not cli_paths_given
         set cli_fine to no
     end
     if cli_command is "tidy" and length of cli_paths is 0
@@ -5899,19 +6128,18 @@ to cli_main
     if cli_target is "wasm"
         stop the program with cli_build_wasm(cli_file)
     end
-    if cli_command is "test"
+    if cli_command is "test" or cli_paths_given
         if length of cli_paths is 0 # none named: every one here and in the folders inside
-            set cli_sep to "/"
-            if cli_host() is "windows"
-                set cli_sep to "\\"
-            end
-            set cli_paths to cli_find_tests("", cli_sep, empty list)
-            if length of cli_paths is 0
-                say "moth: no tests found: name a file, or put tests in files ending in .test.moth" to the error output
+            set cli_paths to cli_tests_here()
+            if cli_paths is nothing
                 stop the program with 1
             end
         end
-        stop the program with cli_test_all(cli_paths, cli_host(), cli_flags)
+        set cli_covering to nothing
+        if cli_command is "coverage"
+            set cli_covering to record with files empty list, counts empty dictionary, lcov cli_lcov
+        end
+        stop the program with cli_test_all(cli_paths, cli_host(), cli_flags, cli_covering)
     end
     if cli_target is nothing
         set cli_target to cli_host()
@@ -5923,10 +6151,10 @@ to cli_main
         stop the program with cli_debug(cli_file, cli_target, cli_flags, cli_passed)
     end
     if cli_command is "profile"
-        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-profiler.moth")
+        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-profiler.moth", no)
     end
     if cli_command is "coverage"
-        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-coverage.moth")
+        stop the program with cli_profile(cli_file, cli_target, cli_flags, cli_passed, "moth-coverage.moth", cli_lcov)
     end
     if library of cli_asked
         stop the program with cli_build_library(cli_file, cli_target, cli_flags)

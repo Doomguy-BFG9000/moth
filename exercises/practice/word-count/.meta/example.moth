@@ -1,0 +1,27 @@
+to is_word_letter with c
+    return c is in "abcdefghijklmnopqrstuvwxyz0123456789"
+end
+
+to count_words with sentence
+    set counts to empty dictionary
+    set letters to split (lowercase of sentence) by ""
+    set word to ""
+    for each k from 1 to (length of letters) + 1
+        set c to " "
+        if k is at most length of letters
+            set c to item k of letters
+        end
+        set inside to c is "'" and word is not "" and k is less than length of letters and is_word_letter(item (k + 1) of letters)
+        if is_word_letter(c) or inside
+            set word to word + c
+        else if word is not ""
+            if word is in counts
+                set item word of counts to item word of counts + 1
+            else
+                set item word of counts to 1
+            end
+            set word to ""
+        end
+    end
+    return counts
+end

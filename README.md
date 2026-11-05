@@ -12,6 +12,14 @@ Built from scratch, with no dependencies, into programs for Windows and Linux as
 &nbsp;·&nbsp;
 <a href="#the-language">The language</a>
 &nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/">The standard library</a>
+&nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/cookbook/">Cookbook</a>
+&nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/examples.html">Examples</a>
+&nbsp;·&nbsp;
+<a href="exercises/">Exercises</a>
+&nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
 <a href="https://github.com/samyyy2423/moth/releases/latest">Download</a>
@@ -98,10 +106,21 @@ write Moth and press Run, or [learn Moth in an afternoon](https://samyyy2423.git
 eleven short lessons, each with a program to run and change. There's nothing to
 install.
 
-**On your computer:** download Moth from the
-[latest release](https://github.com/samyyy2423/moth/releases/latest), one file
-with nothing else to install: `moth-windows.exe`, saved as `moth.exe`, or
-`moth-linux`, saved as `moth` (then `chmod +x moth`).
+**On your computer:** install Moth, one program with nothing else to install.
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex
+```
+
+On Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh
+```
+
+[Install](#install) has Scoop, winget, Debian's packages, Docker and the
+download itself.
 
 ```text
 moth run hello.moth          runs a program
@@ -113,6 +132,79 @@ moth                         the Moth shell: Moth a line at a time
 
 [The language](#the-language) has all of Moth on one page, and
 [CONTRIBUTING.md](CONTRIBUTING.md) says how to help.
+
+## Install
+
+Moth is one program, `moth`, for Windows and Linux on x86-64. Each way below
+installs a [release](https://github.com/samyyy2423/moth/releases)'s program as
+it is, byte for byte, and [docs/verifying-releases.md](docs/verifying-releases.md)
+says how to check one.
+
+**Windows, with the installer.** In PowerShell, with no administrator needed:
+
+```powershell
+irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex
+```
+
+It downloads `moth-windows.exe` and the release's `SHA256SUMS.txt`, installs
+nothing unless the two agree, saves it as `moth.exe` in
+`%LOCALAPPDATA%\Programs\Moth`, and adds that folder to your PATH. A new terminal
+has `moth`. `$env:MOTH_VERSION = "1.11.0"` before it picks a release, and
+`$env:MOTH_INSTALL_DIR` another folder.
+
+**Windows, with Scoop:**
+
+```powershell
+scoop install https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/scoop/moth.json
+```
+
+`scoop update moth` takes the next release once this repository has it.
+
+**Windows, with winget** (once Moth is in winget's repository):
+
+```powershell
+winget install samyyy2423.Moth
+```
+
+**Linux, with the installer:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh
+```
+
+It downloads `moth-linux` and `SHA256SUMS.txt`, installs nothing unless the two
+agree, puts `moth` in `~/.local/bin` (`/usr/local/bin` as root), and adds that
+folder to your shell's PATH if it isn't there. `sh -s -- --version 1.11.0`
+picks a release, `--dir` another folder, and `--no-modify-path` leaves your
+shell's files alone. It needs `curl` or `wget`.
+
+**Debian and Ubuntu.** From the release after 1.11.0, each release has
+`moth_<version>_amd64.deb`, with `moth` as `/usr/bin/moth`:
+
+```bash
+sudo apt install ./moth_1.12.0_amd64.deb
+```
+
+**Docker.** From the release after 1.11.0, `ghcr.io/samyyy2423/moth` is moth on
+[distroless](https://github.com/GoogleContainerTools/distroless) Debian, tagged
+with each version and `latest`. Run in the folder of your program, as you, so
+what it writes is yours:
+
+```bash
+docker run --rm -v "$PWD:/work" --user "$(id -u):$(id -g)" ghcr.io/samyyy2423/moth run hello.moth
+```
+
+The image has no shell, git or curl, so `moth add` and `moth search` don't work
+in it. To use moth in another image, copy it:
+`COPY --from=ghcr.io/samyyy2423/moth:latest /usr/bin/moth /usr/local/bin/moth`.
+
+**By hand.** Download `moth-windows.exe` (save it as `moth.exe`) or `moth-linux`
+(save it as `moth`, then `chmod +x moth`) from the
+[latest release](https://github.com/samyyy2423/moth/releases/latest), or make it
+from the source with Node.js: `node bootstrap.mjs`.
+
+[docs/installers.md](docs/installers.md) says how each of these is made and
+tested.
 
 ## What makes it different
 
@@ -354,6 +446,10 @@ bytes and dictionaries:
   folder, and in a package; a file of that name beside the file that uses it
   comes first.
   [`stdlib.moth`](stdlib.moth) holds them, made by `node make-stdlib.mjs`.
+  [The reference](https://samyyy2423.github.io/moth/docs/) has a page for
+  each, with every function, what it takes and an example with what it says,
+  and a search of them all, made from the libraries' own comments by
+  `node make-docs.mjs`.
 - [`json.moth`](tools/json.moth) reads JSON into dictionaries and lists, `\u`
   escapes and emoji included, and [`json.test.moth`](tools/json.test.moth)
   tests it, with Moth's own test runner, on every push.
@@ -513,6 +609,21 @@ bytes and dictionaries:
   end
   ai's stream(quick, "Write a haiku about a moth.", as_written)
   ```
+- [`properties.moth`](tools/properties.moth) is property-based testing, as
+  Hypothesis and QuickCheck do it: say what should hold for every value of a
+  sort, and `for_all` tries a hundred made at random, small ones first; a
+  value that shows it doesn't hold is made as simple as it can be, and the
+  mistake says it with the seed that makes it again:
+  ```
+  use "properties.moth" as p
+  to test_sorting_twice_is_sorting_once
+      set numbers to p's list_of(p's whole_number(-1000, 1000))
+      p's for_all(numbers, (function with xs gives ((xs in order) in order) is (xs in order)))
+  end
+  ```
+  Values come from `whole_number`, `decimal`, `yes_or_no`, `any_text`,
+  `text_of`, `one_of`, `either_of`, `list_of`, `dictionary_of`, `mapped` and
+  `kept`.
 - [`sets.moth`](tools/sets.moth) is Python's set: each thing once, found at
   once, with `union`, `both`, `only_in` and `in_one`, shown as `{1, 2, 3}`;
   it holds numbers and text, as a dictionary's keys can be.
@@ -1053,9 +1164,9 @@ nothing to install.
 ## Command line
 
 `moth` is standalone Moth: a program of its own, with nothing else to install.
-Get `moth-windows.exe` (save it as `moth.exe`) or `moth-linux` (save it as
-`moth`, then `chmod +x moth`) from
-[the releases](https://github.com/samyyy2423/moth/releases), or make it from the
+[Install](#install) has the ways to get it: an installer for Windows or Linux,
+Scoop, winget, a .deb, Docker, or `moth-windows.exe` or `moth-linux` from
+[the releases](https://github.com/samyyy2423/moth/releases). Or make it from the
 source with Node.js: `node bootstrap.mjs`.
 
 ```text
@@ -1067,6 +1178,8 @@ moth run hello.moth Sam 3                build it beside itself, run it with tho
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
 moth coverage hello.moth Sam 3           the same, then how many of its lines ran, and which didn't, file by file
+moth coverage hello.test.moth            run its tests as moth test does, then which lines of the files they test ran
+moth coverage --lcov                     every .test.moth file's here, and lcov.info too, for CI services and editors
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth kernel                              run cells for Jupyter's Moth kernel (editors/jupyter), each with what the ones before made
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
@@ -1304,6 +1417,27 @@ $ moth test tools/json.test.moth
 5 passed
 ```
 
+`moth coverage` runs a file's tests the same way, or with no file every
+`.test.moth` file here and in the folders inside, and then says which lines of
+the files they test ran: every test's runs added up, each file's share, and
+the lines no test ran, so a branch never taken or a function never called
+shows. It leaves out the test files themselves, moth's own copies of the
+standard library, and packages. `--lcov` writes the same to `lcov.info`, which
+Codecov, Coveralls and editors' coverage views read. Given a program instead,
+it runs the program and says the same of its run.
+
+```text
+$ moth coverage tools/json.test.moth
+✓ test_values
+✓ test_lists_and_objects
+✓ test_spaces_and_lines
+✓ test_escapes
+✓ test_mistakes
+5 passed
+moth coverage: 141 of 151 lines run (93.4%)
+  tools/json.moth: 141 of 151 (93.4%), not run: 73, 136-137, 139, 150, 173, 177, 179, 199, 216
+```
+
 A program moth makes asks before it reads a file, writes one, goes online,
 starts another program or uses a library, the way Deno does: at a terminal
 you're asked, once for each file, site, program or library (or `a` for all of
@@ -1476,7 +1610,9 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`neural.moth`](neural.moth), [`math.moth`](math.moth) | The neural network, and the maths it needs, in Moth |
 | [`digits.moth`](digits.moth), [`digit-shapes.moth`](digit-shapes.moth), [`digits-train.moth`](digits-train.moth), [`handwriting.moth`](handwriting.moth) | Reading handwriting: strokes to pictures, the network, its training, and the program that asks you to draw |
 | [`tools/`](tools) | Real tools in Moth: a picture maker, a word counter, a JSON reader and its tests, SQLite, Windows' own controls, and a notepad made with them |
+| [`make-docs.mjs`](make-docs.mjs), [`docs/`](docs) | The standard library's reference on the site: a page for each library, made from its own comments |
 | [`bootstrap.mjs`](bootstrap.mjs) | Makes the first moth.exe from the source, with Node.js |
+| [`packaging/`](packaging) | The installers (winget, Scoop, the .deb, the image, `install.sh` and `install.ps1`), the release's build script and its SBOM writer: [docs/installers.md](docs/installers.md) |
 | [`index.html`](index.html), [`worker.js`](worker.js) | The playground |
 
 </details>
@@ -1509,6 +1645,9 @@ calls that led there.
 - the WebAssembly back end written in Moth against wasm.js, byte for byte, on
   7,822 programs, and what it makes against the VM, mistakes and trails included
 - the neural network and the handwriting reader, on all three engines
+- the standard library's reference ([`docs.test.js`](docs.test.js)): `docs/` is
+  what [`make-docs.mjs`](make-docs.mjs) makes of the libraries, every public
+  function has a comment, and each example ran and said what's shown under it
 - `stop`, the text helpers, `ask` and `use`, including that `ask` never asks
   twice when a run is handed over, and that a mistake in a used file names it
 - `try`, dictionaries, bytes and bits, files and arguments (a run handed over
@@ -1588,7 +1727,10 @@ calls that led there.
   against the checker, its own problems word for word; `moth test` on the
   tests in Moth here, said exactly as `test()` says them; and `moth test` on
   its own, finding the tests in a folder in the order the Node.js command line
-  found them; and `moth debug` stopping where it's told, its arguments passed on
+  found them; `moth debug` stopping where it's told, its arguments passed on;
+  and `moth coverage` of a program and of tests, a file's and a folder's, a
+  branch never taken, a function never called and a failing test among them,
+  added up and written as LCOV word for word
 - the debugger: three sessions word for word, on Windows and Linux, stepping
   into and out of calls, breakpoints in the program and a file it uses, a
   closure's variables, the calls in progress through recursion and a caught
@@ -1680,6 +1822,12 @@ calls that led there.
   that are mistakes, a refused connection, a big page and the `--allow-net`
   rules, in the Rust engine's words; and that a program that never reads is
   the same bytes it was
+- the installers, as people use them (`packaging.test.js`, and CI's packaging
+  workflow): winget and Scoop installing moth on Windows, the .deb on Debian
+  and Ubuntu, the image running programs, and `install.sh` and `install.ps1`
+  installing a release and refusing a download whose sum is wrong; and the
+  release workflow, as a dry run, building moth, checking the fixed point on
+  Linux and Windows, and signing every file
 
 The tests are tested too: bugs planted on purpose in the VM, the JIT, the
 checker, the compiler written in Moth, the neural network and WebAssembly's
@@ -1709,6 +1857,10 @@ Moth keeps its promises in writing, for anyone who builds on it:
 - **[SECURITY.md](SECURITY.md)**: how to report a vulnerability privately, the
   versions that get fixes, and what the `--allow` flags protect against and
   what they don't.
+- **Signed releases.** From the release after 1.11.0, every file of a release
+  is signed with Sigstore and attested by GitHub, with an SBOM of what's built
+  into moth: [docs/verifying-releases.md](docs/verifying-releases.md) says how
+  to check one with `cosign` or `gh`, or by building moth yourself.
 
 ## Limits
 

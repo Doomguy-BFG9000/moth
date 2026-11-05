@@ -1,0 +1,3 @@
+to reversed_text with words
+    fail with "delete this line, and turn it around"
+end

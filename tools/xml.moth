@@ -324,10 +324,13 @@ end
 
 # ---------- making and finding ----------
 
+# an element of your own, to put in another's children or write: its name, its attributes (a dictionary) and
+# what's inside it (a list of elements, and texts made with text_node)
 to element with name, attributes, inside
     return record with kind "element", name name, attributes attributes, children inside
 end
 
+# text to put inside an element, as a record with kind "text"
 to text_node with words
     return record with kind "text", text words
 end
@@ -387,6 +390,7 @@ end
 
 # ---------- writing ----------
 
+# an element, and everything in it, written as XML text
 to written with e
     set made to empty list
     write_element(e, made)

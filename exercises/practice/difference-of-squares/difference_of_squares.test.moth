@@ -1,0 +1,19 @@
+use "difference_of_squares.moth" as exercise
+
+to test_square_of_sum
+    expect exercise's square_of_sum(1) is 1
+    expect exercise's square_of_sum(5) is 225
+    expect exercise's square_of_sum(100) is 25502500
+end
+
+to test_sum_of_squares
+    expect exercise's sum_of_squares(1) is 1
+    expect exercise's sum_of_squares(5) is 55
+    expect exercise's sum_of_squares(100) is 338350
+end
+
+to test_difference
+    expect exercise's difference(1) is 0
+    expect exercise's difference(5) is 170
+    expect exercise's difference(100) is 25164150
+end

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>system.moth · Moth's standard library</title>
+  <meta name="description" content="Files, folders and the environment, on Windows and Linux.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>system</em>.moth</h1>
+      <p>Files, folders and the environment, on Windows and Linux.</p>
+      <p class="use"><code>use "system.moth" as system</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="system.moth's functions">
+      <h2>17 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#is_file">is_file</a></li><li><a href="#is_folder">is_folder</a></li><li><a href="#exists">exists</a></li><li><a href="#file_size">file_size</a></li><li><a href="#modified">modified</a></li><li><a href="#copy_file">copy_file</a></li><li><a href="#move_file">move_file</a></li><li><a href="#remove_file">remove_file</a></li><li><a href="#append_to_file">append_to_file</a></li><li><a href="#make_folder">make_folder</a></li><li><a href="#remove_folder">remove_folder</a></li><li><a href="#environment">environment</a></li><li><a href="#set_environment">set_environment</a></li><li><a href="#current_folder">current_folder</a></li><li><a href="#change_folder">change_folder</a></li><li><a href="#home_folder">home_folder</a></li><li><a href="#temporary_folder">temporary_folder</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Files, folders and the environment, on Windows and Linux: copying and moving files, making and removing folders, whether a name is a file or a folder, how big a file is and when it last changed, the program's environment variables, and the folders it's in, the home folder and the temporary one.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's make_folder(<span class="s">&quot;backup/2026&quot;</span>)              <span class="c"># and the folders it's in, if they aren't there</span>
+system's copy_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;backup/2026/notes.txt&quot;</span>)
+<span class="k">say</span> system's file_size(<span class="s">&quot;notes.txt&quot;</span>) <span class="s">&quot; bytes, changed &quot;</span> system's modified(<span class="s">&quot;notes.txt&quot;</span>)
+<span class="k">say</span> system's environment(<span class="s">&quot;PATH&quot;</span>)
+<span class="k">say</span> system's home_folder()
+system's append_to_file(<span class="s">&quot;log.txt&quot;</span>, <span class="s">&quot;one more line\n&quot;</span>)
+<span class="k">if</span> system's is_file(<span class="s">&quot;notes.txt&quot;</span>)                 <span class="c"># is_folder for a folder; exists for either</span>
+    system's move_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;old-notes.txt&quot;</span>)   <span class="c"># or renamed</span>
+<span class="k">end</span>
+system's remove_file(<span class="s">&quot;old-notes.txt&quot;</span>)
+system's remove_folder(<span class="s">&quot;backup/2026&quot;</span>)            <span class="c"># once it's empty</span>
+system's set_environment(<span class="s">&quot;MODE&quot;</span>, <span class="s">&quot;test&quot;</span>)         <span class="c"># for this program, and those it starts</span>
+<span class="k">say</span> system's current_folder()                    <span class="c"># change_folder(path) to go into another</span>
+<span class="k">say</span> system's temporary_folder()</code></pre></div>
+          <p><a href="#modified">modified</a>() is seconds since 1 January 1970, as dates.moth's day_number counts days. A program that uses it is built with --allow-libraries.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="is_file">
+          <h3><a href="#is_file"><code>system's is_file(path)</code></a></h3>
+          <p>whether there's a file of that name (not a folder)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_file with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L88">system.moth line 88</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's make_folder(<span class="s">&quot;backup/2026&quot;</span>)              <span class="c"># and the folders it's in, if they aren't there</span>
+system's copy_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;backup/2026/notes.txt&quot;</span>)
+<span class="k">say</span> system's file_size(<span class="s">&quot;notes.txt&quot;</span>) <span class="s">&quot; bytes, changed &quot;</span> system's modified(<span class="s">&quot;notes.txt&quot;</span>)
+<span class="k">say</span> system's environment(<span class="s">&quot;PATH&quot;</span>)
+<span class="k">say</span> system's home_folder()
+system's append_to_file(<span class="s">&quot;log.txt&quot;</span>, <span class="s">&quot;one more line\n&quot;</span>)
+<span class="k">if</span> system's is_file(<span class="s">&quot;notes.txt&quot;</span>)                 <span class="c"># is_folder for a folder; exists for either</span>
+    system's move_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;old-notes.txt&quot;</span>)   <span class="c"># or renamed</span>
+<span class="k">end</span>
+system's remove_file(<span class="s">&quot;old-notes.txt&quot;</span>)
+system's remove_folder(<span class="s">&quot;backup/2026&quot;</span>)            <span class="c"># once it's empty</span>
+system's set_environment(<span class="s">&quot;MODE&quot;</span>, <span class="s">&quot;test&quot;</span>)         <span class="c"># for this program, and those it starts</span>
+<span class="k">say</span> system's current_folder()                    <span class="c"># change_folder(path) to go into another</span>
+<span class="k">say</span> system's temporary_folder()</code></pre></div>
+        </section>
+        <section class="fn" id="is_folder">
+          <h3><a href="#is_folder"><code>system's is_folder(path)</code></a></h3>
+          <p>whether there's a folder of that name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_folder with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L98">system.moth line 98</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's is_folder(path)</code></pre></div>
+        </section>
+        <section class="fn" id="exists">
+          <h3><a href="#exists"><code>system's exists(path)</code></a></h3>
+          <p>whether there's a file or a folder of that name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to exists with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L108">system.moth line 108</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's exists(path)</code></pre></div>
+        </section>
+        <section class="fn" id="file_size">
+          <h3><a href="#file_size"><code>system's file_size(path)</code></a></h3>
+          <p>how many bytes a file is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to file_size with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L113">system.moth line 113</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's file_size(<span class="s">&quot;notes.txt&quot;</span>) <span class="s">&quot; bytes, changed &quot;</span> system's modified(<span class="s">&quot;notes.txt&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="modified">
+          <h3><a href="#modified"><code>system's modified(path)</code></a></h3>
+          <p>when a file last changed, in whole seconds since 1 January 1970</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to modified with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L129">system.moth line 129</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's file_size(<span class="s">&quot;notes.txt&quot;</span>) <span class="s">&quot; bytes, changed &quot;</span> system's modified(<span class="s">&quot;notes.txt&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="copy_file">
+          <h3><a href="#copy_file"><code>system's copy_file(from, to_path)</code></a></h3>
+          <p>a file copied, a file already at <code>to_path</code> replaced</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>from</code></li><li><code>to_path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to copy_file with from, to_path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L147">system.moth line 147</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's copy_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;backup/2026/notes.txt&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="move_file">
+          <h3><a href="#move_file"><code>system's move_file(from, to_path)</code></a></h3>
+          <p>a file or a folder moved, or renamed; a file already at <code>to_path</code> replaced</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>from</code></li><li><code>to_path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to move_file with from, to_path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L161">system.moth line 161</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's make_folder(<span class="s">&quot;backup/2026&quot;</span>)              <span class="c"># and the folders it's in, if they aren't there</span>
+system's copy_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;backup/2026/notes.txt&quot;</span>)
+<span class="k">say</span> system's file_size(<span class="s">&quot;notes.txt&quot;</span>) <span class="s">&quot; bytes, changed &quot;</span> system's modified(<span class="s">&quot;notes.txt&quot;</span>)
+<span class="k">say</span> system's environment(<span class="s">&quot;PATH&quot;</span>)
+<span class="k">say</span> system's home_folder()
+system's append_to_file(<span class="s">&quot;log.txt&quot;</span>, <span class="s">&quot;one more line\n&quot;</span>)
+<span class="k">if</span> system's is_file(<span class="s">&quot;notes.txt&quot;</span>)                 <span class="c"># is_folder for a folder; exists for either</span>
+    system's move_file(<span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;old-notes.txt&quot;</span>)   <span class="c"># or renamed</span>
+<span class="k">end</span>
+system's remove_file(<span class="s">&quot;old-notes.txt&quot;</span>)
+system's remove_folder(<span class="s">&quot;backup/2026&quot;</span>)            <span class="c"># once it's empty</span>
+system's set_environment(<span class="s">&quot;MODE&quot;</span>, <span class="s">&quot;test&quot;</span>)         <span class="c"># for this program, and those it starts</span>
+<span class="k">say</span> system's current_folder()                    <span class="c"># change_folder(path) to go into another</span>
+<span class="k">say</span> system's temporary_folder()</code></pre></div>
+        </section>
+        <section class="fn" id="remove_file">
+          <h3><a href="#remove_file"><code>system's remove_file(path)</code></a></h3>
+          <p>a file removed; a mistake if it can't be</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to remove_file with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L172">system.moth line 172</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's remove_file(<span class="s">&quot;old-notes.txt&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="append_to_file">
+          <h3><a href="#append_to_file"><code>system's append_to_file(path, data)</code></a></h3>
+          <p>text or bytes added to the end of a file, which is made if it isn't there, as Python's open(name, &quot;a&quot;) does</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to append_to_file with path, data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L183">system.moth line 183</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's append_to_file(<span class="s">&quot;log.txt&quot;</span>, <span class="s">&quot;one more line\n&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="make_folder">
+          <h3><a href="#make_folder"><code>system's make_folder(path)</code></a></h3>
+          <p>a folder, and the folders it's in if they aren't there; a folder that's there already is fine</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to make_folder with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L222">system.moth line 222</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's make_folder(<span class="s">&quot;backup/2026&quot;</span>)              <span class="c"># and the folders it's in, if they aren't there</span></code></pre></div>
+        </section>
+        <section class="fn" id="remove_folder">
+          <h3><a href="#remove_folder"><code>system's remove_folder(path)</code></a></h3>
+          <p>an empty folder removed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to remove_folder with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L247">system.moth line 247</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's remove_folder(<span class="s">&quot;backup/2026&quot;</span>)            <span class="c"># once it's empty</span></code></pre></div>
+        </section>
+        <section class="fn" id="environment">
+          <h3><a href="#environment"><code>system's environment(name)</code></a></h3>
+          <p>an environment variable's value, or nothing if there's none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to environment with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L260">system.moth line 260</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's environment(<span class="s">&quot;PATH&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="set_environment">
+          <h3><a href="#set_environment"><code>system's set_environment(name, value)</code></a></h3>
+          <p>an environment variable set, for this program and those it starts; nothing for its value removes it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_environment with name, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L273">system.moth line 273</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's set_environment(<span class="s">&quot;MODE&quot;</span>, <span class="s">&quot;test&quot;</span>)         <span class="c"># for this program, and those it starts</span></code></pre></div>
+        </section>
+        <section class="fn" id="current_folder">
+          <h3><a href="#current_folder"><code>system's current_folder()</code></a></h3>
+          <p>the folder the program is working in, which names that aren't whole paths are from</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to current_folder</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L288">system.moth line 288</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's current_folder()                    <span class="c"># change_folder(path) to go into another</span></code></pre></div>
+        </section>
+        <section class="fn" id="change_folder">
+          <h3><a href="#change_folder"><code>system's change_folder(path)</code></a></h3>
+          <p>the folder the program is working in changed, so names that aren't whole paths are from there</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to change_folder with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L308">system.moth line 308</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+system's change_folder(path)</code></pre></div>
+        </section>
+        <section class="fn" id="home_folder">
+          <h3><a href="#home_folder"><code>system's home_folder()</code></a></h3>
+          <p>the person's own folder: USERPROFILE on Windows, HOME on Linux</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to home_folder</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L321">system.moth line 321</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's home_folder()</code></pre></div>
+        </section>
+        <section class="fn" id="temporary_folder">
+          <h3><a href="#temporary_folder"><code>system's temporary_folder()</code></a></h3>
+          <p>the folder for files a program needs a short while, without a \ or / at its end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to temporary_folder</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/system.moth#L329">system.moth line 329</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;system.moth&quot;</span> <span class="k">as</span> system
+<span class="k">say</span> system's temporary_folder()</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

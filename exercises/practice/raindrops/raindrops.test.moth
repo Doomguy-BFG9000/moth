@@ -1,0 +1,29 @@
+use "raindrops.moth" as exercise
+
+to test_one
+    expect exercise's convert(1) is "1"
+end
+
+to test_three
+    expect exercise's convert(3) is "Pling"
+end
+
+to test_five
+    expect exercise's convert(5) is "Plang"
+end
+
+to test_seven
+    expect exercise's convert(7) is "Plong"
+end
+
+to test_fifteen
+    expect exercise's convert(15) is "PlingPlang"
+end
+
+to test_all_three
+    expect exercise's convert(105) is "PlingPlangPlong"
+end
+
+to test_none
+    expect exercise's convert(34) is "34"
+end

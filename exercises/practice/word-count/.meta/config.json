@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "word_count.moth"
+    ],
+    "test": [
+      "word_count.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Count how many times each word comes in a sentence."
+}

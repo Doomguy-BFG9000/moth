@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dates.moth · Moth's standard library</title>
+  <meta name="description" content="Dates on the calendar: today's, one read from &quot;2026-11-03&quot;, days added and counted between, weekdays, and a date written as a person wants it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>dates</em>.moth</h1>
+      <p>Dates on the calendar: today's, one read from &quot;2026-11-03&quot;, days added and counted between, weekdays, and a date written as a person wants it.</p>
+      <p class="use"><code>use "dates.moth" as dates</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="dates.moth's functions">
+      <h2>16 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#date">date</a></li><li><a href="#today">today</a></li><li><a href="#now">now</a></li><li><a href="#read_date">read_date</a></li><li><a href="#is_leap_year">is_leap_year</a></li><li><a href="#days_in_month">days_in_month</a></li><li><a href="#day_number">day_number</a></li><li><a href="#date_of_day">date_of_day</a></li><li><a href="#add_days">add_days</a></li><li><a href="#add_months">add_months</a></li><li><a href="#days_between">days_between</a></li><li><a href="#weekday_number">weekday_number</a></li><li><a href="#weekday_name">weekday_name</a></li><li><a href="#month_name">month_name</a></li><li><a href="#date_text">date_text</a></li><li><a href="#format_date">format_date</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Dates on the calendar: today's, one read from &quot;2026-11-03&quot;, days added and counted between, weekdays, and a date written as a person wants it. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">set</span> <span class="k">start</span> <span class="k">to</span> dates's read_date(<span class="s">&quot;2026-11-03&quot;</span>)
+<span class="k">set</span> due <span class="k">to</span> dates's add_days(<span class="k">start</span>, <span class="n">30</span>)
+<span class="k">say</span> dates's format_date(due, <span class="s">&quot;dddd D MMMM YYYY&quot;</span>)       <span class="c"># Thursday 3 December 2026</span>
+<span class="k">say</span> dates's days_between(<span class="k">start</span>, due)                    <span class="c"># 30</span>
+<span class="k">say</span> dates's format_date(dates's now(), <span class="s">&quot;YYYY-MM-DD hh:mm:ss&quot;</span>)</code></pre></div>
+          <p>A date is a record with its year, month and day; <a href="#now">now</a>() is one with its hour, minute and second too. <a href="#format_date">format_date</a> writes YYYY (2026), YY (26), MMMM (November), MMM (Nov), MM (11), M, DD (03), D (3), dddd (Tuesday), ddd (Tue), hh (09, from 0 to 23), h, mm (05, minutes), m, ss and s; anything else is as it is, and anything in [ ] is as it is without the brackets: &quot;D [of] MMMM&quot;.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="date">
+          <h3><a href="#date"><code>dates's date(year, month, day)</code></a></h3>
+          <p>a date, after checking there is one: date(2024, 2, 29) is, date(2023, 2, 29) isn't</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>year</code></li><li><code>month</code></li><li><code>day</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to date with year, month, day</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L22">dates.moth line 22</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's day_number(dates's date(<span class="n">1970</span>, <span class="n">1</span>, <span class="n">1</span>))</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="today">
+          <h3><a href="#today"><code>dates's today()</code></a></h3>
+          <p>today's date, by the computer's clock, where it is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to today</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L38">dates.moth line 38</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">set</span> d <span class="k">to</span> dates's today()
+<span class="k">say</span> d</code></pre><pre class="says"><code>(record with year 2026, month 1, day 2)</code></pre></div>
+        </section>
+        <section class="fn" id="now">
+          <h3><a href="#now"><code>dates's now()</code></a></h3>
+          <p>today, and the time: its hour (0 to 23), minute and second</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to now</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L43">dates.moth line 43</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's format_date(dates's now(), <span class="s">&quot;YYYY-MM-DD hh:mm:ss&quot;</span>)</code></pre><pre class="says"><code>2026-01-02 03:04:05</code></pre></div>
+        </section>
+        <section class="fn" id="read_date">
+          <h3><a href="#read_date"><code>dates's read_date(written)</code></a></h3>
+          <p>&quot;2026-11-03&quot;, maybe with a time after it, &quot;2026-11-03 14:05&quot; or &quot;2026-11-03T14:05:09&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>written</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_date with written</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L52">dates.moth line 52</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">set</span> d <span class="k">to</span> dates's read_date(<span class="s">&quot;2026-11-03&quot;</span>)
+<span class="k">say</span> d</code></pre><pre class="says"><code>(record with year 2026, month 11, day 3)</code></pre></div>
+        </section>
+        <section class="fn" id="is_leap_year">
+          <h3><a href="#is_leap_year"><code>dates's is_leap_year(year)</code></a></h3>
+          <p>whether a year has 29 February: every fourth year, but not every hundredth, but every four hundredth</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>year</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_leap_year with year</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L83">dates.moth line 83</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's is_leap_year(<span class="n">2000</span>)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="days_in_month">
+          <h3><a href="#days_in_month"><code>dates's days_in_month(year, month)</code></a></h3>
+          <p>how many days a month of a year has, 28 to 31</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>year</code></li><li><code>month</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to days_in_month with year, month</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L88">dates.moth line 88</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's days_in_month(<span class="n">2026</span>, <span class="n">4</span>)</code></pre><pre class="says"><code>30</code></pre></div>
+        </section>
+        <section class="fn" id="day_number">
+          <h3><a href="#day_number"><code>dates's day_number(d)</code></a></h3>
+          <p>how many days a date is after 1 January 1970 (before it, below 0)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to day_number with d</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L116">dates.moth line 116</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's day_number(dates's date(<span class="n">1970</span>, <span class="n">1</span>, <span class="n">1</span>))</code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="date_of_day">
+          <h3><a href="#date_of_day"><code>dates's date_of_day(n)</code></a></h3>
+          <p>the date <code>n</code> days after 1 January 1970</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to date_of_day with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L134">dates.moth line 134</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's date_of_day(<span class="n">20395</span>)</code></pre><pre class="says"><code>(record with year 2025, month 11, day 3)</code></pre></div>
+        </section>
+        <section class="fn" id="add_days">
+          <h3><a href="#add_days"><code>dates's add_days(d, n)</code></a></h3>
+          <p>the date so many days after (or before, below 0) a date</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_days with d, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L155">dates.moth line 155</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's add_days(dates's date(<span class="n">2024</span>, <span class="n">2</span>, <span class="n">28</span>), <span class="n">1</span>)</code></pre><pre class="says"><code>(record with year 2024, month 2, day 29)</code></pre></div>
+        </section>
+        <section class="fn" id="add_months">
+          <h3><a href="#add_months"><code>dates's add_months(d, n)</code></a></h3>
+          <p>the same day so many months on (or back, below 0), or the month's last day if it has fewer</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_months with d, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L160">dates.moth line 160</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's add_months(dates's date(<span class="n">2026</span>, <span class="n">1</span>, <span class="n">31</span>), <span class="n">1</span>)</code></pre><pre class="says"><code>(record with year 2026, month 2, day 28)</code></pre></div>
+        </section>
+        <section class="fn" id="days_between">
+          <h3><a href="#days_between"><code>dates's days_between(first, second)</code></a></h3>
+          <p>how many days from <code>first</code> to <code>second</code>: below 0 if second is first</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>first</code></li><li><code>second</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to days_between with first, second</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L173">dates.moth line 173</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's days_between(dates's date(<span class="n">2026</span>, <span class="n">1</span>, <span class="n">1</span>), dates's date(<span class="n">2027</span>, <span class="n">1</span>, <span class="n">1</span>))</code></pre><pre class="says"><code>365</code></pre></div>
+        </section>
+        <section class="fn" id="weekday_number">
+          <h3><a href="#weekday_number"><code>dates's weekday_number(d)</code></a></h3>
+          <p>1 for Monday, to 7 for Sunday</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to weekday_number with d</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L178">dates.moth line 178</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's weekday_number(dates's date(<span class="n">1970</span>, <span class="n">1</span>, <span class="n">1</span>))</code></pre><pre class="says"><code>4</code></pre></div>
+        </section>
+        <section class="fn" id="weekday_name">
+          <h3><a href="#weekday_name"><code>dates's weekday_name(d)</code></a></h3>
+          <p>the day of the week a date is on, in full: &quot;Monday&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to weekday_name with d</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L184">dates.moth line 184</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">say</span> dates's weekday_name(dates's date(<span class="n">2026</span>, <span class="n">11</span>, <span class="n">3</span>))</code></pre><pre class="says"><code>Tuesday</code></pre></div>
+        </section>
+        <section class="fn" id="month_name">
+          <h3><a href="#month_name"><code>dates's month_name(d)</code></a></h3>
+          <p>the month a date is in, in full: &quot;November&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to month_name with d</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L189">dates.moth line 189</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+dates's month_name(d)</code></pre></div>
+        </section>
+        <section class="fn" id="date_text">
+          <h3><a href="#date_text"><code>dates's date_text(d)</code></a></h3>
+          <p>a date as &quot;2026-11-03&quot; (ISO 8601), as <a href="#read_date">read_date</a> reads it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to date_text with d</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L194">dates.moth line 194</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">set</span> d <span class="k">to</span> dates's read_date(<span class="s">&quot;2026-11-03&quot;</span>)
+<span class="k">say</span> dates's date_text(d)</code></pre><pre class="says"><code>2026-11-03</code></pre></div>
+        </section>
+        <section class="fn" id="format_date">
+          <h3><a href="#format_date"><code>dates's format_date(d, pattern)</code></a></h3>
+          <p>a date written as <code>pattern</code> says, with YYYY, MMMM, DD, dddd and the rest as at the top of this file: format_date(d, &quot;dddd D MMMM YYYY&quot;) is &quot;Tuesday 3 November 2026&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>d</code></li><li><code>pattern</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to format_date with d, pattern</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/dates.moth#L269">dates.moth line 269</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+<span class="k">set</span> d <span class="k">to</span> dates's read_date(<span class="s">&quot;2026-11-03&quot;</span>)
+<span class="k">say</span> dates's format_date(d, <span class="s">&quot;dddd D MMMM YYYY&quot;</span>)</code></pre><pre class="says"><code>Tuesday 3 November 2026</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+to to_rna with dna
+    fail with "delete this line, and transcribe it"
+end

@@ -18,10 +18,12 @@ to b64_bytes with data
     return data as bytes
 end
 
+# text or bytes in base64, with = at the end to make it a multiple of 4 letters, as Python's b64encode
 to base64_of with data
     return b64_encode(b64_bytes(data), b64_alphabet as bytes, yes)
 end
 
+# the bytes base64 stands for; spaces and line ends are skipped, as in a PEM file
 to bytes_of_base64 with words
     return b64_decode(words, b64_alphabet as bytes)
 end
@@ -31,6 +33,7 @@ to url_base64_of with data
     return b64_encode(b64_bytes(data), b64_url_alphabet as bytes, yes)
 end
 
+# the bytes URL-safe base64 stands for, with or without its = at the end
 to bytes_of_url_base64 with words
     return b64_decode(words, b64_url_alphabet as bytes)
 end

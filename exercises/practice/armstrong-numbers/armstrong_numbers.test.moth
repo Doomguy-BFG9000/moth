@@ -1,0 +1,24 @@
+use "armstrong_numbers.moth" as exercise
+
+to test_zero
+    expect exercise's is_armstrong(0)
+end
+
+to test_one_digit
+    expect exercise's is_armstrong(5)
+end
+
+to test_two_digits
+    expect not exercise's is_armstrong(10)
+end
+
+to test_three_digits
+    expect exercise's is_armstrong(153)
+    expect not exercise's is_armstrong(100)
+end
+
+to test_more_digits
+    expect exercise's is_armstrong(9474)
+    expect not exercise's is_armstrong(9475)
+    expect exercise's is_armstrong(9926315)
+end

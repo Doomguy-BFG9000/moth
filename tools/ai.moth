@@ -50,6 +50,8 @@ end
 
 # ---------- clients ----------
 
+# a client for Anthropic's Messages API and a Claude model ("claude-opus-5-5" if none is given), its key from
+# ANTHROPIC_API_KEY; options, a dictionary, can have base_url, max_tokens, effort and fallbacks
 to anthropic with model or "claude-opus-5-5", options or nothing
     set chosen to ai_options(options)
     set made to ai_client("Anthropic", model, ai_option(chosen, "base_url", "https://api.anthropic.com"),
@@ -59,6 +61,8 @@ to anthropic with model or "claude-opus-5-5", options or nothing
     return made
 end
 
+# a client for OpenAI's own API and one of its models, its key from OPENAI_API_KEY; options, a dictionary, can
+# have base_url
 to openai with model, options or nothing
     set chosen to ai_options(options)
     return openai_compatible(ai_option(chosen, "base_url", "https://api.openai.com/v1"), model, yes)

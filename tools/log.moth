@@ -5,6 +5,8 @@
 #   use "log.moth" as log
 #   log's info("started")                  # 2026-11-04 10:15:00 INFO started, on the error output
 #   log's warning("the disk is almost full")
+#   log's debug("cache hit")                # written only at the debug level
+#   log's error("can't reach the database") # and critical, the most
 #   log's set_level("debug")               # debug, info (the first level), warning, error or critical
 #   log's to_file("app.log")               # each line added to the end of app.log (built with --allow-libraries)
 #   log's to_error_output()                # back to the error output
@@ -23,6 +25,8 @@ set log_name to ""
 set log_format to "%time% %level% %name%%message%"
 set log_written to empty list
 
+# the least a line must matter to be written: "debug", "info" (the level to begin with), "warning", "error" or
+# "critical"
 to set_level with name
     set at to log_number_of(name)
     set log_level to at
@@ -38,42 +42,53 @@ to log_number_of with name
     fail with "there's no level called '" + name + "': debug, info, warning, error and critical are"
 end
 
+# each line added to the end of a file from now on, which is made if it isn't there
 to to_file with path
     set log_file to path
 end
 
+# each line written to the error output from now on, as at the start
 to to_error_output
     set log_file to nothing
 end
 
+# a name written before each message from now on, as "db: connected"; "" for none
 to set_name with name
     set log_name to name
 end
 
+# how each line is written: %time%, %level%, %name% and %message% in it are those, as "%time% %level%
+# %name%%message%" to begin with
 to set_format with format
     set log_format to format
 end
 
+# every line written so far, at any level that was written, as a list
 to lines
     return log_written
 end
 
+# a line written at the debug level: what's useful when looking for a mistake
 to debug with message
     log_line(1, message)
 end
 
+# a line written at the info level: what happened, as it should
 to info with message
     log_line(2, message)
 end
 
+# a line written at the warning level: something that may be wrong
 to warning with message
     log_line(3, message)
 end
 
+# a line written at the error level: something that went wrong
 to error with message
     log_line(4, message)
 end
 
+# a line written at the critical level: something so wrong the program may not go on
 to critical with message
     log_line(5, message)
 end

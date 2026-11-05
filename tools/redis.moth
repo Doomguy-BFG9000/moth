@@ -35,6 +35,7 @@ set redis_crlf to (list of 13, 10) as bytes
 
 # ---------- connecting ----------
 
+# a connection to a Redis server, over TCP: the host and its port (6379)
 to connect with host, port or 6379
     return redis_client(redis_net's connect(host, port))
 end
@@ -136,6 +137,7 @@ to redis_decoded with words
     return made as bytes as text
 end
 
+# logged in with a password, and for Redis 6's users a user name too (AUTH)
 to log_in with r, password, user or nothing
     if user is nothing
         command(r, list of "AUTH", password)
@@ -144,6 +146,7 @@ to log_in with r, password, user or nothing
     end
 end
 
+# which of the server's numbered databases the connection uses from now on (SELECT), from 0
 to select_database with r, n
     command(r, list of "SELECT", n)
 end
@@ -160,6 +163,7 @@ to wait_at_most with r, milliseconds
     redis_net's wait_at_most(connection of r, milliseconds)
 end
 
+# the connection closed
 to close with r
     redis_net's close(connection of r)
 end
@@ -203,14 +207,17 @@ to transaction with r, commands
     return item (length of replies) of replies
 end
 
+# a key's value, as text, or nothing if there's no such key (GET)
 to get with r, key
     return command(r, list of "GET", key)
 end
 
+# a key's value as bytes, as they are, or nothing if there's no such key
 to get_bytes with r, key
     return command_bytes(r, list of "GET", key)
 end
 
+# a key given a value, for ever, replacing what it had (SET): text, bytes or a number
 to put with r, key, value
     command(r, list of "SET", key, value)
 end
@@ -229,6 +236,7 @@ to delete with r, keys_given
     return command(r, words)
 end
 
+# whether there's a key of that name
 to exists with r, key
     return command(r, list of "EXISTS", key) is 1
 end
@@ -276,6 +284,7 @@ to push with r, key, values
     return command(r, redis_words("RPUSH", key, values))
 end
 
+# a value, or a list of them, put at the front of a list (LPUSH): how long it is after
 to push_front with r, key, values
     return command(r, redis_words("LPUSH", key, values))
 end
@@ -285,6 +294,7 @@ to pop with r, key
     return command(r, list of "LPOP", key)
 end
 
+# the value at the end of a list, taken off, or nothing if it's empty (RPOP)
 to pop_back with r, key
     return command(r, list of "RPOP", key)
 end
@@ -304,20 +314,24 @@ to pop_waiting with r, keys_given, seconds
     return record with key item 1 of reply, value item 2 of reply
 end
 
+# every value of a list, front to back (LRANGE 0 -1)
 to list_items with r, key
     return command(r, list of "LRANGE", key, 0, -1)
 end
 
+# how many values a list has, 0 if there's no such key (LLEN)
 to list_length with r, key
     return command(r, list of "LLEN", key)
 end
 
 # ---------- hashes ----------
 
+# a field of a hash given a value (HSET): 1 if the field is new, 0 if it was changed
 to hash_put with r, key, field, value
     return command(r, list of "HSET", key, field, value)
 end
 
+# a field of a hash's value, or nothing if there's no such field (HGET)
 to hash_get with r, key, field
     return command(r, list of "HGET", key, field)
 end
@@ -335,6 +349,7 @@ to hash_all with r, key
     return made
 end
 
+# a field taken out of a hash (HDEL): 1 if it was there, else 0
 to hash_remove with r, key, field
     return command(r, list of "HDEL", key, field)
 end
@@ -352,6 +367,8 @@ to subscribe with r, channels
     redis_subscribing(r, "SUBSCRIBE", channels)
 end
 
+# the connection subscribed to every channel whose name fits a pattern, as "news.*" (PSUBSCRIBE); next_message
+# gives each message, with the pattern it fitted
 to subscribe_like with r, patterns
     redis_subscribing(r, "PSUBSCRIBE", patterns)
 end

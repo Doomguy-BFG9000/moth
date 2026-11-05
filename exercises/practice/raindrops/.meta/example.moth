@@ -1,0 +1,16 @@
+to convert with n
+    set sound to ""
+    if n is divisible by 3
+        set sound to sound + "Pling"
+    end
+    if n is divisible by 5
+        set sound to sound + "Plang"
+    end
+    if n is divisible by 7
+        set sound to sound + "Plong"
+    end
+    if sound is ""
+        return "" + n
+    end
+    return sound
+end

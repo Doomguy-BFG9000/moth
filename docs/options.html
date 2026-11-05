@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>options.moth · Moth's standard library</title>
+  <meta name="description" content="A program's command line read, as Python's argparse reads it: options with values, flags, and the names in order after them, with a --help made from what each is for.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>options</em>.moth</h1>
+      <p>A program's command line read, as Python's argparse reads it: options with values, flags, and the names in order after them, with a --help made from what each is for.</p>
+      <p class="use"><code>use "options.moth" as options</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="options.moth's functions">
+      <h2>9 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#parser">parser</a></li><li><a href="#option">option</a></li><li><a href="#flag">flag</a></li><li><a href="#positional">positional</a></li><li><a href="#rest">rest</a></li><li><a href="#parse">parse</a></li><li><a href="#parse_or_fail">parse_or_fail</a></li><li><a href="#usage_text">usage_text</a></li><li><a href="#help_text">help_text</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>A program's command line read, as Python's argparse reads it: options with values, flags, and the names in order after them, with a --help made from what each is for. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)   <span class="c"># --name Sam, -n Sam or --name=Sam; World if not</span>
+options's option(p, <span class="s">&quot;times&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;how many times&quot;</span>, <span class="n">1</span>)      <span class="c"># a default that's a number makes it a number</span>
+options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)                  <span class="c"># --loud or -l: yes; no if it isn't there</span>
+options's positional(p, <span class="s">&quot;file&quot;</span>, <span class="s">&quot;the file to greet from&quot;</span>)   <span class="c"># needed, in order</span>
+options's rest(p, <span class="s">&quot;more&quot;</span>, <span class="s">&quot;other files&quot;</span>)                    <span class="c"># the rest, as a list, which can be empty</span>
+<span class="k">set</span> given <span class="k">to</span> options's parse(p, <span class="k">arguments</span>)                  <span class="c"># a dictionary: name, times, loud, file, more</span>
+<span class="k">say</span> <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> given</code></pre></div>
+          <p>--help or -h says how to use it, and stops the program. A mistake on the command line (an option it doesn't know, one with no value, a name missing, one too many) says how to use it and why on the error output, and stops the program with 2, as argparse does. <a href="#parse_or_fail">parse_or_fail</a> is parse with a <code>fail with</code> instead, which <code>try</code> can catch: its why is the usage, then a line that says what's wrong; and given a --help, it gives the dictionary with &quot;help&quot; set to yes. <a href="#help_text">help_text</a>(p) is what --help says. A short name can be &quot;&quot;, for none.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="parser">
+          <h3><a href="#parser"><code>options's parser(name, description)</code></a></h3>
+          <p>a parser for a program's command line: its name and what it does, for --help; option, flag, positional and rest say what it takes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li><li><code>description</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to parser with name, description</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L22">options.moth line 22</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+<span class="k">say</span> p</code></pre><pre class="says"><code>(record with name &quot;greet&quot;, description &quot;Says hello to someone.&quot;, options [], positionals [], rest nothing)</code></pre></div>
+        </section>
+        <section class="fn" id="option">
+          <h3><a href="#option"><code>options's option(p, name, short, help, default)</code></a></h3>
+          <p>an option with a value: its name (--name), a short name (-n, or &quot;&quot; for none), what it's for, and its value when it isn't given, whose kind (a number, say) the value given is read as</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>name</code></li><li><code>short</code></li><li><code>help</code></li><li><code>default</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to option with p, name, short, help, default</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L28">options.moth line 28</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)   <span class="c"># --name Sam, -n Sam or --name=Sam; World if not</span></code></pre></div>
+        </section>
+        <section class="fn" id="flag">
+          <h3><a href="#flag"><code>options's flag(p, name, short, help)</code></a></h3>
+          <p>an option with no value: its name (--loud), a short name (-l, or &quot;&quot; for none) and what it's for; yes if it's given, no if not</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>name</code></li><li><code>short</code></li><li><code>help</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to flag with p, name, short, help</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L34">options.moth line 34</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)                  <span class="c"># --loud or -l: yes; no if it isn't there</span></code></pre></div>
+        </section>
+        <section class="fn" id="positional">
+          <h3><a href="#positional"><code>options's positional(p, name, help)</code></a></h3>
+          <p>a name the command line must have, in order after the options: its name in what parse gives, and what it's for</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>name</code></li><li><code>help</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to positional with p, name, help</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L51">options.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's positional(p, <span class="s">&quot;file&quot;</span>, <span class="s">&quot;the file to greet from&quot;</span>)   <span class="c"># needed, in order</span></code></pre></div>
+        </section>
+        <section class="fn" id="rest">
+          <h3><a href="#rest"><code>options's rest(p, name, help)</code></a></h3>
+          <p>every name left after the positional ones, as a list (which can be empty): its name in what parse gives, and what it's for</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>name</code></li><li><code>help</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rest with p, name, help</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L59">options.moth line 59</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's rest(p, <span class="s">&quot;more&quot;</span>, <span class="s">&quot;other files&quot;</span>)                    <span class="c"># the rest, as a list, which can be empty</span></code></pre></div>
+        </section>
+        <section class="fn" id="parse">
+          <h3><a href="#parse"><code>options's parse(p, given_arguments)</code></a></h3>
+          <p>the command line read, or the usage and what's wrong on the error output and the program stopped with 2</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>given_arguments</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to parse with p, given_arguments</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L64">options.moth line 64</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+<span class="k">set</span> given <span class="k">to</span> options's parse(p, <span class="k">arguments</span>)                  <span class="c"># a dictionary: name, times, loud, file, more</span></code></pre></div>
+        </section>
+        <section class="fn" id="parse_or_fail">
+          <h3><a href="#parse_or_fail"><code>options's parse_or_fail(p, given_arguments)</code></a></h3>
+          <p>the command line read, as parse reads it, or a <code>fail with</code> whose why is the usage and what's wrong; for --help, the dictionary with &quot;help&quot; set to yes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li><li><code>given_arguments</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to parse_or_fail with p, given_arguments</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L81">options.moth line 81</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">to</span> greeter
+    <span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+    options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)
+    options's option(p, <span class="s">&quot;times&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;how many times&quot;</span>, <span class="n">1</span>)
+    options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)
+    options's positional(p, <span class="s">&quot;file&quot;</span>, <span class="s">&quot;the file to greet from&quot;</span>)
+    options's rest(p, <span class="s">&quot;more&quot;</span>, <span class="s">&quot;other files&quot;</span>)
+    <span class="k">return</span> p
+<span class="k">end</span>
+<span class="k">set</span> p <span class="k">to</span> greeter()
+<span class="k">set</span> given <span class="k">to</span> options's parse_or_fail(p, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;--name&quot;</span>, <span class="s">&quot;Sam&quot;</span>, <span class="s">&quot;notes.txt&quot;</span>, <span class="s">&quot;-l&quot;</span>, <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)
+<span class="k">say</span> given</code></pre><pre class="says"><code>(dictionary where &quot;help&quot; is no, &quot;name&quot; is &quot;Sam&quot;, &quot;times&quot; is 1, &quot;loud&quot; is yes, &quot;file&quot; is &quot;notes.txt&quot;, &quot;more&quot; is [&quot;a&quot;, &quot;b&quot;])</code></pre></div>
+        </section>
+        <section class="fn" id="usage_text">
+          <h3><a href="#usage_text"><code>options's usage_text(p)</code></a></h3>
+          <p>the line that says how to use it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to usage_text with p</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L212">options.moth line 212</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">to</span> greeter
+    <span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+    options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)
+    options's option(p, <span class="s">&quot;times&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;how many times&quot;</span>, <span class="n">1</span>)
+    options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)
+    options's positional(p, <span class="s">&quot;file&quot;</span>, <span class="s">&quot;the file to greet from&quot;</span>)
+    options's rest(p, <span class="s">&quot;more&quot;</span>, <span class="s">&quot;other files&quot;</span>)
+    <span class="k">return</span> p
+<span class="k">end</span>
+<span class="k">set</span> p <span class="k">to</span> greeter()
+<span class="k">say</span> options's usage_text(p)</code></pre><pre class="says"><code>usage: greet [-h] [-n NAME] [-t TIMES] [-l] file [more ...]</code></pre></div>
+        </section>
+        <section class="fn" id="help_text">
+          <h3><a href="#help_text"><code>options's help_text(p)</code></a></h3>
+          <p>what --help says: the usage, what the program does, and what each name and option is for</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>p</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to help_text with p</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/options.moth#L234">options.moth line 234</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+<span class="k">to</span> greeter
+    <span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+    options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)
+    options's option(p, <span class="s">&quot;times&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;how many times&quot;</span>, <span class="n">1</span>)
+    options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)
+    options's positional(p, <span class="s">&quot;file&quot;</span>, <span class="s">&quot;the file to greet from&quot;</span>)
+    options's rest(p, <span class="s">&quot;more&quot;</span>, <span class="s">&quot;other files&quot;</span>)
+    <span class="k">return</span> p
+<span class="k">end</span>
+<span class="k">set</span> p <span class="k">to</span> greeter()
+<span class="k">set</span> lines <span class="k">to</span> <span class="k">split</span> options's help_text(p) <span class="k">by</span> <span class="s">&quot;\n&quot;</span>
+<span class="k">say</span> lines</code></pre><pre class="says"><code>[&quot;usage: greet [-h] [-n NAME] [-t TIMES] [-l] file [more ...]&quot;, &quot;&quot;, &quot;Says hello to someone.&quot;, &quot;&quot;, &quot;names:&quot;, &quot;  file                  the file to greet from&quot;, &quot;  more                  other files&quot;, &quot;&quot;, &quot;options:&quot;, &quot;  -h, --help            say this, and stop&quot;, &quot;  -n, --name NAME       who to greet (World if it isn't given)&quot;, &quot;  -t, --times TIMES     how many times (1 if it isn't given)&quot;, &quot;  -l, --loud            shout it&quot;]</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

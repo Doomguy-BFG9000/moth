@@ -1,0 +1,137 @@
+# properties.moth's tests, which moth.test.js runs on every engine
+
+use "properties.moth" as p
+use "json.moth" as json
+use "text.moth" as text
+
+to test_making
+    for each n in p's sample(p's whole_number(-5, 5), 42, 200)
+        expect n is at least -5
+        expect n is at most 5
+        expect (n rounded) is n
+    end
+    expect p's sample(p's whole_number(3, 3), 1, 4) is list of 3, 3, 3, 3
+    set big to p's sample(p's whole_number(1, 1000000000000), 8, 100)
+    expect 1 is in big
+    expect 1000000000000 is in big
+    for each x in p's sample(p's decimal(-1, 1), 7, 100)
+        expect x is at least -1
+        expect x is at most 1
+        expect ((x * 1000) rounded) is x * 1000
+    end
+    set seen to p's sample(p's yes_or_no(), 3, 50)
+    expect yes is in seen
+    expect no is in seen
+    for each t in p's sample(p's text_of("ab"), 5, 50)
+        for each c in split t by ""
+            expect c is in list of "a", "b"
+        end
+    end
+    for each xs in p's sample(p's list_of(p's whole_number(0, 9)), 9, 100)
+        expect length of xs is at most 20
+    end
+    for each v in p's sample(p's one_of(list of "x", "y"), 11, 30)
+        expect v is in list of "x", "y"
+    end
+    set both to p's sample(p's either_of(list of p's whole_number(1, 2), p's one_of(list of "z")), 12, 30)
+    expect 1 is in both or 2 is in both
+    expect "z" is in both
+    for each d in p's sample(p's dictionary_of(p's text_of("abc"), p's whole_number(1, 3)), 2, 50)
+        expect length of keys of d is at most 10
+    end
+    for each n in p's sample(p's mapped(p's whole_number(1, 9), (function with n gives n * 2)), 4, 30)
+        expect (remainder of n divided by 2) is 0
+    end
+    for each n in p's sample(p's kept(p's whole_number(1, 100), (function with n gives n is greater than 50)), 5, 30)
+        expect n is greater than 50
+    end
+end
+
+to test_the_same_seed_makes_the_same_values
+    set g to p's list_of(p's any_text())
+    expect p's sample(g, 1234, 30) is p's sample(g, 1234, 30)
+    expect p's sample(g, 1234, 30) is not p's sample(g, 4321, 30)
+    # on every engine alike: Park and Miller's numbers are whole numbers kept exactly
+    expect p's sample(p's whole_number(1, 1000000), 42, 12) is list of 1000000, 1, 4, 5, 23, 17, 10, 29, 53, 34, 90, 61
+end
+
+to test_properties_that_hold
+    p's for_all(p's list_of(p's whole_number(-1000, 1000)), (function with xs gives ((xs in order) in order) is (xs in order)))
+    p's for_all(p's any_text(), joining_nothing_changes_text)
+    p's for_all_with((dictionary where "tries" is 30), p's whole_number(1, 9), (function with n gives n is at least 1))
+end
+
+to joining_nothing_changes_text with t
+    expect t + "" is t
+    expect length of (split t by "") is length of t
+end
+
+to test_the_simplest_value_that_shows_it
+    expect "the property doesn't hold for 10: it gave no (try " is in failing(p's whole_number(0, 1000), (function with n gives n is less than 10))
+    set why to failing(p's list_of(p's whole_number(0, 100)), no_number_above_five)
+    expect "doesn't hold for [6]: it gave no" is in why
+    set why to failing(p's text_of("ab"), (function with t gives not ("b" is in t)))
+    expect "doesn't hold for \"b\": it gave no" is in why
+    set why to failing(p's decimal(0, 100), (function with x gives x is less than 2.5))
+    expect "doesn't hold for 2.5: it gave no" is in why
+    set why to failing(p's dictionary_of(p's text_of("ab"), p's whole_number(0, 9)), (function with d gives not ("b" is in d)))
+    expect "doesn't hold for \{\"b\":0\}: it gave no" is in why
+end
+
+to no_number_above_five with xs
+    for each x in xs
+        if x is greater than 5
+            return no
+        end
+    end
+    return yes
+end
+
+to test_a_mistake_counts_and_the_seed_says_how_to_see_it_again
+    set why to failing(p's whole_number(1, 10), (function with n gives item n of (list of 1, 2, 3) is at least 1))
+    expect "doesn't hold for 4: it failed: " is in why
+    set again to failing(p's whole_number(1, 10), (function with n gives item n of (list of 1, 2, 3) is at least 1))
+    expect "seed 77" is in again
+    expect why is again
+end
+
+to test_mistakes
+    expect mistake_of((function with x gives p's whole_number(5, 1))) is "whole_number needs low to be at most high, not 5 and 1"
+    expect mistake_of((function with x gives p's whole_number(1.5, 3))) is "whole_number needs whole numbers, not 1.5 and 3"
+    expect mistake_of((function with x gives p's text_of(""))) is "text_of needs at least one letter to make text of"
+    expect mistake_of((function with x gives p's one_of(empty list))) is "one_of needs a list with at least one value in it"
+    expect mistake_of((function with x gives p's sample(p's kept(p's whole_number(1, 5), (function with n gives n is greater than 9)), 1, 1))) is "kept found no value its test says yes to in 100 tries"
+end
+
+# ----- other libraries' properties -----
+
+to test_json_reads_what_moth_writes
+    set leaf to p's either_of(list of p's whole_number(-1000000, 1000000), p's decimal(-1000, 1000), p's yes_or_no(), p's any_text())
+    set value to p's either_of(list of leaf, p's list_of(leaf), p's dictionary_of(p's any_text(), leaf))
+    p's for_all(value, (function with v gives json's parse(v as json) is v))
+end
+
+to test_text_splits_and_joins_back
+    p's for_all(p's text_of("ab,"), (function with t gives (join (text's split_by(",", t)) with ",") is t))
+end
+
+# ----- helpers -----
+
+# the mistake for_all makes with seed 77, or "" if the property held
+to failing with generator, property
+    try
+        p's for_all_with((dictionary where "seed" is 77), generator, property)
+    if it fails with why
+        return why
+    end
+    return ""
+end
+
+to mistake_of with making
+    try
+        making(nothing)
+    if it fails with why
+        return why
+    end
+    return ""
+end

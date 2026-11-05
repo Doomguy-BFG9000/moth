@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "rna_transcription.moth"
+    ],
+    "test": [
+      "rna_transcription.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Turn a DNA strand into its RNA complement."
+}

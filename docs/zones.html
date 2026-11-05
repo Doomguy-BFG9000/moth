@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zones.moth · Moth's standard library</title>
+  <meta name="description" content="Time zones, as Python's zoneinfo has them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>zones</em>.moth</h1>
+      <p>Time zones, as Python's zoneinfo has them.</p>
+      <p class="use"><code>use "zones.moth" as zones</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="zones.moth's functions">
+      <h2>7 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#now">now</a></li><li><a href="#offset_at">offset_at</a></li><li><a href="#in_zone">in_zone</a></li><li><a href="#moment_of">moment_of</a></li><li><a href="#utc_text">utc_text</a></li><li><a href="#zone_text">zone_text</a></li><li><a href="#local_zone">local_zone</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Time zones, as Python's zoneinfo has them: what time it is in any of the world's zones, by its name (&quot;Asia/Kolkata&quot;, &quot;America/New_York&quot;, &quot;UTC&quot;), with its summer time, and the moment a time in one is. A moment is seconds since 1970 began in UTC, as the system's clock counts them. On Windows the zones are the system's own (ICU, in icu.dll, from Windows 10 1903); on Linux, the zoneinfo files. A program <code>moth build</code> makes can use it, built with --allow-libraries (and on Linux --allow-read, to read the zone's file).</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">set</span> now <span class="k">to</span> zones's now()                         <span class="c"># seconds since 1970, UTC</span>
+<span class="k">set</span> t <span class="k">to</span> zones's in_zone(now, <span class="s">&quot;Asia/Kolkata&quot;</span>)    <span class="c"># (record with year, month, day, hour, minute, second,</span>
+<span class="k">say</span> t                                            <span class="c">#   offset (seconds east of UTC), zone)</span>
+<span class="k">say</span> zones's zone_text(t)                         <span class="c"># 2026-11-04T11:55:38+05:30</span>
+<span class="k">say</span> zones's offset_at(<span class="s">&quot;America/New_York&quot;</span>, now)   <span class="c"># -18000 in winter, -14400 in summer</span>
+<span class="k">say</span> zones's moment_of(<span class="n">2026</span>, <span class="n">7</span>, <span class="n">4</span>, <span class="n">9</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="s">&quot;America/New_York&quot;</span>)   <span class="c"># that time there, as a moment</span>
+<span class="k">say</span> zones's local_zone()                         <span class="c"># this computer's own zone's name</span>
+<span class="k">say</span> zones's utc_text(now)                        <span class="c"># 2026-11-04T06:25:38Z</span></code></pre></div>
+          <p>A zone that isn't there is a <code>fail with</code> that says so: catch it with <code>try</code>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="now">
+          <h3><a href="#now"><code>zones's now()</code></a></h3>
+          <p>seconds since 1970 began, UTC</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to now</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L46">zones.moth line 46</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">set</span> now <span class="k">to</span> zones's now()                         <span class="c"># seconds since 1970, UTC</span></code></pre></div>
+        </section>
+        <section class="fn" id="offset_at">
+          <h3><a href="#offset_at"><code>zones's offset_at(zone, moment)</code></a></h3>
+          <p>seconds east of UTC in this zone at this moment</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>zone</code></li><li><code>moment</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to offset_at with zone, moment</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L54">zones.moth line 54</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">set</span> now <span class="k">to</span> zones's now()                         <span class="c"># seconds since 1970, UTC</span>
+<span class="k">say</span> zones's offset_at(<span class="s">&quot;America/New_York&quot;</span>, now)   <span class="c"># -18000 in winter, -14400 in summer</span></code></pre></div>
+        </section>
+        <section class="fn" id="in_zone">
+          <h3><a href="#in_zone"><code>zones's in_zone(moment, zone)</code></a></h3>
+          <p>the moment as the date and time in this zone</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>moment</code></li><li><code>zone</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to in_zone with moment, zone</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L65">zones.moth line 65</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">set</span> now <span class="k">to</span> zones's now()                         <span class="c"># seconds since 1970, UTC</span>
+<span class="k">set</span> t <span class="k">to</span> zones's in_zone(now, <span class="s">&quot;Asia/Kolkata&quot;</span>)    <span class="c"># (record with year, month, day, hour, minute, second,</span></code></pre></div>
+        </section>
+        <section class="fn" id="moment_of">
+          <h3><a href="#moment_of"><code>zones's moment_of(year, month, day, hour, minute, second, zone)</code></a></h3>
+          <p>the moment a date and time in this zone is, as Python's zoneinfo has it: for one summer time has twice, the first; for one it skips, as if the clocks hadn't changed yet (so 2:30 in a night that goes from 2:00 to 3:00 is 3:30)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>year</code></li><li><code>month</code></li><li><code>day</code></li><li><code>hour</code></li><li><code>minute</code></li><li><code>second</code></li><li><code>zone</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to moment_of with year, month, day, hour, minute, second, zone</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L76">zones.moth line 76</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">say</span> zones's moment_of(<span class="n">2026</span>, <span class="n">7</span>, <span class="n">4</span>, <span class="n">9</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="s">&quot;America/New_York&quot;</span>)   <span class="c"># that time there, as a moment</span></code></pre></div>
+        </section>
+        <section class="fn" id="utc_text">
+          <h3><a href="#utc_text"><code>zones's utc_text(moment)</code></a></h3>
+          <p>a moment, in seconds since 1 January 1970, written in UTC as ISO 8601: &quot;2026-11-03T14:05:09Z&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>moment</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to utc_text with moment</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L113">zones.moth line 113</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">set</span> now <span class="k">to</span> zones's now()                         <span class="c"># seconds since 1970, UTC</span>
+<span class="k">say</span> zones's utc_text(now)                        <span class="c"># 2026-11-04T06:25:38Z</span></code></pre></div>
+        </section>
+        <section class="fn" id="zone_text">
+          <h3><a href="#zone_text"><code>zones's zone_text(t)</code></a></h3>
+          <p>a time <a href="#in_zone">in_zone</a> gave, as ISO 8601 has it with its offset</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>t</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to zone_text with t</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L119">zones.moth line 119</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">say</span> zones's zone_text(t)                         <span class="c"># 2026-11-04T11:55:38+05:30</span></code></pre></div>
+        </section>
+        <section class="fn" id="local_zone">
+          <h3><a href="#local_zone"><code>zones's local_zone()</code></a></h3>
+          <p>this computer's own zone's name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to local_zone</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/zones.moth#L147">zones.moth line 147</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;zones.moth&quot;</span> <span class="k">as</span> zones
+<span class="k">say</span> zones's local_zone()                         <span class="c"># this computer's own zone's name</span></code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

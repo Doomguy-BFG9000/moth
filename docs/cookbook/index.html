@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Moth cookbook</title>
+  <meta name="description" content="Short, tested recipes for real work in Moth: files, JSON, CSV, web APIs, servers, the command line, data, dates, every core and tests.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../../#playground">Playground</a>
+      <a class="go" href="../../learn.html">Learn</a>
+      <a class="go" href="../../docs/">Docs</a>
+      <a class="go" href="../../docs/cookbook/" aria-current="page">Cookbook</a>
+      <a class="go" href="../../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow">The cookbook</p>
+      <h1>Recipes for <em>real work</em>.</h1>
+      <p>Short, complete answers to the things programs are for: files, JSON and CSV, web APIs and servers, the
+        command line, numbers and charts, dates, every core of the machine, and tests. Every recipe here is run, or
+        checked, each time Moth changes, so none of them goes stale.</p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="The recipes">
+      <h2>10 recipes</h2>
+      <ol><li><a href="#csv">Read and write CSV</a></li><li><a href="#json">Read, change and write JSON</a></li><li><a href="#web-api">Call a web API</a></li><li><a href="#web-server">A web API with a database</a></li><li><a href="#command-line">A command-line tool</a></li><li><a href="#data">Numbers, statistics and a chart</a></li><li><a href="#dates">Dates</a></li><li><a href="#every-core">Work on every core</a></li><li><a href="#testing">Test a program</a></li><li><a href="#text">Find and change text</a></li></ol>
+      <p class="more"><a href="../">The standard library</a> · <a href="../examples.html">Examples</a></p>
+    </nav>
+    <main class="prose">
+      <section class="fn recipe" id="csv">
+        <h2><a href="#csv">Read and write CSV</a></h2>
+        <p><code>text.moth</code> reads CSV the way spreadsheets write it, quotes and commas inside them included, and writes it back. <code>csv_rows</code> gives a list of rows, each a list of text; <code>csv_text</code> makes CSV from rows.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+
+<span class="k">set</span> rows <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;name&quot;</span>, <span class="s">&quot;city&quot;</span>, <span class="s">&quot;score&quot;</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Ada&quot;</span>, <span class="s">&quot;London&quot;</span>, <span class="n">91</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Lee, Ana&quot;</span>, <span class="s">&quot;Lisbon&quot;</span>, <span class="n">78</span>)
+<span class="k">write</span> text's csv_text(rows) <span class="k">to</span> <span class="s">&quot;scores.csv&quot;</span>
+
+<span class="k">set</span> <span class="k">table</span> <span class="k">to</span> text's csv_rows(<span class="k">read</span> <span class="s">&quot;scores.csv&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> <span class="k">items</span> <span class="n">2</span> <span class="k">to</span> (<span class="k">length</span> <span class="k">of</span> <span class="k">table</span>) <span class="k">of</span> <span class="k">table</span>
+    <span class="k">say</span> <span class="k">item</span> <span class="n">1</span> <span class="k">of</span> row + <span class="s">&quot; from &quot;</span> + <span class="k">item</span> <span class="n">2</span> <span class="k">of</span> row + <span class="s">&quot; scored &quot;</span> + <span class="k">item</span> <span class="n">3</span> <span class="k">of</span> row
+<span class="k">end</span></code></pre><pre class="says"><code>Ada from London scored 91
+Lee, Ana from Lisbon scored 78</code></pre></div>
+        <p>Every value comes back as text. <code>number of</code> makes a number of one, so the scores can be added up:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+
+<span class="k">set</span> <span class="k">table</span> <span class="k">to</span> text's csv_rows(<span class="s">&quot;name,score\nAda,91\nLee,78\nSam,85&quot;</span>)
+<span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> row <span class="k">in</span> <span class="k">items</span> <span class="n">2</span> <span class="k">to</span> (<span class="k">length</span> <span class="k">of</span> <span class="k">table</span>) <span class="k">of</span> <span class="k">table</span>
+    <span class="k">add</span> <span class="k">number</span> <span class="k">of</span> <span class="k">item</span> <span class="n">2</span> <span class="k">of</span> row <span class="k">to</span> <span class="k">total</span>
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;average: &quot;</span> + (<span class="k">total</span> / (<span class="k">length</span> <span class="k">of</span> <span class="k">table</span> - <span class="n">1</span>) <span class="k">with</span> <span class="n">1</span> decimals)</code></pre><pre class="says"><code>average: 84.7</code></pre></div>
+      </section>
+      <section class="fn recipe" id="json">
+        <h2><a href="#json">Read, change and write JSON</a></h2>
+        <p><code>json's parse</code> turns JSON into Moth's own values: an object becomes a dictionary, an array a list, true and false yes and no, and null nothing. <code>as json</code> turns any of them back.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;json.moth&quot;</span> <span class="k">as</span> <span class="k">json</span>
+
+<span class="k">set</span> order <span class="k">to</span> <span class="k">json</span>'s parse(<span class="s">&quot;\{\&quot;id\&quot;: 7, \&quot;items\&quot;: [\{\&quot;name\&quot;: \&quot;tea\&quot;, \&quot;price\&quot;: 3.5}, \{\&quot;name\&quot;: \&quot;cake\&quot;, \&quot;price\&quot;: 4.25}]}&quot;</span>)
+<span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> thing <span class="k">in</span> <span class="k">item</span> <span class="s">&quot;items&quot;</span> <span class="k">of</span> order
+    <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="k">total</span> + <span class="k">item</span> <span class="s">&quot;price&quot;</span> <span class="k">of</span> thing
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;order &quot;</span> + <span class="k">item</span> <span class="s">&quot;id&quot;</span> <span class="k">of</span> order + <span class="s">&quot; costs &quot;</span> + <span class="k">total</span>
+
+<span class="k">set</span> <span class="k">item</span> <span class="s">&quot;total&quot;</span> <span class="k">of</span> order <span class="k">to</span> <span class="k">total</span>
+<span class="k">write</span> order <span class="k">as</span> <span class="k">json</span> <span class="k">to</span> <span class="s">&quot;order.json&quot;</span>
+<span class="k">say</span> <span class="k">read</span> <span class="s">&quot;order.json&quot;</span></code></pre><pre class="says"><code>order 7 costs 7.75
+{&quot;id&quot;:7,&quot;items&quot;:[{&quot;name&quot;:&quot;tea&quot;,&quot;price&quot;:3.5},{&quot;name&quot;:&quot;cake&quot;,&quot;price&quot;:4.25}],&quot;total&quot;:7.75}</code></pre></div>
+        <p>A mistake in the JSON is a <code>fail with</code> that says where it is, so <code>try</code> can catch it:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;json.moth&quot;</span> <span class="k">as</span> <span class="k">json</span>
+
+<span class="k">try</span>
+    <span class="k">set</span> data <span class="k">to</span> <span class="k">json</span>'s parse(<span class="s">&quot;\{\&quot;name\&quot;: \&quot;Sam\&quot;,}&quot;</span>)
+<span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+    <span class="k">say</span> <span class="s">&quot;not JSON: &quot;</span> + why
+<span class="k">end</span></code></pre><pre class="says"><code>not JSON: JSON, letter 16: expected a key in quotes but found }</code></pre></div>
+      </section>
+      <section class="fn recipe" id="web-api">
+        <h2><a href="#web-api">Call a web API</a></h2>
+        <p><code>read</code> reads a site as well as a file. With <code>json's parse</code>, that's a JSON API in two lines. A program that reaches the network asks first, unless it runs with <code>--allow-net</code>: <code>moth run --allow-net stars.moth</code>.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;json.moth&quot;</span> <span class="k">as</span> <span class="k">json</span>
+
+<span class="k">set</span> repo <span class="k">to</span> <span class="k">json</span>'s parse(<span class="k">read</span> <span class="s">&quot;https://api.github.com/repos/samyyy2423/moth&quot;</span>)
+<span class="k">say</span> <span class="k">item</span> <span class="s">&quot;full_name&quot;</span> <span class="k">of</span> repo + <span class="s">&quot; has &quot;</span> + <span class="k">item</span> <span class="s">&quot;stargazers_count&quot;</span> <span class="k">of</span> repo + <span class="s">&quot; stars&quot;</span></code></pre></div>
+        <p>For more than a GET (other methods, headers, a body of JSON, a status to check), <code>http.moth</code> has them all. It runs on sockets of its own, so it needs <code>--allow-libraries</code> too:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;http.moth&quot;</span> <span class="k">as</span> http
+
+<span class="k">set</span> answer <span class="k">to</span> http's post(<span class="s">&quot;https://httpbin.org/post&quot;</span>, <span class="k">record</span> <span class="k">with</span> name <span class="s">&quot;Sam&quot;</span>, score <span class="n">91</span>)
+http's check(answer)
+<span class="k">say</span> status <span class="k">of</span> answer
+<span class="k">say</span> text <span class="k">of</span> answer</code></pre></div>
+      </section>
+      <section class="fn recipe" id="web-server">
+        <h2><a href="#web-server">A web API with a database</a></h2>
+        <p><code>server.moth</code> gives each request to a function of the program's, which says what to send back: text, a list or dictionary as JSON, or a record with a status. <code>sqlite.moth</code> keeps the data in a file. Together they're a small API that lists and saves notes:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;server.moth&quot;</span> <span class="k">as</span> web
+<span class="k">use</span> <span class="s">&quot;sqlite.moth&quot;</span> <span class="k">as</span> sqlite
+
+<span class="k">set</span> db <span class="k">to</span> sqlite's open(<span class="s">&quot;notes.db&quot;</span>)
+sqlite's run(db, <span class="s">&quot;create table if not exists notes (id integer primary key, text text)&quot;</span>)
+
+<span class="k">to</span> answer <span class="k">with</span> request
+    <span class="k">if</span> path <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;/notes&quot;</span> <span class="k">and</span> method <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;GET&quot;</span>
+        <span class="k">return</span> sqlite's query(db, <span class="s">&quot;select id, text from notes order by id&quot;</span>)
+    <span class="k">end</span>
+    <span class="k">if</span> path <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;/notes&quot;</span> <span class="k">and</span> method <span class="k">of</span> request <span class="k">is</span> <span class="s">&quot;POST&quot;</span>
+        sqlite's run_with(db, <span class="s">&quot;insert into notes (text) values (?)&quot;</span>, <span class="k">list</span> <span class="k">of</span> body <span class="k">of</span> request)
+        <span class="k">return</span> <span class="k">record</span> <span class="k">with</span> status <span class="n">201</span>, body <span class="s">&quot;saved&quot;</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">record</span> <span class="k">with</span> status <span class="n">404</span>, body <span class="s">&quot;There's nothing at &quot;</span> + path <span class="k">of</span> request
+<span class="k">end</span>
+
+web's serve(<span class="n">8080</span>, answer)</code></pre></div>
+        <p>Run it with <code>moth run --allow-libraries --allow-read --allow-write notes.moth</code>, then try it: <code>curl -d &quot;buy milk&quot; localhost:8080/notes</code> saves a note, and <code>curl localhost:8080/notes</code> lists them as JSON.</p>
+        <p>The server answers many people at once, and <code>web's serve_on_workers(8080, answer, 4)</code> answers on 4 cores. <code>moth build notes.moth --allow-libraries --allow-read --allow-write</code> makes it a program of its own, to copy to a server and run.</p>
+      </section>
+      <section class="fn recipe" id="command-line">
+        <h2><a href="#command-line">A command-line tool</a></h2>
+        <p><code>options.moth</code> reads a program's command line as Python's argparse does: options with values, flags, names in order, and a <code>--help</code> made from what each is for. In a real program, <code>parse</code> is given <code>arguments</code>, what the program was run with; here it's given a list, so the recipe can show what it does.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)
+options's option(p, <span class="s">&quot;times&quot;</span>, <span class="s">&quot;t&quot;</span>, <span class="s">&quot;how many times&quot;</span>, <span class="n">1</span>)
+options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)
+
+<span class="k">set</span> given <span class="k">to</span> options's parse(p, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;--name&quot;</span>, <span class="s">&quot;Sam&quot;</span>, <span class="s">&quot;-t&quot;</span>, <span class="s">&quot;2&quot;</span>, <span class="s">&quot;--loud&quot;</span>)
+<span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">1</span> <span class="k">to</span> <span class="k">item</span> <span class="s">&quot;times&quot;</span> <span class="k">of</span> given
+    <span class="k">set</span> greeting <span class="k">to</span> <span class="s">&quot;Hello, &quot;</span> + <span class="k">item</span> <span class="s">&quot;name&quot;</span> <span class="k">of</span> given + <span class="s">&quot;!&quot;</span>
+    <span class="k">if</span> <span class="k">item</span> <span class="s">&quot;loud&quot;</span> <span class="k">of</span> given
+        <span class="k">set</span> greeting <span class="k">to</span> <span class="k">uppercase</span> <span class="k">of</span> greeting
+    <span class="k">end</span>
+    <span class="k">say</span> greeting
+<span class="k">end</span></code></pre><pre class="says"><code>HELLO, SAM!
+HELLO, SAM!</code></pre></div>
+        <p>What <code>--help</code> says comes from the same lines:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;options.moth&quot;</span> <span class="k">as</span> options
+
+<span class="k">set</span> p <span class="k">to</span> options's parser(<span class="s">&quot;greet&quot;</span>, <span class="s">&quot;Says hello to someone.&quot;</span>)
+options's option(p, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;n&quot;</span>, <span class="s">&quot;who to greet&quot;</span>, <span class="s">&quot;World&quot;</span>)
+options's flag(p, <span class="s">&quot;loud&quot;</span>, <span class="s">&quot;l&quot;</span>, <span class="s">&quot;shout it&quot;</span>)
+<span class="k">say</span> options's help_text(p)</code></pre><pre class="says"><code>usage: greet [-h] [-n NAME] [-l]
+
+Says hello to someone.
+
+options:
+  -h, --help            say this, and stop
+  -n, --name NAME       who to greet (World if it isn't given)
+  -l, --loud            shout it</code></pre></div>
+        <p><code>moth build greet.moth</code> makes it a program of its own: <code>greet --name Sam --loud</code>.</p>
+      </section>
+      <section class="fn recipe" id="data">
+        <h2><a href="#data">Numbers, statistics and a chart</a></h2>
+        <p><code>stats.moth</code> has what Python's statistics module has, and <code>charts.moth</code> draws bars and lines to SVG or PNG. A week of temperatures, summed up and drawn:</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;stats.moth&quot;</span> <span class="k">as</span> stats
+<span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+
+<span class="k">set</span> days <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Mon&quot;</span>, <span class="s">&quot;Tue&quot;</span>, <span class="s">&quot;Wed&quot;</span>, <span class="s">&quot;Thu&quot;</span>, <span class="s">&quot;Fri&quot;</span>, <span class="s">&quot;Sat&quot;</span>, <span class="s">&quot;Sun&quot;</span>
+<span class="k">set</span> temperatures <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">12.5</span>, <span class="n">14</span>, <span class="n">13.2</span>, <span class="n">17.8</span>, <span class="n">19.4</span>, <span class="n">21</span>, <span class="n">18.6</span>
+
+<span class="k">say</span> <span class="s">&quot;mean &quot;</span> + (stats's mean(temperatures) <span class="k">with</span> <span class="n">1</span> decimals) + <span class="s">&quot;°C&quot;</span>
+<span class="k">say</span> <span class="s">&quot;median &quot;</span> + stats's median(temperatures) + <span class="s">&quot;°C&quot;</span>
+<span class="k">say</span> <span class="s">&quot;standard deviation &quot;</span> + (stats's stdev(temperatures) <span class="k">with</span> <span class="n">2</span> decimals)
+<span class="k">set</span> warmest <span class="k">to</span> <span class="n">1</span>
+<span class="k">for</span> <span class="k">each</span> k <span class="k">from</span> <span class="n">2</span> <span class="k">to</span> <span class="k">length</span> <span class="k">of</span> temperatures
+    <span class="k">if</span> <span class="k">item</span> k <span class="k">of</span> temperatures <span class="k">is</span> greater <span class="k">than</span> <span class="k">item</span> warmest <span class="k">of</span> temperatures
+        <span class="k">set</span> warmest <span class="k">to</span> k
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">say</span> <span class="s">&quot;warmest &quot;</span> + <span class="k">item</span> warmest <span class="k">of</span> temperatures + <span class="s">&quot;°C, on &quot;</span> + <span class="k">item</span> warmest <span class="k">of</span> days
+
+charts's save(charts's line_chart(<span class="s">&quot;A week of temperatures&quot;</span>, days, temperatures), <span class="s">&quot;week.svg&quot;</span>)
+<span class="k">say</span> <span class="s">&quot;drew week.svg&quot;</span></code></pre><pre class="says"><code>mean 16.6°C
+median 17.8°C
+standard deviation 3.36
+warmest 21°C, on Sat
+drew week.svg</code></pre></div>
+        <p>Numbers in Moth are decimals compared to 15 digits, as a spreadsheet keeps them, so money adds up as it should:</p>
+        <div class="code"><pre><code><span class="k">set</span> prices <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="n">0.1</span>, <span class="n">0.2</span>, <span class="n">19.99</span>
+<span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="n">0</span>
+<span class="k">for</span> <span class="k">each</span> p <span class="k">in</span> prices
+    <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="k">total</span> + p
+<span class="k">end</span>
+<span class="k">say</span> <span class="k">total</span>
+<span class="k">say</span> <span class="n">0.1</span> + <span class="n">0.2</span> <span class="k">is</span> <span class="n">0.3</span></code></pre><pre class="says"><code>20.29
+yes</code></pre></div>
+      </section>
+      <section class="fn recipe" id="dates">
+        <h2><a href="#dates">Dates</a></h2>
+        <p><code>dates.moth</code> reads dates, adds days, counts the days between two, and writes a date as a person wants it.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;dates.moth&quot;</span> <span class="k">as</span> dates
+
+<span class="k">set</span> <span class="k">start</span> <span class="k">to</span> dates's read_date(<span class="s">&quot;2026-11-05&quot;</span>)
+<span class="k">set</span> due <span class="k">to</span> dates's add_days(<span class="k">start</span>, <span class="n">30</span>)
+<span class="k">say</span> <span class="s">&quot;due &quot;</span> + dates's format_date(due, <span class="s">&quot;dddd D MMMM YYYY&quot;</span>)
+<span class="k">say</span> dates's days_between(<span class="k">start</span>, due) + <span class="s">&quot; days from &quot;</span> + dates's format_date(<span class="k">start</span>, <span class="s">&quot;ddd D MMM&quot;</span>)
+<span class="k">say</span> <span class="s">&quot;a weekend day: &quot;</span> + (dates's format_date(due, <span class="s">&quot;ddd&quot;</span>) <span class="k">is</span> <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Sat&quot;</span>, <span class="s">&quot;Sun&quot;</span>)</code></pre><pre class="says"><code>due Saturday 5 December 2026
+30 days from Thu 5 Nov
+a weekend day: yes</code></pre></div>
+        <p><code>dates's now()</code> is the date and time it is now, and <code>format_date</code> writes hours, minutes and seconds too: <code>dates's format_date(dates's now(), &quot;YYYY-MM-DD hh:mm:ss&quot;)</code>.</p>
+      </section>
+      <section class="fn recipe" id="every-core">
+        <h2><a href="#every-core">Work on every core</a></h2>
+        <p><code>start f(x) on another core</code> runs a call on a worker, a thread with memory of its own, and <code>wait for</code> gives back what it gave. Workers share nothing (each gets copies), so they can't trip over each other. In a program <code>moth build</code> makes, they run at the same moment on every core; in the playground they run one after another and give the same answers.</p>
+        <div class="code"><pre><code><span class="k">to</span> primes_below <span class="k">with</span> top
+    <span class="k">set</span> found <span class="k">to</span> <span class="n">0</span>
+    <span class="k">for</span> <span class="k">each</span> n <span class="k">from</span> <span class="n">2</span> <span class="k">to</span> top - <span class="n">1</span>
+        <span class="k">set</span> prime <span class="k">to</span> <span class="k">yes</span>
+        <span class="k">set</span> d <span class="k">to</span> <span class="n">2</span>
+        <span class="k">repeat</span> <span class="k">while</span> d * d <span class="k">is</span> <span class="k">at</span> <span class="k">most</span> n <span class="k">and</span> prime
+            <span class="k">if</span> <span class="k">remainder</span> <span class="k">of</span> n <span class="k">divided</span> <span class="k">by</span> d <span class="k">is</span> <span class="n">0</span>
+                <span class="k">set</span> prime <span class="k">to</span> <span class="k">no</span>
+            <span class="k">end</span>
+            <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> d
+        <span class="k">end</span>
+        <span class="k">if</span> prime
+            <span class="k">add</span> <span class="n">1</span> <span class="k">to</span> found
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> found
+<span class="k">end</span>
+
+<span class="k">set</span> jobs <span class="k">to</span> <span class="k">empty</span> <span class="k">list</span>
+<span class="k">for</span> <span class="k">each</span> top <span class="k">in</span> <span class="k">list</span> <span class="k">of</span> <span class="n">1000</span>, <span class="n">2000</span>, <span class="n">3000</span>, <span class="n">4000</span>
+    <span class="k">add</span> (<span class="k">start</span> primes_below(top) on another core) <span class="k">to</span> jobs
+<span class="k">end</span>
+<span class="k">for</span> <span class="k">each</span> job <span class="k">in</span> jobs
+    <span class="k">say</span> <span class="k">wait</span> <span class="k">for</span> job
+<span class="k">end</span></code></pre><pre class="says"><code>168
+303
+430
+550</code></pre></div>
+        <p><code>tools/cores.moth</code> does the same for a whole list at once, across separate copies of the program.</p>
+      </section>
+      <section class="fn recipe" id="testing">
+        <h2><a href="#testing">Test a program</a></h2>
+        <p>Tests are functions whose names start with <code>test_</code>, in a file whose name ends in <code>.test.moth</code>. Each runs on its own, and <code>expect</code> says what should be so; when it isn't, the mistake says what each side was.</p>
+        <div class="code"><pre><code><span class="k">to</span> with_tax <span class="k">with</span> price
+    <span class="k">return</span> price * <span class="n">1.2</span>
+<span class="k">end</span>
+
+<span class="k">to</span> test_tax_on_ten
+    <span class="k">expect</span> with_tax(<span class="n">10</span>) <span class="k">is</span> <span class="n">12</span>
+<span class="k">end</span>
+
+<span class="k">to</span> test_tax_on_nothing
+    <span class="k">expect</span> with_tax(<span class="n">0</span>) <span class="k">is</span> <span class="n">0</span>
+<span class="k">end</span>
+
+<span class="k">to</span> test_tax_on_pennies
+    <span class="k">expect</span> with_tax(<span class="n">0.1</span>) <span class="k">is</span> <span class="n">0.12</span>
+<span class="k">end</span></code></pre></div>
+        <p>Save it as <code>prices.test.moth</code>, and <code>moth test</code> runs every test file in the folder and the folders inside: <code>✓ test_tax_on_ten</code>, and so on, then how many passed. <code>moth coverage</code> runs them too, and says which lines no test ran.</p>
+        <p>A test can check a mistake as well, with <code>try</code>:</p>
+        <div class="code"><pre><code><span class="k">to</span> price_of <span class="k">with</span> item_name
+    <span class="k">if</span> item_name <span class="k">is</span> <span class="s">&quot;tea&quot;</span>
+        <span class="k">return</span> <span class="n">3.5</span>
+    <span class="k">end</span>
+    <span class="k">fail</span> <span class="k">with</span> <span class="s">&quot;there's no &quot;</span> + item_name + <span class="s">&quot; on the menu&quot;</span>
+<span class="k">end</span>
+
+<span class="k">to</span> test_an_unknown_item
+    <span class="k">try</span>
+        price_of(<span class="s">&quot;soup&quot;</span>)
+        <span class="k">expect</span> <span class="k">no</span>
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">expect</span> why <span class="k">is</span> <span class="s">&quot;there's no soup on the menu&quot;</span>
+    <span class="k">end</span>
+<span class="k">end</span></code></pre></div>
+      </section>
+      <section class="fn recipe" id="text">
+        <h2><a href="#text">Find and change text</a></h2>
+        <p><code>text.moth</code>'s patterns are regular expressions: <code>\d</code> a digit, <code>\w</code> a letter, digit or _, <code>+</code> one or more, and the rest. In Moth's own text, a <code>\</code> is written <code>\\</code>.</p>
+        <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+
+<span class="k">set</span> log <span class="k">to</span> <span class="s">&quot;2026-11-05 ERROR disk full\n2026-11-05 INFO started\n2026-11-06 ERROR no network&quot;</span>
+<span class="k">for</span> <span class="k">each</span> line <span class="k">in</span> <span class="k">split</span> log <span class="k">by</span> <span class="s">&quot;\n&quot;</span>
+    <span class="k">if</span> text's contains_pattern(<span class="s">&quot;ERROR&quot;</span>, line)
+        <span class="k">say</span> text's replace_all(<span class="s">&quot;^[\\d-]+ ERROR &quot;</span>, line, <span class="s">&quot;problem: &quot;</span>)
+    <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">say</span> text's matches(<span class="s">&quot;^[a-z.]+@[a-z]+\\.[a-z]+$&quot;</span>, <span class="s">&quot;ada.l@moth.dev&quot;</span>)
+<span class="k">set</span> found <span class="k">to</span> text's find(<span class="s">&quot;(\\d+) of (\\d+)&quot;</span>, <span class="s">&quot;page 12 of 40&quot;</span>)
+<span class="k">say</span> <span class="k">item</span> <span class="n">1</span> <span class="k">of</span> groups <span class="k">of</span> found + <span class="s">&quot; and &quot;</span> + <span class="k">item</span> <span class="n">2</span> <span class="k">of</span> groups <span class="k">of</span> found</code></pre><pre class="says"><code>problem: disk full
+problem: no network
+yes
+12 and 40</code></pre></div>
+        <p>Counting words needs no library at all: a dictionary keeps a count for each.</p>
+        <div class="code"><pre><code><span class="k">set</span> counts <span class="k">to</span> <span class="k">empty</span> <span class="k">dictionary</span>
+<span class="k">for</span> <span class="k">each</span> word <span class="k">in</span> <span class="k">split</span> (<span class="k">lowercase</span> <span class="k">of</span> <span class="s">&quot;The moth and the lamp and the night&quot;</span>) <span class="k">by</span> <span class="s">&quot; &quot;</span>
+    <span class="k">if</span> word <span class="k">is</span> <span class="k">in</span> counts
+        <span class="k">set</span> <span class="k">item</span> word <span class="k">of</span> counts <span class="k">to</span> <span class="k">item</span> word <span class="k">of</span> counts + <span class="n">1</span>
+    <span class="k">else</span>
+        <span class="k">set</span> <span class="k">item</span> word <span class="k">of</span> counts <span class="k">to</span> <span class="n">1</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">say</span> counts</code></pre><pre class="says"><code>(dictionary where &quot;the&quot; is 3, &quot;moth&quot; is 1, &quot;and&quot; is 2, &quot;lamp&quot; is 1, &quot;night&quot; is 1)</code></pre></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../../#playground">Playground</a>
+      <a href="../../learn.html">Learn</a>
+      <a href="../../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+</body>
+</html>

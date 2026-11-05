@@ -34,6 +34,7 @@ to date with year, month, day
     return record with year year, month month, day day
 end
 
+# today's date, by the computer's clock, where it is
 to today
     return date(the year, the month, the day)
 end
@@ -78,10 +79,12 @@ to read_date with written
     return made
 end
 
+# whether a year has 29 February: every fourth year, but not every hundredth, but every four hundredth
 to is_leap_year with year
     return (year is divisible by 4 and not (year is divisible by 100)) or year is divisible by 400
 end
 
+# how many days a month of a year has, 28 to 31
 to days_in_month with year, month
     if month is 2
         if is_leap_year(year)
@@ -148,6 +151,7 @@ to date_of_day with n
     return date(y, m, d)
 end
 
+# the date so many days after (or before, below 0) a date
 to add_days with d, n
     return date_of_day(day_number(d) + n)
 end
@@ -176,14 +180,17 @@ to weekday_number with d
     return n - dates_floor(n / 7) * 7 + 1
 end
 
+# the day of the week a date is on, in full: "Monday"
 to weekday_name with d
     return item weekday_number(d) of dates_weekdays
 end
 
+# the month a date is in, in full: "November"
 to month_name with d
     return item (month of d) of dates_months
 end
 
+# a date as "2026-11-03" (ISO 8601), as read_date reads it
 to date_text with d
     return format_date(d, "YYYY-MM-DD")
 end
@@ -257,6 +264,8 @@ to dates_first with words, count
     return made
 end
 
+# a date written as `pattern` says, with YYYY, MMMM, DD, dddd and the rest as at the top of this file:
+# format_date(d, "dddd D MMMM YYYY") is "Tuesday 3 November 2026"
 to format_date with d, pattern
     set chars to empty list
     for each c in pattern
