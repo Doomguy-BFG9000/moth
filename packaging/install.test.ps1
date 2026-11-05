@@ -62,7 +62,7 @@ if (Get-Command Install-Moth -ErrorAction SilentlyContinue) { 'iex left its func
 exit 0
 "@
     $shell = (Get-Process -Id $PID).Path
-    $said = & $shell -NoProfile -NonInteractive -EncodedCommand ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($session)))
+    $said = & $shell -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($session)))
     $said | Write-Host
     Assert ($LASTEXITCODE -eq 0) "irm | iex installs, and leaves the session's variables, settings and functions as they were (exit $LASTEXITCODE)"
     Assert (Test-Path (Join-Path $dir2 'moth.exe')) 'iex installed the latest moth'
