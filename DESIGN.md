@@ -5247,7 +5247,9 @@ engines stay: as the fallback, and as what the tests compare against.
   serial number is made from what it says, so the same release gives the same
   SBOM.
 - **The image** is pushed as `<version>` and `latest`, then attested (with the
-  attestation pushed to the registry) and signed by its digest.
+  attestation pushed to the registry) and signed by its digest. A pre-release
+  (`v1.12.0-rc.1`) isn't `latest`, and its .deb's version is `1.12.0~rc.1`,
+  which Debian puts before `1.12.0`.
 - **A dry run sends nothing anywhere.** A dry run does every step, into the
   run's artifacts, with three changes. It builds from the commit's source,
   since there's no release (on a tag, it checks that release's files). It

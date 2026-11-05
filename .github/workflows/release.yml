@@ -8,7 +8,8 @@ name: release
 #   - builds moth_<version>_amd64.deb, and the SBOM (CycloneDX), and winget's and Scoop's manifests;
 #   - signs every file with Sigstore's cosign, keyless, as this workflow (a .sig, a .pem and a .sigstore.json
 #     bundle each), and adds GitHub's attestations: where each was built, and the SBOM of the programs;
-#   - pushes the image to ghcr.io/samyyy2423/moth as <version> and latest, attested and signed;
+#   - pushes the image to ghcr.io/samyyy2423/moth as <version> and latest (not for a pre-release), attested
+#     and signed;
 #   - uploads the .deb, the SBOM, the signatures, certificates and bundles to the release.
 #
 # A dry run does all of it into this run's artifacts and sends nothing anywhere: it builds from this commit's
@@ -52,6 +53,7 @@ jobs:
       dry-run: ${{ steps.run.outputs.dry-run }}
       tag: ${{ steps.run.outputs.tag }}
       version: ${{ steps.run.outputs.version }}
+      tags: ${{ steps.run.outputs.tags }}
       sums: ${{ steps.sums.outputs.sums }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,6 +70,7 @@ jobs:
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p 'require("./package.json").version')
           tag=
@@ -86,9 +89,18 @@ jobs:
             echo "::error::The release is $tag, but package.json says $version."
             exit 1
           fi
+          # the image's tags: the version, and latest unless it's a pre-release (1.12.0-rc.1)
+          prerelease=false
+          case $version in *-*) prerelease=true ;; esac
+          if [ -n "$tag" ]; then
+            prerelease=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)
+          fi
+          tags="ghcr.io/samyyy2423/moth:$version"
+          [ "$prerelease" = true ] || tags="$tags,ghcr.io/samyyy2423/moth:latest"
           echo "dry-run=$dry" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
           echo "### moth $version: $([ "$dry" = true ] && echo 'a dry run' || echo "the release $tag")" >> "$GITHUB_STEP_SUMMARY"
       - name: the release's files
@@ -110,7 +122,9 @@ jobs:
             packaging/release-build.sh dist
           fi
       - name: the .deb
-        run: packaging/debian/build-deb.sh dist/moth-linux "${{ steps.run.outputs.version }}" dist
+        env:
+          VERSION: ${{ steps.run.outputs.version }}
+        run: packaging/debian/build-deb.sh dist/moth-linux "$VERSION" dist
       - name: the SBOM
         run: node packaging/sbom.mjs dist "${{ steps.run.outputs.version }}" "$GITHUB_SHA"
       - name: winget's and Scoop's manifests for this version
@@ -323,9 +337,7 @@ jobs:
           build-args: |
             VERSION=${{ env.VERSION }}
             REVISION=${{ github.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ env.VERSION }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ needs.build.outputs.tags }}
           load: true
       - name: the image runs a program
         run: |
@@ -360,9 +372,7 @@ jobs:
           build-args: |
             VERSION=${{ env.VERSION }}
             REVISION=${{ github.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ env.VERSION }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ needs.build.outputs.tags }}
           push: true
       - name: attest where the image was built
         if: env.DRY_RUN == 'false'
@@ -379,11 +389,12 @@ jobs:
         if: env.DRY_RUN == 'false'
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ needs.build.outputs.tags }}
           IDENTITY: https://github.com/${{ github.workflow_ref }}
         run: |
           cosign sign --yes "$IMAGE@$DIGEST"
           cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
-          echo "pushed $IMAGE:$VERSION and :latest, $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "pushed $TAGS, $DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   # the only job that changes the release; a dry run says what it would have uploaded instead
   publish:

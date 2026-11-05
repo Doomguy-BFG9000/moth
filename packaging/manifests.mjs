@@ -97,7 +97,7 @@ export function scoop(version, sha256) {
 
 // every file, by where it goes under packaging/
 export function manifests(version, sha256, date) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`'${version}' isn't a version like 1.11.0`);
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(version)) throw new Error(`'${version}' isn't a version like 1.11.0 or 1.12.0-rc.1`);
   if (!/^[0-9a-fA-F]{64}$/.test(sha256)) throw new Error(`'${sha256}' isn't a SHA-256`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`'${date}' isn't a day like 2026-11-04`);
   const files = { [join("scoop", "moth.json")]: scoop(version, sha256) };

@@ -20,9 +20,12 @@ out=${3:-.}
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 
-case $version in
-    *[!0-9.]* | .* | *. | *..* | "") echo "'$version' isn't a version like 1.11.0" >&2; exit 2 ;;
-esac
+if ! printf '%s\n' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'; then
+    echo "'$version' isn't a version like 1.11.0 or 1.12.0-rc.1" >&2
+    exit 2
+fi
+# a pre-release's 1.12.0-rc.1 is Debian's 1.12.0~rc.1, which comes before 1.12.0
+debian_version=$(printf '%s' "$version" | tr '-' '~')
 if [ ! -f "$binary" ]; then
     echo "there's no file called '$binary'" >&2
     exit 1
@@ -96,7 +99,7 @@ size=$(cd "$root" && find usr -type f -exec stat -c %s {} + | awk '{ k += int(($
 folders=$(cd "$root" && find usr -type d | wc -l)
 cat > "$root/DEBIAN/control" << END
 Package: moth
-Version: $version
+Version: $debian_version
 Architecture: amd64
 Maintainer: Samyak Pudke <workitsam01@gmail.com>
 Installed-Size: $((size + folders))
