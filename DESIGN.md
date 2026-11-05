@@ -5258,3 +5258,74 @@ engines stay: as the fallback, and as what the tests compare against.
   library can't be built with; `moth build --library` with gcc linking C
   to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
   CI runs the same C program against the DLL.
+
+## 128. Moth from Python: the mothlang package
+
+- **Why.** Python is where most people who want speed are: a loop that's
+  slow in Python is fast in Moth's machine code (§127), if Python can call
+  it. And a package is how Python gets anything: `pip install`.
+- **Its name.** `moth` on PyPI is an unrelated project (tokens kept in
+  MongoDB) whose module is also called `moth`, so the package is
+  `mothlang`, and so is its module, everywhere: two packages giving Python
+  one module name would break each other. Code says `import mothlang as
+  moth`, then `moth.load(...)`. The command it installs is still `moth`.
+- **Wheels with moth in them.** A wheel for Windows (`win_amd64`) and one
+  for Linux (`manylinux_2_17_x86_64`) each carry `moth` itself, built from
+  the source by `bootstrap.mjs`, as `mothlang/bin/moth(.exe)`, so `pip
+  install` is all there is. Linux's moth calls the kernel itself and links
+  nothing, so it runs on any distribution, and a library it builds needs
+  only libc.so.6. The wheels are `py3-none`: no Python extension, so one
+  wheel serves every Python from 3.9 on. hatchling builds them, its build
+  hook putting moth in and tagging the wheel when MOTHLANG_BINARY and
+  MOTHLANG_PLATFORM say which; the sdist has no moth, and finds one through
+  MOTHLANG_MOTH or PATH.
+- **Calling a library: ctypes alone.** `moth.load("fast.moth")` builds the
+  file with `moth build --library --into <cache>` and loads it with
+  ctypes; `moth.compile(source)` does the same for code in a string. Each
+  function the library exports (`moth_exports` lists them, with their
+  inputs' names) is an attribute, whose ctypes signature is `int(uint64*,
+  uint64...)`. No compiled extension means nothing to build per Python
+  version, and nothing for pip to compile.
+- **Cached by what it was built from.** A library is kept in
+  `~/.cache/mothlang` (or `%LOCALAPPDATA%\mothlang\Cache`, or
+  `MOTHLANG_CACHE`), in a folder named by a SHA-256 of mothlang's version,
+  the moth that builds it, its --allow flags, the file's name and text, and
+  the text of each file it `use`s (by a name, or as a package), found the
+  way moth finds them. Changing any of them builds it again; changing
+  nothing loads the one built before. Built in a folder of its own, then
+  moved into place, so a library half written is never loaded; loaded once
+  for each process.
+- **Values both ways.** int and float are numbers, whole ones coming back
+  as int; an int past 2^53, which a double can't hold, is an OverflowError
+  rather than a number changed silently. str is text in UTF-8, bool yes or
+  no, None nothing, bytes bytes, list and tuple a list, dict a dictionary.
+  A record comes back as a read-only `Record`, read as `p.x` or `p["x"]`;
+  as C can't make Moth's records (a field is found by its name being one
+  of the program's own texts), one given back is a dictionary. Anything
+  else, a function above all, is a `Value`, kept with `moth_keep` until
+  Python lets go of it, which can be given back, and called with
+  `moth_call`. A list of numbers goes across at once, through
+  `moth_numbers` and `moth_list_numbers` and an array of doubles, not an
+  item at a time; and the kind of a value is worked out in Python from its
+  bits, as a call to `moth_kind` would cost more than the rest.
+- **Mistakes as exceptions.** What a call fails with is raised as
+  `MothError`, with the message, line, column and file from the record
+  (§127) and what `fail with` gave as `value`; code that can't be built is
+  `BuildError`, with moth's own report. A wrong number of inputs is
+  Python's TypeError, before Moth is called.
+- **Running a program.** `moth.run(source)` writes the code to a folder of
+  its own and runs `moth run` there: what it said, its error output and
+  the number it ended with, as a RunResult, with arguments, --allow flags,
+  input and a folder to run in.
+- **What it gave.** Called from Python on Linux, fib(30) took 7.5 ms
+  against Python's 110, and a Mandelbrot set 32 ms against 445; a sieve of
+  primes 2.9 times as fast. A call costs about 2 µs, 0.7 of it ctypes'
+  own, so a sum over a list Python already has is faster in Python: the
+  benchmark says so too.
+- **Tested** with pytest, against a wheel built as the publishing workflow
+  builds it and installed: Linux with Python 3.9 and 3.13, and Windows. Each
+  kind of value both ways, records and functions, every kind of mistake
+  and where it was, a library's top level failing, deep recursion and
+  eight threads at once, the cache (built once, again when a file it uses
+  changes, nothing written beside the source), moth.run with arguments,
+  input and flags, and the moth command. CI runs the benchmark too.

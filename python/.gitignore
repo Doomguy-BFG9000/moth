@@ -1,0 +1,6 @@
+# what building and testing mothlang leaves
+dist/
+build/
+__pycache__/
+.pytest_cache/
+*.egg-info/
