@@ -33,6 +33,10 @@
 # wait_for_flag waits until it's raised. wait_for_all(jobs) gives what each task gave, and wait_for_any(jobs)
 # the first of them to end. `job has ended` asks without waiting.
 #
+# Workers (`start f(x) on another core`, DESIGN §124) share nothing: each is given copies, so a lock, flag or
+# queue given to one, or among the program's variables it starts with, is its own, and keeps its own tasks in
+# step. wait_for_all and wait_for_any take workers as they take tasks.
+#
 # One task runs Moth at a time, and a task only lets the others run at a loop's end, a call or a wait, so
 # what's between those happens with nothing else running: a lock is taken by seeing it's free and marking it
 # held, with nothing in between. That's why take and receive do their work themselves, with no call. On the
