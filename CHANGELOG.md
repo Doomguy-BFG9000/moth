@@ -48,6 +48,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   builds.
 - **A debugger in your editor.** A debug adapter for `moth debug` gives VS Code (*Moth: Debug this file*, or
   F5), Neovim, Helix and JetBrains' IDEs breakpoints, stepping, the calls in progress and the variables.
+- **Libraries for a company's work.** `postgres.moth` and `mysql.moth` query PostgreSQL and MySQL over their
+  own protocols, each value sent apart from the SQL, and `redis.moth` talks to Redis, all three on
+  `wire.moth`. `s3.moth` keeps objects in S3 and the stores that speak its language, `jwt.moth` makes and
+  checks JSON Web Tokens, `oauth.moth` signs a person in with OAuth 2 and PKCE, and `yaml.moth` reads and
+  writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 

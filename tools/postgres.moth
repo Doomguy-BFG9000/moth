@@ -1,0 +1,756 @@
+# PostgreSQL, as Python's psycopg has it: connected over its own protocol (version 3), logged in with
+# SCRAM-SHA-256 or MD5, over TLS where asked for; queries with their values as parameters, sent apart from
+# the SQL so no value is ever read as SQL; rows as dictionaries, each value as Moth has it; and transactions.
+# On sockets.moth: a program `moth build` makes can use it, built with --allow-libraries.
+#
+#   use "postgres.moth" as pg
+#   set db to pg's connect(record with host "localhost", port 5432, user "app", password "secret", database "shop")
+#   set db to pg's connect_url("postgres://app:secret@db.example.com/shop?sslmode=require")
+#   for each row in pg's query(db, "select id, name from people where age > $1 and city = $2", list of 21, "Pune")
+#       say item "id" of row " " item "name" of row
+#   end
+#   say pg's query_one(db, "select count(*) as n from people")    # the first row, or nothing if none
+#   say pg's execute(db, "update people set name = $1 where id = $2", list of "Sam", 7)   # how many it changed
+#   to move_money with db
+#       pg's execute(db, "update accounts set total = total - 10 where id = $1", list of 1)
+#       pg's execute(db, "update accounts set total = total + 10 where id = $1", list of 2)
+#   end
+#   pg's in_transaction(db, move_money)           # all or none: COMMIT, or ROLLBACK and the mistake again
+#   pg's run_script(db, read "schema.sql")         # many statements, with no parameters
+#   pg's close(db)
+#
+# connect's record has host, port (5432), user, password, database (the user's name), tls ("prefer": TLS if
+# the server has it and its certificate can be checked, "require": checked TLS or a mistake, "disable": never)
+# and trust (a PEM file of certificates to trust besides the system's, as a cloud's own CA, or nothing); each
+# but user can be left out. TLS always checks the server's certificate, for its name. Parameters are $1, $2 ... in the SQL: text, numbers, yes and
+# no, nothing (NULL), bytes (bytea), and lists, dictionaries and records (as JSON). Values come back as text,
+# numbers (integers, floats and numeric), yes and no, nothing, bytes (bytea), what JSON says (json and jsonb),
+# and lists (arrays of those); dates and times stay text, as PostgreSQL writes them ("2026-11-04 10:15:00").
+# A query PostgreSQL refuses is a `fail with` with its message and code, as
+# "PostgreSQL said: relation \"nowhere\" does not exist (42P01)".
+
+use "sockets.moth" as pg_net
+use "wire.moth" as pg_wire
+use "hash.moth" as pg_hash
+use "base64.moth" as pg_b64
+use "secrets.moth" as pg_secrets
+
+# ---------- connecting ----------
+
+to connect with options
+    set given to pg_fields(options)
+    if not ("user" is in given)
+        fail with "connect needs a user"
+    end
+    set host to pg_field(given, "host", "localhost")
+    set port to pg_field(given, "port", 5432)
+    set user to item "user" of given
+    set password to pg_field(given, "password", nothing)
+    set database to pg_field(given, "database", user)
+    set tls to pg_field(given, "tls", "prefer")
+    if not (tls is in (list of "prefer", "require", "disable"))
+        fail with "tls is \"prefer\", \"require\" or \"disable\", not " + tls
+    end
+    if pg_field(given, "trust", nothing) is not nothing
+        pg_net's trust(item "trust" of given)
+    end
+    try
+        return pg_connect(host, port, user, password, database, tls)
+    if it fails with why
+        if tls is "prefer" and (pg_starts(why, "can't connect securely") or pg_starts(why, "secure connections need OpenSSL"))
+            return pg_connect(host, port, user, password, database, "disable") # a certificate that can't be checked: as if the server had no TLS
+        end
+        fail with why
+    end
+end
+
+to pg_connect with host, port, user, password, database, tls
+    set c to pg_net's connect(host, port)
+    try
+        if tls is not "disable"
+            pg_tls(c, host, tls)
+        end
+        set db to record with connection c, reader pg_wire's reader(c), status "I", settings empty dictionary, process 0, notices empty list
+        pg_start(db, user, password, database)
+        return db
+    if it fails with why
+        pg_net's close(c)
+        fail with why
+    end
+end
+
+# a connection from a URL: postgres://user:password@host:port/database?sslmode=require
+to connect_url with url
+    return connect(pg_url_options(url))
+end
+
+# a URL's parts, as connect's options
+to pg_url_options with url
+    set rest to url
+    set scheme_end to position of "://" in rest
+    if scheme_end is 0 or not (items 1 to (scheme_end - 1) of rest is in (list of "postgres", "postgresql"))
+        fail with "a PostgreSQL URL starts postgres:// or postgresql://, not " + url
+    end
+    set rest to items (scheme_end + 3) to (length of rest) of rest
+    set options to empty dictionary
+    set question to position of "?" in rest
+    if question is greater than 0
+        for each pair in split (items (question + 1) to (length of rest) of rest) by "&"
+            set halves to split pair by "="
+            if item 1 of halves is "sslmode" and length of halves is 2
+                set mode to item 2 of halves
+                if mode is "require" or mode is "verify-ca" or mode is "verify-full"
+                    set item "tls" of options to "require"
+                else if mode is "disable"
+                    set item "tls" of options to "disable"
+                else
+                    set item "tls" of options to "prefer"
+                end
+            end
+        end
+        set rest to items 1 to (question - 1) of rest
+    end
+    set at to position of "@" in rest
+    if at is greater than 0
+        set login to items 1 to (at - 1) of rest
+        set rest to items (at + 1) to (length of rest) of rest
+        set colon to position of ":" in login
+        if colon is 0
+            set item "user" of options to pg_decoded(login)
+        else
+            set item "user" of options to pg_decoded(items 1 to (colon - 1) of login)
+            set item "password" of options to pg_decoded(items (colon + 1) to (length of login) of login)
+        end
+    end
+    set slash to position of "/" in rest
+    if slash is greater than 0
+        if slash is less than length of rest
+            set item "database" of options to pg_decoded(items (slash + 1) to (length of rest) of rest)
+        end
+        set rest to items 1 to (slash - 1) of rest
+    end
+    if ":" is in rest
+        set pieces to split rest by ":"
+        set item "host" of options to item 1 of pieces
+        set item "port" of options to number of item 2 of pieces
+    else if rest is not ""
+        set item "host" of options to rest
+    end
+    return options
+end
+
+# SSLRequest: TLS over the connection if the server says S; a mistake if it says N and TLS is required
+to pg_tls with c, host, tls
+    set w to pg_wire's writer()
+    pg_wire's add_number(w, 8, 4, "big")
+    pg_wire's add_number(w, 80877103, 4, "big")
+    pg_net's send(c, pg_wire's bytes_of(w))
+    set answer to pg_net's receive(c, 1)
+    if length of answer is 1 and byte 1 of answer is 83 # S
+        pg_net's secure(c, host)
+    else if tls is "require"
+        fail with "the PostgreSQL server at " + host + " has no TLS, and tls is \"require\""
+    end
+end
+
+# the startup message, logging in, and the settings the server says, to its first ReadyForQuery
+to pg_start with db, user, password, database
+    set body to pg_wire's writer()
+    pg_wire's add_number(body, 196608, 4, "big") # protocol 3.0
+    for each pair in list of (list of "user", user), (list of "database", database), (list of "application_name", "moth"), (list of "client_encoding", "UTF8"), (list of "DateStyle", "ISO, YMD")
+        pg_wire's add_text(body, item 1 of pair)
+        pg_wire's add_byte(body, 0)
+        pg_wire's add_text(body, item 2 of pair)
+        pg_wire's add_byte(body, 0)
+    end
+    pg_wire's add_byte(body, 0)
+    set b to pg_wire's bytes_of(body)
+    set w to pg_wire's writer()
+    pg_wire's add_number(w, length of b + 4, 4, "big")
+    pg_wire's add_bytes(w, b)
+    pg_net's send(connection of db, pg_wire's bytes_of(w))
+    set scram to nothing
+    repeat while yes
+        set m to pg_message(db)
+        set kind to type of m
+        set r to pg_wire's reader_of(body of m)
+        if kind is "R"
+            set code to pg_wire's take_number(r, 4, "big")
+            if code is 0
+                set code to code # logged in
+            else if code is 3
+                pg_need_password(password)
+                pg_send(db, "p", pg_zero_text(password))
+            else if code is 5
+                pg_need_password(password)
+                set salt to pg_wire's take(r, 4)
+                pg_send(db, "p", pg_zero_text(pg_md5_password(user, password, salt)))
+            else if code is 10
+                set offered to empty list
+                repeat while pg_wire's waiting(r) is greater than 1
+                    add pg_wire's text_to_zero(r) to offered
+                end
+                if not ("SCRAM-SHA-256" is in offered)
+                    fail with "the server logs in with " + (join offered with ", ") + ", and postgres.moth has SCRAM-SHA-256"
+                end
+                pg_need_password(password)
+                set scram to scram_first(pg_random_nonce())
+                set w to pg_wire's writer()
+                pg_wire's add_text(w, "SCRAM-SHA-256")
+                pg_wire's add_byte(w, 0)
+                pg_wire's add_number(w, length of message of scram, 4, "big")
+                pg_wire's add_text(w, message of scram)
+                pg_send(db, "p", pg_wire's bytes_of(w))
+            else if code is 11
+                set server_first to pg_wire's take(r, pg_wire's waiting(r)) as text
+                set final to scram_final(password, scram, server_first)
+                set scram to final
+                pg_send(db, "p", (message of final) as bytes)
+            else if code is 12
+                set server_final to pg_wire's take(r, pg_wire's waiting(r)) as text
+                if server_final is not "v=" + server_signature of scram
+                    fail with "the server's SCRAM signature isn't right: it may not be the server it says"
+                end
+            else
+                fail with "the server logs in a way postgres.moth doesn't know (" + code + ")"
+            end
+        else if kind is "S"
+            set name to pg_wire's text_to_zero(r)
+            set settings to settings of db
+            set item name of settings to pg_wire's text_to_zero(r)
+        else if kind is "K"
+            set process of db to pg_wire's take_number(r, 4, "big")
+        else if kind is "Z"
+            set status of db to (pg_wire's take(r, 1)) as text
+            return nothing
+        else if kind is "E"
+            fail with pg_problem(body of m)
+        end
+    end
+end
+
+to pg_need_password with password
+    if password is nothing
+        fail with "the server wants a password, and connect was given none"
+    end
+end
+
+# MD5's: "md5" and md5(md5(password + user) + salt), in hex
+to pg_md5_password with user, password, salt
+    set inner to pg_hash's md5(password + user)
+    return "md5" + pg_hash's md5(pg_wire's joined(list of (inner as bytes), salt))
+end
+
+# ---------- SCRAM-SHA-256 (RFC 5802, RFC 7677) ----------
+
+# The client's first message, with its nonce: a record with message ("n,,n=,r=..."), bare (it without "n,,")
+# and nonce
+to scram_first with nonce, user or ""
+    set bare to "n=" + user + ",r=" + nonce
+    return record with message ("n,," + bare), bare bare, nonce nonce, server_signature nothing
+end
+
+# the client's last message, its proof, for the server's first: a record with message and server_signature
+# (what the server's last must say, so the client knows it's the server that has the password)
+to scram_final with password, first, server_first
+    set fields to empty dictionary
+    for each part in split server_first by ","
+        if length of part is at least 2 and item 2 of part is "="
+            set item (item 1 of part) of fields to items 3 to (length of part) of part
+        end
+    end
+    if not ("r" is in fields) or not ("s" is in fields) or not ("i" is in fields)
+        fail with "the server's SCRAM message isn't one: " + server_first
+    end
+    set nonce to item "r" of fields
+    if length of nonce is less than length of nonce of first or items 1 to (length of nonce of first) of nonce is not nonce of first
+        fail with "the server's SCRAM nonce doesn't start with the client's"
+    end
+    set salted to pg_hash's bytes_of_hex(pg_hash's pbkdf2("sha256", password, pg_b64's bytes_of_base64(item "s" of fields), number of item "i" of fields, 32))
+    set client_key to pg_hash's bytes_of_hex(pg_hash's hmac("sha256", salted, "Client Key"))
+    set stored_key to pg_hash's bytes_of_hex(pg_hash's sha256(client_key))
+    set without_proof to "c=biws,r=" + nonce
+    set auth_message to bare of first + "," + server_first + "," + without_proof
+    set signature to pg_hash's bytes_of_hex(pg_hash's hmac("sha256", stored_key, auth_message))
+    set proof to 32 bytes
+    for each k from 1 to 32
+        set byte k of proof to byte k of client_key bit xor byte k of signature
+    end
+    set server_key to pg_hash's bytes_of_hex(pg_hash's hmac("sha256", salted, "Server Key"))
+    set server_signature to pg_b64's base64_of(pg_hash's bytes_of_hex(pg_hash's hmac("sha256", server_key, auth_message)))
+    return record with message (without_proof + ",p=" + pg_b64's base64_of(proof)), bare nothing, nonce nonce, server_signature server_signature
+end
+
+to pg_random_nonce
+    return pg_b64's base64_of(pg_secrets's random_bytes(18))
+end
+
+# ---------- queries ----------
+
+# the rows a query gives, each a dictionary of its columns' values; $1, $2 ... in the SQL are `values`
+to query with db, sql, values or empty list
+    return rows of run(db, sql, values)
+end
+
+# the first row, or nothing if there are none
+to query_one with db, sql, values or empty list
+    set found to rows of run(db, sql, values)
+    if length of found is 0
+        return nothing
+    end
+    return item 1 of found
+end
+
+# how many rows a statement changed (or gave)
+to execute with db, sql, values or empty list
+    return count of run(db, sql, values)
+end
+
+# A statement done, with parameters: a record with rows, count, columns (their names, in order) and tag (what
+# PostgreSQL says it did, as "INSERT 0 1")
+to run with db, sql, values or empty list
+    pg_net's send(connection of db, pg_query_bytes(sql, values))
+    return pg_results(db)
+end
+
+# what a query with parameters is, sent: Parse, Bind, Describe, Execute and Sync
+to pg_query_bytes with sql, values
+    set w to pg_wire's writer()
+    # Parse: an unnamed statement, each parameter's type left to the server but bytea's
+    set parse to pg_wire's writer()
+    pg_wire's add_byte(parse, 0)
+    pg_wire's add_text(parse, sql)
+    pg_wire's add_byte(parse, 0)
+    pg_wire's add_number(parse, length of values, 2, "big")
+    for each value in values
+        if pg_is_bytes(value)
+            pg_wire's add_number(parse, 17, 4, "big")
+        else
+            pg_wire's add_number(parse, 0, 4, "big")
+        end
+    end
+    pg_message_to(w, "P", pg_wire's bytes_of(parse))
+    # Bind: each value as text, or bytes as they are; every column back as text
+    set bind to pg_wire's writer()
+    pg_wire's add_byte(bind, 0)
+    pg_wire's add_byte(bind, 0)
+    pg_wire's add_number(bind, length of values, 2, "big")
+    for each value in values
+        if pg_is_bytes(value)
+            pg_wire's add_number(bind, 1, 2, "big")
+        else
+            pg_wire's add_number(bind, 0, 2, "big")
+        end
+    end
+    pg_wire's add_number(bind, length of values, 2, "big")
+    for each value in values
+        set b to pg_parameter(value)
+        if b is nothing
+            pg_wire's add_number(bind, -1, 4, "big")
+        else
+            pg_wire's add_number(bind, length of b, 4, "big")
+            pg_wire's add_bytes(bind, b)
+        end
+    end
+    pg_wire's add_number(bind, 1, 2, "big")
+    pg_wire's add_number(bind, 0, 2, "big")
+    pg_message_to(w, "B", pg_wire's bytes_of(bind))
+    pg_message_to(w, "D", (list of 80, 0) as bytes) # Describe the portal: its columns
+    pg_message_to(w, "E", (list of 0, 0, 0, 0, 0) as bytes) # Execute it, every row
+    pg_message_to(w, "S", 0 bytes) # Sync
+    return pg_wire's bytes_of(w)
+end
+
+# Many statements at once, with no parameters, as a file of SQL has them (the simple query protocol): the
+# last one's result
+to run_script with db, sql
+    pg_send(db, "Q", pg_zero_text(sql))
+    return pg_results(db)
+end
+
+# the messages after a query, to ReadyForQuery: rows, count, columns and tag; a mistake if one was an error
+to pg_results with db
+    set columns to empty list
+    set types to empty list
+    set rows to empty list
+    set count to 0
+    set tag to ""
+    set problem to nothing
+    repeat while yes
+        set m to pg_message(db)
+        set kind to type of m
+        if kind is "T"
+            set columns to empty list
+            set types to empty list
+            set rows to empty list
+            set r to pg_wire's reader_of(body of m)
+            repeat pg_wire's take_number(r, 2, "big") times
+                add pg_wire's text_to_zero(r) to columns
+                pg_wire's take(r, 6)
+                add pg_wire's take_number(r, 4, "big") to types
+                pg_wire's take(r, 8)
+            end
+        else if kind is "D"
+            add pg_row(body of m, columns, types) to rows
+        else if kind is "C"
+            set tag to pg_wire's text_to_zero(pg_wire's reader_of(body of m))
+            set words to split tag by " "
+            set last to item (length of words) of words
+            if length of words is greater than 1 and pg_all_digits(last)
+                set count to number of last
+            end
+        else if kind is "E"
+            if problem is nothing
+                set problem to pg_problem(body of m)
+            end
+        else if kind is "N"
+            set kept to notices of db
+            add pg_problem(body of m) to kept
+        else if kind is "Z"
+            set status of db to (items 1 to 1 of body of m) as text
+            if problem is not nothing
+                fail with problem
+            end
+            return record with rows rows, count count, columns columns, tag tag
+        end
+    end
+end
+
+# a DataRow as a dictionary, each value as its type has it
+to pg_row with b, columns, types
+    set r to pg_wire's reader_of(b)
+    set made to empty dictionary
+    set n to pg_wire's take_number(r, 2, "big")
+    for each k from 1 to n
+        set size to pg_wire's take_number(r, 4, "big")
+        set value to nothing
+        if size is not 4294967295 # -1: NULL
+            set value to pg_value(pg_wire's take(r, size) as text, item k of types)
+        end
+        set item (item k of columns) of made to value
+    end
+    return made
+end
+
+# a column's text as its type has it
+to pg_value with words, type
+    if type is 16
+        return words is "t"
+    else if type is 20 or type is 21 or type is 23 or type is 26
+        return number of words
+    else if type is 700 or type is 701 or type is 1700
+        return pg_float(words)
+    else if type is 17
+        return pg_hash's bytes_of_hex(items 3 to (length of words) of words) # \x and its hex
+    else if type is 114 or type is 3802
+        return json from words
+    else if type is 1000 or type is 1005 or type is 1007 or type is 1016 or type is 1021 or type is 1022 or type is 1231 or type is 1009 or type is 1015
+        return pg_array(words, type)
+    end
+    return words
+end
+
+# "3.14", "-1e+20", "NaN", "Infinity" as a number
+to pg_float with words
+    if words is "Infinity"
+        return 10 to the power of 400
+    else if words is "-Infinity"
+        return -1 * (10 to the power of 400)
+    else if words is "NaN"
+        fail with "PostgreSQL sent NaN, which Moth's numbers don't have"
+    end
+    set lower to lowercase of words
+    if not ("e" is in lower)
+        return number of words
+    end
+    set halves to split lower by "e"
+    set p to item 2 of halves
+    if item 1 of p is "+"
+        set p to items 2 to (length of p) of p
+    end
+    set e to number of p
+    if e is at least 0
+        return number of item 1 of halves * (10 to the power of e)
+    end
+    return number of item 1 of halves / (10 to the power of (0 - e))
+end
+
+# An array, as PostgreSQL writes one: {1,2,NULL}, {"a b",c}; each item as the array's type has its items
+to pg_array with words, type
+    set item_type to 25
+    if type is 1000
+        set item_type to 16
+    else if type is 1005 or type is 1007 or type is 1016
+        set item_type to 20
+    else if type is 1021 or type is 1022 or type is 1231
+        set item_type to 701
+    end
+    set chars to split words by ""
+    set made to empty list
+    set k to 2
+    set n to length of chars
+    if n is 2
+        return made
+    end
+    repeat while k is less than n
+        set c to item k of chars
+        set pieces to empty list
+        set quoted to no
+        if c is "\""
+            set quoted to yes
+            set k to k + 1
+            repeat while item k of chars is not "\""
+                if item k of chars is "\\"
+                    set k to k + 1
+                end
+                add item k of chars to pieces
+                set k to k + 1
+            end
+            set k to k + 1
+        else
+            repeat while item k of chars is not "," and item k of chars is not "}"
+                add item k of chars to pieces
+                set k to k + 1
+            end
+        end
+        set text_value to join pieces with ""
+        if not quoted and text_value is "NULL"
+            add nothing to made
+        else if c is "\{"
+            fail with "postgres.moth reads arrays of one dimension, not " + words
+        else
+            add pg_value(text_value, item_type) to made
+        end
+        set k to k + 1 # past the ,
+    end
+    return made
+end
+
+# ---------- transactions ----------
+
+to begin with db
+    run(db, "BEGIN")
+end
+
+to commit with db
+    run(db, "COMMIT")
+end
+
+to rollback with db
+    run(db, "ROLLBACK")
+end
+
+# work(db) done all or none: COMMIT if it ends well; ROLLBACK, and its mistake again, if it doesn't. What
+# work gives back.
+to in_transaction with db, work
+    begin(db)
+    set given to nothing
+    try
+        set given to work(db)
+    if it fails with why
+        try
+            rollback(db)
+        if it fails
+            set given to nothing
+        end
+        fail with why
+    end
+    commit(db)
+    return given
+end
+
+# whether a transaction is open: "I" none, "T" one, "E" one that failed and must be rolled back
+to transaction_status with db
+    return status of db
+end
+
+to close with db
+    try
+        pg_send(db, "X", 0 bytes) # Terminate
+    if it fails
+        set db to db
+    end
+    pg_net's close(connection of db)
+end
+
+# ---------- messages ----------
+
+# the next message: a record with its type (a letter) and body (bytes)
+to pg_message with db
+    set r to reader of db
+    set kind to (list of pg_wire's take_byte(r)) as bytes as text
+    set size to pg_wire's take_number(r, 4, "big")
+    return record with type kind, body pg_wire's take(r, size - 4)
+end
+
+to pg_send with db, kind, body
+    set w to pg_wire's writer()
+    pg_message_to(w, kind, body)
+    pg_net's send(connection of db, pg_wire's bytes_of(w))
+end
+
+# a message, its type and length first, added to a writer
+to pg_message_to with w, kind, body
+    pg_wire's add_text(w, kind)
+    pg_wire's add_number(w, length of body + 4, 4, "big")
+    pg_wire's add_bytes(w, body)
+end
+
+to pg_zero_text with words
+    return pg_wire's joined(list of (words as bytes), (list of 0) as bytes)
+end
+
+# an ErrorResponse as a sentence: its message, code, and the detail and hint after them
+to pg_problem with b
+    set r to pg_wire's reader_of(b)
+    set fields to empty dictionary
+    repeat while pg_wire's waiting(r) is greater than 0
+        set code to pg_wire's take_byte(r)
+        if code is 0
+            stop
+        end
+        set item ((list of code) as bytes as text) of fields to pg_wire's text_to_zero(r)
+    end
+    set said to "PostgreSQL said: " + pg_field(fields, "M", "an error")
+    if "C" is in fields
+        set said to said + " (" + item "C" of fields + ")"
+    end
+    if "D" is in fields
+        set said to said + ". " + item "D" of fields
+    end
+    if "H" is in fields
+        set said to said + " Hint: " + item "H" of fields
+    end
+    return said
+end
+
+# ---------- parameters ----------
+
+# a value as a parameter's bytes: text as it is, numbers written out, yes and no as true and false, bytes as
+# they are, lists, dictionaries and records as JSON; nothing as nothing (NULL)
+to pg_parameter with value
+    if value is nothing
+        return nothing
+    else if value is yes
+        return "true" as bytes
+    else if value is no
+        return "false" as bytes
+    else if pg_is_bytes(value)
+        return value
+    else if pg_is_text(value)
+        return value as bytes
+    else if pg_is_number(value)
+        return pg_number_text(value) as bytes
+    end
+    return (value as json) as bytes
+end
+
+# a number as PostgreSQL reads one, with every digit a whole one has
+to pg_number_text with n
+    set shown to "" + n
+    if shown is "Infinity"
+        return "Infinity"
+    else if shown is "-Infinity"
+        return "-Infinity"
+    end
+    return shown
+end
+
+# ---------- small things ----------
+
+to pg_fields with options
+    if pg_is_record(options)
+        return json from (options as json)
+    end
+    return options
+end
+
+to pg_field with given, name, otherwise
+    if name is in given and item name of given is not nothing
+        return item name of given
+    end
+    return otherwise
+end
+
+to pg_decoded with words
+    set hex to "0123456789abcdef"
+    set made to empty list
+    set b to words as bytes
+    set k to 1
+    repeat while k is at most length of b
+        if byte k of b is 37 and k + 2 is at most length of b
+            set high to position of lowercase of ((list of byte (k + 1) of b) as bytes as text) in hex
+            set low to position of lowercase of ((list of byte (k + 2) of b) as bytes as text) in hex
+            add (high - 1) * 16 + low - 1 to made
+            set k to k + 3
+        else
+            add byte k of b to made
+            set k to k + 1
+        end
+    end
+    return made as bytes as text
+end
+
+to pg_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to pg_all_digits with words
+    if words is ""
+        return no
+    end
+    for each c in words
+        if not (c is in "0123456789")
+            return no
+        end
+    end
+    return yes
+end
+
+to pg_bytes_check with value as bytes
+    return yes
+end
+
+to pg_is_bytes with value
+    try
+        return pg_bytes_check(value)
+    if it fails
+        return no
+    end
+end
+
+to pg_text_check with value as text
+    return yes
+end
+
+to pg_is_text with value
+    try
+        return pg_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to pg_number_check with value as a number
+    return yes
+end
+
+to pg_is_number with value
+    try
+        return pg_number_check(value)
+    if it fails
+        return no
+    end
+end
+
+to pg_record_check with value as a record
+    return yes
+end
+
+to pg_is_record with value
+    try
+        return pg_record_check(value)
+    if it fails
+        return no
+    end
+end

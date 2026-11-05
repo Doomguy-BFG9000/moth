@@ -1,4 +1,4 @@
-// A load test for tools/server.moth (DESIGN §110): builds a small site with it, runs it, and asks it from
+// A load test for tools/server.moth (DESIGN §118): builds a small site with it, runs it, and asks it from
 // Node with many connections at once, on raw sockets, so nothing of Node's own pools or limits is measured.
 //
 //     node tools/load-test.mjs [server.moth] [--workers n] [--seconds s] [--connections c]

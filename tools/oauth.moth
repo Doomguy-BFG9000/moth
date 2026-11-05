@@ -1,0 +1,339 @@
+# OAuth 2 clients (RFC 6749), as Python's requests-oauthlib and Authlib have them: signing a person in with the
+# authorization code flow and PKCE (RFC 7636), which a program on the command line does with a server of its
+# own on 127.0.0.1 for the browser to come back to (RFC 8252); a program's own tokens, with its client
+# credentials; and tokens refreshed before they end. Over http.moth and server.moth: a program `moth build`
+# makes can use it, built with --allow-libraries (and --allow-run, to open the browser itself).
+#
+#   use "oauth.moth" as oauth
+#   set github to oauth's provider("https://github.com/login/oauth/authorize", "https://github.com/login/oauth/access_token", "my-client-id")
+#   set google to oauth's discover("https://accounts.google.com", "my-client-id")   # its endpoints, from OpenID Connect
+#   set tokens to oauth's sign_in(google, list of "openid", "email")   # the browser opens; the person signs in
+#   say access_token of tokens            # and refresh_token, expires_at, scope, id_token, token_type, fields
+#   if oauth's expired(tokens)            # within a minute of its end
+#       set tokens to oauth's refresh(google, tokens)
+#   end
+#   set service to oauth's provider("", "https://id.example.com/oauth/token", "my-service")
+#   set client_secret of service to "the service's secret"
+#   set tokens to oauth's client_credentials(service, list of "reports.read")   # no person: the program's own
+#
+#   set started to oauth's authorization_start(google, "https://my.app/callback", list of "openid")   # a web app's:
+#   # send the browser to url of started, keep state and verifier of started, and when it comes back,
+#   set tokens to oauth's exchange_code(google, code, "https://my.app/callback", verifier of started)
+#
+# A provider is a record: authorize_url, token_url, client_id, client_secret (nothing for a public client, as a
+# program on a person's computer is), secret_in ("basic", sent as HTTP Basic, or "body", in the form), port
+# (where sign_in's own server listens first, 8765; the next free one up from it), open_browser (yes) and
+# extra (a dictionary of more for the authorization URL, as "access_type" is "offline"). Tokens are a record:
+# access_token, token_type, refresh_token, scope, id_token and expires_at (seconds since 1970), each nothing
+# when the provider didn't send it, and fields, everything it sent. A provider that says no is a `fail with`
+# with what it said, as "the provider said invalid_grant: the code has expired".
+
+use "http.moth" as oauth_http
+use "server.moth" as oauth_web
+use "sockets.moth" as oauth_net
+use "hash.moth" as oauth_hash
+use "base64.moth" as oauth_b64
+use "secrets.moth" as oauth_secrets
+
+use the library "msvcrt"
+    "_time64" as oauth_windows_time(a pointer) gives a long whole number
+end
+use the library "c"
+    "time" as oauth_unix_time(a pointer) gives a long whole number
+end
+
+set oauth_waiting to nothing # sign_in's: the state it waits for, then the code or the mistake that came back
+
+# ---------- providers ----------
+
+to provider with authorize_url, token_url, client_id
+    return record with authorize_url authorize_url, token_url token_url, client_id client_id, client_secret nothing,
+        secret_in "basic", port 8765, open_browser yes, extra empty dictionary
+end
+
+# a provider from its OpenID Connect discovery document, at its issuer's /.well-known/openid-configuration
+to discover with issuer, client_id
+    set base to issuer
+    repeat while length of base is greater than 0 and item (length of base) of base is "/"
+        set base to items 1 to (length of base - 1) of base
+    end
+    set found to oauth_http's get_json(base + "/.well-known/openid-configuration")
+    if not ("authorization_endpoint" is in found) or not ("token_endpoint" is in found)
+        fail with base + " says no authorization_endpoint and token_endpoint"
+    end
+    return provider(item "authorization_endpoint" of found, item "token_endpoint" of found, client_id)
+end
+
+# ---------- the authorization code flow, with PKCE ----------
+
+# Where to send the browser to sign in, and what to keep for when it comes back: a record with url, state (a
+# random text the provider sends back, so a page that wasn't asked for is known) and verifier (PKCE's, whose
+# SHA-256, the challenge, is in the URL, so only this program can use the code)
+to authorization_start with given_provider, redirect_uri, scopes or empty list
+    set state to oauth_random(16)
+    set verifier to oauth_random(32)
+    set challenge to challenge_of(verifier)
+    set fields to dictionary where "response_type" is "code", "client_id" is client_id of given_provider, "redirect_uri" is redirect_uri
+    if length of scopes is greater than 0
+        set item "scope" of fields to join scopes with " "
+    end
+    set item "state" of fields to state
+    set item "code_challenge" of fields to challenge
+    set item "code_challenge_method" of fields to "S256"
+    for each name in extra of given_provider
+        set item name of fields to item name of extra of given_provider
+    end
+    set where to authorize_url of given_provider
+    set mark to "?"
+    if "?" is in where
+        set mark to "&"
+    end
+    return record with url (where + mark + oauth_http's form_of(fields)), state state, verifier verifier
+end
+
+# PKCE's challenge for a verifier, as S256 has it: its SHA-256, in base64url
+to challenge_of with verifier
+    return oauth_url(oauth_hash's bytes_of_hex(oauth_hash's sha256(verifier)))
+end
+
+# the tokens for a code the browser came back with
+to exchange_code with given_provider, code, redirect_uri, verifier
+    set fields to dictionary where "grant_type" is "authorization_code", "code" is code, "redirect_uri" is redirect_uri, "code_verifier" is verifier
+    return oauth_tokens(given_provider, fields, nothing)
+end
+
+# A person signed in from the command line: a server of the program's own on 127.0.0.1, the browser sent to
+# sign in (or the address said, to the error output, to open), and the code it comes back with exchanged
+to sign_in with given_provider, scopes or empty list
+    set port to oauth_free_port(port of given_provider)
+    set redirect_uri to "http://127.0.0.1:" + port + "/callback"
+    set started to authorization_start(given_provider, redirect_uri, scopes)
+    say "To sign in, open this address in a browser:\n" + url of started to the error output
+    if open_browser of given_provider
+        oauth_open(url of started)
+    end
+    set oauth_waiting to record with state state of started, code nothing, problem nothing
+    oauth_web's serve(port, oauth_answer)
+    set came to oauth_waiting
+    set oauth_waiting to nothing
+    if problem of came is not nothing
+        fail with problem of came
+    end
+    return exchange_code(given_provider, code of came, redirect_uri, verifier of started)
+end
+
+# what sign_in's server says to the browser when it comes back, with a code or a mistake
+to oauth_answer with request
+    if path of request is not "/callback"
+        return record with status 404, body "Nothing here."
+    end
+    set q to query of request
+    if not ("state" is in q) or item "state" of q is not state of oauth_waiting
+        return record with status 400, body "This sign-in wasn't asked for here: its state isn't the one sent."
+    end
+    if "error" is in q
+        set why to "the provider said " + item "error" of q
+        if "error_description" is in q
+            set why to why + ": " + item "error_description" of q
+        end
+        set problem of oauth_waiting to why
+        oauth_web's stop_serving()
+        return record with status 400, type "text/html; charset=utf-8", body oauth_page("Not signed in", why)
+    end
+    if not ("code" is in q)
+        return record with status 400, body "There's no code here."
+    end
+    set code of oauth_waiting to item "code" of q
+    oauth_web's stop_serving()
+    return record with status 200, type "text/html; charset=utf-8", body oauth_page("Signed in", "You can close this tab and go back to the program.")
+end
+
+to oauth_page with title, words
+    set safe to join (split (join (split (join (split words by "&") with "&amp;") by "<") with "&lt;") by ">") with "&gt;"
+    return "<!doctype html><meta charset=\"utf-8\"><title>" + title + "</title><body style=\"font-family:sans-serif;margin:3em\"><h1>" + title + "</h1><p>" + safe + "</p></body>"
+end
+
+# the first port from this one up that nothing is listening on, on 127.0.0.1
+to oauth_free_port with first
+    for each port from first to first + 50
+        set free to yes
+        try
+            set probe to oauth_net's listen(port)
+            oauth_net's close(probe)
+        if it fails
+            set free to no
+        end
+        if free
+            return port
+        end
+    end
+    fail with "no port from " + first + " to " + (first + 50) + " is free for the sign-in to come back to"
+end
+
+# the browser opened at this address, where the program may start one (built with --allow-run); else nothing
+to oauth_open with url
+    try
+        if oauth_on_windows()
+            set opened to run program "rundll32" with (list of "url.dll,FileProtocolHandler", url)
+        else
+            set opened to run program "xdg-open" with (list of url)
+        end
+    if it fails
+        return nothing
+    end
+end
+
+to oauth_on_windows
+    try
+        oauth_windows_time(nothing)
+        return yes
+    if it fails
+        return no
+    end
+end
+
+# ---------- other grants ----------
+
+# the program's own tokens, with its client_id and client_secret: no person signs in
+to client_credentials with given_provider, scopes or empty list
+    if client_secret of given_provider is nothing
+        fail with "client credentials need the provider's client_secret"
+    end
+    set fields to dictionary where "grant_type" is "client_credentials"
+    if length of scopes is greater than 0
+        set item "scope" of fields to join scopes with " "
+    end
+    return oauth_tokens(given_provider, fields, nothing)
+end
+
+# new tokens for ones ending, with their refresh_token; the refresh_token kept if no new one comes
+to refresh with given_provider, tokens
+    if refresh_token of tokens is nothing
+        fail with "these tokens have no refresh_token to refresh them with"
+    end
+    set fields to dictionary where "grant_type" is "refresh_token", "refresh_token" is refresh_token of tokens
+    return oauth_tokens(given_provider, fields, refresh_token of tokens)
+end
+
+# whether tokens end within `margin` seconds (or have ended); tokens that say no end never do
+to expired with tokens, margin or 60
+    if expires_at of tokens is nothing
+        return no
+    end
+    return oauth_now() + margin is at least expires_at of tokens
+end
+
+# ---------- the token endpoint ----------
+
+to oauth_tokens with given_provider, fields, old_refresh
+    set headers to dictionary where "content-type" is "application/x-www-form-urlencoded", "accept" is "application/json"
+    set sent to fields
+    if client_secret of given_provider is not nothing and secret_in of given_provider is "basic"
+        set pair to oauth_http's encoded(client_id of given_provider) + ":" + oauth_http's encoded(client_secret of given_provider)
+        set item "authorization" of headers to "Basic " + oauth_b64's base64_of(pair)
+    else
+        set item "client_id" of sent to client_id of given_provider
+        if client_secret of given_provider is not nothing
+            set item "client_secret" of sent to client_secret of given_provider
+        end
+    end
+    set r to oauth_http's request("POST", token_url of given_provider, oauth_http's form_of(sent), headers)
+    return oauth_read_tokens(status of r, text of r, oauth_now(), old_refresh)
+end
+
+# A token endpoint's answer, as tokens: its JSON (or, as GitHub can answer, a form), at this moment; a mistake
+# with its error if it says no
+to oauth_read_tokens with status, words, moment, old_refresh
+    set got to nothing
+    try
+        set got to json from words
+    if it fails
+        set got to nothing
+    end
+    if got is nothing or not oauth_is_dictionary(got)
+        set got to oauth_form(words)
+    end
+    if "error" is in got
+        set why to "the provider said " + item "error" of got
+        if "error_description" is in got and item "error_description" of got is not nothing
+            set why to why + ": " + item "error_description" of got
+        end
+        fail with why
+    end
+    if status is at least 400
+        fail with "the token endpoint said " + status
+    end
+    if not ("access_token" is in got)
+        fail with "the token endpoint sent no access_token"
+    end
+    set expires_at to nothing
+    if "expires_in" is in got and item "expires_in" of got is not nothing
+        set expires_at to moment + number of ("" + item "expires_in" of got)
+    end
+    set refresh_token to oauth_field(got, "refresh_token")
+    if refresh_token is nothing
+        set refresh_token to old_refresh
+    end
+    return record with access_token item "access_token" of got, token_type oauth_field(got, "token_type"),
+        refresh_token refresh_token, scope oauth_field(got, "scope"), id_token oauth_field(got, "id_token"),
+        expires_at expires_at, fields got
+end
+
+to oauth_field with got, name
+    if name is in got
+        return item name of got
+    end
+    return nothing
+end
+
+# name=value&... as a dictionary, each decoded
+to oauth_form with words
+    set made to empty dictionary
+    for each pair in split words by "&"
+        if pair is not ""
+            set at to position of "=" in pair
+            if at is 0
+                set item (oauth_http's decoded(pair)) of made to ""
+            else
+                set item (oauth_http's decoded(items 1 to (at - 1) of pair)) of made to oauth_http's decoded(items (at + 1) to (length of pair) of pair)
+            end
+        end
+    end
+    return made
+end
+
+# ---------- small things ----------
+
+# n random bytes in base64url, with no = at the end
+to oauth_random with n
+    return oauth_url(oauth_secrets's random_bytes(n))
+end
+
+to oauth_url with data
+    set made to oauth_b64's url_base64_of(data)
+    repeat while length of made is greater than 0 and item (length of made) of made is "="
+        set made to items 1 to (length of made - 1) of made
+    end
+    return made
+end
+
+# seconds since 1970 began, in UTC, as the system's clock has it
+to oauth_now
+    try
+        return oauth_windows_time(nothing)
+    if it fails
+        return oauth_unix_time(nothing)
+    end
+end
+
+to oauth_dictionary_check with value as a dictionary
+    return yes
+end
+
+to oauth_is_dictionary with value
+    try
+        return oauth_dictionary_check(value)
+    if it fails
+        return no
+    end
+end

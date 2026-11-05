@@ -358,7 +358,7 @@ function parse(tokens, reading = { loaded: new Set(), open: [] }) {
   }
   // these words from token i on, on the line before them
   const wordsAt = (i, words) => words.every((w, k) => wordAt(i + k, w) && !tokens[i + k].nl);
-  // `start count(10) on another core`: a worker, with memory of its own, not a task (DESIGN §111)
+  // `start count(10) on another core`: a worker, with memory of its own, not a task (DESIGN §119)
   const onAnotherCore = () => {
     if (!wordsAt(pos, ["on", "another", "core"])) return false;
     pos += 3;

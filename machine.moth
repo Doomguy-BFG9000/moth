@@ -28885,7 +28885,7 @@ to emit_runtime with st
         end
     end
     reserve(a, "gc_roots_from", 0, 8) # where the collector looks for values among the runtime's own
-    if workers of a # a worker's slots, what one was given, and what each gave: all of them values (DESIGN §111)
+    if workers of a # a worker's slots, what one was given, and what each gave: all of them values (DESIGN §119)
         reserve(a, "wk_slots", wk_max * wk_size, 8)
         reserve(a, "wk_given", 64, 8)
         reserve(a, "wk_given_fn", 8, 8)
@@ -29090,7 +29090,7 @@ to table_of_texts with a, name, labels
 end
 
 # ---------- the runtime: workers ----------
-# `start f(x) on another core` (DESIGN §111) makes the call on a worker: a thread of the system's with memory
+# `start f(x) on another core` (DESIGN §119) makes the call on a worker: a thread of the system's with memory
 # of its own, which shares nothing with the program. A worker runs a copy of the program's whole image -- its
 # code, its read-only data, its variables and the runtime's own memory -- taken as the worker starts. Every
 # address inside the image is written as a distance from the instruction using it, so the copy's code reads
@@ -44249,7 +44249,7 @@ to gen_wk_cant_copy with fc, at
     jmp_to(a, "rt_e_end")
 end
 
-# `start f(x) on another core`: the call made on a worker, which has memory of its own (DESIGN §111); gives
+# `start f(x) on another core`: the call made on a worker, which has memory of its own (DESIGN §119); gives
 # the worker: a record of its number.
 to gen_worker_start with fc, e
     set a to a of fc
@@ -44462,7 +44462,7 @@ to place_absolutes with a, bases, image_base
     end
 end
 
-# For a program with workers (DESIGN §111): where each 8-byte address absolute() asked for is, as a distance
+# For a program with workers (DESIGN §119): where each 8-byte address absolute() asked for is, as a distance
 # from where the image starts, so a worker's copy of the image can have each say where its place is in the
 # copy (see rt_wk_image). Made when the read-only data is otherwise done, as every such address has been
 # asked for by then; filled in by wk_fixes_place once each has its place.

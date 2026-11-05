@@ -1,0 +1,118 @@
+# jwt.moth's tests: RFC 7515's own examples, and tokens and keys PyJWT and Python's cryptography made, which
+# moth.test.js runs on every engine: each time a check needs is given as `now`, so none asks the system's clock
+
+use "jwt.moth" as jwt
+
+set jwt_test_spki to "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAg3iadlki/q9z3Z0S5wuJ\ncb2OECkDbxaFJCFqXdqdPVJjM8fIRISr/TyJTaVDmJO4ZA+q+R9uDtYDqES7yXgQ\nh60+6jizGhJZi97iKPOdYqTS5BrbgtmbJWK/+WzXNqX5nYqLymWvfrOomXx2Gs99\nqw0EoVKpU42IiM/DOzYOpRKE+nI3IM+/kD5s8JBH+4P51zYdCSroE8xSK1RDyoWb\n4BDEIYSsAm0HD17V0FEQr0NWBv5LtwtNRB4bXwSxBM/ZV1C9VV6JZl6sKo+sjYpx\nmW43ZfhQJGLNG90Z1jy39edd+W81ItKEDad5A8SheakY1TBDPBTZvqiEKpRNsKpk\n1QIDAQAB\n-----END PUBLIC KEY-----\n"
+set jwt_test_pkcs1 to "-----BEGIN RSA PUBLIC KEY-----\nMIIBCgKCAQEAg3iadlki/q9z3Z0S5wuJcb2OECkDbxaFJCFqXdqdPVJjM8fIRISr\n/TyJTaVDmJO4ZA+q+R9uDtYDqES7yXgQh60+6jizGhJZi97iKPOdYqTS5Brbgtmb\nJWK/+WzXNqX5nYqLymWvfrOomXx2Gs99qw0EoVKpU42IiM/DOzYOpRKE+nI3IM+/\nkD5s8JBH+4P51zYdCSroE8xSK1RDyoWb4BDEIYSsAm0HD17V0FEQr0NWBv5LtwtN\nRB4bXwSxBM/ZV1C9VV6JZl6sKo+sjYpxmW43ZfhQJGLNG90Z1jy39edd+W81ItKE\nDad5A8SheakY1TBDPBTZvqiEKpRNsKpk1QIDAQAB\n-----END RSA PUBLIC KEY-----\n"
+set jwt_test_certificate to "-----BEGIN CERTIFICATE-----\nMIICoTCCAYmgAwIBAgIBBzANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAltb3Ro\nIHRlc3QwHhcNMjYwMTAxMDAwMDAwWhcNMzYwMTAxMDAwMDAwWjAUMRIwEAYDVQQD\nDAltb3RoIHRlc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCDeJp2\nWSL+r3PdnRLnC4lxvY4QKQNvFoUkIWpd2p09UmMzx8hEhKv9PIlNpUOYk7hkD6r5\nH24O1gOoRLvJeBCHrT7qOLMaElmL3uIo851ipNLkGtuC2ZslYr/5bNc2pfmdiovK\nZa9+s6iZfHYaz32rDQShUqlTjYiIz8M7Ng6lEoT6cjcgz7+QPmzwkEf7g/nXNh0J\nKugTzFIrVEPKhZvgEMQhhKwCbQcPXtXQURCvQ1YG/ku3C01EHhtfBLEEz9lXUL1V\nXolmXqwqj6yNinGZbjdl+FAkYs0b3RnWPLf15135bzUi0oQNp3kDxKF5qRjVMEM8\nFNm+qIQqlE2wqmTVAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAAGGLWZIXb+CTn2X\nczwEO1QMCTIeTB6ExhGPf2kZeR+AEVqYG9YNzqzPiHOpwNQI4DvNG+QowlPDudxD\ngGd+laiBeY+FtFpcLnJI0t9rhqcvT+BuEpDAadD63OkTvV9eYr/twCuATv8N1fsQ\n/sdMKWHIwrYVTC7lT7+bhDAVLMWznNBhgPBY55FGv8qaBlPQYm9tTgbegYavHNJM\nIA4eBBuiaxBfgDkMmfUgKGqFpgurU6Yxs6Z7PLsOWuGU0JvNHPxjFYIdNYLzX8Re\ns6lAUJBgUrQ283WXzi2Yoek9YpDZJ4vFUPVui+baH+02vpH3Lk+KTydfIkK4zBOK\nJbwXDCE=\n-----END CERTIFICATE-----\n"
+set jwt_test_n to "g3iadlki_q9z3Z0S5wuJcb2OECkDbxaFJCFqXdqdPVJjM8fIRISr_TyJTaVDmJO4ZA-q-R9uDtYDqES7yXgQh60-6jizGhJZi97iKPOdYqTS5BrbgtmbJWK_-WzXNqX5nYqLymWvfrOomXx2Gs99qw0EoVKpU42IiM_DOzYOpRKE-nI3IM-_kD5s8JBH-4P51zYdCSroE8xSK1RDyoWb4BDEIYSsAm0HD17V0FEQr0NWBv5LtwtNRB4bXwSxBM_ZV1C9VV6JZl6sKo-sjYpxmW43ZfhQJGLNG90Z1jy39edd-W81ItKEDad5A8SheakY1TBDPBTZvqiEKpRNsKpk1Q"
+
+# what a call fails with, or nothing if it doesn't
+to failure_of with f
+    try
+        f()
+    if it fails with why
+        return why
+    end
+    return nothing
+end
+
+to test_rfc_examples
+    # RFC 7515 A.1: HMAC SHA-256, its key a JWK
+    set key to dictionary where "kty" is "oct", "k" is "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+    set token to "eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    set claims to jwt's verify(token, key, record with now 1300819379)
+    expect item "iss" of claims is "joe"
+    expect item "exp" of claims is 1300819380
+    expect item "http://example.com/is_root" of claims is yes
+    expect failure_of(function gives jwt's verify(token, key, record with now 1300819380)) is "the token has expired"
+    expect jwt's verify(token, key, record with now 1300819390, leeway 30) is claims
+    # A.2: RSA SHA-256, its key a JWK
+    set rsa_key to dictionary where "kty" is "RSA", "n" is "ofgWCuLjybRlzo0tZWJjNiuSfb4p4fAkd_wWJcyQoTbji9k0l8W26mPddxHmfHQp-Vaw-4qPCJrcS2mJPMEzP1Pt0Bm4d4QlL-yRT-SFd2lZS-pCgNMsD1W_YpRPEwOWvG6b32690r2jZ47soMZo9wGzjb_7OMg0LOL-bSf63kpaSHSXndS5z5rexMdbBYUsLA9e-KXBdQOS-UTo7WTBEMa2R2CapHg665xsmtdVMTBQY4uDZlxvb3qCo5ZwKh9kG4LT6_I5IhlJH7aGhyxXFvUK-DWNmoudF8NAco9_h9iaGNj8q2ethFkMLs91kzk2PAcDTW9gb54h4FRWyuXpoQ", "e" is "AQAB"
+    expect jwt's verify("eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.cC4hiUPoj9Eetdgtv3hF80EGrhuB__dzERat0XF9g2VtQgr9PJbu3XOiZj5RZmh7AAuHIm4Bh-0Qc_lF5YKt_O8W2Fp5jujGbds9uJdbF9CUAr7t1dnZcAcQjbKBYNX4BAynRFdiuB--f_nZLgrnbyTyWzO75vRK5h6xBArLIARNPvkSjtQBMHlb1L07Qe7K0GarZRmB_eSN9383LcOLn6_dO--xi12jzDwusC-eOkHWEsqtFZESc6BfI7noOPqvhJ1phCnvWh6IeYI2w9QOYEUipUTI8np6LbgGY9Fs98rqVt5AXLIhWkWywlVmtVrBp0igcN_IoypGlUPQGe77Rw", rsa_key, record with now 1300819379) is claims
+    set parts to jwt's decode("eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.cC4hiUPoj9Eetdgtv3hF80EGrhuB__dzERat0XF9g2VtQgr9PJbu3XOiZj5RZmh7AAuHIm4Bh-0Qc_lF5YKt_O8W2Fp5jujGbds9uJdbF9CUAr7t1dnZcAcQjbKBYNX4BAynRFdiuB--f_nZLgrnbyTyWzO75vRK5h6xBArLIARNPvkSjtQBMHlb1L07Qe7K0GarZRmB_eSN9383LcOLn6_dO--xi12jzDwusC-eOkHWEsqtFZESc6BfI7noOPqvhJ1phCnvWh6IeYI2w9QOYEUipUTI8np6LbgGY9Fs98rqVt5AXLIhWkWywlVmtVrBp0igcN_IoypGlUPQGe77Rw")
+    expect header of parts is dictionary where "alg" is "RS256"
+    expect length of signature of parts is 256
+end
+
+to test_making
+    set claims to dictionary where "sub" is "42", "admin" is yes, "exp" is 1700003600
+    # byte for byte as PyJWT makes them
+    expect jwt's make(claims, "a long random secret") is "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.cJ8nZPRsxGWXThFK6CXBZ9QWL1pmCi0KIWMVXG9-lRI"
+    expect jwt's make(claims, "a long random secret", "HS384") is "eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.tPboKXDGmuAPWY-1Hy-pGv__N_-YaiKwbZqjsm1rEThrt75iKnMTogAN9YI_s-nV"
+    expect jwt's make(claims, "a long random secret", "HS512") is "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.McZkMUQip8nLrdvjY5eL37fjbwAFQpJNmJJy0KW4rZBK_pR9t7cta1rm8z-UQI1WXTpREtiRbk7FTnoIbG4UDA"
+    for each name in list of "HS256", "HS384", "HS512"
+        set token to jwt's make(claims, "a long random secret", name)
+        expect jwt's verify(token, "a long random secret", record with now 1700000000) is claims
+    end
+    set with_kid to jwt's make((record with sub "7", exp 1700003600), "a long random secret", "HS256", dictionary where "kid" is "2026-11")
+    expect header of jwt's decode(with_kid) is dictionary where "alg" is "HS256", "typ" is "JWT", "kid" is "2026-11"
+    expect item "sub" of jwt's verify(with_kid, "a long random secret" as bytes, record with now 1700000000) is "7"
+    expect failure_of(function gives jwt's make(claims, "secret", "RS256")) is "jwt.moth makes tokens with HS256, HS384 or HS512, not RS256"
+    expect failure_of(function gives jwt's make(claims, jwt_test_spki)) is "a token is made with a secret here: an RSA key can only check one"
+    expect failure_of(function gives jwt's make(claims, "")) is "a secret for a token can't be empty"
+end
+
+to test_rsa_keys
+    set checks to record with issuer "https://id.example.com", audience "my-app", now 1700000100
+    set want to dictionary where "sub" is "42", "iss" is "https://id.example.com", "aud" is "my-app", "iat" is 1700000000, "nbf" is 1700000000, "exp" is 1700003600
+    set jwk to dictionary where "kty" is "RSA", "n" is jwt_test_n, "e" is "AQAB"
+    for each key in list of jwt_test_spki, jwt_test_pkcs1, jwt_test_certificate, jwk
+        expect jwt's verify("eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw", key, checks) is want
+    end
+    expect jwt's verify("eyJhbGciOiJSUzM4NCIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.dP-6S0OwldiIUVv576L5CC-qYCSHY9KZtl793-hfFvg5EK_wxyz6PiOp9loSUXV0ygQG63a8Z9QFCBj4_7iPiyRfVD-muxuXSjeLU9UzrVGUsIOzme4YUKs8qdQfWnzagE2pn9zoxhOj5iLlarn8ynVjarQC0Dk3ZjHD5NXgLFV_fpuWeP9wAym_hbOPFH2jesveGkUclQ5V2e5Z1gLTpi8l3vLoVnPb2JsKL5GCcHc8KWQu5scHYbNHC2BFFiM6WGf2wrOf7b02yXHPYECPE89NzYi1qerjwEuxHxBkb4MjJGwzRJZxAfSV_PZ7DEUW0iIuDsfXun_RdjwyLAc5eQ", jwt_test_spki, checks) is want
+    expect jwt's verify("eyJhbGciOiJSUzUxMiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.HZKjiRFHxCBUJZVYx7PCI0mPrUgIE2iVNfvbstgbMmuLJ7x6TG23SGnPICiyszpuys_PY5ALYTyjzphlslKL2MCkg327Mh6433dBdCpT4a9seCXNKWf3CnGuO7IC23TfjMPGQuyi3uNnawCqoMOtr73MhIQbGxLarEr0bCE8sorp-IR7Qw82o4ZMACitSrxB2LVhyv9phonUfo1JZltKEuvZvgl-OWE_ZZdzxhKKIyGHKX-wMU0XspMw52AIaouNTNIUM9Q2GqcPeIBaKxLtfnUUZa2lGwDb4wx79_r3JS8oDAHSk0SXYXni1ITBaKdjjitHp35042038DkOHMnA5Q", jwt_test_certificate, checks) is want
+    expect header of jwt's decode("eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw") is dictionary where "alg" is "RS256", "kid" is "k1", "typ" is "JWT"
+    # a PEM file as Windows writes it, with \r\n line ends
+    set cr to (list of 13) as bytes as text
+    expect jwt's verify("eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw", join (split jwt_test_spki by "\n") with cr + "\n", checks) is want
+end
+
+to test_claims
+    set secret to "a long random secret"
+    set token to jwt's make((dictionary where "iss" is "me", "aud" is (list of "a", "b"), "nbf" is 1000, "iat" is 1000, "exp" is 2000), secret)
+    expect item "iss" of jwt's verify(token, secret, record with now 1500, audience "b") is "me"
+    expect failure_of(function gives jwt's verify(token, secret, record with now 2000, audience "a")) is "the token has expired"
+    expect item "exp" of jwt's verify(token, secret, record with now 2009, leeway 10, audience "a") is 2000
+    expect failure_of(function gives jwt's verify(token, secret, record with now 999, audience "a")) is "the token isn't good yet: its nbf is after now"
+    expect failure_of(function gives jwt's verify(token, secret, record with now 1500)) is "the token is for another audience (aud)"
+    expect failure_of(function gives jwt's verify(token, secret, record with now 1500, audience "c")) is "the token is for another audience (aud)"
+    expect failure_of(function gives jwt's verify(token, secret, dictionary where "now" is 1500, "audience" is "a", "issuer" is "you")) is "the token isn't from the issuer it should be (iss)"
+    expect item "iss" of jwt's verify(token, secret, dictionary where "now" is 1500, "audience" is "a", "issuer" is (list of "you", "me")) is "me"
+    set bare to jwt's make((dictionary where "sub" is "x"), secret)
+    expect jwt's verify(bare, secret, record with now 5) is dictionary where "sub" is "x"
+    expect failure_of(function gives jwt's verify(bare, secret, record with now 5, require (list of "exp"))) is "the token has no exp claim, which it must have"
+    expect failure_of(function gives jwt's verify(bare, secret, record with now 5, audience "a")) is "the token says no audience (aud), and one was expected"
+    expect failure_of(function gives jwt's verify(bare, secret, record with now 5, issuer "me")) is "the token isn't from the issuer it should be (iss)"
+    set later to jwt's make((dictionary where "iat" is 100), secret)
+    expect failure_of(function gives jwt's verify(later, secret, record with now 50)) is "the token says it was made after now (iat)"
+    set wordy to jwt's make((dictionary where "exp" is "tomorrow"), secret)
+    expect failure_of(function gives jwt's verify(wordy, secret, record with now 50)) is "the token's exp isn't a number of seconds"
+    expect failure_of(function gives jwt's verify(bare, secret, record with now 5, algorithms (list of "HS512"))) is "the token says HS256, but a secret checks only HS256, HS384 or HS512"
+end
+
+to test_attacks
+    set checks to record with issuer "https://id.example.com", audience "my-app", now 1700000100
+    # alg none, and HMAC with the public key as its secret: each turned down before anything else
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.", jwt_test_spki, checks)) is "a token with no signature (alg none) is never accepted"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.", "a long random secret", checks)) is "a token with no signature (alg none) is never accepted"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.oM71rsWALbZJoj_5ZHHp6D2NnGbvcYLOuyQD9FnbaO8", jwt_test_spki, checks)) is "the token says HS256, but this RSA key checks only RS256, RS384 or RS512"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw", "a long random secret", checks)) is "the token says RS256, but a secret checks only HS256, HS384 or HS512"
+    # a claim changed, a signature from another key, and a secret that isn't the one
+    set parts to split "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw" by "."
+    set changed to jwt's make((dictionary where "sub" is "1", "aud" is "my-app", "iss" is "https://id.example.com"), "x")
+    set forged to item 1 of parts + "." + item 2 of (split changed by ".") + "." + item 3 of parts
+    expect failure_of(function gives jwt's verify(forged, jwt_test_spki, checks)) is "the token's signature isn't right"
+    set other to dictionary where "kty" is "RSA", "n" is "ofgWCuLjybRlzo0tZWJjNiuSfb4p4fAkd_wWJcyQoTbji9k0l8W26mPddxHmfHQp-Vaw-4qPCJrcS2mJPMEzP1Pt0Bm4d4QlL-yRT-SFd2lZS-pCgNMsD1W_YpRPEwOWvG6b32690r2jZ47soMZo9wGzjb_7OMg0LOL-bSf63kpaSHSXndS5z5rexMdbBYUsLA9e-KXBdQOS-UTo7WTBEMa2R2CapHg665xsmtdVMTBQY4uDZlxvb3qCo5ZwKh9kG4LT6_I5IhlJH7aGhyxXFvUK-DWNmoudF8NAco9_h9iaGNj8q2ethFkMLs91kzk2PAcDTW9gb54h4FRWyuXpoQ", "e" is "AQAB"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiI0MiIsImlzcyI6Imh0dHBzOi8vaWQuZXhhbXBsZS5jb20iLCJhdWQiOiJteS1hcHAiLCJpYXQiOjE3MDAwMDAwMDAsIm5iZiI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAzNjAwfQ.KXoC1bMtBuVg4MqgPKFYQKSWrHsz2IWPrrVrYWYCsiOa6I0CbY4QBQDw70gau-0oLmyJnqb4YF2p3RKF3Rn7W_0VvCg1P02_o2JZaul-mqT5QnfrT71UPeuPVm9h302NtSKNcbel-d1hZZDLE-DaUqvxD1LwaNiMUgBl65Qb6hIyVEzSX6gLnLQ_qUwvObU_WdcwiD9NDH9NvwrEGaY2U0bc-o4T9a9IYXBH7WaTP-UEMoA57djthvkNLFtvvgpL288wy1SfIAbQ8kvQDeIXyirPv5t3_sRVeW4GRaa43Aw1prv2sa_7TXIBKvu-QUzlVUpvDAtqgk5SPaeFjia4Kw", other, checks)) is "the token's signature isn't right"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.cJ8nZPRsxGWXThFK6CXBZ9QWL1pmCi0KIWMVXG9-lRI", "another secret", record with now 1700000000)) is "the token's signature isn't right"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.cJ8nZPRsxGWXThFK6CXBZ9QWL1pmCi0KIWMVXG9-lRI", "a long random secreT", record with now 1700000000)) is "the token's signature isn't right"
+    # tokens that aren't
+    expect failure_of(function gives jwt's verify("a.b", "k")) is "this isn't a JWT: it has 1 dots, not 2"
+    expect failure_of(function gives jwt's verify("a.b.c=", "k")) is "this isn't a JWT: '=' isn't one of base64url's letters"
+    expect failure_of(function gives jwt's verify("bm90IGpzb24.e30.", "k")) is "this isn't a JWT: its header isn't JSON"
+    expect failure_of(function gives jwt's verify("W10.e30.", "k")) is "this isn't a JWT: its header isn't a JSON object"
+    expect failure_of(function gives jwt's verify("e30.e30.", "k")) is "the token's header says no algorithm"
+    expect failure_of(function gives jwt's verify("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiIsImFkbWluIjp0cnVlLCJleHAiOjE3MDAwMDM2MDB9.cJ8nZPRsxGWXThFK6CXBZ9QWL1pmCi0KIWMVXG9-lRI", "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n")) is "this is a private key: a token is checked with the public key, which can't sign"
+end
