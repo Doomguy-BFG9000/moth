@@ -7,8 +7,12 @@ apps/*.html
 /moth
 # where npm run bench and npm run versus put the programs they time, while they do
 /.bench-*
-# the VS Code extension, packed (by node editors/vscode/make-vsix.mjs)
+# the VS Code extension, packed (by node editors/vscode/make-vsix.mjs, or vsce), the engine vsce packs from,
+# the tools to pack and test it (npm ci there), and the copies of VS Code its tests download
 editors/vscode/*.vsix
+editors/vscode/engine/
+editors/vscode/node_modules/
+editors/vscode/.vscode-test/
 # what building the Zed extension, and the tree-sitter grammar for Neovim, leave behind
 editors/zed/target/
 editors/zed/extension.wasm
