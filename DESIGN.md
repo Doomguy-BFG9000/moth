@@ -5858,3 +5858,46 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   added it: the three files built, checked by twine, the Linux wheel's
   tests passed, and the artifact kept. The upload itself has never run,
   against PyPI or TestPyPI.
+## 138. Bits where the code is
+
+- **Why.** `x bit and 255`, `shift u right by 8` and the rest went to the
+  runtime, which checked each side with rt_bits: about 60 instructions, two
+  calls in, to `and` two whole numbers. machine.moth does it for every byte
+  it writes (put32, put64), so moth building compiler.moth spent 9.5% of its
+  instructions there, and a call of `distance(i, 0, 0, i bit and 1023)`
+  58% (§128).
+- **What it does.** When both sides are whole numbers from 0 to 2^53 - 1,
+  it's done right where it is: each side becomes a 64-bit whole number,
+  unless it's known to be one already (then the conversion alone, as anything
+  past 2^63, an infinity or NaN comes out below 0); one test that neither is
+  below 0 nor past 2^53 - 1; the `and`, `or`, `xor` or shift; and the
+  answer back as a number. A whole number the program wrote on the right, as
+  in `bit and 255` or `right by 8`, goes in the instruction. A shift left
+  checks that no bit was lost and the answer is still below 2^53; a shift
+  past 63 to the right, or 52 to the left, goes the runtime's way. Anything
+  else (a number whole only to 15 digits, below 0, past 2^53 - 1, text,
+  nothing) goes to the runtime, in the code kept out of the way, with both
+  sides as they were, so what it gives and every mistake it makes are what
+  they were.
+- **What's known after.** A bit operation gives a whole number, so `set u
+  to shift u right by 8` keeps `u` whole, and a loop or a function's inputs
+  know it (§32, §48). A shift left gives one only if what's shifted is known
+  to be whole: see below.
+- **A mistake found on the way.** vm.js shifts left by multiplying the
+  number as it is, which bits only checks: `shift (0.1 * 3 * 10) left by 51`
+  is 6755399441055745 on every engine, as 0.1 * 3 * 10 is 3.0000000000000004.
+  Machine code shifted the whole number rounding made of it, and said
+  6755399441055744. rt_shift_left now multiplies the number as it is by 2^n,
+  as the engines do, and says it's too big as they do.
+- **What it gave.** Counted (§128): the calls of four inputs, 573 million
+  instructions to 231 million; moth building compiler.moth, 3,579 million to
+  3,259 million. Timed: the calls of four inputs, 44 ms to 23; a million
+  bytes filled and summed, 37 ms to 27; moth building compiler.moth, 712 ms
+  to 677 (the best of ten, each moth run in turn with the other).
+- **Tested.** Every kind of value on each side of `bit and`, `bit or` and
+  `bit xor` (0, -0, 2^53 - 1, 2^53, -1, 1.5, numbers whole to 15 digits,
+  infinities, text, nothing, yes, a list, hex), each shifted both ways by
+  every distance up to 1,024 and by ones that are wrong, the same with
+  whole numbers written on the right, in functions, loops and sums, and the
+  mistakes with their lines and calls: in machine code against the
+  JavaScript engine, and on the VM, the JIT and WebAssembly, which agree.
