@@ -1,18 +1,19 @@
-// The VS Code extension (editors/vscode, DESIGN §61 and §108): its colours, run through a small TextMate
+// The VS Code extension (editors/vscode, DESIGN §61, §108 and §126): its colours, run through a small TextMate
 // tokenizer; its indenting; the extension itself, against a stand-in for VS Code's API, with and without a
-// stand-in for moth lsp; and the .vsix it's packed in.
-import { test } from "node:test";
+// stand-in for moth lsp; finding moth; and the .vsix it's packed in. Its tests in VS Code itself are
+// editors/vscode/e2e, which CI runs on the .vsix vsce makes.
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { inflateRawSync } from "node:zlib";
 import { createRequire, Module } from "node:module";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { check, format, suggestedFix } from "./moth.js";
 import examples from "./examples.js";
-import { contents, zip, ENGINE } from "./editors/vscode/make-vsix.mjs";
+import { contents, zip, unzip, ENGINE, FILES } from "./editors/vscode/make-vsix.mjs";
+const { findMoth, missingMessage } = createRequire(import.meta.url)("./editors/vscode/find-moth.js");
 
 const here = (file) => new URL(`./${file}`, import.meta.url);
 const grammar = JSON.parse(readFileSync(here("editors/vscode/syntaxes/moth.tmLanguage.json"), "utf8"));
@@ -133,6 +134,15 @@ test("the editor indents after a line that opens a block, and takes it back at e
 
 // ---------- the extension, against a stand-in for VS Code ----------
 
+// a moth for the extension to find, in a folder with spaces in its name, as Windows' Program Files has: an
+// empty file marked as a program, since the stand-ins never run it
+const mothHome = mkdtempSync(join(tmpdir(), "moth-home-"));
+const fakeMoth = join(mothHome, "Program Files", "Moth", "moth");
+mkdirSync(join(mothHome, "Program Files", "Moth"), { recursive: true });
+writeFileSync(fakeMoth, "");
+chmodSync(fakeMoth, 0o755);
+after(() => rmSync(mothHome, { recursive: true, force: true }));
+
 class Position {
   constructor(line, character) {
     this.line = line;
@@ -182,9 +192,10 @@ function makeDocument(fsPath, text, languageId = "moth") {
     },
   };
 }
-// the stand-in, with moth.path and moth.languageServer as `settings` says
-function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }) {
-  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, terminals: [], messages: [], output: [], triggers: {}, debugging: [], debug: {} };
+// the stand-in, with moth.path and moth.languageServer as `settings` says; a warning's buttons go in
+// seen.buttons, and it's answered with seen.answer
+function standIn(settings = { path: fakeMoth, languageServer: false }) {
+  const seen = { diagnostics: new Map(), providers: {}, listeners: {}, commands: {}, tasks: [], messages: [], buttons: [], answer: undefined, opened: [], output: [], triggers: {}, debugging: [], debug: {} };
   const on = (kind) => (f) => ((seen.listeners[kind] = f), { dispose() {} });
   const provider = (kind) => (selector, p, ...triggers) => ((seen.providers[kind] = p), (seen.triggers[kind] = triggers), { dispose() {} });
   const vscode = {
@@ -198,10 +209,20 @@ function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }
     Hover: class { constructor(contents, range) { Object.assign(this, { contents, range }); } },
     MarkdownString: class { constructor(value) { this.value = value; } },
     CompletionItem: class { constructor(label, kind) { Object.assign(this, { label, kind }); } },
-    Uri: { parse: (text) => ({ scheme: text.split(":")[0], toString: () => text }) },
+    Uri: { parse: (text) => ({ scheme: text.split(":")[0], toString: () => text }), file: (fsPath) => ({ scheme: "file", fsPath, toString: () => `file://${fsPath}` }) },
+    env: { openExternal: async (uri) => (seen.opened.push(uri.toString()), true) },
     TextEdit: { replace: (range, newText) => ({ range, newText }) },
     CodeAction: class { constructor(title, kind) { Object.assign(this, { title, kind }); } },
     CodeActionKind: { QuickFix: "quickfix" },
+    Task: class { constructor(definition, scope, name, source, execution, matchers) { Object.assign(this, { definition, scope, name, source, execution, matchers }); } },
+    ProcessExecution: class { constructor(process, args, options) { Object.assign(this, { process, args, options }); } },
+    TaskScope: { Workspace: 2 },
+    TaskRevealKind: { Always: 1 },
+    TaskPanelKind: { Dedicated: 2 },
+    tasks: {
+      executeTask: async (task) => (seen.tasks.push(task), {}),
+      registerTaskProvider: (type, provider) => ((seen.taskProvider = [type, provider]), { dispose() {} }),
+    },
     WorkspaceEdit: class { constructor() { this.edits = []; } replace(uri, range, text) { this.edits.push({ uri, range, text }); } },
     languages: {
       createDiagnosticCollection: () => ({ set: (uri, d) => seen.diagnostics.set(uri.toString(), d), delete: (uri) => seen.diagnostics.delete(uri.toString()), dispose() {} }),
@@ -217,14 +238,17 @@ function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }
       onDidOpenTextDocument: on("open"),
       onDidChangeTextDocument: on("change"),
       onDidCloseTextDocument: on("close"),
+      onDidChangeConfiguration: on("configuration"),
+      getWorkspaceFolder: () => undefined,
+      workspaceFolders: undefined,
       getConfiguration: () => ({ get: (key) => settings[key] }),
+      isTrusted: true,
     },
     window: {
       activeTextEditor: null,
-      createTerminal: (options) => (seen.terminals.push(options), { show() {} }),
       createOutputChannel: () => ({ appendLine: (line) => seen.output.push(line), dispose() {} }),
       showInformationMessage: (m) => seen.messages.push(m),
-      showWarningMessage: (m) => seen.messages.push(m),
+      showWarningMessage: async (m, ...buttons) => (seen.messages.push(m), seen.buttons.push(buttons), seen.answer),
     },
     commands: { registerCommand: (name, f) => ((seen.commands[name] = f), { dispose() {} }) },
     debug: {
@@ -245,6 +269,10 @@ function standIn(settings = { path: "C:/tools/moth.exe", languageServer: false }
     DebugAdapterInlineImplementation: class { constructor(adapter) { this.adapter = adapter; } },
   };
   return { vscode, seen };
+}
+// what VS Code keeps for the extension: its globalState, which lasts from one session to the next
+function extensionContext(kept = new Map()) {
+  return { subscriptions: [], globalState: { get: (key) => kept.get(key), update: async (key, value) => void kept.set(key, value) } };
 }
 // the extension, with the stand-in for VS Code, and `client` for client.js if it's given
 function loadExtension(vscode, client) {
@@ -321,17 +349,28 @@ test("the extension shows the checker's problems, fixes what it can, tidies, out
     assert.equal(await seen.providers.hover.provideHover(document, new Position(11, 10)), null); // hovers need the server
     assert.equal(await seen.providers.completion.provideCompletionItems(document, new Position(11, 10)), undefined);
 
-    // Run and Debug: moth, started on the file, from its folder
+    // Run: a task, moth started on the file, from its folder, its output kept in a terminal of the task's
     vscode.window.activeTextEditor = { document };
     await seen.commands["moth.run"]();
     await seen.commands["moth.debug"]();
-    assert.deepEqual(seen.terminals.map((t) => [t.shellPath, t.shellArgs, t.cwd]), [["C:/tools/moth.exe", ["run", "main.moth"], folder]]);
+    assert.deepEqual(seen.tasks.map((t) => [t.name, t.source, t.definition, t.execution.process, t.execution.args, t.execution.options.cwd]),
+      [["run main.moth", "moth", { type: "moth", command: "run", file: join(folder, "main.moth") }, fakeMoth, ["run", "main.moth"], folder]]);
+    assert.deepEqual(seen.tasks[0].presentationOptions, { reveal: 1, focus: true, panel: 2, clear: true });
+    // and a moth task in tasks.json is made the same, from the workspace's folder
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: folder } }];
+    const [taskType, taskProvider] = seen.taskProvider;
+    const resolved = taskProvider.resolveTask({ definition: { type: "moth", command: "build", file: "main.moth" }, scope: 2, name: "build it" });
+    assert.deepEqual([taskType, resolved.name, resolved.execution.process, resolved.execution.args, resolved.execution.options.cwd], ["moth", "build it", fakeMoth, ["build", "main.moth"], folder]);
+    assert.equal(taskProvider.resolveTask({ definition: { type: "moth", command: "delete", file: "main.moth" }, scope: 2, name: "no" }), undefined);
+    vscode.workspace.workspaceFolders = undefined;
     // Debug: a debugging session on the file, its moth.path filled in, with the debug adapter inside the extension
     assert.deepEqual(seen.debugging, [{ type: "moth", request: "launch", name: "Debug main.moth", program: join(folder, "main.moth") }]);
     const [type, provider] = seen.debug.provider;
     assert.equal(type, "moth");
-    assert.deepEqual(provider.resolveDebugConfiguration(undefined, seen.debugging[0]), { ...seen.debugging[0], mothPath: "C:/tools/moth.exe" });
-    assert.deepEqual(provider.resolveDebugConfiguration(undefined, {}), { type: "moth", request: "launch", name: "Debug this file", program: join(folder, "main.moth"), mothPath: "C:/tools/moth.exe" });
+    assert.deepEqual(provider.resolveDebugConfiguration(undefined, seen.debugging[0]), { ...seen.debugging[0], mothPath: fakeMoth });
+    assert.deepEqual(provider.resolveDebugConfiguration(undefined, {}), { type: "moth", request: "launch", name: "Debug this file", program: join(folder, "main.moth"), mothPath: fakeMoth });
+    // a launch configuration's own mothPath is kept
+    assert.equal(provider.resolveDebugConfiguration(undefined, { ...seen.debugging[0], mothPath: "/elsewhere/moth" }).mothPath, "/elsewhere/moth");
     const { adapter } = seen.debug.factory[1].createDebugAdapterDescriptor();
     const sent = [];
     adapter.onDidSendMessage((m) => sent.push(m));
@@ -391,14 +430,14 @@ function serverStandIn({ fails = false } = {}) {
 }
 
 test("where moth is installed, the extension asks moth lsp for the outline, definitions, hovers and completion", async () => {
-  const { vscode, seen } = standIn({ path: "/opt/moth/moth" });
+  const { vscode, seen } = standIn({ path: fakeMoth });
   const server = serverStandIn();
   const lib = makeDocument("/work/lib.moth", "to twice with n\n    return n * 2\nend\n");
   vscode.workspace.textDocuments.push(lib, makeDocument("/work/notes.txt", "hi", "plaintext"));
   const extension = loadExtension(vscode, server.client);
   await extension.activate({ subscriptions: [] });
   // started with moth.path, asked not to say problems (the engine's checker does), and told of the open Moth files
-  assert.deepEqual(server.seen.started, [{ command: "/opt/moth/moth", options: { initializationOptions: { diagnostics: false } } }]);
+  assert.deepEqual(server.seen.started, [{ command: fakeMoth, options: { initializationOptions: { diagnostics: false } } }]);
   assert.deepEqual(server.seen.told, [["textDocument/didOpen", "file:///work/lib.moth", 1]]);
   const source = 'use "lib.moth"\nset totl to 1\nsay twice(totl)\nto outer with n\n    to inner\n        say n\n    end\nend\n';
   const document = makeDocument("/work/main.moth", source);
@@ -442,23 +481,170 @@ test("where moth is installed, the extension asks moth lsp for the outline, defi
   await extension.deactivate();
 });
 
-test("without moth, or with moth.languageServer off, the extension does without the server", async () => {
-  for (const settings of [{ path: "missing" }, { languageServer: false }]) {
+test("without moth, with a moth that has no moth lsp, or with moth.languageServer off, the extension does without the server", async () => {
+  const nowhere = join(mothHome, "nowhere", "moth");
+  for (const settings of [{ path: nowhere }, { path: fakeMoth }, { path: fakeMoth, languageServer: false }]) {
     const { vscode, seen } = standIn(settings);
     const server = serverStandIn({ fails: true });
     const extension = loadExtension(vscode, server.client);
-    await extension.activate({ subscriptions: [] });
-    assert.equal(server.seen.started.length, settings.languageServer === false ? 0 : 1);
-    if (settings.path) {
-      assert.equal(server.seen.started[0].command, "missing");
-      assert.match(seen.output.join("\n"), /moth lsp couldn't start: there's no missing\. The outline and Go to Definition find the file's functions by their lines instead/);
+    await extension.activate(extensionContext());
+    assert.deepEqual(server.seen.started.map((s) => s.command), settings.path === fakeMoth && settings.languageServer !== false ? [fakeMoth] : []);
+    if (settings.path === nowhere) {
+      // one message, that moth isn't where moth.path says, with a button to the releases
+      assert.deepEqual(seen.messages, [`moth.path says moth is at ${nowhere}, but it isn't there. Install Moth, or set moth.path to where moth is.`]);
+      assert.deepEqual(seen.buttons, [["Get Moth", "Don't Show Again"]]);
+    } else {
+      assert.deepEqual(seen.messages, []); // nothing in the way: what happened is in the Moth output
     }
-    const document = makeDocument("/work/main.moth", "to outer\n    say 1\nend\nouter()\n");
+    if (server.seen.started.length) assert.match(seen.output.join("\n"), /moth lsp couldn't start: there's no .*\. The outline and Go to Definition find the file's functions by their lines instead/);
+    // the problems, the outline and Go to Definition work all the same
+    const document = makeDocument("/work/main.moth", "to outer\n    say 1\nend\nouter()\nsay x\n");
     await seen.listeners.open(document);
+    assert.equal(seen.diagnostics.get("file:///work/main.moth")[0].message, "'x' has no value yet (give it one with 'set x to ...')");
     assert.deepEqual((await seen.providers.symbols.provideDocumentSymbols(document)).map((s) => s.name), ["outer"]);
     assert.deepEqual((await seen.providers.definition.provideDefinition(document, new Position(3, 2))).range.start, new Position(0, 3));
     assert.equal(await seen.providers.hover.provideHover(document, new Position(3, 2)), null);
-    assert.deepEqual(seen.messages, []); // nothing in the way: what happened is in the Moth output
+  }
+});
+
+test("where there's no moth, the extension says so once, with a button to the releases, and Run, Build and Debug say it again", async () => {
+  const nowhere = join(mothHome, "nowhere");
+  const kept = new Map();
+  const { vscode, seen } = standIn({ path: nowhere });
+  seen.answer = "Get Moth";
+  const extension = loadExtension(vscode, serverStandIn().client);
+  await extension.activate(extensionContext(kept));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(seen.messages.length, 1);
+  assert.deepEqual(seen.opened, ["https://github.com/samyyy2423/moth/releases"]);
+  // a second Moth file, or the server asked to start again, doesn't say it again
+  await seen.listeners.configuration({ affectsConfiguration: (key) => key === "moth.path" });
+  assert.equal(seen.messages.length, 1);
+
+  // Run, Build and Debug each say it, as they can't do what was asked, with no terminal and no debugging
+  const folder = mkdtempSync(join(tmpdir(), "moth-editor-"));
+  try {
+    const document = makeDocument(join(folder, "main.moth"), "say 1\n");
+    vscode.window.activeTextEditor = { document };
+    await seen.commands["moth.run"]();
+    await seen.commands["moth.build"]();
+    const [, provider] = seen.debug.provider;
+    assert.equal(provider.resolveDebugConfiguration(undefined, {}), undefined);
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(seen.tasks, []);
+    assert.equal(seen.messages.length, 4);
+    assert.deepEqual(seen.buttons.slice(1), [["Get Moth"], ["Get Moth"], ["Get Moth"]]);
+    assert.equal(seen.opened.length, 4);
+    assert.ok(seen.output.includes(seen.messages[0]), "it's in the Moth output too");
+    await extension.deactivate();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+
+  // the message waits for the person, but nothing else does: the extension starts, and Run is done with
+  {
+    const { vscode, seen } = standIn({ path: nowhere });
+    seen.answer = new Promise(() => {}); // never answered
+    const extension = loadExtension(vscode, serverStandIn().client);
+    assert.equal((await extension.activate(extensionContext())).moth, null);
+    vscode.window.activeTextEditor = { document: makeDocument(join(mothHome, "main.moth"), "say 1\n") };
+    await seen.commands["moth.run"]();
+    assert.equal(seen.messages.length, 2);
+  }
+
+  // Don't Show Again is kept: the next session says nothing as it starts, but Run still does
+  {
+    const { vscode, seen } = standIn({ path: nowhere });
+    seen.answer = "Don't Show Again";
+    assert.equal(kept.get("moth.missing.quiet"), undefined); // Get Moth was the answer before
+    await loadExtension(vscode, serverStandIn().client).activate(extensionContext(kept));
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual([seen.messages.length, seen.opened.length, kept.get("moth.missing.quiet")], [1, 0, true]);
+  }
+  {
+    const { vscode, seen } = standIn({ path: nowhere });
+    const extension = loadExtension(vscode, serverStandIn().client);
+    await extension.activate(extensionContext(kept));
+    assert.deepEqual(seen.messages, []);
+    vscode.window.activeTextEditor = { document: makeDocument(join(mothHome, "main.moth"), "say 1\n") };
+    await seen.commands["moth.run"]();
+    assert.equal(seen.messages.length, 1);
+  }
+});
+
+test("once moth.path is changed, the language server is started again with the moth it now says", async () => {
+  const settings = { path: join(mothHome, "nowhere") };
+  const { vscode, seen } = standIn(settings);
+  const server = serverStandIn();
+  const extension = loadExtension(vscode, server.client);
+  const api = await extension.activate(extensionContext());
+  assert.deepEqual([api.moth, api.languageServer, server.seen.started.length], [null, false, 0]);
+  settings.path = join(mothHome, "Program Files", "Moth"); // the folder moth is in will do
+  await seen.listeners.configuration({ affectsConfiguration: (key) => key === "moth.path" });
+  assert.deepEqual([api.moth, api.languageServer, server.seen.started.map((s) => s.command)], [fakeMoth, true, [fakeMoth]]);
+  await seen.listeners.configuration({ affectsConfiguration: (key) => key === "editor.fontSize" }); // not Moth's
+  assert.equal(server.seen.started.length, 1);
+  // two changes at once start one server, not two
+  const changed = { affectsConfiguration: (key) => key === "moth.path" };
+  await Promise.all([seen.listeners.configuration(changed), seen.listeners.configuration(changed)]);
+  assert.deepEqual([server.seen.started.length, server.seen.stopped, api.languageServer], [2, true, true]);
+  settings.languageServer = false;
+  await seen.listeners.configuration({ affectsConfiguration: (key) => key === "moth.languageServer" });
+  assert.deepEqual([server.seen.stopped, api.languageServer], [true, false]);
+  await extension.deactivate();
+});
+
+test("moth is found where moth.path says, or on the PATH, as Linux and Windows write them", () => {
+  const folder = mkdtempSync(join(tmpdir(), "moth-find-"));
+  try {
+    const made = (file, mode = 0o755) => (mkdirSync(join(file, ".."), { recursive: true }), writeFileSync(file, ""), chmodSync(file, mode), file);
+    const first = made(join(folder, "my tools", "moth"));
+    const second = made(join(folder, "bin", "moth"));
+    const notMarked = made(join(folder, "downloads", "moth"), 0o644);
+    mkdirSync(join(folder, "a folder", "moth"), { recursive: true }); // a folder called moth isn't moth
+    const env = (...dirs) => ({ PATH: ["", join(folder, "a folder"), ...dirs].join(":") });
+    const linux = (setting, more = {}) => findMoth(setting, { platform: "linux", env: env(), home: folder, ...more });
+
+    // on the PATH: the first folder that has it, for an empty moth.path, or the old default, moth
+    for (const setting of ["", undefined, "  ", "moth"]) assert.deepEqual(linux(setting, { env: env(join(folder, "my tools"), join(folder, "bin")) }), { file: first });
+    assert.deepEqual(linux("", { env: env(join(folder, "bin"), join(folder, "my tools")) }), { file: second });
+    assert.deepEqual(linux("", { env: env(join(folder, "downloads"), join(folder, "bin")) }), { file: second });
+    assert.deepEqual(linux("", { env: env(join(folder, "downloads")) }), { file: null, why: "not runnable", tried: notMarked });
+    assert.deepEqual(linux(""), { file: null, why: "not on the PATH", tried: "moth" });
+    assert.deepEqual(linux("", { env: {} }), { file: null, why: "not on the PATH", tried: "moth" });
+
+    // where moth.path says: the file, the folder it's in, in quotes, from home, from the workspace's folder
+    assert.deepEqual(linux(first), { file: first });
+    assert.deepEqual(linux(join(folder, "my tools")), { file: first });
+    assert.deepEqual(linux(`"${first}"`), { file: first });
+    assert.deepEqual(linux("~/my tools/moth"), { file: first });
+    assert.deepEqual(linux("my tools/moth", { folder }), { file: first });
+    assert.deepEqual(linux("my tools/moth"), { file: null, why: "not there", tried: "my tools/moth" }); // no folder to be from
+    assert.deepEqual(linux(join(folder, "nowhere", "moth")), { file: null, why: "not there", tried: join(folder, "nowhere", "moth") });
+    assert.deepEqual(linux(notMarked), { file: null, why: "not runnable", tried: notMarked });
+
+    // Windows: moth.exe, Path, ; between folders, folders in quotes, \ or /, and spaces
+    const files = new Set(["C:\\Program Files\\Moth\\moth.exe", "D:\\Other Tools\\moth.exe", "C:\\Users\\Sam\\moth\\moth.exe"]);
+    const check = (file) => (files.has(file) ? "yes" : "no");
+    const windows = (setting, Path = 'C:\\Windows;;"D:\\Other Tools";C:\\Program Files\\Moth') =>
+      findMoth(setting, { platform: "win32", env: { Path }, home: "C:\\Users\\Sam", folder: "C:\\Users\\Sam", check });
+    assert.deepEqual(windows(""), { file: "D:\\Other Tools\\moth.exe" });
+    assert.deepEqual(windows("moth"), { file: "D:\\Other Tools\\moth.exe" });
+    assert.deepEqual(windows("", "C:\\Program Files\\Moth\\"), { file: "C:\\Program Files\\Moth\\moth.exe" });
+    assert.deepEqual(windows("", "C:\\Windows"), { file: null, why: "not on the PATH", tried: "moth.exe" });
+    for (const setting of ["C:\\Program Files\\Moth\\moth.exe", '"C:\\Program Files\\Moth\\moth.exe"', "C:\\Program Files\\Moth\\moth", "C:\\Program Files\\Moth", "C:/Program Files/Moth/moth.exe", "C:\\Program Files\\Moth\\..\\Moth\\moth.exe"]) {
+      assert.deepEqual(windows(setting), { file: "C:\\Program Files\\Moth\\moth.exe" }, setting);
+    }
+    assert.deepEqual(windows("~\\moth"), { file: "C:\\Users\\Sam\\moth\\moth.exe" });
+    assert.deepEqual(windows("moth\\moth.exe"), { file: "C:\\Users\\Sam\\moth\\moth.exe" });
+    assert.deepEqual(windows("C:\\Moth\\moth.exe"), { file: null, why: "not there", tried: "C:\\Moth\\moth.exe" });
+
+    // and what the person is told
+    assert.equal(missingMessage({ why: "not on the PATH" }, "win32"), "Moth's command line, moth.exe, isn't on your PATH. Hovers, completion, Run, Build and the debugger need it; colours, snippets, problems and Format Document work without it. Install it, or set moth.path to where it is.");
+    assert.equal(missingMessage({ why: "not there", tried: "/opt/moth" }, "linux"), "moth.path says moth is at /opt/moth, but it isn't there. Install Moth, or set moth.path to where moth is.");
+    assert.equal(missingMessage({ why: "not runnable", tried: notMarked }, "linux"), `${notMarked} isn't marked as a program, so it can't be run. Run chmod +x "${notMarked}", then try again.`);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 
@@ -511,25 +697,6 @@ test("the grammar at that commit is the grammar here", { skip: hasCommit ? false
 
 // ---------- the .vsix ----------
 
-// a zip's files, read back from its central directory
-function unzip(bytes) {
-  const files = new Map();
-  const end = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
-  let at = bytes.readUInt32LE(end + 16);
-  for (let n = bytes.readUInt16LE(end + 10); n > 0; n--) {
-    assert.equal(bytes.readUInt32LE(at), 0x02014b50);
-    const nameLength = bytes.readUInt16LE(at + 28);
-    const local = bytes.readUInt32LE(at + 42);
-    const name = bytes.subarray(at + 46, at + 46 + nameLength).toString("utf8");
-    const packed = bytes.readUInt32LE(at + 20);
-    const data = inflateRawSync(bytes.subarray(local + 30 + bytes.readUInt16LE(local + 26), local + 30 + bytes.readUInt16LE(local + 26) + packed));
-    assert.equal(data.length, bytes.readUInt32LE(at + 24));
-    files.set(name, data);
-    at += 46 + nameLength + bytes.readUInt16LE(at + 30) + bytes.readUInt16LE(at + 32);
-  }
-  return files;
-}
-
 test("the .vsix holds the extension and Moth's engine as they are here, the same bytes each time", () => {
   const files = contents();
   const bytes = zip(files);
@@ -544,6 +711,16 @@ test("the .vsix holds the extension and Moth's engine as they are here, the same
   }
   const manifest = JSON.parse(read.get("extension/package.json"));
   assert.match(read.get("extension.vsixmanifest").toString(), new RegExp(`Id="moth" Version="${manifest.version}" Publisher="samyyy2423"`));
+  // what's in it is FILES, the list vsce is held to, which .vscodeignore lets through; and the licence is the
+  // repository's own
+  const inside = [...files.keys()].filter((name) => name.startsWith("extension/")).map((name) => name.slice("extension/".length).replace(/^LICENSE\.txt$/, "LICENSE"));
+  assert.deepEqual(inside.sort(), [...FILES].sort());
+  const allowed = readFileSync(here("editors/vscode/.vscodeignore"), "utf8").split(/\r?\n/).filter((line) => line.startsWith("!")).map((line) => line.slice(1));
+  assert.deepEqual(allowed.flatMap((p) => (p === "engine/**" ? FILES.filter((f) => f.startsWith("engine/")) : [p])).sort(), [...FILES].sort());
+  assert.ok(readFileSync(here("editors/vscode/LICENSE")).equals(readFileSync(here("LICENSE"))), "editors/vscode/LICENSE isn't the repository's LICENSE");
+  assert.equal(manifest.icon, "images/icon.png");
+  const png = read.get("extension/images/icon.png");
+  assert.deepEqual([png.subarray(1, 4).toString(), png.readUInt32BE(16), png.readUInt32BE(20)], ["PNG", 128, 128]);
 });
 
 const code = spawnSync("code --version", { encoding: "utf8", shell: true }).status === 0;
@@ -557,34 +734,6 @@ test("VS Code installs the .vsix", { skip: code ? false : "there's no VS Code he
     const [installed] = readdirSync(join(folder, "ext")).filter((f) => f.startsWith("samyyy2423.moth-"));
     assert.ok(installed, readdirSync(join(folder, "ext")).join(", "));
     assert.deepEqual(readdirSync(join(folder, "ext", installed, "engine")).sort(), [...ENGINE, "package.json"].sort());
-  } finally {
-    rmSync(folder, { recursive: true, force: true });
-  }
-});
-
-// In VS Code itself, its extension host running in-vscode.js: only with MOTH_VSCODE=1, as it opens a window
-// of VS Code's for a few seconds, with a profile of its own
-const vscodeAt = process.platform === "win32" ? join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe") : "code";
-test("in VS Code, the extension shows problems, fixes, tidies and outlines", { skip: process.env.MOTH_VSCODE === "1" ? false : "set MOTH_VSCODE=1 to open VS Code for it" }, () => {
-  const folder = mkdtempSync(join(tmpdir(), "moth-vscode-"));
-  try {
-    writeFileSync(join(folder, "main.moth"), "set totl to 1\nsay total\nto  outer\n    to inner\n        say 1\n    end\nend\n");
-    // the outline found by the lines, whether or not moth is installed here (the server's is tested above)
-    mkdirSync(join(folder, "data", "User"), { recursive: true });
-    writeFileSync(join(folder, "data", "User", "settings.json"), JSON.stringify({ "moth.languageServer": false }));
-    const done = spawnSync(vscodeAt, [`--extensionDevelopmentPath=${new URL("./editors/vscode", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")}`,
-      `--extensionTestsPath=${new URL("./editors/vscode/in-vscode.js", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")}`,
-      `--user-data-dir=${join(folder, "data")}`, `--extensions-dir=${join(folder, "ext")}`, "--disable-extensions", "--disable-workspace-trust", "--skip-welcome", "--skip-release-notes"],
-    { env: { ...process.env, MOTH_HOST_FILE: join(folder, "main.moth"), MOTH_HOST_OUT: join(folder, "out.json") }, timeout: 120_000 });
-    assert.equal(done.status, 0);
-    const got = JSON.parse(readFileSync(join(folder, "out.json"), "utf8"));
-    assert.equal(got.error, undefined);
-    assert.equal(got.language, "moth");
-    assert.deepEqual(got.diagnostics.map(([line, col, severity, source]) => [line, col, severity, source]), [[0, 0, 1, "moth"], [1, 4, 0, "moth"], [2, 0, 1, "moth"], [3, 4, 1, "moth"]]);
-    assert.ok(got.fixes.includes("Change to 'totl'"), got.fixes.join(", "));
-    assert.equal(got.formatted, format("set totl to 1\nsay total\nto  outer\n    to inner\n        say 1\n    end\nend\n"));
-    assert.deepEqual(got.symbols, [["outer", ["inner"]]]);
-    assert.deepEqual(got.commands.sort(), ["moth.build", "moth.debug", "moth.run"]);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
