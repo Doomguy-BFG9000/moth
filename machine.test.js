@@ -951,7 +951,7 @@ test("editors/jupyter's kernel runs cells through moth kernel, as Jupyter runs t
   const ran = spawnSync(jupyterPython, ["-B", fileURLToPath(new URL("./editors/jupyter/test_moth_kernel.py", import.meta.url))],
     { cwd: tmpdir(), env: { ...process.env, MOTH: exe }, encoding: "utf8", timeout: 600_000 });
   assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-  assert.match(ran.stderr, /\nOK( \(skipped=\d+\))?\n$/);
+  assert.match(ran.stderr, /\r?\nOK( \(skipped=\d+\))?\r?\n$/); // Python ends its lines with \r\n on Windows
 });
 
 // The shell: a line whose value makes functions of its own (a list built from a list) runs once, not again in
@@ -1465,7 +1465,10 @@ test("moth lsp answers an editor: problems as it's typed, tidying, the outline, 
   const shapes = "# Shapes: the areas of squares and the rest.\n\n# a square's area\nto square with side\n    return side * side\nend\n";
   writeFileSync(join(sub, "lib.moth"), lib);
   writeFileSync(join(sub, "shapes.moth"), shapes);
-  const uri = (name) => pathToFileURL(join(sub, name)).href;
+  // A file's address as VS Code writes it. ~ is unreserved, so file:///a~b and file:///a%7Eb are the same address
+  // (RFC 3986, 6.2.2.2); VS Code and moth lsp write ~ and Node's pathToFileURL %7E, which Windows's short names
+  // such as C:\Users\SAMUP_~1 bring into the temporary folder's path.
+  const uri = (name) => pathToFileURL(join(sub, name)).href.replace(/%7E/gi, "~");
   const main = [
     'use "lib.moth"', // 0
     'use "shapes.moth" as shapes',
