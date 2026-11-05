@@ -269,7 +269,9 @@ it   ███████ 11
 
 It builds for the system it runs on, or the other one with `--target windows`
 or `--target linux`, and a Linux moth.exe and a Windows one build each other
-byte for byte too. The first one comes from Node.js
+byte for byte too. `--target wasm` makes `<file>.wasm`, a WebAssembly module
+(with GC and exceptions) from [`wasm.moth`](wasm.moth), the WebAssembly back
+end written in Moth, which `runWasm` in `moth.js` runs (DESIGN §125). The first one comes from Node.js
 (`node bootstrap.mjs`) or from
 [the releases](https://github.com/samyyy2423/moth/releases); after that, each
 builds the next. It takes nearly all of Moth, units, tables, charts, drawing and
@@ -1390,6 +1392,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`jit.js`](jit.js) | The JIT: Moth to JavaScript |
 | [`wasm-binary.js`](wasm-binary.js) | WebAssembly's binary format, written byte by byte |
 | [`wasm.js`](wasm.js) | Moth to WebAssembly, with escape analysis and unboxed numbers |
+| [`wasm.moth`](wasm.moth) | The same, written in Moth: wasm.js's bytes exactly, and `moth build --target wasm` |
 | [`checker.js`](checker.js) | Finds mistakes without running the program |
 | [`compiler.moth`](compiler.moth) | Moth's compiler, written in Moth |
 | [`machine.moth`](machine.moth) | Moth to x86-64 machine code, written in Moth: a Windows .exe or a Linux program, byte by byte |
@@ -1434,6 +1437,8 @@ calls that led there.
   no false alarms
 - the compiler written in Moth against the JIT, byte for byte, on every example,
   every table program and 3,000 broken ones, and bootstrapping it three stages deep
+- the WebAssembly back end written in Moth against wasm.js, byte for byte, on
+  7,822 programs, and what it makes against the VM, mistakes and trails included
 - the neural network and the handwriting reader, on all three engines
 - `stop`, the text helpers, `ask` and `use`, including that `ask` never asks
   twice when a run is handed over, and that a mistake in a used file names it

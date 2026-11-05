@@ -2,7 +2,7 @@
 # (moth on Linux), which compiles a Moth program into a program of its own with neither JavaScript nor Rust:
 #
 #     moth [shell] [--allow-...]
-#     moth build program.moth [--target windows|linux] [--allow-read] [--allow-write] ...
+#     moth build program.moth [--target windows|linux|wasm] [--allow-read] [--allow-write] ...
 #         [--icon app.ico] [--version 1.2.0] [--include files]
 #     moth run [--allow-...] program.moth [arguments...]
 #     moth tidy program.moth [--check]
@@ -18,6 +18,7 @@
 # with the program's top level (DESIGN.md, section 27).
 
 use "machine.moth" as machine
+use "wasm.moth" as webassembly # moth build --target wasm
 use "stdlib.moth" as standard # the libraries a program anywhere can use (see cli_sources_of)
 use "webpage.moth" as webpage # the page moth build --web writes a program into
 use "checker-rules.moth" as checker_rules # what the checker's rules do with each type (see cli_rules)
@@ -26,7 +27,7 @@ use "tools/hash.moth" as cli_hashing # SHA-256, for the sums of packages' files 
 # what a build ships with: --icon's file, --version's numbers and --include's files and folders (see cli_main)
 set cli_asked to record with icon nothing, version nothing, include empty list, installer no, app_name nothing, sign nothing
 
-set cli_usage to "usage: moth build <file.moth> [--target windows|linux] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n       moth kernel [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --web, <file>.html, a page that runs it in\n  a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left. kernel runs cells\n  for Jupyter (editors/jupyter): each line it reads names a file of code, run as a notebook's block."
+set cli_usage to "usage: moth build <file.moth> [--target windows|linux|wasm] [--allow-...] [--icon <file>] [--version <1.2.0>] [--include <file or folder>]\n       moth build <file.moth> --installer [--name <name>] [--version <1.2.0>] [--icon <file>] [--sign <command>]\n       moth build --web <file.moth>\n       moth run [--allow-...] <file.moth> [arguments...]\n       moth debug [--allow-...] <file.moth> [arguments...]\n       moth profile [--allow-...] <file.moth> [arguments...]\n       moth coverage [--allow-...] <file.moth> [arguments...]\n       moth notebook [--allow-...] <file.md>\n       moth tidy <files...> [--check]\n       moth check <file.moth>\n       moth lsp\n       moth test [files...] [--allow-...]\n       moth add <git repository or name> [name] [--signed] | moth get [--signed] | moth update [name] [--signed]\n       moth remove <name> | moth packages\n       moth search [words...] [--index <address or file>] | moth audit [--index <address or file>]\n       moth [shell] [--allow-...]\n       moth kernel [--allow-...]\n  build compiles a Moth program to machine code: a program of its own, <file>.exe for Windows or <file>\n  for Linux, for the system moth runs on unless --target says; with --target wasm, <file>.wasm, a WebAssembly\n  module (with GC and exceptions) that Moth's JavaScript runs, runWasm in moth.js; with --web, <file>.html, a\n  page that runs it in a browser, with Moth's engine and the files it uses in it. run builds it for this system into a file\n  beside it, runs it with the arguments after it, ends with the number it ended with, and removes the file.\n  debug runs it so too, stopping at its first line for commands: step, next, out, go, break, show, where\n  and the rest, which help lists. profile runs it so too, and then says where its time went: each\n  function's own time and calls, and the lines that took longest. coverage runs it so too, and then says\n  how many of each file's lines with a statement on them ran, and which didn't.\n  notebook runs each ```moth block of a Markdown file in turn, as the shell runs entries, and writes what\n  it said under it, in an ```output block, which the next run writes again.\n  The --allow flags let the program read or write files, read sites, start programs or use libraries\n  without asking: --allow-read, --allow-write, --allow-net, --allow-run, --allow-libraries or --allow-all,\n  and --allow-read=data,notes.txt (or --allow-write=..., --allow-net=...) only those. --icon gives a Windows\n  program its icon (an .ico or .png file), --version its version, and --include builds a file, or a folder's\n  files, into the program, where read finds them before it looks on the disk. --installer then makes\n  <file>-setup.exe (or <file>-setup), which installs the program for a person, with a menu entry and a way to\n  take it away, and no administrator needed; --name names it there. --sign runs a command on each program\n  built, with its name after it: --sign \"signtool sign /fd SHA256 /a\".\n  tidy writes the files the one way Moth writes code; --check only says which of them need it.\n  check finds problems in a file without running it, and test runs every test_ function in the files, each\n  in a run of its own; with no file, every file ending in .test.moth here and in the folders inside.\n  lsp is the language server an editor starts: problems as you type, tidying, the outline, where a name is\n  made, what it is, and what can come next, over the Language Server Protocol on the input and output.\n  add fetches a package, a Git repository (an address, github.com/someone/thing, or a folder), into\n  packages/, and lists it, at its commit, in moth.packages; a program uses it with use the package \"thing\".\n  An @ after it asks for a version: github.com/someone/thing@v1.2, a tag, branch or commit.\n  A name alone is one from the package index, which search lists, or finds the words in; --index gives\n  another index, an address or a file.\n  get fetches every package listed, at its commit; update moves them, or one, to their newest (a branch's,\n  if one was asked for; one asked for at a tag or commit stays there); remove takes\n  one away; and packages lists them. moth.sums keeps the SHA-256 of each package's files, which add and\n  update write and get checks, so a package that has changed is found. --signed takes only packages whose\n  commit, or the tag they were asked for at, has a signature git trusts. audit checks the packages against\n  the advisories in the package index, and says which are about the commits they're at.\n  moth alone, or moth shell, is the Moth shell: Moth typed a line at a\n  time, each entry run as a program of its own that has what the entries before it left. kernel runs cells\n  for Jupyter (editors/jupyter): each line it reads names a file of code, run as a notebook's block."
 
 # the folder a file is in, with its last / or \, or "" for the folder moth runs in
 to cli_folder_of with cli_path
@@ -601,6 +602,34 @@ to cli_build_web with cli_path
         return 1
     end
     say "made " + cli_out + ", a page that runs " + cli_name_of(cli_path) + " in a browser (" + cli_grouped(length of (cli_page as bytes)) + " bytes)"
+    return 0
+end
+
+# `moth build app.moth --target wasm`: app.wasm, a WebAssembly module wasm.moth makes, with what running it needs
+# in a section of its own (see wasm_with_details), for runWasm in moth.js
+to cli_build_wasm with cli_path
+    set cli_source to cli_text_of(cli_path)
+    if cli_source is nothing
+        return 1
+    end
+    set cli_used to cli_sources_of(cli_path, cli_source)
+    set cli_names to names of cli_used
+    set cli_texts to texts of cli_used
+    try
+        set cli_made to webassembly's wasm_compile(cli_source, cli_names, cli_texts)
+    if it fails with cli_why
+        cli_report(cli_why, cli_path, cli_source, cli_names, cli_texts)
+        return 1
+    end
+    set cli_bytes to webassembly's wasm_with_details(cli_made)
+    set cli_out to cli_stem(cli_path) + ".wasm"
+    try
+        write cli_bytes as bytes to cli_out
+    if it fails with cli_why
+        say "moth: " + cli_why to the error output
+        return 1
+    end
+    say "compiled " + cli_path + " to WebAssembly -> " + cli_out + " (" + cli_grouped(length of cli_bytes) + " bytes)"
     return 0
 end
 
@@ -5749,7 +5778,7 @@ to cli_main
             add 1 to cli_k
         else if cli_arg is "--target" and cli_command is "build" and cli_k is less than length of cli_given and cli_target is nothing
             set cli_target to item (cli_k + 1) of cli_given
-            set cli_fine to cli_target is "windows" or cli_target is "linux"
+            set cli_fine to cli_target is "windows" or cli_target is "linux" or cli_target is "wasm"
             add 2 to cli_k
         else if cli_arg is "--installer" and cli_command is "build" and not installer of cli_asked
             set installer of cli_asked to yes
@@ -5802,6 +5831,9 @@ to cli_main
     end
     if cli_web
         stop the program with cli_build_web(cli_file)
+    end
+    if cli_target is "wasm"
+        stop the program with cli_build_wasm(cli_file)
     end
     if cli_command is "test"
         if length of cli_paths is 0 # none named: every one here and in the folders inside
