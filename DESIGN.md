@@ -5317,11 +5317,12 @@ engines stay: as the fallback, and as what the tests compare against.
   its own and runs `moth run` there: what it said, its error output and
   the number it ended with, as a RunResult, with arguments, --allow flags,
   input and a folder to run in.
-- **What it gave.** Called from Python on Linux, fib(30) took 7.5 ms
-  against Python's 110, and a Mandelbrot set 32 ms against 445; a sieve of
-  primes 2.9 times as fast. A call costs about 2 µs, 0.7 of it ctypes'
-  own, so a sum over a list Python already has is faster in Python: the
-  benchmark says so too.
+- **What it gave.** On CI's runners, called from Python: fib(30) 10 times
+  as fast as Python's own on Linux and 13 on Windows, a Mandelbrot set 16
+  to 18 times, a sieve of primes 3.5 to 5.7 times (benchmarks/RESULTS.md).
+  A call costs 1.5 to 1.7 µs, most of it ctypes' own, and a value given to
+  Moth is copied, so a sum over a list Python already has is faster in
+  Python, which the benchmark shows too.
 - **Tested** with pytest, against a wheel built as the publishing workflow
   builds it and installed: Linux with Python 3.10 and 3.14, and Windows. Each
   kind of value both ways, records and functions, every kind of mistake
