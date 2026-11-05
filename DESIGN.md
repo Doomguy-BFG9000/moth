@@ -5022,8 +5022,83 @@ hold them to agreeing.
   four workers taking far less time than four calls; and a Windows program's
   imports. server.moth with three workers: twenty requests answered while one
   handler works for a second and a half.
+## 125. A WebAssembly back end written in Moth
 
-## 125. The VS Code extension, ready to publish
+Moth's web side is about 18,000 lines of JavaScript, and even a program the
+WebAssembly engine compiles calls back into `vm.js` for text, dictionaries,
+built-ins and every mistake. The plan is a Moth compiler written in Moth that
+runs in the browser as WebAssembly, with JavaScript left as a small loader, in
+four stages: a WebAssembly back end in Moth; the runtime in WebAssembly, so a
+module imports nothing from `vm.js`; `moth.wasm`, the compiler built into a
+module that rebuilds itself to the same bytes; and the playground on
+`moth.wasm`. This is the first. The rest are still to come, and the JavaScript
+engines stay: as the fallback, and as what the tests compare against.
+
+- **A port, byte for byte.** [`wasm.moth`](wasm.moth) is `wasm.js` written in
+  Moth: the same encoder, the same runtime functions, the same escape analysis
+  and unboxed numbers, the same fast paths for `remainder`, `rounded` and
+  `item n of`, and numbers as `wasm.js` keeps them (an i31 from -2^30 to
+  2^30-1 that isn't 0 or 1, which are no and yes, and a box otherwise). It
+  reads programs with `compiler.moth`'s tokenizer, parser and scope rules, as
+  `machine.moth` does, and makes exactly the bytes `wasm.js` makes, as
+  `compiler.moth` makes exactly the JIT's JavaScript. Matching byte for byte
+  is the strongest check there is: every local, global, type and position
+  must come in the same order, so any difference in what the two back ends
+  think a program means shows up as a byte.
+- **The tree is `compiler.moth`'s.** Its fields differ from `moth.js`'s where
+  `of`, `to` and `bytes` can't be field names (`subject`, `start` and `limit`,
+  `over`, `binary`), and a number is kept as written, so `wasm.moth` works out
+  a double's 8 bytes itself, with exact steps (halving, doubling and
+  subtracting), as `machine.moth` does, and keeps one global for each
+  different double, keyed by its bytes.
+- **Writing code from text.** The runtime is about 450 lines of instruction
+  chains in `wasm.js`. In Moth each chain is a line of text, such as
+  `local.get 0 ref.test i31 if i32 ...`, which a small assembler turns into
+  bytes, knowing each instruction's immediates and the names of the module's
+  types, functions, imports, globals and a function's own locals. That kept
+  the port close enough to `wasm.js` to check line by line.
+- **The runtime once.** Every module starts with the same types, imports,
+  runtime functions, exports and globals, so they are made once per run of
+  the compiler and copied, with each function's encoded body kept. A program
+  then costs only its own code: about 1.5 ms a program through the JIT, 12
+  seconds for the 7,822 programs of the test corpora.
+- **The escape analysis missed three places.** Making `wasm.moth` meant
+  reading every field the parser makes, and `wasm.js`'s escape analysis never
+  looked inside `ask`'s question, `wait`'s amount, or `play note`'s note and
+  time. A function that used an outer variable only there kept it in a local
+  of the program's, not in the heap, and found it unset. Both back ends now
+  look there, and a test runs the four programs that showed it on every
+  engine.
+- **It compiles itself.** `wasm.moth` with `compiler.moth` is a program like
+  any other: compiled by itself, it is a 977,707-byte module, `wasm.js`'s bytes
+  exactly, in about a second, and that module, run, compiles a program into
+  the same bytes again. That is the start of `moth.wasm`; what's missing is
+  the runtime, which the module still imports from `vm.js`.
+- **Half an emoji.** Holding `wasm.moth`'s mistakes to the VM's, column and
+  all, found one more difference, in `compiler.moth`'s tokenizer: half of a
+  character past the first 65,536, on its own, sorts among those characters,
+  so it counted 2 columns where JavaScript counts 1. It now counts 2 only for
+  a character that is 4 bytes of UTF-8.
+- **`moth build --target wasm`.** `moth.moth` carries `wasm.moth`, made into
+  machine code by `machine.moth` with the rest, and writes `<file>.wasm`:
+  `wasm.js`'s module, byte for byte, then a custom section called `moth`
+  holding, as JSON, what the JavaScript side needs to run it (each position,
+  the names, the messages, the text, and what typed inputs must be).
+  `runWasm` in `moth.js` reads that section and runs it. Until the runtime is
+  in WebAssembly too, the module still imports `vm.js`'s checks, and with no
+  source to hand to the VM, calls past 2,000 deep are a mistake there.
+- **Tested.** `wasm.moth`, run through the JIT, makes `wasm.js`'s bytes, or
+  stops at the same mistake, on every playground example, every hand-written
+  case, the 1,500 programs the grammar makes, the 5,000 broken ones and 500 of
+  machine code's random programs; what it makes says, draws and stops at what
+  the VM does, mistakes, positions and trails included, on all of them but
+  machine code's, and the hand-written cases say what they should. `moth`
+  itself, with `wasm.moth` in machine code, builds a module whose bytes are
+  `wasm.js`'s, which runs as the VM runs the program, and moth still builds
+  itself into the same bytes.
+
+
+## 126. The VS Code extension, ready to publish
 
 - **Why.** People find VS Code extensions in VS Code's Extensions view, from
   the Visual Studio Marketplace, and editors built from VS Code (VSCodium,
