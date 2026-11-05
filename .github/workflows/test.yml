@@ -5,6 +5,34 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    # real servers for the live tests of tools/postgres.moth, redis.moth and s3.moth (MySQL is started below), in
+    # machine.test.js; each test is skipped wherever its MOTH_..._URL isn't set. The passwords are for these
+    # throwaway containers alone.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: moth
+          POSTGRES_PASSWORD: moth-test
+          POSTGRES_DB: moth
+          POSTGRES_HOST_AUTH_METHOD: md5 # SCRAM for a password kept as SCRAM, MD5 for one kept as MD5
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U moth" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+      minio: # MinIO itself, as Bitnami built it: MinIO no longer publishes images of its own
+        image: bitnamilegacy/minio
+        env:
+          MINIO_ROOT_USER: moth-test-key
+          MINIO_ROOT_PASSWORD: moth-test-secret
+        ports: ["9000:9000"]
+    env:
+      MOTH_POSTGRES_URL: postgres://moth:moth-test@127.0.0.1:5432/moth
+      MOTH_MYSQL_URL: mysql://root:moth-root@127.0.0.1:3306/moth
+      MOTH_REDIS_URL: redis://127.0.0.1:6379
+      MOTH_S3_URL: http://moth-test-key:moth-test-secret@127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +50,13 @@ jobs:
           sudo ln -sf "$(basename "$library")" /usr/local/lib/libonnxruntime.so.1
           sudo ln -sf libonnxruntime.so.1 /usr/local/lib/libonnxruntime.so
           sudo ldconfig
+      # MySQL 8.4 with mysql_native_password turned on, which takes a server option a service container can't be
+      # given; then each server waited for until it answers
+      - name: start MySQL, and wait for it and MinIO
+        run: |
+          docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=moth-root -e MYSQL_DATABASE=moth mysql:8.4 --mysql-native-password=ON
+          for i in $(seq 1 90); do docker exec mysql mysqladmin ping -h 127.0.0.1 -uroot -pmoth-root --silent 2> /dev/null && break; sleep 2; done
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:9000/minio/health/live > /dev/null && break; sleep 2; done
       # the JavaScript engines, the playground's, and machine.moth's machine code against them, moth.exe included; on
       # a display of Xvfb's, where there's one, for tools/linux.moth's GTK windows
       - run: if command -v xvfb-run > /dev/null; then xvfb-run -a npm test; else npm test; fi

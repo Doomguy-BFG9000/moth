@@ -1,0 +1,88 @@
+# oauth.moth's tests: PKCE as RFC 7636 has it, the address a sign-in starts at, and the answers token endpoints
+# give, with no network; machine.test.js signs in for real, through a provider of its own and a browser it plays
+
+use "oauth.moth" as oauth
+use "http.moth" as http
+
+# what a call fails with, or nothing if it doesn't
+to failure_of with f
+    try
+        f()
+    if it fails with why
+        return why
+    end
+    return nothing
+end
+
+# a URL's query, as a dictionary, each value decoded
+to query_of with url
+    set made to empty dictionary
+    for each pair in split item 2 of (split url by "?") by "&"
+        set halves to split pair by "="
+        set item (item 1 of halves) of made to http's decoded(item 2 of halves)
+    end
+    return made
+end
+
+to test_pkce
+    # RFC 7636, appendix B
+    expect oauth's challenge_of("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") is "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+end
+
+to test_authorization_start
+    set google to oauth's provider("https://accounts.example.com/o/oauth2/auth", "https://accounts.example.com/token", "client 1")
+    set item "access_type" of extra of google to "offline"
+    set started to oauth's authorization_start(google, "http://127.0.0.1:8765/callback", list of "openid", "email")
+    expect items 1 to 62 of url of started is "https://accounts.example.com/o/oauth2/auth?response_type=code&"
+    set q to query_of(url of started)
+    expect item "client_id" of q is "client 1"
+    expect item "redirect_uri" of q is "http://127.0.0.1:8765/callback"
+    expect item "scope" of q is "openid email"
+    expect item "state" of q is state of started
+    expect item "code_challenge" of q is oauth's challenge_of(verifier of started)
+    expect item "code_challenge_method" of q is "S256"
+    expect item "access_type" of q is "offline"
+    expect "client%201" is in url of started
+    # the verifier and state: 32 and 16 random bytes in base64url, new each time
+    expect length of verifier of started is 43
+    expect length of state of started is 22
+    set again to oauth's authorization_start(google, "http://127.0.0.1:8765/callback")
+    expect verifier of again is not verifier of started
+    expect state of again is not state of started
+    expect not ("scope" is in query_of(url of again))
+    set queried to oauth's provider("https://id.example.com/auth?tenant=7", "https://id.example.com/token", "c")
+    expect items 1 to 47 of url of oauth's authorization_start(queried, "http://127.0.0.1/cb") is "https://id.example.com/auth?tenant=7&response_t"
+end
+
+to test_reading_tokens
+    set tokens to oauth's oauth_read_tokens(200, "\{\"access_token\":\"at1\",\"token_type\":\"Bearer\",\"expires_in\":3600,\"refresh_token\":\"rt1\",\"scope\":\"openid email\"}", 1000, nothing)
+    expect access_token of tokens is "at1"
+    expect token_type of tokens is "Bearer"
+    expect refresh_token of tokens is "rt1"
+    expect scope of tokens is "openid email"
+    expect id_token of tokens is nothing
+    expect expires_at of tokens is 4600
+    expect item "expires_in" of fields of tokens is 3600
+    # no refresh_token: the old one kept; no expires_in: no end
+    set renewed to oauth's oauth_read_tokens(200, "\{\"access_token\":\"at2\"}", 5000, "rt1")
+    expect refresh_token of renewed is "rt1"
+    expect expires_at of renewed is nothing
+    expect oauth's expired(renewed) is no
+    expect oauth's expired(tokens) is yes
+    # GitHub's answer, a form, when it isn't asked for JSON
+    set github to oauth's oauth_read_tokens(200, "access_token=gho_abc&scope=repo%2Cgist&token_type=bearer", 0, nothing)
+    expect access_token of github is "gho_abc"
+    expect scope of github is "repo,gist"
+    # what a provider says when it says no
+    expect failure_of(function gives oauth's oauth_read_tokens(400, "\{\"error\":\"invalid_grant\",\"error_description\":\"the code has expired\"}", 0, nothing)) is "the provider said invalid_grant: the code has expired"
+    expect failure_of(function gives oauth's oauth_read_tokens(401, "\{\"error\":\"invalid_client\"}", 0, nothing)) is "the provider said invalid_client"
+    expect failure_of(function gives oauth's oauth_read_tokens(500, "<h1>down</h1>", 0, nothing)) is "the token endpoint said 500"
+    expect failure_of(function gives oauth's oauth_read_tokens(200, "\{}", 0, nothing)) is "the token endpoint sent no access_token"
+end
+
+to test_mistakes
+    set public to oauth's provider("https://id.example.com/auth", "https://id.example.com/token", "c")
+    expect failure_of(function gives oauth's client_credentials(public)) is "client credentials need the provider's client_secret"
+    set no_refresh to record with access_token "a", refresh_token nothing, expires_at nothing
+    expect failure_of(function gives oauth's refresh(public, no_refresh)) is "these tokens have no refresh_token to refresh them with"
+end

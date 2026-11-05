@@ -50,7 +50,7 @@ shell runs an entry: a program built from the cells before it and this one, whic
 cells before it kept and keeps its own for the next. Output comes as the cell's program writes it: when its
 buffer is half full, or it asks, fails or ends, so the lines of a long cell can come together. Stopping a
 cell stops the program running it; on Windows that needs `pip install psutil` to find the program, or
-Moth is started again, with nothing kept. DESIGN.md §114 has more.
+Moth is started again, with nothing kept. DESIGN.md §122 has more.
 
 Its tests run a stand-in for `moth kernel`, moth itself, and, with ipykernel and jupyter_client installed,
 the kernel as Jupyter runs it:

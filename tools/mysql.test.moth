@@ -1,0 +1,122 @@
+# mysql.moth's tests: the handshake read and answered, both ways of scrambling a password, RSA-OAEP as MySQL 8
+# decrypts it, a prepared statement's values and a server's answers, each byte for byte as Python made them
+# apart; machine.test.js runs statements on a real MySQL, where there is one
+
+use "mysql.moth" as mysql
+use "wire.moth" as wire
+use "hash.moth" as hash
+use "jwt.moth" as jwt
+
+set my_test_nonce to hash's bytes_of_hex("0102030405060708090a0b0c0d0e0f1011121314")
+
+# what a call fails with, or nothing if it doesn't
+to failure_of with f
+    try
+        f()
+    if it fails with why
+        return why
+    end
+    return nothing
+end
+
+# a connection whose server's every packet is already here, in hex
+to answered with hex
+    return record with connection nothing, reader wire's reader_of(hash's bytes_of_hex(hex)), sequence 0, secure no, statements empty dictionary,
+        server "", status 0
+end
+
+to test_handshake
+    set hello to mysql's my_handshake(hash's bytes_of_hex("0a382e342e33002a000000010203040506070800ffffff0200ffbf1500000000000000000000090a0b0c0d0e0f10111213140063616368696e675f736861325f70617373776f726400"))
+    expect version of hello is "8.4.3"
+    expect capabilities of hello is 3221225471
+    expect nonce of hello is my_test_nonce
+    expect plugin of hello is "caching_sha2_password"
+    set capabilities to (1 + 4 + 8 + 512 + 8192 + 32768 + 65536 + 131072 + 262144 + 524288 + 2097152) bit and capabilities of hello
+    set scrambled to mysql's sha2_scramble("secret", nonce of hello)
+    expect hash's hex_of(mysql's my_handshake_answer(capabilities, "app", scrambled, "shop", "caching_sha2_password")) is "0da22f00000000012d00000000000000000000000000000000000000000000006170700020746ebe205d56a0707acb3e796e834e0dd7b1d61743b26bd5202c7a623230c7c973686f700063616368696e675f736861325f70617373776f726400"
+    expect failure_of(function gives mysql's my_handshake(hash's bytes_of_hex("09"))) is "this isn't a MySQL server: its handshake isn't protocol 10"
+end
+
+to test_scrambles
+    expect hash's hex_of(mysql's native_scramble("secret", my_test_nonce)) is "b32bb3a583e1340c0a1108d58b1be49781ad8c2f"
+    expect hash's hex_of(mysql's sha2_scramble("secret", my_test_nonce)) is "746ebe205d56a0707acb3e796e834e0dd7b1d61743b26bd5202c7a623230c7c9"
+    expect mysql's my_scramble("mysql_native_password", "", my_test_nonce) is 0 bytes
+    # sha256_password: without TLS it asks for the server's RSA key; over TLS, the password itself and a 0
+    expect mysql's my_scramble("sha256_password", "secret", my_test_nonce) is (list of 1) as bytes
+    expect hash's hex_of(mysql's my_scramble("sha256_password", "secret", my_test_nonce, yes)) is "73656372657400"
+    expect mysql's my_scramble("sha256_password", "", my_test_nonce) is 0 bytes
+    expect failure_of(function gives mysql's my_scramble("dialog", "x", my_test_nonce)) is "the MySQL server logs in with dialog, and mysql.moth has caching_sha2_password, sha256_password and mysql_native_password"
+end
+
+to test_rsa_oaep
+    # the password, masked with the nonce, padded with a seed of twenty 0xAA bytes: as Python pads it, by hand,
+    # which Python's cryptography decrypts to the same
+    set key to jwt's read_key("-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzZzqkI1VhC0IRsybCPed\nD305z2zmYsFkolBT0dGMVQLgoF+rcTHK9iPSdciJGXnu9EP9Cv3XvaIsNmhmfVeF\n9oGseZ5cJdI4f4oHDsfcgvnn8D+CJLy8g5OJTPr1Pq2ipULdCq3qlDOBhY6Vnpp0\nBVe55bWbzjB3ySNTCTZjWXaUnp1XEiw58Zwahe5oi8G/MEVxG07iRnOSR7Vk9YS4\nldIwXNjEAZxLVw62YoNSy5NIsCBNl/vNaSvRjYf7Jrz5egw6t7zouxKmly4jKot0\n1ZKPqX/p/i9zmZsbyfW/FADM56hhqA6U2VOiCfsvIiJWNrBwWMW1ax9pQSBXDoF0\nrQIDAQAB\n-----END PUBLIC KEY-----\n")
+    set masked to hash's bytes_of_hex("72676076607207")
+    expect mysql's my_masked("secret", my_test_nonce) is masked
+    set seed to 20 bytes
+    for each k from 1 to 20
+        set byte k of seed to 170
+    end
+    expect hash's hex_of(mysql's rsa_oaep(masked, key, seed)) is "a59a32679e81ddceaa14b033dbf91896bae716e09a136d17073e8509b88755deae73594b2bbefca39d40feee6800eaebcbe1e9dc018392dd224ac28f8428b41ffa504f1f462e624e5ad1c1dc388e27566e90da6ded78b842ea92ea2a6089cb8daea73a3b5b05d63ede544efdaefeacff64da850765c90bf6a82024aa6d36b9f52f98f1fa43662dbabf761677cc091e8f19d020f61e08a963990ef1492ce16388212bbad5ff052e1380e3af12addabd0f27219bc10d14a6cab160b4a9806ab8d528116e77b559a42db3807482671e0cc3f0d3b3c42e0a934ed29ccda2f7e6e87adbf7c43846cdbfb6a1abe7ce90b5aefa8f4c9aee9e71e21b54f9c60763c80896"
+end
+
+to test_statements_sent
+    set values to list of 42, "é", nothing, (list of 0, 255) as bytes, 2.5, yes, (dictionary where "a" is 1)
+    expect hash's hex_of(mysql's my_execute_bytes(9, values)) is "1709000000000100000004010800fd000600fc0005000100fd002a0000000000000002c3a90200ff000000000000044001077b2261223a317d"
+    expect hash's hex_of(mysql's my_execute_bytes(9, empty list)) is "17090000000001000000"
+end
+
+to test_reading_answers
+    set db to answered("010000010c24000002036465660473686f70017401740474696e790474696e790c2d00ff00000001000000000026000003036465660473686f7001740174056269675f75056269675f750c2d00ff0000000820000000001e000004036465660473686f7001740174016601660c2d00ff0000000400000000001e000005036465660473686f7001740174016401640c2d00ff00000005000000000022000006036465660473686f700174017403646563036465630c2d00ff000000f6000000000024000007036465660473686f7001740174046e616d65046e616d650c2d00ff000000fd000000000024000008036465660473686f700174017404626c6f6204626c6f620c3f00ff000000fc000000000020000009036465660473686f70017401740261740261740c2d00ff0000000c00000000002200000a036465660473686f700174017403646179036461790c2d00ff0000000a00000000002200000b036465660473686f700174017403647572036475720c2d00ff0000000b00000000002200000c036465660473686f700174017403646f6303646f630c2d00ff000000f500000000002400000d036465660473686f700174017404676f6e6504676f6e650c2d00ff0000000300000000000500000efe000002005100000f000000ff0000f595e7f23f000000c03f9a9999999999b9bf0531322e35300353616d0200010bea070b040a0f00c0d4010004ea070b040801010000000203040d7b2261223a205b312c20325d7d07000000240000100070357f000000000000000002c3a90bd0070101000000000000000800000000000c1e0005000011fe00000200")
+    set result to mysql's my_results(db, yes)
+    expect columns of result is list of "tiny", "big_u", "f", "d", "dec", "name", "blob", "at", "day", "dur", "doc", "gone"
+    expect count of result is 2
+    set first to item 1 of rows of result
+    expect item "tiny" of first is -1
+    expect item "big_u" of first is 18000000000000000
+    expect item "f" of first is 1.5
+    expect item "d" of first is -0.1
+    expect item "dec" of first is 12.5
+    expect item "name" of first is "Sam"
+    expect item "blob" of first is (list of 0, 1) as bytes
+    expect item "at" of first is "2026-11-04 10:15:00.120000"
+    expect item "day" of first is "2026-11-04"
+    expect item "dur" of first is "-26:03:04"
+    expect item "doc" of first is dictionary where "a" is (list of 1, 2)
+    expect item "gone" of first is 7
+    set second to item 2 of rows of result
+    expect item "tiny" of second is 127
+    expect item "f" of second is nothing
+    expect item "name" of second is "é"
+    expect item "at" of second is "2000-01-01 00:00:00"
+    expect item "dur" of second is "12:30:00"
+    expect item "gone" of second is nothing
+    # an OK: rows changed and the id made
+    set done to mysql's my_results(answered("0700000100030702000000"), yes)
+    expect count of done is 3
+    expect last_id of done is 7
+    expect rows of done is empty list
+    # text rows, from a statement with no parameters
+    set listed to mysql's my_results(answered("010000010320000002036465660473686f70017401740269640269640c2d00ff00000003000000000024000003036465660473686f7001740174046e616d65046e616d650c2d00ff000000fd000000000026000004036465660473686f70017401740570726963650570726963650c2d00ff000000f6000000000005000005fe000002000b000006013103416e6104392e3939090000070132fb052d31652b3305000008fe00000200"), no)
+    expect rows of listed is list of (dictionary where "id" is 1, "name" is "Ana", "price" is 9.99), (dictionary where "id" is 2, "name" is nothing, "price" is -1000)
+    # a statement prepared: its id, and how many parameters it has
+    expect mysql's my_prepare_answer(answered("0c0000010009000000020001000000001e000002036465660473686f7001740174013f013f0c2d00ff000000fd000000000005000003fe000002001e000004036465660473686f7001740174016101610c2d00ff0000000300000000001e000005036465660473686f7001740174016201620c2d00ff00000003000000000005000006fe00000200")) is record with id 9, params 1
+end
+
+to test_errors
+    expect failure_of(function gives mysql's my_results(answered("2b000001ff7a042334325330325461626c65202773686f702e6e6f77686572652720646f65736e2774206578697374"), yes)) is "MySQL said: Table 'shop.nowhere' doesn't exist (1146, 42S02)"
+    set db to answered("")
+    set item "select ? as a, 1 as b" of statements of db to record with id 9, params 1
+    expect failure_of(function gives mysql's run(db, "select ? as a, 1 as b", empty list)) is "the SQL has 1 ?s, and 0 values were given"
+end
+
+to test_urls
+    expect mysql's my_url_options("mysql://app:s%40cret@db.example.com:3307/shop?ssl-mode=REQUIRED") is dictionary where "tls" is "require", "user" is "app", "password" is "s@cret", "database" is "shop", "host" is "db.example.com", "port" is 3307
+    expect mysql's my_url_options("mysql://root@localhost") is dictionary where "user" is "root", "host" is "localhost"
+    expect failure_of(function gives mysql's my_url_options("postgres://x")) is "a MySQL URL starts mysql://, not postgres://x"
+    expect hash's hex_of(mysql's my_length_coded(250)) is "fa"
+    expect hash's hex_of(mysql's my_length_coded(251)) is "fcfb00"
+    expect hash's hex_of(mysql's my_length_coded(70000)) is "fd701101"
+    expect hash's hex_of(mysql's my_length_coded(16777216)) is "fe0000000100000000"
+end
