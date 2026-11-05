@@ -33,6 +33,7 @@ export const BUILT_IN = {
   "tools/hash.moth": "SHA-256, for the sums of packages' files in moth.sums",
   "moth-debugger.moth": "the debugger moth debug builds into a program, built into moth with --include",
   "moth-coverage.moth": "what moth coverage builds into a program, in the debugger's place, to count the lines that ran",
+  "package.json": "the release's manifest, built into moth with --include, which moth --version reads its version from",
 };
 const WEB = ["index.html", "docs/moth.svg", ...MODULES];
 
