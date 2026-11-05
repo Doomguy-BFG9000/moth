@@ -4,6 +4,9 @@ Thank you for looking. Moth is a programming language that reads like plain Engl
 is welcome: a bug report, a clearer error message, an example, a package, or a change to the compiler.
 Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
+Questions, ideas still taking shape, and things you've made with Moth belong in
+[Discussions](https://github.com/samyyy2423/moth/discussions); bugs and planned work belong in issues.
+
 ## Ways to help
 
 - **Start with a good first issue.** The issues labelled

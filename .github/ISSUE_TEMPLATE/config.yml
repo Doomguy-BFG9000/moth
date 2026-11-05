@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: A question
+    url: https://github.com/samyyy2423/moth/discussions/categories/q-a
+    about: Ask in Discussions' Q&A, where answers stay findable for the next person.
+  - name: Something you made with Moth
+    url: https://github.com/samyyy2423/moth/discussions/categories/show-and-tell
+    about: Show it in Discussions.
   - name: Learn Moth
     url: https://samyyy2423.github.io/moth/learn.html
     about: The lessons, from a first program up.
