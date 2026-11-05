@@ -1,11 +1,25 @@
-# What `moth coverage` builds into a program, in the debugger's place (DESIGN §93), as Python's coverage.py
-# does: before each line of the program and of the files it uses, wants() notes it ran; when the program
-# ends, however it ends, finish() says, on the error output, how many of each file's lines with a statement on
-# them ran, and which didn't. It never stops the program.
+# What `moth coverage` builds into a program, in the debugger's place (DESIGN §93, §127), as Python's
+# coverage.py does: before each line of the program and of the files it uses, wants() counts it; when the
+# program ends, however it ends, finish() says, on the error output, how many of each file's lines with a
+# statement on them ran, and which didn't. It never stops the program. moth uses this file too, to say the same
+# of a program's tests, added up from each test's run (coverage_summary and coverage_lcov_text).
+
+# What moth asks of it, set by lines moth puts at the end of this file before building it in (cli_watched in
+# moth.moth). keeping, for a test's run: say each line's count, for moth to add up with the other tests', in
+# place of the summary. lcov: a file to write the counts to in LCOV's format too, or nothing; its paths are
+# each file's from the folder moth runs in, as folder has the program's. left_out: files to say nothing of,
+# moth's own copies of the standard library.
+set coverage_keeping to no
+set coverage_lcov to nothing
+set coverage_folder to ""
+set coverage_left_out to empty list
+
+# what keeping says first, so moth finds the counts after what the run said to the error output itself
+set coverage_mark to "moth coverage, lines run:"
 
 set program_name to "" # the program's own file, for saying where a line is
 set every_line to empty list # each line a statement is on: its file ("" for the program's own) and its number
-set ran to empty dictionary # those that ran, each "file line"
+set ran to empty dictionary # how many times each line ran, by "file line"
 
 to start with name, file_names, texts, statement_lines
     set program_name to name
@@ -13,7 +27,12 @@ to start with name, file_names, texts, statement_lines
 end
 
 to wants with line, file, depth, fn
-    set item (file + " line " + line) of ran to yes
+    set key to file + " line " + line
+    if key is in ran
+        set item key of ran to item key of ran + 1
+    else
+        set item key of ran to 1
+    end
     return no
 end
 
@@ -30,51 +49,113 @@ end
 to waits
 end
 
-# how many lines ran, of how many, each file's, the program's own first, and the lines that didn't, as runs
-# ("12-14")
+# each file's lines and how many times each ran, said, or said as moth keeps them, and written as LCOV
 to finish
-    set files to list of ""
-    set counts to empty dictionary
-    set missed to empty dictionary
+    set files to list of "" # the program's own first, then each file in the order its lines come
+    set counts to empty dictionary # for each file, a dictionary from each of its lines to how many times it ran
     for each pair in every_line
         set file to item 1 of pair
         if not (file is in counts)
-            set item file of counts to list of 0, 0
-            set item file of missed to empty list
+            set item file of counts to empty dictionary
             if file is not ""
                 add file to files
             end
         end
-        set count to item file of counts
-        set item 2 of count to item 2 of count + 1
+        set times to 0
         if (file + " line " + item 2 of pair) is in ran
-            set item 1 of count to item 1 of count + 1
-        else
-            set kept to item file of missed
-            add item 2 of pair to kept
+            set times to item (file + " line " + item 2 of pair) of ran
         end
+        set lines to item file of counts
+        set item (item 2 of pair) of lines to times
     end
-    set run_total to 0
-    set all_total to 0
-    for each file in counts
-        set run_total to run_total + item 1 of item file of counts
-        set all_total to all_total + item 2 of item file of counts
+    if coverage_keeping
+        say coverage_mark to the error output
+        for each file in files
+            if file is in counts
+                set told to empty list
+                set lines to item file of counts
+                for each n in keys of lines
+                    add n + ":" + item n of lines to told
+                end
+                say file + "\t" + (join told with " ") to the error output
+            end
+        end
+        return
     end
-    say "moth coverage: " + run_total + " of " + all_total + " lines run (" + coverage_share(run_total, all_total) + ")" to the error output
+    set shown to empty list
+    set paths to empty list
+    set kept to empty list
     for each file in files
-        if file is in counts
-            set count to item file of counts
-            set shown to file
+        if file is in counts and not (file is in coverage_left_out)
+            set name to file
             if file is ""
-                set shown to program_name
+                set name to program_name
             end
-            set line to "  " + shown + ": " + item 1 of count + " of " + item 2 of count + " (" + coverage_share(item 1 of count, item 2 of count) + ")"
-            if length of item file of missed is greater than 0
-                set line to line + ", not run: " + coverage_runs(item file of missed in order)
-            end
-            say line to the error output
+            add name to shown
+            add coverage_folder + name to paths
+            add item file of counts to kept
         end
     end
+    for each line in coverage_summary(shown, kept)
+        say line to the error output
+    end
+    if coverage_lcov is not nothing
+        try
+            write coverage_lcov_text(paths, kept) to coverage_lcov
+            say "wrote " + coverage_lcov to the error output
+        if it fails with why
+            say "moth coverage: " + why to the error output
+        end
+    end
+end
+
+# The summary, a line each: how many of the lines with a statement on them ran, all told, then each file's,
+# with those that didn't as runs (5-7). names: each file as it's said, in order; counts: for each, a
+# dictionary from each such line's number to how many times it ran, 0 for never.
+to coverage_summary with names, counts
+    set run_all to 0
+    set lines_all to 0
+    set said to list of "" # the line all told, once it's known
+    for each k from 1 to length of names
+        set lines to item k of counts
+        set missed to empty list
+        for each n in keys of lines
+            if item n of lines is 0
+                add n to missed
+            end
+        end
+        set lines_here to length of keys of lines
+        set run_here to lines_here - length of missed
+        set run_all to run_all + run_here
+        set lines_all to lines_all + lines_here
+        set line to "  " + item k of names + ": " + run_here + " of " + lines_here + " (" + coverage_share(run_here, lines_here) + ")"
+        if length of missed is greater than 0
+            set line to line + ", not run: " + coverage_runs(missed in order)
+        end
+        add line to said
+    end
+    set item 1 of said to "moth coverage: " + run_all + " of " + lines_all + " lines run (" + coverage_share(run_all, lines_all) + ")"
+    return said
+end
+
+# The same as LCOV's tracefile, which CI services and editors read, as geninfo writes it: for each file, its
+# path (SF), each line with a statement on it and how many times it ran (DA), in order, and how many such
+# lines there are (LF) and ran (LH)
+to coverage_lcov_text with paths, counts
+    set out to ""
+    for each k from 1 to length of paths
+        set lines to item k of counts
+        set hit to 0
+        add "TN:\nSF:" + item k of paths + "\n" to out
+        for each n in keys of lines in order
+            add "DA:" + n + "," + item n of lines + "\n" to out
+            if item n of lines is greater than 0
+                add 1 to hit
+            end
+        end
+        add "LF:" + length of keys of lines + "\nLH:" + hit + "\nend_of_record\n" to out
+    end
+    return out
 end
 
 # a part of the whole, as "84.5%"

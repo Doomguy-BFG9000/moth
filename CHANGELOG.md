@@ -53,6 +53,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   `wire.moth`. `s3.moth` keeps objects in S3 and the stores that speak its language, `jwt.moth` makes and
   checks JSON Web Tokens, `oauth.moth` signs a person in with OAuth 2 and PKCE, and `yaml.moth` reads and
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
+- **`moth coverage` of tests.** `moth coverage x.test.moth`, or `moth coverage` for every `.test.moth` file
+  here, runs the tests as `moth test` does and says which lines of the files they test ran, every test's runs
+  added up: each file's share, and the lines no test ran. `--lcov` writes `lcov.info` for CI services and
+  editors, for a program's run too. It no longer counts moth's own copies of the standard library, nor
+  packages.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 
