@@ -95,8 +95,15 @@ main() {
         which="the latest moth"
     fi
 
+    home=${HOME:-}
     if [ -z "$dir" ]; then
-        if [ "$(id -u)" = 0 ]; then dir=/usr/local/bin; else dir="${HOME:?HOME isn't set: say where with --dir}/.local/bin"; fi
+        if [ "$(id -u)" = 0 ]; then
+            dir=/usr/local/bin
+        elif [ -n "$home" ]; then
+            dir="$home/.local/bin"
+        else
+            fail "HOME is not set, so say where to put moth with --dir"
+        fi
     fi
     case $dir in
         /*) ;;
@@ -131,21 +138,22 @@ main() {
     case ":${PATH:-}:" in
         *":$dir:"*) say "run: moth run hello.moth"; return 0 ;;
     esac
-    if [ "$modify_path" = no ]; then
+    if [ "$modify_path" = no ] || [ -z "$home" ]; then
         say "$dir isn't on your PATH: add it, or run $dir/moth"
         return 0
     fi
     shown=$dir
     case $dir in
-        "$HOME"/*) shown="\$HOME/${dir#"$HOME"/}" ;;
+        "$home"/*) shown="\$HOME/${dir#"$home"/}" ;;
     esac
     line="export PATH=\"$shown:\$PATH\""
-    add_to_path "$HOME/.profile" "$line" || true
-    if [ -f "$HOME/.bashrc" ] || [ "${SHELL##*/}" = bash ]; then add_to_path "$HOME/.bashrc" "$line" || true; fi
-    if [ -f "$HOME/.zshrc" ] || [ "${SHELL##*/}" = zsh ]; then add_to_path "$HOME/.zshrc" "$line" || true; fi
-    if [ -d "$HOME/.config/fish" ] || [ "${SHELL##*/}" = fish ]; then
-        mkdir -p "$HOME/.config/fish/conf.d"
-        add_to_path "$HOME/.config/fish/conf.d/moth.fish" "fish_add_path -g \"$dir\"" || true
+    shell=$(basename "${SHELL:-sh}")
+    add_to_path "$home/.profile" "$line" || true
+    if [ -f "$home/.bashrc" ] || [ "$shell" = bash ]; then add_to_path "$home/.bashrc" "$line" || true; fi
+    if [ -f "$home/.zshrc" ] || [ "$shell" = zsh ]; then add_to_path "$home/.zshrc" "$line" || true; fi
+    if [ -d "$home/.config/fish" ] || [ "$shell" = fish ]; then
+        mkdir -p "$home/.config/fish/conf.d"
+        add_to_path "$home/.config/fish/conf.d/moth.fish" "fish_add_path -g '$dir'" || true
     fi
     say "open a new terminal for PATH to have it, or run: $line"
 }

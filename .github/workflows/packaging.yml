@@ -208,10 +208,19 @@ jobs:
       - name: winget validates and installs the manifests
         shell: pwsh
         run: |
-          winget --version
+          $client = [version] ((winget --version).Trim() -replace '^v', '')
+          Write-Host "winget $client"
           $manifest = Get-ChildItem packaging\winget\manifests\s\samyyy2423\Moth | Sort-Object { [version] $_.Name } | Select-Object -Last 1
-          winget validate --manifest $manifest.FullName
-          if ($LASTEXITCODE) { throw 'winget validate failed' }
+          $said = winget validate --manifest $manifest.FullName | Out-String
+          Write-Host $said
+          if ($LASTEXITCODE) {
+            # a winget older than the manifests' schema (1.28) knows all but its header's address, and warns of
+            # that alone; anything else is a failure
+            $others = @($said -split "`n" | Where-Object { $_ -match 'Manifest (Warning|Error)' -and $_ -notmatch 'schema header URL does not match' })
+            $old = $client -lt [version] '1.28' -and $said -match 'Manifest validation succeeded with warnings'
+            if (-not $old -or $others) { throw 'winget validate failed' }
+            Write-Host "winget $client doesn't know schema 1.28's header, and finds nothing else"
+          }
           winget settings --enable LocalManifestFiles
           winget install --manifest $manifest.FullName --accept-package-agreements --accept-source-agreements --disable-interactivity
           if ($LASTEXITCODE) { throw 'winget install failed' }

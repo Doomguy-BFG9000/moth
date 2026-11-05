@@ -114,7 +114,7 @@ Description: programming language that reads like plain English
  moth is one static program. moth add, get and update run git, moth search
  runs curl, and a program that makes a secure connection loads OpenSSL 3.
 END
-(cd "$root" && find usr -type f | LC_ALL=C sort | xargs md5sum) > "$root/DEBIAN/md5sums"
+(cd "$root" && find usr -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum) > "$root/DEBIAN/md5sums"
 chmod 0644 "$root/DEBIAN/control" "$root/DEBIAN/md5sums" "$root/usr/share/doc/moth/copyright"
 find "$root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 
