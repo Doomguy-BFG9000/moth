@@ -1,0 +1,83 @@
+# redis.moth's tests: commands as RESP has them, byte for byte, and every kind of reply RESP2 and RESP3 have,
+# read, with no server; machine.test.js runs commands on a real Redis, where there is one
+
+use "redis.moth" as redis
+use "wire.moth" as wire
+
+set redis_test_crlf to (list of 13, 10) as bytes as text
+
+# lines, each ended by \r\n, as bytes
+to resp with lines
+    return ((join lines with redis_test_crlf) + redis_test_crlf) as bytes
+end
+
+# what a call fails with, or nothing if it doesn't
+to failure_of with f
+    try
+        f()
+    if it fails with why
+        return why
+    end
+    return nothing
+end
+
+to test_commands_sent
+    expect redis's redis_encoded(list of (list of "SET", "k", "v")) is resp(list of "*3", "$3", "SET", "$1", "k", "$1", "v")
+    set mixed to list of "SET", "é", 3600, yes, (list of 0, 13, 10) as bytes
+    expect redis's redis_encoded(list of mixed) is resp(list of "*5", "$3", "SET", "$2", "é", "$4", "3600", "$1", "1", "$3", (list of 0) as bytes as text + redis_test_crlf)
+    # a pipeline: each command after the one before, sent at once
+    set two to redis's redis_encoded(list of (list of "INCR", "a"), (list of "GET", "a"))
+    expect two is resp(list of "*2", "$4", "INCR", "$1", "a", "*2", "$3", "GET", "$1", "a")
+    expect failure_of(function gives redis's redis_encoded(list of (list of "GET", nothing))) is "a Redis command's words can't be nothing"
+end
+
+to test_resp2_replies
+    set r to wire's reader_of(resp(list of "+OK", "-ERR unknown command 'FOO'", ":42", ":-7", "$5", "hello", "$-1", "$0", "", "*3", "$1", "a", ":1", "*1", "+inner", "*-1", "*0", "$2", "é"))
+    expect redis's redis_reply(r, no) is "OK"
+    set problem to redis's redis_reply(r, no)
+    expect problem is record with kind "redis error", message "ERR unknown command 'FOO'"
+    expect failure_of(function gives redis's redis_value(problem)) is "Redis said ERR unknown command 'FOO'"
+    expect redis's redis_reply(r, no) is 42
+    expect redis's redis_reply(r, no) is -7
+    expect redis's redis_reply(r, no) is "hello"
+    expect redis's redis_reply(r, no) is nothing
+    expect redis's redis_reply(r, no) is ""
+    expect redis's redis_reply(r, no) is list of "a", 1, (list of "inner")
+    expect redis's redis_reply(r, no) is nothing
+    expect redis's redis_reply(r, no) is empty list
+    expect redis's redis_reply(r, yes) is "é" as bytes
+    expect wire's waiting(r) is 0
+    # a bulk string with \r\n inside it, which only its length tells apart
+    set inside to wire's reader_of(resp(list of "$4", redis_test_crlf + "ab"))
+    expect redis's redis_reply(inside, no) is redis_test_crlf + "ab"
+end
+
+to test_resp3_replies
+    set r to wire's reader_of(resp(list of "_", "#t", "#f", ",3.25", ",-1.5e3", ",inf", ",-inf", "(3492890328409238509324850943850943825024385",
+        "=15", "txt:Some string", "%2", "+first", ":1", "+second", "*2", ":2", ":3", "~2", "+a", "+b", "|1", "+key-popularity", ":5", "$5", "value",
+        ">3", "+message", "+news", "+hi", "!21", "SYNTAX invalid syntax"))
+    expect redis's redis_reply(r, no) is nothing
+    expect redis's redis_reply(r, no) is yes
+    expect redis's redis_reply(r, no) is no
+    expect redis's redis_reply(r, no) is 3.25
+    expect redis's redis_reply(r, no) is -1500
+    expect redis's redis_reply(r, no) is 10 to the power of 400
+    expect redis's redis_reply(r, no) is -1 * (10 to the power of 400)
+    expect redis's redis_reply(r, no) is "3492890328409238509324850943850943825024385"
+    expect redis's redis_reply(r, no) is "Some string"
+    expect redis's redis_reply(r, no) is dictionary where "first" is 1, "second" is (list of 2, 3)
+    expect redis's redis_reply(r, no) is list of "a", "b"
+    expect redis's redis_reply(r, no) is "value"
+    expect redis's redis_reply(r, no) is list of "message", "news", "hi"
+    expect redis's redis_reply(r, no) is record with kind "redis error", message "SYNTAX invalid syntax"
+    expect failure_of(function gives redis's redis_reply(wire's reader_of(resp(list of "?what")), no)) is "Redis sent a reply that isn't RESP: it starts with byte 63"
+    expect failure_of(function gives redis's redis_reply(wire's reader_of(resp(list of "$10", "short")), no)) is "the message ends too soon"
+end
+
+to test_urls
+    expect redis's redis_url("redis://localhost") is record with secure no, host "localhost", port 6379, user nothing, password nothing, database 0
+    expect redis's redis_url("rediss://:p%40ss@cache.example.com:6380/2") is record with secure yes, host "cache.example.com", port 6380, user nothing, password "p@ss", database 2
+    expect redis's redis_url("redis://app:secret@10.0.0.5/") is record with secure no, host "10.0.0.5", port 6379, user "app", password "secret", database 0
+    expect redis's redis_url("redis://") is record with secure no, host "localhost", port 6379, user nothing, password nothing, database 0
+    expect failure_of(function gives redis's redis_url("http://x")) is "a Redis URL starts redis:// or rediss://, not http://x"
+end

@@ -1,0 +1,958 @@
+# MySQL and MariaDB, as Python's PyMySQL has them: connected over their own protocol, logged in with
+# caching_sha2_password (MySQL 8's), sha256_password or mysql_native_password, over TLS where asked for;
+# prepared statements with their values as parameters, sent apart from the SQL so no value is ever read as SQL;
+# rows as dictionaries, each value as Moth has it; and transactions. On sockets.moth: a program `moth build`
+# makes can use it, built with --allow-libraries.
+#
+#   use "mysql.moth" as mysql
+#   set db to mysql's connect(record with host "localhost", port 3306, user "app", password "secret", database "shop")
+#   set db to mysql's connect_url("mysql://app:secret@db.example.com/shop?ssl-mode=REQUIRED")
+#   for each row in mysql's query(db, "select id, name from people where age > ? and city = ?", list of 21, "Pune")
+#       say item "id" of row " " item "name" of row
+#   end
+#   say mysql's query_one(db, "select count(*) as n from people")     # the first row, or nothing if none
+#   say mysql's execute(db, "update people set name = ? where id = ?", list of "Sam", 7)   # how many it changed
+#   set done to mysql's run(db, "insert into people (name) values (?)", list of "Ana")
+#   say last_id of done                             # the AUTO_INCREMENT it made; rows, count and columns too
+#   mysql's in_transaction(db, move_money)          # all or none: COMMIT, or ROLLBACK and the mistake again
+#   mysql's run_script(db, read "schema.sql")       # many statements, with no parameters
+#   mysql's close(db)
+#
+# connect's record has host, port (3306), user, password, database (or none), tls ("prefer": TLS if the server
+# has it and its certificate can be checked, "require": checked TLS or a mistake, "disable": never) and trust
+# (a PEM file of certificates to trust besides the system's); each but user can be left out. Without TLS,
+# caching_sha2_password and sha256_password send the password encrypted with the server's RSA key. Parameters
+# are ? in the SQL: text, numbers, yes and no, nothing (NULL), bytes, and lists, dictionaries and records (as
+# JSON). Values come back as text, numbers (integers, floats and decimals), nothing, bytes (binary columns),
+# and what JSON says (JSON columns); dates and times are text, as "2026-11-04 10:15:00". A statement MySQL
+# refuses is a `fail with` with its message, code and state, as "MySQL said: Table 'shop.nowhere' doesn't
+# exist (1146, 42S02)".
+
+use "sockets.moth" as my_net
+use "wire.moth" as my_wire
+use "hash.moth" as my_hash
+use "big.moth" as my_big
+use "secrets.moth" as my_secrets
+use "jwt.moth" as my_jwt
+
+set my_hex to "0123456789abcdef"
+
+# ---------- connecting ----------
+
+to connect with options
+    set given to my_fields(options)
+    if not ("user" is in given)
+        fail with "connect needs a user"
+    end
+    set tls to my_field(given, "tls", "prefer")
+    if not (tls is in (list of "prefer", "require", "disable"))
+        fail with "tls is \"prefer\", \"require\" or \"disable\", not " + tls
+    end
+    if my_field(given, "trust", nothing) is not nothing
+        my_net's trust(item "trust" of given)
+    end
+    try
+        return my_connect(given, tls)
+    if it fails with why
+        if tls is "prefer" and (my_starts(why, "can't connect securely") or my_starts(why, "secure connections need OpenSSL"))
+            return my_connect(given, "disable") # a certificate that can't be checked: as if the server had no TLS
+        end
+        fail with why
+    end
+end
+
+to my_connect with given, tls
+    set host to my_field(given, "host", "localhost")
+    set c to my_net's connect(host, my_field(given, "port", 3306))
+    set db to record with connection c, reader my_wire's reader(c), sequence 0, secure no, statements empty dictionary,
+        server "", status 0
+    try
+        my_start(db, host, item "user" of given, my_field(given, "password", ""), my_field(given, "database", nothing), tls)
+    if it fails with why
+        my_net's close(c)
+        fail with why
+    end
+    return db
+end
+
+# a connection from a URL: mysql://user:password@host:port/database?ssl-mode=REQUIRED
+to connect_url with url
+    return connect(my_url_options(url))
+end
+
+to my_url_options with url
+    set rest to url
+    if items 1 to 8 of (rest + "        ") is not "mysql://"
+        fail with "a MySQL URL starts mysql://, not " + url
+    end
+    set rest to items 9 to (length of rest) of rest
+    set options to empty dictionary
+    set question to position of "?" in rest
+    if question is greater than 0
+        for each pair in split (items (question + 1) to (length of rest) of rest) by "&"
+            set halves to split pair by "="
+            if length of halves is 2 and (lowercase of item 1 of halves is "ssl-mode" or lowercase of item 1 of halves is "sslmode")
+                set mode to lowercase of item 2 of halves
+                if mode is "required" or mode is "require" or mode is "verify_ca" or mode is "verify_identity"
+                    set item "tls" of options to "require"
+                else if mode is "disabled" or mode is "disable"
+                    set item "tls" of options to "disable"
+                end
+            end
+        end
+        set rest to items 1 to (question - 1) of rest
+    end
+    set at to position of "@" in rest
+    if at is greater than 0
+        set login to items 1 to (at - 1) of rest
+        set rest to items (at + 1) to (length of rest) of rest
+        set colon to position of ":" in login
+        if colon is 0
+            set item "user" of options to my_decoded(login)
+        else
+            set item "user" of options to my_decoded(items 1 to (colon - 1) of login)
+            set item "password" of options to my_decoded(items (colon + 1) to (length of login) of login)
+        end
+    end
+    set slash to position of "/" in rest
+    if slash is greater than 0
+        if slash is less than length of rest
+            set item "database" of options to my_decoded(items (slash + 1) to (length of rest) of rest)
+        end
+        set rest to items 1 to (slash - 1) of rest
+    end
+    if ":" is in rest
+        set pieces to split rest by ":"
+        set item "host" of options to item 1 of pieces
+        set item "port" of options to number of item 2 of pieces
+    else if rest is not ""
+        set item "host" of options to rest
+    end
+    return options
+end
+
+# The server's handshake, TLS if it's wanted, logging in, to the OK that says it's done
+to my_start with db, host, user, password, database, tls
+    set hello to my_handshake(my_packet(db))
+    set server of db to version of hello
+    set wanted to 1 + 4 + 512 + 8192 + 32768 + 65536 + 131072 + 262144 + 524288 + 2097152
+    if database is not nothing
+        set wanted to wanted bit or 8 # CLIENT_CONNECT_WITH_DB
+    end
+    set capabilities to wanted bit and (capabilities of hello bit or 8)
+    set server_tls to (capabilities of hello bit and 2048) is not 0
+    if tls is "require" and not server_tls
+        fail with "the MySQL server at " + host + " has no TLS, and tls is \"require\""
+    end
+    if tls is not "disable" and server_tls
+        set capabilities to capabilities bit or 2048
+        set request to my_wire's writer() # SSLRequest: the first 32 bytes of the handshake's answer
+        my_wire's add_number(request, capabilities, 4, "little")
+        my_wire's add_number(request, 16777216, 4, "little")
+        my_wire's add_byte(request, 45)
+        my_wire's add_bytes(request, 23 bytes)
+        my_send(db, my_wire's bytes_of(request))
+        my_net's secure(connection of db, host)
+        set secure of db to yes
+    end
+    set plugin to plugin of hello
+    set nonce to nonce of hello
+    my_send(db, my_handshake_answer(capabilities, user, my_scramble(plugin, password, nonce, secure of db), database, plugin))
+    repeat while yes
+        set p to my_packet(db)
+        set first to byte 1 of p
+        if first is 0
+            return nothing
+        else if first is 255
+            fail with my_problem(p)
+        else if first is 254 # switch to another way of logging in, with a nonce of its own
+            set r to my_wire's reader_of(p)
+            my_wire's take_byte(r)
+            set plugin to my_wire's text_to_zero(r)
+            set nonce to my_wire's take(r, my_wire's waiting(r))
+            if length of nonce is greater than 0 and byte (length of nonce) of nonce is 0
+                set nonce to items 1 to (length of nonce - 1) of nonce
+            end
+            my_send(db, my_scramble(plugin, password, nonce, secure of db))
+        else if first is 1 and plugin is "sha256_password" # the server's RSA key, which it was asked for
+            my_send(db, my_encrypted(password, nonce, (items 2 to (length of p) of p) as text))
+        else if first is 1 and length of p is 2 and byte 2 of p is 3
+            set first to first # caching_sha2_password: the fast way worked; the OK comes next
+        else if first is 1 and length of p is 2 and byte 2 of p is 4 # the full way: the password itself
+            if secure of db
+                my_send(db, my_wire's joined(list of (password as bytes), (list of 0) as bytes))
+            else
+                my_send(db, (list of 2) as bytes) # the server's RSA key, to send it encrypted
+                set key_packet to my_packet(db)
+                my_send(db, my_encrypted(password, nonce, (items 2 to (length of key_packet) of key_packet) as text))
+            end
+        else
+            fail with "the MySQL server logs in a way mysql.moth doesn't know (" + first + ")"
+        end
+    end
+end
+
+# the server's first packet, its handshake (protocol 10): version, capabilities, nonce (20 bytes) and plugin
+to my_handshake with p
+    if byte 1 of p is 255
+        fail with my_problem(p)
+    end
+    set r to my_wire's reader_of(p)
+    if my_wire's take_byte(r) is not 10
+        fail with "this isn't a MySQL server: its handshake isn't protocol 10"
+    end
+    set version to my_wire's text_to_zero(r)
+    my_wire's take(r, 4) # its connection's id
+    set first_part to my_wire's take(r, 8)
+    my_wire's take(r, 1)
+    set capabilities to my_wire's take_number(r, 2, "little")
+    my_wire's take(r, 3) # its character set, and status
+    set capabilities to capabilities + my_wire's take_number(r, 2, "little") * 65536
+    set data_length to my_wire's take_byte(r)
+    my_wire's take(r, 10)
+    set second_length to data_length - 8
+    if second_length is less than 13
+        set second_length to 13
+    end
+    set second_part to my_wire's take(r, second_length)
+    set plugin to "mysql_native_password"
+    if my_wire's waiting(r) is greater than 0
+        set plugin to my_wire's text_to_zero(r)
+    end
+    set nonce to my_wire's joined(list of first_part, items 1 to 12 of second_part)
+    return record with version version, capabilities capabilities, nonce nonce, plugin plugin
+end
+
+# HandshakeResponse41: capabilities, the most a packet can be, utf8mb4, the user, the scrambled password, the
+# database and the plugin
+to my_handshake_answer with capabilities, user, scrambled, database, plugin
+    set w to my_wire's writer()
+    my_wire's add_number(w, capabilities, 4, "little")
+    my_wire's add_number(w, 16777216, 4, "little")
+    my_wire's add_byte(w, 45) # utf8mb4_general_ci
+    my_wire's add_bytes(w, 23 bytes)
+    my_wire's add_text(w, user)
+    my_wire's add_byte(w, 0)
+    my_wire's add_bytes(w, my_length_coded(length of scrambled))
+    my_wire's add_bytes(w, scrambled)
+    if database is not nothing
+        my_wire's add_text(w, database)
+        my_wire's add_byte(w, 0)
+    end
+    my_wire's add_text(w, plugin)
+    my_wire's add_byte(w, 0)
+    return my_wire's bytes_of(w)
+end
+
+# the password as a plugin proves it with the nonce: no bytes for no password. sha256_password sends the
+# password itself over TLS, and without it asks for the server's RSA key (1), to send it encrypted. A server
+# gives a user that isn't there any of the three, so that it can't be told from one that is.
+to my_scramble with plugin, password, nonce, over_tls or no
+    if password is "" or password is nothing
+        return 0 bytes
+    end
+    if plugin is "mysql_native_password"
+        return native_scramble(password, nonce)
+    else if plugin is "caching_sha2_password"
+        return sha2_scramble(password, nonce)
+    else if plugin is "sha256_password"
+        if over_tls
+            return my_wire's joined(list of (password as bytes), (list of 0) as bytes)
+        end
+        return (list of 1) as bytes
+    end
+    fail with "the MySQL server logs in with " + plugin + ", and mysql.moth has caching_sha2_password, sha256_password and mysql_native_password"
+end
+
+# the password and a 0, XORed with the nonce over and over
+to my_masked with password, nonce
+    set zeroed to my_wire's joined(list of (password as bytes), (list of 0) as bytes)
+    set masked to (length of zeroed) bytes
+    for each k from 1 to length of zeroed
+        set at to (remainder of (k - 1) divided by (length of nonce)) + 1
+        set byte k of masked to byte k of zeroed bit xor byte at of nonce
+    end
+    return masked
+end
+
+# the password as caching_sha2_password's full way and sha256_password send it without TLS: masked, then
+# encrypted with the server's RSA key (a PEM public key) and a random seed
+to my_encrypted with password, nonce, pem
+    return rsa_oaep(my_masked(password, nonce), my_jwt's read_key(pem), my_secrets's random_bytes(20))
+end
+
+# mysql_native_password's: SHA1(password) XOR SHA1(nonce + SHA1(SHA1(password)))
+to native_scramble with password, nonce
+    set once to my_hash's bytes_of_hex(my_hash's sha1(password))
+    set twice to my_hash's bytes_of_hex(my_hash's sha1(once))
+    set mixed to my_hash's bytes_of_hex(my_hash's sha1(my_wire's joined(list of nonce, twice)))
+    return my_xor(once, mixed)
+end
+
+# caching_sha2_password's: SHA256(password) XOR SHA256(SHA256(SHA256(password)) + nonce)
+to sha2_scramble with password, nonce
+    set once to my_hash's bytes_of_hex(my_hash's sha256(password))
+    set twice to my_hash's bytes_of_hex(my_hash's sha256(once))
+    set mixed to my_hash's bytes_of_hex(my_hash's sha256(my_wire's joined(list of twice, nonce)))
+    return my_xor(once, mixed)
+end
+
+to my_xor with a, b
+    set made to (length of a) bytes
+    for each k from 1 to length of a
+        set byte k of made to byte k of a bit xor byte k of b
+    end
+    return made
+end
+
+# RSAES-OAEP (RFC 8017) with SHA-1, as MySQL decrypts a password: the message, padded with this 20-byte seed,
+# to the power e of the key (jwt.moth's read_key's)
+to rsa_oaep with message, key, seed
+    set k to size of key
+    if length of message is greater than k - 42
+        fail with "this password is too long for the server's RSA key"
+    end
+    set block to my_wire's writer() # lHash, zeros, 1, the message
+    my_wire's add_bytes(block, my_hash's bytes_of_hex(my_hash's sha1("")))
+    my_wire's add_bytes(block, (k - length of message - 42) bytes)
+    my_wire's add_byte(block, 1)
+    my_wire's add_bytes(block, message)
+    set data_block to my_wire's bytes_of(block)
+    set masked_block to my_xor(data_block, my_mask(seed, k - 21))
+    set masked_seed to my_xor(seed, my_mask(masked_block, 20))
+    set whole to my_wire's joined(list of ((list of 0) as bytes), masked_seed, masked_block)
+    set m to my_big's from_base(my_hash's hex_of(whole), 16)
+    set c to my_big's in_base(my_big's power_mod(m, e of key, n of key), 16)
+    repeat while length of c is less than 2 * k
+        set c to "0" + c
+    end
+    return my_hash's bytes_of_hex(c)
+end
+
+# MGF1 with SHA-1: SHA1(seed + 0), SHA1(seed + 1), ... to `size` bytes
+to my_mask with seed, size
+    set pieces to empty list
+    set made to 0
+    set count to 0
+    repeat while made is less than size
+        add my_hash's bytes_of_hex(my_hash's sha1(my_wire's joined(list of seed, my_wire's bytes_of_number(count, 4, "big")))) to pieces
+        set made to made + 20
+        set count to count + 1
+    end
+    return items 1 to size of my_wire's joined(pieces)
+end
+
+# ---------- statements ----------
+
+to query with db, sql, values or empty list
+    return rows of run(db, sql, values)
+end
+
+to query_one with db, sql, values or empty list
+    set found to rows of run(db, sql, values)
+    if length of found is 0
+        return nothing
+    end
+    return item 1 of found
+end
+
+# how many rows a statement changed
+to execute with db, sql, values or empty list
+    return count of run(db, sql, values)
+end
+
+# A statement, prepared (once for each SQL) and run with these values: a record with rows, count (rows changed,
+# or given), columns (their names, in order) and last_id (the AUTO_INCREMENT an INSERT made, or 0)
+to run with db, sql, values or empty list
+    set statement to my_prepared(db, sql)
+    if length of values is not params of statement
+        fail with "the SQL has " + params of statement + " ?s, and " + length of values + " values were given"
+    end
+    set db's sequence to 0
+    my_send(db, my_execute_bytes(id of statement, values))
+    return my_results(db, yes)
+end
+
+# Many statements at once, with no parameters, as a file of SQL has them: the first result with rows, or
+# else the last one's
+to run_script with db, sql
+    set db's sequence to 0
+    my_send(db, my_wire's joined(list of ((list of 3) as bytes), sql as bytes)) # COM_QUERY
+    return my_results(db, no)
+end
+
+# the statement for this SQL, prepared the first time it's asked for: its id, and how many parameters it has
+to my_prepared with db, sql
+    set known to statements of db
+    if sql is in known
+        return item sql of known
+    end
+    set db's sequence to 0
+    my_send(db, my_wire's joined(list of ((list of 22) as bytes), sql as bytes)) # COM_STMT_PREPARE
+    set statement to my_prepare_answer(db)
+    set item sql of known to statement
+    return statement
+end
+
+# the answer to COM_STMT_PREPARE: the statement's id, and how many parameters it has
+to my_prepare_answer with db
+    set p to my_packet(db)
+    if byte 1 of p is 255
+        fail with my_problem(p)
+    end
+    set r to my_wire's reader_of(p)
+    my_wire's take_byte(r)
+    set id to my_wire's take_number(r, 4, "little")
+    set columns to my_wire's take_number(r, 2, "little")
+    set params to my_wire's take_number(r, 2, "little")
+    if params is greater than 0 # their definitions, then an EOF
+        repeat params times
+            my_packet(db)
+        end
+        my_packet(db)
+    end
+    if columns is greater than 0
+        repeat columns times
+            my_packet(db)
+        end
+        my_packet(db)
+    end
+    return record with id id, params params
+end
+
+# COM_STMT_EXECUTE: the statement, no cursor, once; which values are NULL, each one's type, then the values
+to my_execute_bytes with id, values
+    set w to my_wire's writer()
+    my_wire's add_byte(w, 23)
+    my_wire's add_number(w, id, 4, "little")
+    my_wire's add_byte(w, 0)
+    my_wire's add_number(w, 1, 4, "little")
+    set n to length of values
+    if n is 0
+        return my_wire's bytes_of(w)
+    end
+    set nulls to (((n + 7) / 8) rounded down) bytes
+    for each k from 1 to n
+        if item k of values is nothing
+            set at to (((k - 1) / 8) rounded down) + 1
+            set byte at of nulls to byte at of nulls bit or (shift 1 left by (remainder of (k - 1) divided by 8))
+        end
+    end
+    my_wire's add_bytes(w, nulls)
+    my_wire's add_byte(w, 1) # the types follow
+    set data to my_wire's writer()
+    for each value in values
+        if value is nothing
+            my_wire's add_number(w, 6, 2, "little") # MYSQL_TYPE_NULL
+        else if value is yes or value is no
+            my_wire's add_number(w, 1, 2, "little") # TINY
+            if value
+                my_wire's add_byte(data, 1)
+            else
+                my_wire's add_byte(data, 0)
+            end
+        else if my_is_number(value) and value is divisible by 1 and value is at least -9007199254740991 and value is at most 9007199254740991
+            my_wire's add_number(w, 8, 2, "little") # LONGLONG
+            my_wire's add_number(data, value, 8, "little")
+        else if my_is_number(value)
+            my_wire's add_number(w, 5, 2, "little") # DOUBLE
+            my_wire's add_double(data, value, "little")
+        else if my_is_bytes(value)
+            my_wire's add_number(w, 252, 2, "little") # BLOB
+            my_wire's add_bytes(data, my_length_coded(length of value))
+            my_wire's add_bytes(data, value)
+        else
+            set words to value
+            if not my_is_text(value)
+                set words to value as json
+            end
+            set b to words as bytes
+            my_wire's add_number(w, 253, 2, "little") # VAR_STRING
+            my_wire's add_bytes(data, my_length_coded(length of b))
+            my_wire's add_bytes(data, b)
+        end
+    end
+    my_wire's add_bytes(w, my_wire's bytes_of(data))
+    return my_wire's bytes_of(w)
+end
+
+# the packets after a statement: an OK, an error, or a result set of rows (`binary` ones, from a prepared
+# statement, or text), and more of them while the server says more results exist; the first with rows kept
+to my_results with db, binary
+    set kept to nothing
+    set problem to nothing
+    repeat while yes
+        set p to my_packet(db)
+        set more to no
+        set result to nothing
+        if byte 1 of p is 255
+            set problem to my_problem(p)
+        else if byte 1 of p is 0
+            set r to my_wire's reader_of(p)
+            my_wire's take_byte(r)
+            set affected to my_length_number(r)
+            set last_id to my_length_number(r)
+            set status of db to my_wire's take_number(r, 2, "little")
+            set more to (status of db bit and 8) is not 0
+            set result to record with rows empty list, count affected, columns empty list, last_id last_id
+        else
+            set result to my_result_set(db, p, binary)
+            set more to (status of db bit and 8) is not 0
+        end
+        if problem is not nothing
+            fail with problem
+        end
+        if kept is nothing or length of rows of kept is 0 # the first with rows, or the last
+            set kept to result
+        end
+        if not more
+            return kept
+        end
+    end
+end
+
+# a result set, from its first packet (how many columns): each column's definition, then rows to an EOF
+to my_result_set with db, first, binary
+    set count to my_length_number(my_wire's reader_of(first))
+    set columns to empty list
+    repeat count times
+        add my_column(my_packet(db)) to columns
+    end
+    my_packet(db) # the EOF after the columns
+    set rows to empty list
+    repeat while yes
+        set p to my_packet(db)
+        if byte 1 of p is 254 and length of p is less than 9 # the EOF after the rows
+            set r to my_wire's reader_of(p)
+            my_wire's take(r, 3)
+            set status of db to my_wire's take_number(r, 2, "little")
+            set names to empty list
+            for each c in columns
+                add name of c to names
+            end
+            return record with rows rows, count length of rows, columns names, last_id 0
+        else if byte 1 of p is 255
+            fail with my_problem(p)
+        end
+        if binary
+            add my_binary_row(p, columns) to rows
+        else
+            add my_text_row(p, columns) to rows
+        end
+    end
+end
+
+# a column definition: its name, type, flags and character set (63 is binary's)
+to my_column with p
+    set r to my_wire's reader_of(p)
+    repeat 4 times # catalog, schema, table, the table's own name
+        my_wire's take(r, my_length_number(r))
+    end
+    set name to my_wire's take(r, my_length_number(r)) as text
+    my_wire's take(r, my_length_number(r))
+    my_length_number(r)
+    set charset to my_wire's take_number(r, 2, "little")
+    my_wire's take(r, 4)
+    set type to my_wire's take_byte(r)
+    set flags to my_wire's take_number(r, 2, "little")
+    return record with name name, type type, flags flags, charset charset
+end
+
+# a row of the text protocol: each value as text, or 251 for NULL, then made what its column's type says
+to my_text_row with p, columns
+    set r to my_wire's reader_of(p)
+    set made to empty dictionary
+    for each c in columns
+        set value to nothing
+        if byte (at of r) of data of r is 251
+            my_wire's take_byte(r)
+        else
+            set value to my_from_text(my_wire's take(r, my_length_number(r)), c)
+        end
+        set item (name of c) of made to value
+    end
+    return made
+end
+
+to my_from_text with b, c
+    set t to type of c
+    if t is 1 or t is 2 or t is 3 or t is 8 or t is 9 or t is 13
+        return number of (b as text)
+    else if t is 4 or t is 5 or t is 0 or t is 246
+        return my_decimal(b as text)
+    else if t is 245
+        return json from (b as text)
+    else if t is 16 or (charset of c is 63 and t is greater than 248)
+        return b
+    end
+    return b as text
+end
+
+# a row of the binary protocol: a 0, which values are NULL (two bits on), then each value as its type has it
+to my_binary_row with p, columns
+    set r to my_wire's reader_of(p)
+    my_wire's take_byte(r)
+    set nulls to my_wire's take(r, ((length of columns + 9) / 8) rounded down)
+    set made to empty dictionary
+    set k to 0
+    for each c in columns
+        set bit_at to k + 2
+        set at to ((bit_at / 8) rounded down) + 1
+        set is_null to (byte at of nulls bit and (shift 1 left by (remainder of bit_at divided by 8))) is not 0
+        set value to nothing
+        if not is_null
+            set value to my_binary_value(r, c)
+        end
+        set item (name of c) of made to value
+        set k to k + 1
+    end
+    return made
+end
+
+to my_binary_value with r, c
+    set t to type of c
+    set unsigned to (flags of c bit and 32) is not 0
+    if t is 1
+        return my_whole(r, 1, unsigned)
+    else if t is 2 or t is 13
+        return my_whole(r, 2, unsigned)
+    else if t is 3 or t is 9
+        return my_whole(r, 4, unsigned)
+    else if t is 8
+        return my_whole(r, 8, unsigned)
+    else if t is 4
+        return my_single(my_wire's take(r, 4))
+    else if t is 5
+        return my_wire's double_of(my_wire's take(r, 8), 1, "little")
+    else if t is 10 or t is 12 or t is 7
+        return my_date_time(r, t is 10)
+    else if t is 11
+        return my_time(r)
+    end
+    return my_from_text(my_wire's take(r, my_length_number(r)), c)
+end
+
+to my_whole with r, count, unsigned
+    set b to my_wire's take(r, count)
+    if unsigned
+        return my_wire's number_of(b, 1, count, "little")
+    end
+    return my_wire's signed_of(b, 1, count, "little")
+end
+
+# an IEEE 754 single, 4 bytes, the lowest first
+to my_single with b
+    set n to my_wire's number_of(b, 1, 4, "little")
+    set sign to 1
+    if n is at least 2147483648
+        set sign to -1
+        set n to n - 2147483648
+    end
+    set fraction to remainder of n divided by 8388608
+    set exponent to (n - fraction) / 8388608
+    if exponent is 255
+        if fraction is 0
+            return sign * (10 to the power of 400)
+        end
+        fail with "MySQL sent NaN, which Moth's numbers don't have"
+    end
+    if exponent is 0
+        return sign * fraction / (2 to the power of 149)
+    end
+    set whole to sign * (fraction + 8388608)
+    if exponent is at least 150
+        return whole * (2 to the power of (exponent - 150))
+    end
+    return whole / (2 to the power of (150 - exponent))
+end
+
+# DATE, DATETIME, TIMESTAMP: as many bytes as it needs, then year, month, day, hour, minute, second, microseconds
+to my_date_time with r, date_only
+    set size to my_wire's take_byte(r)
+    set parts to list of 0, 0, 0, 0, 0, 0, 0
+    if size is at least 4
+        set item 1 of parts to my_wire's take_number(r, 2, "little")
+        set item 2 of parts to my_wire's take_byte(r)
+        set item 3 of parts to my_wire's take_byte(r)
+    end
+    if size is at least 7
+        set item 4 of parts to my_wire's take_byte(r)
+        set item 5 of parts to my_wire's take_byte(r)
+        set item 6 of parts to my_wire's take_byte(r)
+    end
+    if size is at least 11
+        set item 7 of parts to my_wire's take_number(r, 4, "little")
+    end
+    set made to my_digits(item 1 of parts, 4) + "-" + my_digits(item 2 of parts, 2) + "-" + my_digits(item 3 of parts, 2)
+    if date_only
+        return made
+    end
+    set made to made + " " + my_digits(item 4 of parts, 2) + ":" + my_digits(item 5 of parts, 2) + ":" + my_digits(item 6 of parts, 2)
+    if item 7 of parts is not 0
+        set made to made + "." + my_digits(item 7 of parts, 6)
+    end
+    return made
+end
+
+# TIME: negative or not, days, hours, minutes, seconds, microseconds, as "-838:59:59" or "12:30:00"
+to my_time with r
+    set size to my_wire's take_byte(r)
+    if size is 0
+        return "00:00:00"
+    end
+    set negative to my_wire's take_byte(r) is 1
+    set days to my_wire's take_number(r, 4, "little")
+    set hours to days * 24 + my_wire's take_byte(r)
+    set minutes to my_wire's take_byte(r)
+    set seconds to my_wire's take_byte(r)
+    set made to my_digits(hours, 2) + ":" + my_digits(minutes, 2) + ":" + my_digits(seconds, 2)
+    if size is 12
+        set micro to my_wire's take_number(r, 4, "little")
+        if micro is not 0
+            set made to made + "." + my_digits(micro, 6)
+        end
+    end
+    if negative
+        return "-" + made
+    end
+    return made
+end
+
+to my_digits with n, count
+    set made to "" + n
+    repeat while length of made is less than count
+        set made to "0" + made
+    end
+    return made
+end
+
+# "12.50", "-1e+20" as a number
+to my_decimal with words
+    set lower to lowercase of words
+    if not ("e" is in lower)
+        return number of words
+    end
+    set halves to split lower by "e"
+    set p to item 2 of halves
+    if item 1 of p is "+"
+        set p to items 2 to (length of p) of p
+    end
+    set e to number of p
+    if e is at least 0
+        return number of item 1 of halves * (10 to the power of e)
+    end
+    return number of item 1 of halves / (10 to the power of (0 - e))
+end
+
+# ---------- transactions ----------
+
+to begin with db
+    run_script(db, "START TRANSACTION")
+end
+
+to commit with db
+    run_script(db, "COMMIT")
+end
+
+to rollback with db
+    run_script(db, "ROLLBACK")
+end
+
+# work(db) done all or none: COMMIT if it ends well; ROLLBACK, and its mistake again, if it doesn't
+to in_transaction with db, work
+    begin(db)
+    set given to nothing
+    try
+        set given to work(db)
+    if it fails with why
+        try
+            rollback(db)
+        if it fails
+            set given to nothing
+        end
+        fail with why
+    end
+    commit(db)
+    return given
+end
+
+to close with db
+    try
+        set db's sequence to 0
+        my_send(db, (list of 1) as bytes) # COM_QUIT
+    if it fails
+        set db to db
+    end
+    my_net's close(connection of db)
+end
+
+# ---------- packets ----------
+
+# the next packet's payload: 3 bytes of its length, the lowest first, and its sequence number, then it; one of
+# 16 MB less a byte has more after it
+to my_packet with db
+    set r to reader of db
+    set pieces to empty list
+    repeat while yes
+        set size to my_wire's take_number(r, 3, "little")
+        set db's sequence to (my_wire's take_byte(r) + 1) bit and 255
+        add my_wire's take(r, size) to pieces
+        if size is less than 16777215
+            return my_wire's joined(pieces)
+        end
+    end
+end
+
+# a payload sent as packets, numbered from the connection's sequence
+to my_send with db, payload
+    set w to my_wire's writer()
+    set at to 1
+    set left to length of payload
+    repeat while yes
+        set size to left
+        if size is greater than 16777215
+            set size to 16777215
+        end
+        my_wire's add_number(w, size, 3, "little")
+        my_wire's add_byte(w, sequence of db)
+        set db's sequence to (sequence of db + 1) bit and 255
+        if size is greater than 0
+            my_wire's add_bytes(w, items at to (at + size - 1) of payload)
+        end
+        set at to at + size
+        set left to left - size
+        if size is less than 16777215
+            my_net's send(connection of db, my_wire's bytes_of(w))
+            return nothing
+        end
+    end
+end
+
+# a whole number as the protocol codes a length: one byte under 251, else 252, 253 or 254 and 2, 3 or 8 bytes
+to my_length_coded with n
+    if n is less than 251
+        return (list of n) as bytes
+    else if n is less than 65536
+        return my_wire's joined(list of ((list of 252) as bytes), my_wire's bytes_of_number(n, 2, "little"))
+    else if n is less than 16777216
+        return my_wire's joined(list of ((list of 253) as bytes), my_wire's bytes_of_number(n, 3, "little"))
+    end
+    return my_wire's joined(list of ((list of 254) as bytes), my_wire's bytes_of_number(n, 8, "little"))
+end
+
+to my_length_number with r
+    set first to my_wire's take_byte(r)
+    if first is less than 251
+        return first
+    else if first is 252
+        return my_wire's take_number(r, 2, "little")
+    else if first is 253
+        return my_wire's take_number(r, 3, "little")
+    else if first is 254
+        return my_wire's take_number(r, 8, "little")
+    end
+    return nothing
+end
+
+# an ERR packet as a sentence: its message, code and SQL state
+to my_problem with p
+    set r to my_wire's reader_of(p)
+    my_wire's take_byte(r)
+    set code to my_wire's take_number(r, 2, "little")
+    set state to ""
+    if my_wire's waiting(r) is greater than 0 and byte (at of r) of data of r is 35 # #, then 5 letters of state
+        my_wire's take_byte(r)
+        set state to my_wire's take(r, 5) as text
+    end
+    set message to my_wire's take(r, my_wire's waiting(r)) as text
+    if state is ""
+        return "MySQL said: " + message + " (" + code + ")"
+    end
+    return "MySQL said: " + message + " (" + code + ", " + state + ")"
+end
+
+# ---------- small things ----------
+
+to my_starts with words, start
+    return length of words is at least length of start and items 1 to (length of start) of words is start
+end
+
+to my_fields with options
+    if my_is_record(options)
+        return json from (options as json)
+    end
+    return options
+end
+
+to my_field with given, name, otherwise
+    if name is in given and item name of given is not nothing
+        return item name of given
+    end
+    return otherwise
+end
+
+to my_decoded with words
+    set made to empty list
+    set b to words as bytes
+    set k to 1
+    repeat while k is at most length of b
+        if byte k of b is 37 and k + 2 is at most length of b
+            set high to position of lowercase of ((list of byte (k + 1) of b) as bytes as text) in my_hex
+            set low to position of lowercase of ((list of byte (k + 2) of b) as bytes as text) in my_hex
+            add (high - 1) * 16 + low - 1 to made
+            set k to k + 3
+        else
+            add byte k of b to made
+            set k to k + 1
+        end
+    end
+    return made as bytes as text
+end
+
+to my_bytes_check with value as bytes
+    return yes
+end
+
+to my_is_bytes with value
+    try
+        return my_bytes_check(value)
+    if it fails
+        return no
+    end
+end
+
+to my_text_check with value as text
+    return yes
+end
+
+to my_is_text with value
+    try
+        return my_text_check(value)
+    if it fails
+        return no
+    end
+end
+
+to my_number_check with value as a number
+    return yes
+end
+
+to my_is_number with value
+    try
+        return my_number_check(value)
+    if it fails
+        return no
+    end
+end
+
+to my_record_check with value as a record
+    return yes
+end
+
+to my_is_record with value
+    try
+        return my_record_check(value)
+    if it fails
+        return no
+    end
+end
