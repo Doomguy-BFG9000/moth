@@ -6,6 +6,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
+  [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
+  bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
+- **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
+  question, `wait`'s amount or `play note`'s note or time found it had no value.
 - **The standard library's reference**, at [samyyy2423.github.io/moth/docs/](https://samyyy2423.github.io/moth/docs/):
   a page for each library, with what it's for and each of its functions, what it takes and an example with
   what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,
