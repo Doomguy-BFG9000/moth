@@ -5215,7 +5215,9 @@ engines stay: as the fallback, and as what the tests compare against.
   as the engines do, and says it's too big as they do.
 - **What it gave.** Counted (§126): the calls of four inputs, 573 million
   instructions to 231 million; moth building compiler.moth, 3,579 million to
-  3,259 million. Timed: see the table below.
+  3,259 million. Timed: the calls of four inputs, 44 ms to 23; a million
+  bytes filled and summed, 37 ms to 27; moth building compiler.moth, 712 ms
+  to 677 (the best of ten, each moth run in turn with the other).
 - **Tested.** Every kind of value on each side of `bit and`, `bit or` and
   `bit xor` (0, -0, 2^53 - 1, 2^53, -1, 1.5, numbers whole to 15 digits,
   infinities, text, nothing, yes, a list, hex), each shifted both ways by
