@@ -8,10 +8,10 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
@@ -891,6 +891,68 @@ test("moth.exe notebook runs a Markdown file's blocks, and writes what each said
     assert.equal(readFileSync(join(sub, "notes.md"), "utf8"), after, `run ${time}`);
   }
   assert.deepEqual(readdirSync(sub), ["notes.md"], "what it built to run the blocks was left behind");
+});
+
+// `moth kernel` (DESIGN §122), as editors/jupyter's kernel talks to it: each line names a file of a cell's code,
+// which runs as a notebook's block does, with its output and mistakes going out as they come, between a line of
+// byte 1 and "moth-cell" and one of byte 1 and "moth-done ok" or "moth-done failed", and one of byte 1 and
+// "moth-done" on the error output; a number before the file's name numbers the cell, unless that would go back;
+// a question is answered from the input. Each line is written once what it waits for has come, as the kernel
+// writes them, and what the kernel built and kept is gone at the end.
+test("moth.exe kernel runs cells for Jupyter, each with what the ones before made", { skip }, async () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "kernel");
+  mkdirSync(sub);
+  const cells = { "1.moth": 'set xs to list of 1, 2, 3\nsay "made " + length of xs\n', "2.moth": "xs\n\n", "3.moth": "set xs to list of 9\nsay item 9 of xs\n",
+    "4.moth": "to double with n\n    return n * 2\nend\ndouble(item 3 of xs)\n", "5.moth": "\n  \n", "6.moth": 'say "to the error output" to the error output\nsay nope\n',
+    "7.moth": 'set name to ask "Name?"\nsay "hi " + name\n' };
+  for (const [name, code] of Object.entries(cells)) writeFileSync(join(sub, name), code);
+  const child = spawn(exe, ["kernel", "--allow-read"], { cwd: sub, stdio: ["pipe", "pipe", "pipe"] });
+  let [stdout, stderr] = ["", ""];
+  child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+  child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+  const ended = new Promise((resolve) => child.on("close", resolve));
+  const until = async (ready, what) => {
+    for (const start = Date.now(); !ready(); await new Promise((r) => setTimeout(r, 20)))
+      if (Date.now() - start > 120_000) throw new Error(`waited for ${what}: ${JSON.stringify(stdout)} ${JSON.stringify(stderr)}`);
+  };
+  const done = () => (stdout.match(/\x01moth-done (ok|failed)\n/g) ?? []).length;
+  for (const line of ["1.moth", "2.moth", "3.moth", "4.moth", "5.moth", "9 6.moth", "missing.moth", "7.moth", "Ana", "8 3.moth"]) {
+    const before = done();
+    child.stdin.write(line + "\n");
+    if (line === "7.moth") await until(() => stdout.endsWith("Name? "), "the question");
+    else await until(() => done() > before, line);
+  }
+  child.stdin.write("\n");
+  const status = await ended;
+  const mistake = (cell, line, why, code, at) => `cell ${cell}:${line}:${at}: ${why}\n${code}\n${" ".repeat(at - 1)}^\n`;
+  assert.deepEqual([stdout, stderr, status], [" 1.moth\n\x01moth-cell\nmade 3\n\x01moth-done ok\n 2.moth\n\x01moth-cell\n[1, 2, 3]\n\x01moth-done ok\n"
+    + " 3.moth\n\x01moth-cell\n\x01moth-done failed\n 4.moth\n\x01moth-cell\n6\n\x01moth-done ok\n 5.moth\n\x01moth-cell\n\x01moth-done ok\n"
+    + " 9 6.moth\n\x01moth-cell\n\x01moth-done failed\n missing.moth\n\x01moth-cell\n\x01moth-done failed\n"
+    + " 7.moth\n\x01moth-cell\nName? Ana\nhi Ana\n\x01moth-done ok\n 8 3.moth\n\x01moth-cell\n\x01moth-done failed\n \n",
+  "\x01moth-done\n\x01moth-done\n" + mistake(3, 2, "there is no item 9, the list only has 1 item", "say item 9 of xs", 5) + "\x01moth-done\n\x01moth-done\n\x01moth-done\n"
+    + "to the error output\n" + mistake(9, 2, "'nope' has no value yet (give it one with 'set nope to ...')", "say nope", 5) + "\x01moth-done\n"
+    + "moth: there is no file called 'missing.moth'\n\x01moth-done\n\x01moth-done\n"
+    + mistake(11, 2, "there is no item 9, the list only has 1 item", "say item 9 of xs", 5) + "\x01moth-done\n", 0]);
+  assert.deepEqual(readdirSync(sub).sort(), Object.keys(cells).sort(), "what the kernel built or kept was left behind");
+});
+
+// editors/jupyter's kernel (DESIGN §122): its own tests, in Python, against a stand-in for moth kernel and against
+// the moth built here; and, where ipykernel and jupyter_client are installed, as Jupyter runs it
+function pythonCommand() {
+  for (const command of ["python3", "python"]) {
+    const asked = spawnSync(command, ["-c", "import sys; print(sys.version_info >= (3, 8))"], { encoding: "utf8", cwd: tmpdir() });
+    if (!asked.error && asked.stdout.trim() === "True") return command;
+  }
+  return null;
+}
+const jupyterPython = target ? pythonCommand() : null;
+test("editors/jupyter's kernel runs cells through moth kernel, as Jupyter runs them", { skip: skip || (!jupyterPython && "there's no Python 3.8 or later here") }, () => {
+  const { exe } = mothExe();
+  const ran = spawnSync(jupyterPython, ["-B", fileURLToPath(new URL("./editors/jupyter/test_moth_kernel.py", import.meta.url))],
+    { cwd: tmpdir(), env: { ...process.env, MOTH: exe }, encoding: "utf8", timeout: 600_000 });
+  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  assert.match(ran.stderr, /\nOK( \(skipped=\d+\))?\n$/);
 });
 
 // The shell: a line whose value makes functions of its own (a list built from a list) runs once, not again in
@@ -2305,6 +2367,572 @@ test("text.moth, dates.moth, hash.moth, base64.moth, toml.moth, options.moth, co
     "base64.test.moth", "toml.test.moth", "options.test.moth", "collections.test.moth", "lists.test.moth", "stats.test.moth", "sync.test.moth", "fractions.test.moth", "sets.test.moth", "images.test.moth", "crypto.test.moth", "charts.test.moth"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
   assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
   assert.equal(ran.stdout.split("\n").at(-2), "93 passed");
+});
+
+// tools/arrays.moth (DESIGN §118): its own tests, in machine code, where machine code's own loops do the work and
+// must give what Moth gives to the last bit
+test("arrays.moth and ai.moth pass their own tests in machine code, where machine code's own loops do the work", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "arrays");
+  mkdirSync(sub);
+  for (const name of ["arrays.moth", "arrays.test.moth", "ai.moth", "ai.test.moth", "http.moth", "sockets.moth", "system.moth", "zip.moth"]) {
+    writeFileSync(join(sub, name), readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8"));
+  }
+  writeFileSync(join(sub, "math.moth"), readFileSync(new URL("./math.moth", import.meta.url), "utf8"));
+  const ran = spawnSync(exe, ["test", "arrays.test.moth", "ai.test.moth", "--allow-libraries"], { cwd: sub, encoding: "utf8", timeout: 300_000 });
+  assert.deepEqual([ran.status, ran.stderr, ran.stdout.includes("✗")], [0, "", false], ran.stdout);
+  assert.equal(ran.stdout.split("\n").at(-2), "13 passed");
+});
+
+// Moth's own library, which needs no --allow-libraries and isn't a library the program loads, and a list of
+// numbers given to C as where its numbers are
+test("a program uses Moth's own library without --allow-libraries, and gives C a list of numbers where they are", { skip }, () => {
+  const own = libraryRun(`use the library "moth"
+    numbers_reduce(a long whole number, a list of numbers, a list of numbers, a long whole number, a long whole number, a long whole number, a long whole number) gives a long whole number
+end
+set out to list of 0, 0
+say numbers_reduce(1, out, (list of 1, 2, 3, 4, 5, 6), 2, 3, 1, 0) " " out
+say numbers_reduce(1, out, (list of 1, 2, 3), 2, 3, 1, 0) " " out
+say numbers_reduce(2, out, (list of 1, "x", 3), 1, 3, 1, 0)`, []);
+  assert.deepEqual([own.stdout, own.stderr, own.status], ["0 [6, 15]\n1 [6, 15]\n1\n", "", 0]);
+  if (target === "linux") assert.equal(own.bytes.includes(Buffer.from("libdl.so.2")), false, "Moth's own library isn't linked");
+  const unknown = () => machine(`use the library "moth"
+    numbers_nowhere(a list of numbers) gives a whole number
+end
+numbers_nowhere(list of 1)`, { target, name: "p.moth" });
+  assert.throws(unknown, /the library 'moth' has no function called 'numbers_nowhere'/);
+  const c = libraryRun(`use the library "msvcrt" or "c"
+    memcpy(a list of numbers, a list of numbers, a long whole number) gives a pointer
+    memset(a list of numbers, a whole number, a long whole number) gives a pointer
+end
+set to_here to list of 0, 0, 0
+memcpy(to_here, (list of 1.5, -2, 1000000), 24)
+say to_here
+memset(to_here, 255, 16)
+say (item 1 of to_here is not item 1 of to_here) " " (item 2 of to_here is not item 2 of to_here) " " item 3 of to_here
+say item 1 of to_here + 1
+memcpy(to_here, (list of 1, "two"), 16)`);
+  assert.deepEqual([c.stdout, c.stderr.split("\n")[0], c.status], ["[1.5, -2, 1000000]\nyes yes 1000000\nNaN\n",
+    "p.moth:2:5: 'memcpy' needs input 2 to be a list of numbers, not a list with text in it", 1]);
+  assert.throws(() => machine('use the library "msvcrt"\n    f(a whole number) gives a list of numbers\nend\n', { target, name: "p.moth" }),
+    (err) => err.reason === "a library's function can't give a list of numbers: only a function's input can be one");
+});
+
+// A library's function "at an address" (DESIGN §119): the first input is where the function is, a pointer C
+// gave, as ONNX Runtime's C API gives a table of them
+test("a library's function at an address is called where a pointer says it is", { skip }, () => {
+  const finding = target === "windows" ? `use the library "kernel32"
+    LoadLibraryW(wide text) gives a pointer
+    GetProcAddress(a pointer, text) gives a pointer
+end
+to found with name
+    return GetProcAddress(LoadLibraryW("msvcrt.dll"), name)
+end` : `use the library "c"
+    dlsym(a pointer, text) gives a pointer
+end
+to found with name
+    return dlsym(nothing, name)
+end`;
+  const ran = libraryRun(`${finding}
+use the library "msvcrt" or "c"
+    "at an address" as call_abs(a pointer, a whole number) gives a whole number
+    "at an address" as call_strlen(a pointer, text) gives a long whole number
+end
+say call_abs(found("abs"), -5) " " call_strlen(found("strlen"), "héllo")
+call_abs(nothing, 1)`);
+  assert.deepEqual([ran.stdout, ran.stderr.split("\n")[0], ran.status], ["5 6\n", `p.moth:${target === "windows" ? 9 : 8}:5: 'call_abs' needs input 1 to be where a function is, not nothing`, 1]);
+  assert.throws(() => machine('use the library "c"\n    "at an address" as f(a whole number) gives a whole number\nend\nf(1)\n', { target, name: "p.moth" }),
+    (err) => err.reason === "a function at an address takes where it is first, as a pointer");
+  const refused = libraryRun(`${finding}
+say found("abs")`, []);
+  assert.match(refused.stderr, /this program isn't allowed to use libraries \(start it with --allow-libraries\)/);
+});
+
+// A small ONNX model, written byte by byte as protobuf: Y = Relu(X · W + B), X [batch, 3], W [3, 2], B [2], in
+// floats (1) or doubles (11)
+function onnxModel(type) {
+  const varint = (n) => {
+    const out = [];
+    let v = BigInt(n);
+    do {
+      let b = Number(v & 0x7fn);
+      v >>= 7n;
+      if (v) b |= 0x80;
+      out.push(b);
+    } while (v);
+    return out;
+  };
+  const int = (field, n) => [...varint(field << 3), ...varint(n)];
+  const bytes = (field, b) => [...varint((field << 3) | 2), ...varint(b.length), ...b];
+  const str = (field, s) => bytes(field, [...Buffer.from(s, "utf8")]);
+  const raw = (values) => {
+    const buf = Buffer.alloc(values.length * (type === 1 ? 4 : 8));
+    values.forEach((v, i) => (type === 1 ? buf.writeFloatLE(v, i * 4) : buf.writeDoubleLE(v, i * 8)));
+    return [...buf];
+  };
+  const tensor = (name, dims, values) => [...dims.flatMap((d) => int(1, d)), ...int(2, type), ...str(8, name), ...bytes(9, raw(values))];
+  const dim = (d) => bytes(1, typeof d === "number" ? int(1, d) : str(2, d));
+  const valueInfo = (name, dims) => [...str(1, name), ...bytes(2, bytes(1, [...int(1, type), ...bytes(2, dims.flatMap(dim))]))];
+  const node = (inputs, outputs, op) => [...inputs.flatMap((i) => str(1, i)), ...outputs.flatMap((o) => str(2, o)), ...str(4, op)];
+  const graph = [...bytes(1, node(["X", "W"], ["XW"], "MatMul")), ...bytes(1, node(["XW", "B"], ["Z"], "Add")), ...bytes(1, node(["Z"], ["Y"], "Relu")),
+    ...str(2, "dense"), ...bytes(5, tensor("W", [3, 2], [1, -1, 0.5, 2, 2, 0.25])), ...bytes(5, tensor("B", [2], [0.5, 1])),
+    ...bytes(11, valueInfo("X", ["batch", 3])), ...bytes(12, valueInfo("Y", ["batch", 2]))];
+  return Buffer.from([...int(1, 7), ...str(2, "moth"), ...bytes(7, graph), ...bytes(8, [...str(1, ""), ...int(2, 13)])]);
+}
+
+// ONNX Runtime comes with Windows 11; on Linux, from its release, where the test looks for it
+const onnxHere = target === "windows" ? existsSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "onnxruntime.dll"))
+  : ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib", "/usr/local/lib"].some((d) => existsSync(join(d, "libonnxruntime.so")) || existsSync(join(d, "libonnxruntime.so.1")));
+test("tools/onnx.moth runs an ONNX model through ONNX Runtime's C API, in floats and in doubles", { skip: skip || (!onnxHere && "ONNX Runtime isn't installed") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-onnx-"));
+  try {
+    writeFileSync(join(dir, "dense.onnx"), onnxModel(1));
+    writeFileSync(join(dir, "dense64.onnx"), onnxModel(11));
+    const files = {};
+    for (const name of ["onnx.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "onnx.moth" as onnx
+use "arrays.moth" as arrays
+say length of split onnx's version() by "."
+for each file in list of "dense.onnx", "dense64.onnx"
+    set model to onnx's load(file)
+    say model
+    for each put in onnx's inputs(model)
+        say put's name " " put's type " " put's shape
+    end
+    for each put in onnx's outputs(model)
+        say put's name " " put's type " " put's shape
+    end
+    set x to arrays's array(list of (list of 1, 2, 3), (list of 4, 5, 6), (list of -1, -1, -1))
+    say item "Y" of onnx's run(model, dictionary where "X" is x)
+    onnx's close(model)
+end
+set model to onnx's load("dense.onnx")
+for each wrong in list of (dictionary where "Z" is 1), (dictionary where "X" is arrays's zeros(list of 2, 4))
+    try
+        onnx's run(model, wrong)
+    if it fails with why
+        say item 1 of split why by "\\n"
+    end
+end
+try
+    onnx's load("nowhere.onnx")
+if it fails with why
+    say "fails: " position of "nowhere.onnx" in why is greater than 0
+end
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`3
+an ONNX model (dense.onnx)
+X float [-1, 3]
+Y float [-1, 2]
+[[8.5, 4.75], [19, 8.5], [0, 0]]
+an ONNX model (dense64.onnx)
+X double [-1, 3]
+Y double [-1, 2]
+[[8.5, 4.75], [19, 8.5], [0, 0]]
+the model needs an input called 'X'
+ONNX Runtime: Got invalid dimensions for input: X for the following indices
+fails: yes
+`, "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// BLAS for matmul: OpenBLAS as Linux has it, or NumPy's copy of it, which the test puts beside the program
+function numpyBlas() {
+  const asked = spawnSync("python", ["-E", "-c", "import numpy, os; print(os.path.dirname(numpy.__file__) + '.libs')"], { encoding: "utf8", cwd: tmpdir() });
+  if (asked.error || asked.status !== 0) return null;
+  const folder = asked.stdout.trim();
+  const found = existsSync(folder) && readdirSync(folder).find((f) => /^libscipy_openblas64_.*\.dll$/.test(f));
+  return found ? join(folder, found) : null;
+}
+const blasHere = target === "windows" ? numpyBlas()
+  : ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib"].some((d) => existsSync(join(d, "libopenblas.so.0")) || existsSync(join(d, "libopenblas.so"))) && "system";
+test("arrays.moth's matmul goes through BLAS once use_blas finds it, and gives what its own loops give", { skip: skip || (!blasHere && "OpenBLAS isn't installed (nor NumPy, which has a copy)") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-blas-"));
+  try {
+    if (target === "windows") copyFileSync(blasHere, join(dir, "libscipy_openblas64_.dll"));
+    const files = { "arrays.moth": readFileSync(new URL("./tools/arrays.moth", import.meta.url), "utf8"), "math.moth": readFileSync(new URL("./math.moth", import.meta.url), "utf8") };
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "arrays.moth" as arrays
+set p to arrays's random(list of 70, 50)
+set q to arrays's random(list of 50, 30)
+set own to arrays's matmul(p, q)
+set found to arrays's use_blas()
+say found is "openblas" or found is "openblas64"
+set blas to arrays's matmul(p, q)
+say arrays's close(own, blas, 0.000000001) " " blas's shape
+say arrays's to_list(arrays's matmul(arrays's array(list of (list of 1, 2)), arrays's array(list of (list of 3), (list of 4))))
+arrays's stop_using_blas()
+say arrays's same(arrays's matmul(p, q), own)
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["yes\nyes [70, 30]\n[[11]]\nyes\n", "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// tools/python.moth: CPython inside the program, through its C API, from the Python this computer has
+function pythonHere() {
+  for (const command of ["python3", "python"]) {
+    const asked = spawnSync(command, ["-E", "-c", "import sys, os, sysconfig\n" +
+      "v = sys.version_info\n" +
+      "if os.name == 'nt': print(os.path.join(sys.base_prefix, 'python%d%d.dll' % (v[0], v[1])))\n" +
+      "else: print(os.path.join(sysconfig.get_config_var('LIBDIR') or '', sysconfig.get_config_var('INSTSONAME') or ''))\n" +
+      "import importlib.util; print(importlib.util.find_spec('numpy') is not None)"], { encoding: "utf8", cwd: tmpdir() });
+    if (asked.error || asked.status !== 0) continue;
+    const [library, numpy] = asked.stdout.trim().split(/\r?\n/);
+    if (existsSync(library)) return { library, numpy: numpy === "True" };
+  }
+  return null;
+}
+const python = target ? pythonHere() : null;
+test("tools/python.moth runs Python inside the program: code, modules, values both ways, and Python's mistakes", { skip: skip || (!python && "Python's library isn't installed") }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "moth-python-"));
+  try {
+    const files = {};
+    for (const name of ["python.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(`use "python.moth" as python
+use "arrays.moth" as arrays
+say python's start() is not nothing
+python's run("import math\\nx = math.factorial(10)")
+say python's evaluate("x // 3")
+set math to python's import_module("math")
+say math
+say python's call(math, "sqrt", list of 2) " " python's call_object(python's attribute(math, "hypot"), list of 3, 4)
+say python's evaluate("[1, 'two', None, True, False, 2.5, (3, 4), {'a': [1]}, 2 ** 70]")
+python's set_variable("given", list of 3, "x", nothing, yes, 1.5, (dictionary where "k" is list of 1, 2))
+say python's evaluate("repr(given)")
+say python's evaluate("given[5]['k'][1] * 10")
+say python's variable("x")
+say python's evaluate("'héllo ' + chr(0x1F600)")
+set held to python's to_python(list of 1, 2)
+say python's call(held, "count", list of 2) " " python's from_python(held)
+python's release(held)
+for each code in list of "1 / 0", "undefined_name", "int('x')"
+    try
+        python's evaluate(code)
+    if it fails with why
+        say why
+    end
+end
+try
+    python's run("raise ValueError('bad thing')")
+if it fails with why
+    say why
+end
+try
+    python's import_module("no_such_module_here")
+if it fails with why
+    say why
+end
+try
+    python's call(5, "x")
+if it fails with why
+    say why
+end
+if python's evaluate("__import__('importlib.util').util.find_spec('numpy') is not None")
+    set np to python's import_module("numpy")
+    say python's call(np, "linspace", list of 0, 1, 5)
+    say python's call(np, "round", (list of 2.567), dictionary where "decimals" is 1)
+    python's set_variable("a", arrays's array(list of (list of 1, 2), (list of 3, 4)))
+    say python's evaluate("a.T @ a") " " python's evaluate("str(a.dtype)")
+    say python's evaluate("__import__('numpy').array(['a', 'b'])")
+end
+`, { target, name: "p.moth", files, allow: ["--allow-libraries"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = spawnSync(exe, [], { cwd: dir, encoding: "utf8", env: { ...process.env, PYTHON_LIBRARY: python.library } });
+    const numpy = python.numpy ? "[0, 0.25, 0.5, 0.75, 1]\n2.6\n[[10, 14], [14, 20]] float64\n[\"a\", \"b\"]\n" : "";
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`yes
+1209600
+<python <module 'math' (built-in)>>
+1.4142135623731 5
+[1, "two", nothing, yes, no, 2.5, [3, 4], (dictionary where "a" is [1]), 1.1805916207174113e+21]
+[3, 'x', None, True, 1.5, {'k': [1, 2]}]
+20
+3628800
+héllo 😀
+1 [1, 2]
+Python: ZeroDivisionError: division by zero
+Python: NameError: name 'undefined_name' is not defined
+Python: ValueError: invalid literal for int() with base 10: 'x'
+Python: ValueError: bad thing
+Python: ModuleNotFoundError: No module named 'no_such_module_here'
+'call' needs a Python object (as import_module gives), not a number
+${numpy}`, "", 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// tools/ai.moth (DESIGN §121), against a server of the test's own that answers as Anthropic's Messages API and
+// OpenAI's chat completions and embeddings do: plain and streamed answers (server-sent events, in chunks),
+// tools, JSON, embeddings, and the APIs' mistakes. The keys are made up, and only ever in the environment.
+async function aiMock() {
+  const seen = [];
+  const vocabulary = ["moth", "night", "bee", "day", "fly"];
+  const embedding = (text) => vocabulary.map((w) => text.toLowerCase().split(w).length - 1);
+  const lastUser = (messages) => [...messages].reverse().find((m) => m.role === "user" || m.role === "tool");
+  const pieces = (text) => text.match(/.{1,5}/gsu);
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const sent = body ? JSON.parse(body) : {};
+      seen.push({ url: req.url, headers: req.headers, body: sent });
+      const json = (status, value) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(value));
+      };
+      const events = (list, openai) => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        for (const [name, data] of list) res.write(openai ? `data: ${JSON.stringify(data)}\n\n` : `event: ${name}\ndata: ${JSON.stringify(data)}\r\n\r\n`);
+        if (openai) res.write("data: [DONE]\n\n");
+        res.end();
+      };
+      if (req.url === "/v1/messages") {
+        if (req.headers["x-api-key"] !== "test-key-not-real" || req.headers["anthropic-version"] !== "2026-10-21")
+          return json(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
+        const last = lastUser(sent.messages);
+        const result = Array.isArray(last.content) && last.content.find((b) => b.type === "tool_result");
+        let content;
+        let stop = "end_turn";
+        if (sent.tools && !result) {
+          content = [{ type: "text", text: "Let me check." }, { type: "tool_use", id: "toolu_1", name: sent.tools[0].name, input: { city: "Paris" } }];
+          stop = "tool_use";
+        } else if (result) content = [{ type: "text", text: `The tool said: ${result.content}${result.is_error ? " (an error)" : ""}` }];
+        else if (sent.output_config?.format) content = [{ type: "text", text: '{"name": "Luna moth", "wingspan": 114}' }];
+        else content = [{ type: "text", text: `You said: ${typeof last.content === "string" ? last.content : last.content[0].text}${sent.system ? ` [${sent.system}]` : ""}` }];
+        if (!sent.stream) return json(200, { id: "msg_1", type: "message", role: "assistant", model: sent.model, content, stop_reason: stop, usage: { input_tokens: 11, output_tokens: 7 } });
+        const list = [["message_start", { type: "message_start", message: { id: "msg_1", model: sent.model, content: [], usage: { input_tokens: 11, output_tokens: 1 } } }]];
+        content.forEach((block, index) => {
+          if (block.type === "text") {
+            list.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } }]);
+            for (const piece of pieces(block.text)) list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "text_delta", text: piece } }]);
+          } else {
+            list.push(["content_block_start", { type: "content_block_start", index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } }]);
+            const written = JSON.stringify(block.input);
+            list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: written.slice(0, 4) } }]);
+            list.push(["content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: written.slice(4) } }]);
+          }
+          list.push(["content_block_stop", { type: "content_block_stop", index }]);
+        });
+        list.push(["ping", { type: "ping" }], ["message_delta", { type: "message_delta", delta: { stop_reason: stop }, usage: { output_tokens: 7 } }], ["message_stop", { type: "message_stop" }]);
+        return events(list, false);
+      }
+      if (req.url === "/v1/chat/completions" || req.url === "/v1/embeddings") {
+        const keyless = sent.model === "local-model" && !("authorization" in req.headers); // a local server, which wants none
+        if (!keyless && req.headers.authorization !== "Bearer test-openai-key") return json(401, { error: { message: "Incorrect API key provided", type: "invalid_request_error" } });
+        if (req.url === "/v1/embeddings") return json(200, { data: sent.input.map((t, index) => ({ index, embedding: embedding(t) })).reverse(), model: sent.model });
+        const last = lastUser(sent.messages);
+        const system = sent.messages[0].role === "system" ? ` [${sent.messages[0].content}]` : "";
+        let message;
+        let finish = "stop";
+        if (sent.tools && last.role !== "tool") {
+          message = { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: sent.tools[0].function.name, arguments: '{"city": "Paris"}' } }] };
+          finish = "tool_calls";
+        } else if (last.role === "tool") message = { role: "assistant", content: `The tool said: ${last.content}` };
+        else if (sent.response_format) message = { role: "assistant", content: '{"name": "Luna moth", "wingspan": 114}' };
+        else message = { role: "assistant", content: `You said: ${last.content}${system}` };
+        if (!sent.stream) return json(200, { model: sent.model, choices: [{ index: 0, message, finish_reason: finish }], usage: { prompt_tokens: 5, completion_tokens: 3 } });
+        const list = [];
+        if (message.content) for (const piece of pieces(message.content)) list.push(["", { choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] }]);
+        if (message.tool_calls) {
+          const call = message.tool_calls[0];
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: call.id, type: "function", function: { name: call.function.name, arguments: "" } }] } }] }]);
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: call.function.arguments.slice(0, 6) } }] } }] }]);
+          list.push(["", { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: call.function.arguments.slice(6) } }] } }] }]);
+        }
+        list.push(["", { choices: [{ index: 0, delta: {}, finish_reason: finish }] }], ["", { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }]);
+        return events(list, true);
+      }
+      json(404, { error: { message: "no such page" } });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, seen, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+const AI_PROGRAM = `use "ai.moth" as ai
+use "system.moth" as system
+set base to system's environment("MOCK_BASE")
+set claude to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base)
+say claude
+say ai's answer(claude, "Name a moth.")
+set reply to ai's chat(claude, (list of (record with role "user", content "Hi")), dictionary where "system" is "Be brief.")
+say reply's text " | " reply's stop_reason " | " reply's usage's input_tokens " " reply's usage's output_tokens " | " reply's model
+set pieces to empty list
+to keep_piece with piece
+    add piece to pieces
+end
+set streamed to ai's stream(claude, "Write a haiku.", keep_piece)
+say length of pieces " pieces: " join pieces with "|"
+say streamed's text " | " streamed's stop_reason " | " streamed's usage's output_tokens
+to weather_in with input
+    return "sunny in " + item "city" of input
+end
+set weather to ai's tool("get_weather", "The weather in a city", (dictionary where "type" is "object", "properties" is (dictionary where "city" is dictionary where "type" is "string")), weather_in)
+say ai's chat_with_tools(claude, "Is it sunny in Paris?", list of weather)'s text
+to broken with input
+    fail with "no weather today"
+end
+say ai's chat_with_tools(claude, "Is it sunny in Paris?", list of ai's tool("get_weather", "The weather", empty dictionary, broken))'s text
+set first_turn to ai's stream(claude, "Is it sunny?", keep_piece, dictionary where "tools" is list of weather)
+say first_turn's stop_reason " " first_turn's tool_calls
+say ai's answer_json(claude, "A moth", dictionary where "type" is "object")
+set gpt to ai's openai("gpt-test", dictionary where "base_url" is base + "/v1")
+say gpt " " ai's answer(gpt, "Hello there", "Be kind.")
+set pieces to empty list
+set streamed to ai's stream(gpt, "Stream this", keep_piece)
+say join pieces with "|"
+say streamed's text " | " streamed's stop_reason " | " streamed's usage's input_tokens
+say ai's chat_with_tools(gpt, "Is it sunny in Paris?", list of weather)'s text
+set gpt_turn to ai's stream(gpt, "Is it sunny?", keep_piece, dictionary where "tools" is list of weather)
+say gpt_turn's stop_reason " " gpt_turn's tool_calls
+say ai's answer_json(gpt, "A moth", dictionary where "type" is "object")
+set texts to list of "moths fly at night", "bees fly by day", "a moth at night, a moth"
+set embedded to ai's embed(gpt, texts)
+say embedded
+set index to ai's vectors()
+ai's add_vector(index, texts, embedded)
+for each found in ai's search(index, ai's embed(gpt, "night moth"), 2)
+    say found's key " " found's score with 3 decimals
+end
+say ai's answer(ai's openai_compatible(base + "/v1", "local-model"), "Hi, with no key")
+say ai's answer(ai's openai_compatible(base + "/v1", "gpt-test", yes), "Hi, with a key")
+try
+    ai's embed(claude, "x")
+if it fails with why
+    say why
+end
+`;
+
+// the keys: a wrong one, as the API says, or none, as ai.moth says, for each client
+const AI_KEYS_PROGRAM = `use "ai.moth" as ai
+use "system.moth" as system
+set base to system's environment("MOCK_BASE")
+to ignore with piece
+end
+set claude to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is base)
+for each attempt in list of 1, 2
+    try
+        if attempt is 1
+            ai's answer(claude, "x")
+        else
+            ai's stream(claude, "x", ignore)
+        end
+    if it fails with why
+        say why
+    end
+end
+for each gpt in list of (ai's openai("gpt-test", dictionary where "base_url" is base + "/v1")), (ai's openai_compatible(base + "/v1", "gpt-test", yes))
+    try
+        ai's answer(gpt, "x")
+    if it fails with why
+        say why
+    end
+end
+say ai's answer(ai's openai_compatible(base + "/v1", "local-model"), "no key needed")
+`;
+
+function runAi(exe, cwd, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, [], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let [stdout, stderr] = ["", ""];
+    child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.on("error", reject);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, status });
+    });
+  });
+}
+
+test("tools/ai.moth talks to Anthropic's and OpenAI's APIs: answers, streams, tools, JSON and embeddings", { skip }, async () => {
+  const { server, seen, base } = await aiMock();
+  const dir = mkdtempSync(join(tmpdir(), "moth-ai-"));
+  try {
+    const files = {};
+    for (const name of ["ai.moth", "http.moth", "sockets.moth", "system.moth", "zip.moth", "arrays.moth"]) files[name] = readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+    files["math.moth"] = readFileSync(new URL("./math.moth", import.meta.url), "utf8");
+    const exe = executable(dir, "p");
+    writeFileSync(exe, machine(AI_PROGRAM, { target, name: "p.moth", files, allow: ["--allow-libraries", "--allow-net"] }));
+    if (target === "linux") chmodSync(exe, 0o755);
+    const ran = await runAi(exe, dir, { ...process.env, MOCK_BASE: base, ANTHROPIC_API_KEY: "test-key-not-real", OPENAI_API_KEY: "test-openai-key" });
+    assert.deepEqual([ran.stdout, ran.stderr, ran.status], [`an Anthropic client (claude-opus-5-5)
+You said: Name a moth.
+You said: Hi [Be brief.] | end_turn | 11 7 | claude-opus-5-5
+5 pieces: You s|aid: |Write| a ha|iku.
+You said: Write a haiku. | end_turn | 7
+The tool said: sunny in Paris
+The tool said: no weather today (an error)
+tool_use [(record with id "toolu_1", name "get_weather", input (dictionary where "city" is "Paris"))]
+(dictionary where "name" is "Luna moth", "wingspan" is 114)
+an OpenAI client (gpt-test) You said: Hello there [Be kind.]
+You s|aid: |Strea|m thi|s
+You said: Stream this | stop | 5
+The tool said: sunny in Paris
+tool_calls [(record with id "call_1", name "get_weather", input (dictionary where "city" is "Paris"))]
+(dictionary where "name" is "Luna moth", "wingspan" is 114)
+[[1, 1, 0, 0, 1], [0, 0, 1, 1, 1], [2, 1, 0, 0, 0]]
+a moth at night, a moth 0.949
+moths fly at night 0.816
+You said: Hi, with no key
+You said: Hi, with a key
+Anthropic's API has no embeddings: use openai_compatible() with a server that has them, as Voyage AI, OpenAI or Ollama
+`, "", 0]);
+    // what was sent: the first request as the Messages API wants it (no fallbacks to a server that isn't
+    // Anthropic's), a stream's tools streamed eagerly, and a tool's result sent back after the model's turn
+    const first = seen[0];
+    assert.deepEqual([first.url, first.headers["content-type"], first.body], ["/v1/messages", "application/json",
+      { model: "claude-opus-5-5", max_tokens: 16000, messages: [{ role: "user", content: "Name a moth." }] }]);
+    const streamedTools = seen.find((s) => s.body.stream && s.body.tools && s.url === "/v1/messages");
+    assert.deepEqual([streamedTools.body.max_tokens, streamedTools.body.tools[0].eager_input_streaming, streamedTools.headers.accept], [64000, true, "text/event-stream"]);
+    const toolRound = seen.find((s) => s.url === "/v1/messages" && s.body.messages.length === 3);
+    assert.deepEqual(toolRound.body.messages.map((m) => m.role), ["user", "assistant", "user"]);
+    assert.deepEqual(toolRound.body.messages[2].content, [{ type: "tool_result", tool_use_id: "toolu_1", content: "sunny in Paris" }]);
+    const openaiRound = seen.find((s) => s.url === "/v1/chat/completions" && s.body.messages.some((m) => m.role === "tool"));
+    assert.deepEqual(openaiRound.body.messages.at(-1), { role: "tool", tool_call_id: "call_1", content: "sunny in Paris" });
+    assert.ok(seen.every((s) => !/test-key-not-real|test-openai-key/.test(JSON.stringify(s.body))), "no key in a request's body");
+    // each key goes only to its own API, and none to a server that wants none
+    assert.ok(seen.every((s) => (s.url === "/v1/messages" ? !("authorization" in s.headers) : !("x-api-key" in s.headers))), "a key went to the other API");
+    assert.equal(seen.find((s) => s.body.model === "local-model").headers.authorization, undefined);
+    assert.equal(seen.filter((s) => s.body.model === "gpt-test").at(-1).headers.authorization, "Bearer test-openai-key");
+    // a wrong key, and none
+    const keys = executable(dir, "keys");
+    writeFileSync(keys, machine(AI_KEYS_PROGRAM, { target, name: "keys.moth", files, allow: ["--allow-libraries", "--allow-net"] }));
+    if (target === "linux") chmodSync(keys, 0o755);
+    const without = { ...process.env, MOCK_BASE: base };
+    delete without.ANTHROPIC_API_KEY;
+    delete without.OPENAI_API_KEY;
+    const wrong = await runAi(keys, dir, { ...without, ANTHROPIC_API_KEY: "not-the-key" });
+    assert.deepEqual([wrong.stdout, wrong.stderr, wrong.status], [`Anthropic said 401: authentication_error: invalid x-api-key
+Anthropic said 401: authentication_error: invalid x-api-key
+set OPENAI_API_KEY to your API key for OpenAI
+set OPENAI_API_KEY to your API key for OpenAI
+You said: no key needed
+`, "", 0]);
+    const none = await runAi(keys, dir, { ...without, ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "not-the-key" });
+    assert.deepEqual([none.stdout, none.stderr, none.status], [`set ANTHROPIC_API_KEY to your API key for Anthropic
+set ANTHROPIC_API_KEY to your API key for Anthropic
+OpenAI said 401: invalid_request_error: Incorrect API key provided
+OpenAI said 401: invalid_request_error: Incorrect API key provided
+You said: no key needed
+`, "", 0]);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // The company libraries (DESIGN §110-§117): yaml.moth, jwt.moth, s3.moth, oauth.moth, redis.moth, postgres.moth,
@@ -4188,7 +4816,7 @@ say read site + "/stop"`, ["--allow-net"]);
   }
 });
 
-// tools/server.moth's connections (DESIGN §118), on raw sockets, so what's checked is what goes over the wire:
+// tools/server.moth's connections (DESIGN §123), on raw sockets, so what's checked is what goes over the wire:
 // each says something, in pieces with pauses if it likes, and gets back everything until the server closes it,
 // or until it has waited `patience` ms for more; reading nothing for `readLate` ms, and then, with `stalls`,
 // stopping for each in turn after each 2 MB it reads
@@ -4354,7 +4982,7 @@ say "stopped"`, { target, name: "site.moth", allow: ["--allow-libraries"], files
   }
 });
 
-// tools/server.moth on workers (DESIGN §119): a handler that works for a second and a half holds up only its own
+// tools/server.moth on workers (DESIGN §124): a handler that works for a second and a half holds up only its own
 // worker, while the others answer
 test("tools/server.moth answers on workers, so a slow handler holds up only its own", { skip }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "moth-server-"));
@@ -6259,7 +6887,7 @@ say 5 has ended`, { files: { "sync.moth": readFileSync(new URL("./tools/sync.mot
     stderr: "p.moth:60:7: 'has ended' needs a task, as 'start' gives, not a number\nsay 5 has ended\n      ^\n", status: 1 });
 });
 
-// Workers (DESIGN §119): calls on threads of their own, each with a copy of the program's memory, so they run
+// Workers (DESIGN §124): calls on threads of their own, each with a copy of the program's memory, so they run
 // Moth at the same moment. What a program with workers says must be what the JavaScript engine says, which runs
 // each worker when it's started, on copies all the same.
 const WORKER_PROGRAMS = [

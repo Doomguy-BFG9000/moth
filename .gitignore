@@ -20,3 +20,5 @@ editors/tree-sitter-moth/*.dylib
 apps/guestbook/*.db
 apps/guestbook/guestbook
 apps/guestbook/guestbook.exe
+# what Python makes when it runs the Jupyter kernel or its tests
+editors/jupyter/**/__pycache__/

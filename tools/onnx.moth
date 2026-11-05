@@ -1,0 +1,344 @@
+# ONNX models, run by ONNX Runtime through its C API: a model trained in PyTorch or anything else that saves
+# ONNX, given arrays (arrays.moth) and giving arrays back. ONNX Runtime comes with Windows 11
+# (System32\onnxruntime.dll); elsewhere, put onnxruntime.dll (or Linux's libonnxruntime.so) from its release
+# page, github.com/microsoft/onnxruntime/releases, beside the program.
+#
+#   use "onnx.moth" as onnx
+#   use "arrays.moth" as arrays
+#   set model to onnx's load("model.onnx")
+#   say onnx's inputs(model)            # each a record: name, type ("float", "double" or "int64") and shape,
+#                                       # -1 for an axis of any length
+#   set x to arrays's array(list of (list of 1, 2, 3))
+#   set answers to onnx's run(model, dictionary where "X" is x)   # each output by its name, an array
+#   say item "Y" of answers
+#   onnx's close(model)
+#
+# A program that uses it is built with --allow-libraries. Inputs are converted to the type the model takes:
+# floats, doubles, or whole numbers of 64 bits. ONNX Runtime's mistakes are a `fail with` that says what it said.
+
+use "arrays.moth" as onnx_arrays
+
+use the library "onnxruntime"
+    OrtGetApiBase() gives a pointer
+    "at an address" as onnx_get_api(a pointer, a whole number) gives a pointer
+    "at an address" as onnx_version_text(a pointer) gives text
+    "at an address" as onnx_error_message(a pointer, a pointer) gives text
+    "at an address" as onnx_release(a pointer, a pointer)
+    "at an address" as onnx_create_env(a pointer, a whole number, text, bytes) gives a pointer
+    "at an address" as onnx_create_options(a pointer, bytes) gives a pointer
+    "at an address" as onnx_create_session_wide(a pointer, a pointer, wide text, a pointer, bytes) gives a pointer
+    "at an address" as onnx_create_session_text(a pointer, a pointer, text, a pointer, bytes) gives a pointer
+    "at an address" as onnx_count(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as onnx_name(a pointer, a pointer, a long whole number, a pointer, bytes) gives a pointer
+    "at an address" as onnx_get_allocator(a pointer, bytes) gives a pointer
+    "at an address" as onnx_free(a pointer, a pointer, a pointer) gives a pointer
+    "at an address" as onnx_type_info(a pointer, a pointer, a long whole number, bytes) gives a pointer
+    "at an address" as onnx_tensor_info(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as onnx_element_type(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as onnx_dimension_count(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as onnx_dimensions(a pointer, a pointer, bytes, a long whole number) gives a pointer
+    "at an address" as onnx_cpu_memory(a pointer, a whole number, a whole number, bytes) gives a pointer
+    "at an address" as onnx_tensor_of_numbers(a pointer, a pointer, a list of numbers, a long whole number, bytes, a long whole number, a whole number, bytes) gives a pointer
+    "at an address" as onnx_tensor_of_bytes(a pointer, a pointer, bytes, a long whole number, bytes, a long whole number, a whole number, bytes) gives a pointer
+    "at an address" as onnx_run(a pointer, a pointer, a pointer, bytes, bytes, a long whole number, bytes, a long whole number, bytes) gives a pointer
+    "at an address" as onnx_tensor_data(a pointer, a pointer, bytes) gives a pointer
+    "at an address" as onnx_tensor_shape(a pointer, a pointer, bytes) gives a pointer
+end
+
+use the library "msvcrt" or "c"
+    "memcpy" as onnx_copy_bytes(bytes, a pointer, a long whole number) gives a pointer
+    "memcpy" as onnx_copy_numbers(a list of numbers, a pointer, a long whole number) gives a pointer
+    "strlen" as onnx_strlen(a pointer) gives a long whole number
+end
+
+use the library "moth"
+    "numbers_convert" as onnx_convert(a long whole number, a list of numbers, bytes) gives a long whole number
+end
+
+use the library "kernel32"
+    "GetTickCount" as onnx_tick() gives a whole number
+end
+
+# which system it is: Windows takes a model's file name as UTF-16
+set onnx_windows to yes
+try
+    onnx_tick()
+if it fails
+    set onnx_windows to no
+end
+
+# where each of the C API's functions is (OrtApi in onnxruntime_c_api.h), by its place there, from 0
+set onnx_table to nothing
+set onnx_env to nothing
+set onnx_allocator to nothing
+set onnx_memory to nothing
+# its element types, by ONNX's numbers for them
+set onnx_types to dictionary where 1 is "float", 11 is "double", 7 is "int64"
+
+to onnx_api with place
+    onnx_start()
+    return item (place + 1) of onnx_table
+end
+
+# the C API, its environment and its allocator, the first time they're wanted
+to onnx_start
+    if onnx_table is not nothing
+        return nothing
+    end
+    set base to onnx_pointers(OrtGetApiBase(), 2)
+    set api to onnx_get_api(item 1 of base, 1)
+    if api is nothing
+        fail with "ONNX Runtime doesn't give its C API"
+    end
+    set onnx_table to onnx_pointers(api, 110)
+    set slot to 8 bytes
+    onnx_check(onnx_create_env(onnx_api(3), 3, "moth", slot))
+    set onnx_env to onnx_pointer_in(slot)
+    onnx_check(onnx_get_allocator(onnx_api(78), slot))
+    set onnx_allocator to onnx_pointer_in(slot)
+    onnx_check(onnx_cpu_memory(onnx_api(69), 1, 0, slot))
+    set onnx_memory to onnx_pointer_in(slot)
+end
+
+# ONNX Runtime's version, as "1.17.1"
+to version
+    onnx_start()
+    return onnx_version_text(item 2 of onnx_pointers(OrtGetApiBase(), 2))
+end
+
+# n pointers in a row, from where C has them, as a list of numbers
+to onnx_pointers with at, n
+    set raw to (8 * n) bytes
+    onnx_copy_bytes(raw, at, 8 * n)
+    set made to onnx_arrays's arrays_zeros_list(n)
+    onnx_convert(4, made, raw)
+    return made
+end
+
+to onnx_pointer_in with slot
+    set made to list of 0
+    onnx_convert(4, made, slot)
+    return item 1 of made
+end
+
+# bytes of 64-bit whole numbers: a shape, or pointers, for C
+to onnx_wholes with numbers
+    set raw to (8 * length of numbers) bytes
+    if onnx_convert(3, numbers, raw) is not 0
+        fail with "ONNX needs whole numbers here, not " + numbers
+    end
+    return raw
+end
+
+# a status ONNX Runtime gave: nothing if all went well, or what it said went wrong
+to onnx_check with status
+    if status is not nothing
+        set said to onnx_error_message(onnx_api(2), status)
+        onnx_release(onnx_api(93), status)
+        fail with "ONNX Runtime: " + said
+    end
+end
+
+kind onnx_model with session, options, file, inputs, outputs, input_names, output_names
+    to shown with self
+        return "an ONNX model (" + self's file + ")"
+    end
+end
+
+# a model from a file, ready to run
+to load with path
+    onnx_start()
+    set slot to 8 bytes
+    onnx_check(onnx_create_options(onnx_api(10), slot))
+    set options to onnx_pointer_in(slot)
+    if onnx_windows
+        onnx_check(onnx_create_session_wide(onnx_api(7), onnx_env, path, options, slot))
+    else
+        onnx_check(onnx_create_session_text(onnx_api(7), onnx_env, path, options, slot))
+    end
+    set session to onnx_pointer_in(slot)
+    set described_ins to empty list
+    set described_outs to empty list
+    set names_in to empty list
+    set names_out to empty list
+    for each way in list of 1, 2 # its inputs, then its outputs
+        onnx_check(onnx_count(onnx_api(29 + way), session, slot))
+        set n to onnx_pointer_in(slot)
+        for each k from 0 to n - 1
+            onnx_check(onnx_name(onnx_api(35 + way), session, k, onnx_allocator, slot))
+            set name_at to onnx_pointer_in(slot)
+            set described to onnx_described(session, way, k)
+            set name of described to onnx_c_text(name_at)
+            if way is 1
+                add described to described_ins
+                add name_at to names_in
+            else
+                add described to described_outs
+                add name_at to names_out
+            end
+        end
+    end
+    return onnx_model(session, options, path, described_ins, described_outs, names_in, names_out)
+end
+
+# a C text's bytes, up to its 0, as text
+to onnx_c_text with at
+    set n to onnx_strlen(at)
+    set raw to n bytes
+    onnx_copy_bytes(raw, at, n)
+    return raw as text
+end
+
+# an input's or output's type and shape
+to onnx_described with session, way, k
+    set slot to 8 bytes
+    onnx_check(onnx_type_info(onnx_api(32 + way), session, k, slot))
+    set type_info to onnx_pointer_in(slot)
+    onnx_check(onnx_tensor_info(onnx_api(55), type_info, slot))
+    set info to onnx_pointer_in(slot)
+    if info is nothing
+        onnx_release(onnx_api(98), type_info)
+        return record with name "", type "not a tensor", shape empty list
+    end
+    set described to onnx_info(info)
+    onnx_release(onnx_api(98), type_info)
+    return described
+end
+
+# a tensor's type and shape, from its OrtTensorTypeAndShapeInfo
+to onnx_info with info
+    set slot to 8 bytes
+    onnx_check(onnx_element_type(onnx_api(60), info, slot))
+    set code to onnx_pointer_in(slot) bit and 4294967295
+    onnx_check(onnx_dimension_count(onnx_api(61), info, slot))
+    set n to onnx_pointer_in(slot)
+    set shape to empty list
+    if n is greater than 0
+        set raw to (8 * n) bytes
+        onnx_check(onnx_dimensions(onnx_api(62), info, raw, n))
+        set shape to onnx_arrays's arrays_zeros_list(n)
+        onnx_convert(4, shape, raw)
+    end
+    set type to "type " + code
+    if code is in onnx_types
+        set type to item code of onnx_types
+    end
+    return record with name "", type type, shape shape, code code
+end
+
+to inputs with model
+    return model's inputs
+end
+
+to outputs with model
+    return model's outputs
+end
+
+# The model run on its inputs, a dictionary of each input's name to an array (or a number, or a list of them):
+# a dictionary of each output's name to an array
+to run with model, given
+    onnx_start()
+    set values to empty list
+    set names to empty list
+    set kept to empty list # what the tensors' memory is, kept while they're used
+    try
+        for each input in model's inputs
+            if not (input's name is in given)
+                fail with "the model needs an input called '" + input's name + "'"
+            end
+            set given_one to onnx_arrays's array(item (input's name) of given)
+            add onnx_tensor(given_one, input's code, kept) to values
+            add item (length of values) of model's input_names to names
+        end
+        set outs to onnx_wholes(onnx_arrays's arrays_zeros_list(length of model's outputs))
+        onnx_check(onnx_run(onnx_api(9), model's session, nothing, onnx_wholes(names), onnx_wholes(values), length of values, onnx_wholes(model's output_names), length of model's outputs, outs))
+        set out_values to onnx_arrays's arrays_zeros_list(length of model's outputs)
+        onnx_convert(4, out_values, outs)
+        set answers to empty dictionary
+        set k to 0
+        for each value in out_values
+            add 1 to k
+            set item (name of item k of model's outputs) of answers to onnx_array(value)
+            onnx_release(onnx_api(96), value)
+        end
+        return answers
+    either way
+        for each value in values
+            onnx_release(onnx_api(96), value)
+        end
+    end
+end
+
+# a tensor ONNX Runtime can take, of the array's numbers as type `code`, with the memory it keeps added to kept
+to onnx_tensor with t, code, kept
+    set slot to 8 bytes
+    set shape to onnx_wholes(t's shape)
+    set data to onnx_arrays's numbers_of(t)
+    add data to kept
+    add shape to kept
+    set n to length of data
+    if code is 11
+        onnx_check(onnx_tensor_of_numbers(onnx_api(49), onnx_memory, data, 8 * n, shape, length of t's shape, 11, slot))
+    else if code is 1 or code is 7
+        set size to 4
+        set way to 1
+        if code is 7
+            set size to 8
+            set way to 3
+        end
+        set raw to (size * n) bytes
+        if onnx_convert(way, data, raw) is not 0
+            fail with "the model needs whole numbers for an input, not " + data
+        end
+        add raw to kept
+        onnx_check(onnx_tensor_of_bytes(onnx_api(49), onnx_memory, raw, size * n, shape, length of t's shape, code, slot))
+    else
+        fail with "onnx.moth can't give a model tensors of ONNX's type " + code + " yet: only float, double and int64"
+    end
+    return onnx_pointer_in(slot)
+end
+
+# an output tensor's numbers, as an array
+to onnx_array with value
+    set slot to 8 bytes
+    onnx_check(onnx_tensor_shape(onnx_api(65), value, slot))
+    set info to onnx_pointer_in(slot)
+    set described to onnx_info(info)
+    onnx_release(onnx_api(99), info)
+    onnx_check(onnx_tensor_data(onnx_api(51), value, slot))
+    set at to onnx_pointer_in(slot)
+    set n to onnx_arrays's arrays_product(described's shape)
+    set data to onnx_arrays's arrays_zeros_list(n)
+    if n is greater than 0
+        if described's code is 11
+            onnx_copy_numbers(data, at, 8 * n)
+        else if described's code is 1 or described's code is 7
+            set size to 4
+            set way to 2
+            if described's code is 7
+                set size to 8
+                set way to 4
+            end
+            set raw to (size * n) bytes
+            onnx_copy_bytes(raw, at, size * n)
+            onnx_convert(way, data, raw)
+        else
+            fail with "onnx.moth can't take tensors of ONNX's type " + described's code + " from a model yet: only float, double and int64"
+        end
+    end
+    return onnx_arrays's shaped(data, described's shape)
+end
+
+# what the model holds, given back
+to close with model
+    for each name_at in model's input_names
+        onnx_free(onnx_api(76), onnx_allocator, name_at)
+    end
+    for each name_at in model's output_names
+        onnx_free(onnx_api(76), onnx_allocator, name_at)
+    end
+    onnx_release(onnx_api(95), model's session)
+    onnx_release(onnx_api(100), model's options)
+    set model's input_names to empty list
+    set model's output_names to empty list
+end

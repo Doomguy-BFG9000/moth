@@ -915,7 +915,7 @@ function waitedFor(task, error) {
   return jobs().tasks.get(task.task);
 }
 
-// Workers (DESIGN §119): `start count(10) on another core` gives one, a record of its number. In a program moth
+// Workers (DESIGN §124): `start count(10) on another core` gives one, a record of its number. In a program moth
 // build makes, a worker is a thread with memory of its own: a copy of the program's variables as they were
 // when it started, and of its function's inputs, which it changes as it likes and no one else sees, and a copy
 // of what it gives back, or of the mistake it ended with, for `wait for`. Here it runs to its end when it's

@@ -1,0 +1,161 @@
+# ai.moth's tests that need no network, which moth.test.js runs on every engine: what a request says, server-
+# sent events read from bytes however they come, and searching vectors. machine.test.js runs the rest against
+# a server of its own that answers as Anthropic's and OpenAI's APIs do.
+
+use "ai.moth" as ai
+
+to test_requests
+    set claude to ai's anthropic("claude-opus-5-5")
+    expect "{claude}" is "an Anthropic client (claude-opus-5-5)"
+    set body to ai's ai_body(claude, "Hi", (dictionary where "system" is "Be brief.", "effort" is "low"), no)
+    expect body is dictionary where "model" is "claude-opus-5-5", "max_tokens" is 16000, "system" is "Be brief.",
+        "messages" is (list of (dictionary where "role" is "user", "content" is "Hi")), "output_config" is
+        (dictionary where "effort" is "low"), "fallbacks" is "default"
+    set quiet to ai's anthropic("claude-opus-5-5", dictionary where "fallbacks" is no)
+    expect "fallbacks" is not in ai's ai_body(quiet, "Hi", nothing, no)
+    set elsewhere to ai's anthropic("claude-opus-5-5", dictionary where "base_url" is "http://127.0.0.1:9")
+    expect "fallbacks" is not in ai's ai_body(elsewhere, "Hi", nothing, no)
+    expect "fallbacks" is not in ai's ai_body(ai's anthropic("claude-haiku-5-5"), "Hi", nothing, no)
+    set weather to ai's tool("get_weather", "The weather", (dictionary where "type" is "object"), function with input gives "sunny")
+    set streamed to ai's ai_body(claude, "Hi", (dictionary where "tools" is (list of weather), "schema" is dictionary where "type" is "object"), yes)
+    expect item "max_tokens" of streamed is 64000
+    expect item "stream" of streamed
+    expect item "tools" of streamed is list of (dictionary where "name" is "get_weather", "description" is "The weather",
+        "input_schema" is (dictionary where "type" is "object"), "eager_input_streaming" is yes)
+    expect item "output_config" of streamed is dictionary where "format" is (dictionary where "type" is "json_schema",
+        "schema" is dictionary where "type" is "object")
+    set gpt to ai's openai("gpt-test")
+    expect "{gpt}" is "an OpenAI client (gpt-test)"
+    set body to ai's ai_body(gpt, "Hi", (dictionary where "system" is "Be kind.", "tools" is (list of weather)), yes)
+    expect item "messages" of body is list of (dictionary where "role" is "system", "content" is "Be kind."),
+        (dictionary where "role" is "user", "content" is "Hi")
+    expect item "tools" of body is list of (dictionary where "type" is "function", "function" is (dictionary where
+        "name" is "get_weather", "description" is "The weather", "parameters" is dictionary where "type" is "object"))
+    expect item "stream_options" of body is dictionary where "include_usage" is yes
+    expect ai's ai_url(gpt) is "https://api.openai.com/v1/chat/completions"
+    expect ai's ai_url(claude) is "https://api.anthropic.com/v1/messages"
+end
+
+# server-sent events, sent in chunks, given to the reader a few bytes at a time: a character of several bytes,
+# a line end and a chunk's size each cut in two
+to test_events_however_they_come
+    set events to "event: message_start\ndata: \{\"type\":\"message_start\",\"message\":\{\"model\":\"m\",\"usage\":\{\"input_tokens\":3}}}\n\n"
+    add "event: content_block_start\ndata: \{\"type\":\"content_block_start\",\"index\":0,\"content_block\":\{\"type\":\"text\",\"text\":\"\"}}\n\n" to events
+    add ": a comment\nevent: content_block_delta\ndata: \{\"type\":\"content_block_delta\",\"index\":0,\"delta\":\{\"type\":\"text_delta\",\"text\":\"Héllo 😀 \"}}\n\n" to events
+    add "event: content_block_delta\ndata: \{\"type\":\"content_block_delta\",\"index\":0,\"delta\":\{\"type\":\"text_delta\",\"text\":\"moth\"}}\n\n" to events
+    add "event: content_block_stop\ndata: \{\"type\":\"content_block_stop\",\"index\":0}\n\n" to events
+    add "event: message_delta\ndata: \{\"type\":\"message_delta\",\"delta\":\{\"stop_reason\":\"end_turn\"},\"usage\":\{\"output_tokens\":5}}\n\n" to events
+    set body to events as bytes
+    set crlf to (list of 13, 10) as bytes as text
+    set sent to ("HTTP/1.1 200 OK" + crlf + "content-type: text/event-stream" + crlf + "transfer-encoding: chunked" + crlf + crlf) as bytes
+    set wire to empty list
+    for each b in sent
+        add b to wire
+    end
+    set at to 1
+    repeat while at is at most length of body # chunks of 37 bytes
+        set last to at + 36
+        if last is greater than length of body
+            set last to length of body
+        end
+        for each b in ("" + ((last - at + 1) as hex) + crlf) as bytes
+            add b to wire
+        end
+        for each b in items at to last of body
+            add b to wire
+        end
+        add 13 to wire
+        add 10 to wire
+        set at to last + 1
+    end
+    for each b in ("0" + crlf + crlf) as bytes
+        add b to wire
+    end
+    for each step in list of 1, 3, 7, 64
+        set pieces to empty list
+        set state to record with client ai's anthropic("m"), on_text (function with piece gives keep(pieces, piece)), blocks empty list,
+            text "", stop_reason nothing, input_tokens 0, output_tokens 0, calls empty list, model "", problem nothing
+        set reading to record with raw empty list, spot 1, head nothing, status 0, chunked no, left -1, events empty list, done no, failed empty list
+        set at to 1
+        repeat while at is at most length of wire
+            set raw to reading's raw
+            for each b in items at to (smaller(at + step - 1, length of wire)) of wire
+                add b to raw
+            end
+            ai's ai_read(reading, state)
+            set at to at + step
+        end
+        expect reading's done
+        expect pieces is list of "Héllo 😀 ", "moth"
+        set reply to ai's ai_streamed_reply(state)
+        expect reply's text is "Héllo 😀 moth"
+        expect reply's stop_reason is "end_turn"
+        expect reply's usage's input_tokens is 3
+        expect reply's usage's output_tokens is 5
+        expect reply's model is "m"
+    end
+end
+
+# A refusal part of the way through, which another model went on from (a server-side fallback): the turn sent
+# back keeps the text from before the "fallback" block and everything after it, but not the tool use the model
+# that declined began, which isn't run
+to test_a_fallback_part_of_the_way
+    set pieces to empty list
+    set state to record with client ai's anthropic("claude-opus-5-5"), on_text (function with piece gives keep(pieces, piece)),
+        blocks empty list, text "", stop_reason nothing, input_tokens 0, output_tokens 0, calls empty list, model "", problem nothing
+    set events to list of "\{\"type\":\"message_start\",\"message\":\{\"model\":\"claude-opus-5\",\"usage\":\{\"input_tokens\":9}}}",
+        "\{\"type\":\"content_block_start\",\"index\":0,\"content_block\":\{\"type\":\"text\",\"text\":\"\"}}",
+        "\{\"type\":\"content_block_delta\",\"index\":0,\"delta\":\{\"type\":\"text_delta\",\"text\":\"Part of it, \"}}",
+        "\{\"type\":\"content_block_stop\",\"index\":0}",
+        "\{\"type\":\"content_block_start\",\"index\":1,\"content_block\":\{\"type\":\"tool_use\",\"id\":\"toolu_9\",\"name\":\"look\",\"input\":\{}}}",
+        "\{\"type\":\"content_block_delta\",\"index\":1,\"delta\":\{\"type\":\"input_json_delta\",\"partial_json\":\"\{\\\"q\\\": 1}\"}}",
+        "\{\"type\":\"content_block_stop\",\"index\":1}",
+        "\{\"type\":\"content_block_start\",\"index\":2,\"content_block\":\{\"type\":\"fallback\",\"from\":\{\"model\":\"claude-opus-5-5\"},\"to\":\{\"model\":\"claude-opus-5\"}}}",
+        "\{\"type\":\"content_block_stop\",\"index\":2}",
+        "\{\"type\":\"content_block_start\",\"index\":3,\"content_block\":\{\"type\":\"text\",\"text\":\"\"}}",
+        "\{\"type\":\"content_block_delta\",\"index\":3,\"delta\":\{\"type\":\"text_delta\",\"text\":\"and the rest.\"}}",
+        "\{\"type\":\"content_block_stop\",\"index\":3}",
+        "\{\"type\":\"message_delta\",\"delta\":\{\"stop_reason\":\"end_turn\"},\"usage\":\{\"output_tokens\":12}}"
+    for each data in events
+        ai's ai_take_event(state, "", data)
+    end
+    set reply to ai's ai_streamed_reply(state)
+    expect pieces is list of "Part of it, ", "and the rest."
+    expect reply's text is "Part of it, and the rest."
+    expect reply's tool_calls is empty list
+    expect reply's model is "claude-opus-5"
+    expect (list of item "type" of block for each block in item "content" of reply's message) is list of "text", "fallback", "text"
+    set answered to json from "\{\"model\":\"claude-opus-5\",\"stop_reason\":\"tool_use\",\"content\":[\{\"type\":\"thinking\",\"thinking\":\"\"},\{\"type\":\"fallback\"},\{\"type\":\"text\",\"text\":\"Let me look.\"},\{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"look\",\"input\":\{}}]}"
+    set plain to ai's ai_reply(ai's anthropic("claude-opus-5-5"), answered)
+    expect (list of call's name for each call in plain's tool_calls) is list of "look"
+    expect (list of item "type" of block for each block in item "content" of plain's message) is list of "fallback", "text", "tool_use"
+end
+
+to keep with pieces, piece
+    add piece to pieces
+    return nothing
+end
+
+to smaller with a, b
+    if a is less than b
+        return a
+    end
+    return b
+end
+
+to test_vectors
+    expect ai's cosine((list of 1, 0, 0), (list of 0, 1, 0)) is 0
+    expect ai's cosine((list of 1, 2), (list of 2, 4)) is 1
+    expect ai's cosine((list of 1, 0), (list of -1, 0)) is -1
+    set index to ai's vectors()
+    ai's add_vector(index, "east", list of 1, 0)
+    ai's add_vector(index, "north", list of 0, 3)
+    ai's add_vector(index, "north east", list of 1, 1)
+    expect "{index}" is "vectors (3)"
+    set found to ai's search(index, (list of 2, 1), 2)
+    expect length of found is 2
+    expect (item 1 of found)'s key is "north east"
+    expect ((item 1 of found)'s score) with 3 decimals is "0.949"
+    expect (item 2 of found)'s key is "east"
+    expect length of ai's search(index, list of 0, 1) is 3
+end

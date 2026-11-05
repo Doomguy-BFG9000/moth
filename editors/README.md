@@ -142,6 +142,12 @@ false }`. For instance, Emacs's Eglot:
 (with-eval-after-load 'eglot (add-to-list 'eglot-server-programs '(moth-mode "moth" "lsp")))
 ```
 
+## Jupyter
+
+`jupyter/` is a Jupyter kernel, for notebooks in JupyterLab, Jupyter Notebook, VS Code and the rest: each
+cell has what the cells before it made, and `ask` asks in the notebook. See
+[jupyter/README.md](jupyter/README.md).
+
 ## The tree-sitter grammar
 
 `tree-sitter-moth/grammar.js` reads each line as Moth's tokenizer does; `src/scanner.c` says whether a `{` in
