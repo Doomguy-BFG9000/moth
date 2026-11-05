@@ -88,6 +88,7 @@ to take_if_free with guard
     return yes
 end
 
+# the lock (or a semaphore's place) let go, for a task waiting for it to take; a mistake if it isn't held
 to let_go with guard
     if free of guard is most of guard
         fail with "the lock isn't held, so it can't be let go"
@@ -120,18 +121,22 @@ to flag
     return record with raised no
 end
 
+# the flag raised: every task waiting for it goes on
 to raise_flag with f
     set raised of f to yes
 end
 
+# the flag lowered, so wait_for_flag waits again
 to lower_flag with f
     set raised of f to no
 end
 
+# whether the flag is raised
 to is_raised with f
     return raised of f
 end
 
+# waits until the flag is raised, letting other tasks run meanwhile
 to wait_for_flag with f
     repeat while not raised of f
         wait 1 millisecond
@@ -210,6 +215,7 @@ to waiting with q
     return last of q - first of q + 1
 end
 
+# whether the queue has nothing waiting
 to is_empty with q
     return last of q is less than first of q
 end

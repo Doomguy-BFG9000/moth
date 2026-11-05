@@ -224,10 +224,14 @@ to new_chart with kind_of_it, title, labels, values, height
     return record with kind kind_of_it, title title, labels labels, series series_of(title, labels, values), width 720, height height
 end
 
+# a bar chart: a title, the labels along the bottom, and the values, a list of numbers or a dictionary of
+# lists, a series for each key
 to bar_chart with title, labels, values
     return new_chart("bars", title, labels, values, 440)
 end
 
+# a line chart: a title, the labels along the bottom, and the values, a list of numbers or a dictionary of
+# lists, a line for each key
 to line_chart with title, labels, values
     return new_chart("lines", title, labels, values, 440)
 end
@@ -251,6 +255,7 @@ to parts_chart with title, labels, values
     return made
 end
 
+# the same chart, another size in pixels (720 by 440 to begin with)
 to sized with chart, width, height
     return record with kind kind of chart, title title of chart, labels labels of chart, series series of chart, width width, height height
 end
@@ -666,6 +671,7 @@ to svg_tip with tip
     return "<title>" + svg_escaped(tip) + "</title>"
 end
 
+# the chart as an SVG file's text: sharp at any size, each mark saying its value when the mouse is on it
 to svg_of with chart
     set w to width of chart
     set h to height of chart
@@ -895,6 +901,7 @@ to draw_text with canvas, s
     end
 end
 
+# the chart as a PNG file's bytes
 to png_of with chart
     set canvas to chart_images's new_image(width of chart, height of chart, colour_numbers(chart_surface))
     for each s in shapes_of(chart)

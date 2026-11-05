@@ -46,6 +46,8 @@ set oauth_waiting to nothing # sign_in's: the state it waits for, then the code 
 
 # ---------- providers ----------
 
+# a provider, from its authorization and token URLs and the client ID it gave the program: a record whose
+# client_secret, secret_in, port, open_browser and extra can be set after, as at the top of this file
 to provider with authorize_url, token_url, client_id
     return record with authorize_url authorize_url, token_url token_url, client_id client_id, client_secret nothing,
         secret_in "basic", port 8765, open_browser yes, extra empty dictionary

@@ -5022,6 +5022,7 @@ hold them to agreeing.
   four workers taking far less time than four calls; and a Windows program's
   imports. server.moth with three workers: twenty requests answered while one
   handler works for a second and a half.
+
 ## 125. A WebAssembly back end written in Moth
 
 Moth's web side is about 18,000 lines of JavaScript, and even a program the
@@ -5410,3 +5411,49 @@ engines stay: as the fallback, and as what the tests compare against.
   runs only on a real release, so it's checked step by step against the
   actions' documentation, and its first run is the next release's. The script
   was also run on the v1.11.0 tag, where it stopped as above.
+## 130. The standard library's reference
+
+- **Why.** The standard library had grown to 49 libraries and 800 public functions, and the only way to learn
+  one was to read its source: its opening comment, then the comment above each `to`, where there was one.
+  353 public functions had none, ui.moth's 64 among them. A language people learn needs a reference: each
+  function, what it takes, what it gives, and an example.
+- **Made from the code.** There was no `moth doc`, but the language server already reads a library's own
+  words: `cli_lsp_file_comment` takes a file's opening comment as what it's for, and `cli_lsp_comment_above`
+  the comment lines just above a `to` as what that function does. make-docs.mjs reads the same, so the hover
+  in an editor and the page on the site say the same thing, and there's one place to write it. A comment's
+  lines three spaces in past the `#` are code, as every opening comment already wrote its examples.
+- **Public and helpers.** VERSIONING.md keeps a library's public functions and lets its helpers change, but
+  Moth has no word for which is which. Most libraries name their helpers with a prefix (`stats_`, `web_`,
+  `mail_`); a few (json, xml, zip, images, charts, big, crypto) use plain names. make-docs.mjs's `HELPERS`
+  says, for each library, its prefix and any helpers with plain names; everything else at its top level is
+  public. A new function is public unless it's named as a helper, so it shows up in the reference, and
+  docs.test.js fails until it has a comment: a function can't be added without saying what it does.
+- **Examples that run.** A function's example is the first of: code in its own comment; a line of the
+  opening comment that calls it; a line of its tests that does, `expect a is b` said as `say a`, a call
+  inside another (`close(math's ln(2), ...)`) said on its own, and a call made as a statement followed by
+  the next `expect` about what it changed. Each is cut down to what it needs: the `use` line, and the lines
+  before it at its own depth that set or change a name it uses (`set q to c's queue()`, `c's push(q, 1)`),
+  and those they need, and the test file's own functions it calls. Then it's run on the JavaScript engine
+  with the standard library, and the first that runs, says something, and stays under 3,000,000 steps is
+  shown with what it said. 301 of the 807 do. The rest need a network, a file, a C library or a window, and
+  are shown as they're written; a function that no line calls is shown as its call, with the opening
+  comment's `set`s of the names it takes (`set r to redis's connect(...)` for `redis's get(r, key)`).
+  linux.moth and windows.moth have ui.moth's functions, and borrow its examples.
+- **Writing what was missing.** Every public function now has a comment, written from its code, and each
+  library whose functions had no line calling them got more lines in its opening comment: ui.moth every
+  control and drawing call, in context; math.moth an opening example, which it had none of; hash, system,
+  http, email, python, tasks, log, game and server the calls they left out. Two comments were wrong:
+  zip.moth's deflate said how it works and not what it gives, and xml.moth's element pointed at text_of for
+  the texts inside an element, where text_node, now public, makes them.
+- **The pages.** docs/index.html lists the libraries in eight groups, each a card with the first sentence of
+  its opening comment, and searches every function by its name, its library and what it does (`?q=` in the
+  address keeps a search). A library's page has what it's for, its opening example, and each function: how
+  it's called (`stats's mean(numbers)`, with the name the opening comment uses), what it does, its inputs
+  with their kinds where they're typed and what they are when left out, what it gives where it says, the
+  line it's written on, and its example. Code is coloured as the playground colours it. They share
+  docs/site.css, the colours, type, header and footer of index.html and learn.html, and need no script but
+  the search's and a filter of the function list; the site's navigation has a Docs link.
+- **Tested.** docs.test.js: docs/ is what make-docs.mjs makes of the libraries as they are, with no page for
+  one that's gone; every public function has a comment; and on a library made up for the test, a helper has
+  no entry, inputs with kinds and defaults are read (`with on as yes or no or no`), and an example from the
+  tests keeps the `set` and the `add` it needs, leaves out what it doesn't, and shows what it said.

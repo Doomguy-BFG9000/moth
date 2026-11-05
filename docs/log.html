@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>log.moth · Moth's standard library</title>
+  <meta name="description" content="Logging, as Python's logging module does it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>log</em>.moth</h1>
+      <p>Logging, as Python's logging module does it.</p>
+      <p class="use"><code>use "log.moth" as log</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="log.moth's functions">
+      <h2>11 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#set_level">set_level</a></li><li><a href="#to_file">to_file</a></li><li><a href="#to_error_output">to_error_output</a></li><li><a href="#set_name">set_name</a></li><li><a href="#set_format">set_format</a></li><li><a href="#lines">lines</a></li><li><a href="#debug">debug</a></li><li><a href="#info">info</a></li><li><a href="#warning">warning</a></li><li><a href="#error">error</a></li><li><a href="#critical">critical</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Logging, as Python's logging module does it: a line for each thing that happened, with the time, how much it matters, and what it was, for those that matter at least as much as the level set, to the error output or added to the end of a file.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's info(<span class="s">&quot;started&quot;</span>)                  <span class="c"># 2026-11-04 10:15:00 INFO started, on the error output</span>
+log's warning(<span class="s">&quot;the disk is almost full&quot;</span>)
+log's debug(<span class="s">&quot;cache hit&quot;</span>)                <span class="c"># written only at the debug level</span>
+log's error(<span class="s">&quot;can't reach the database&quot;</span>) <span class="c"># and critical, the most</span>
+log's set_level(<span class="s">&quot;debug&quot;</span>)               <span class="c"># debug, info (the first level), warning, error or critical</span>
+log's to_file(<span class="s">&quot;app.log&quot;</span>)               <span class="c"># each line added to the end of app.log (built with --allow-libraries)</span>
+log's to_error_output()                <span class="c"># back to the error output</span>
+log's set_name(<span class="s">&quot;db&quot;</span>)                   <span class="c"># 2026-11-04 10:15:00 INFO db: connected</span>
+log's set_format(<span class="s">&quot;%level%: %message%&quot;</span>) <span class="c"># %time%, %level%, %name% and %message%, as you want them</span>
+<span class="k">say</span> log's lines()                      <span class="c"># the lines it's written since the program started</span></code></pre></div>
+          <p>Writing to a file goes through system.moth, so a program that logs to one is built with --allow-libraries.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="set_level">
+          <h3><a href="#set_level"><code>log's set_level(name)</code></a></h3>
+          <p>the least a line must matter to be written: &quot;debug&quot;, &quot;info&quot; (the level to begin with), &quot;warning&quot;, &quot;error&quot; or &quot;critical&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_level with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L30">log.moth line 30</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's set_level(<span class="s">&quot;debug&quot;</span>)               <span class="c"># debug, info (the first level), warning, error or critical</span></code></pre></div>
+        </section>
+        <section class="fn" id="to_file">
+          <h3><a href="#to_file"><code>log's to_file(path)</code></a></h3>
+          <p>each line added to the end of a file from now on, which is made if it isn't there</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to to_file with path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L46">log.moth line 46</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's to_file(<span class="s">&quot;app.log&quot;</span>)               <span class="c"># each line added to the end of app.log (built with --allow-libraries)</span></code></pre></div>
+        </section>
+        <section class="fn" id="to_error_output">
+          <h3><a href="#to_error_output"><code>log's to_error_output()</code></a></h3>
+          <p>each line written to the error output from now on, as at the start</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to to_error_output</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L51">log.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's to_error_output()                <span class="c"># back to the error output</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_name">
+          <h3><a href="#set_name"><code>log's set_name(name)</code></a></h3>
+          <p>a name written before each message from now on, as &quot;db: connected&quot;; &quot;&quot; for none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_name with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L56">log.moth line 56</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's set_name(<span class="s">&quot;db&quot;</span>)                   <span class="c"># 2026-11-04 10:15:00 INFO db: connected</span></code></pre></div>
+        </section>
+        <section class="fn" id="set_format">
+          <h3><a href="#set_format"><code>log's set_format(format)</code></a></h3>
+          <p>how each line is written: %time%, %level%, %name% and %message% in it are those, as &quot;%time% %level% %name%%message%&quot; to begin with</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>format</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to set_format with format</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L62">log.moth line 62</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's set_format(<span class="s">&quot;%level%: %message%&quot;</span>) <span class="c"># %time%, %level%, %name% and %message%, as you want them</span></code></pre></div>
+        </section>
+        <section class="fn" id="lines">
+          <h3><a href="#lines"><code>log's lines()</code></a></h3>
+          <p>every line written so far, at any level that was written, as a list</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to lines</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L67">log.moth line 67</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+<span class="k">say</span> log's lines()                      <span class="c"># the lines it's written since the program started</span></code></pre><pre class="says"><code>[]</code></pre></div>
+        </section>
+        <section class="fn" id="debug">
+          <h3><a href="#debug"><code>log's debug(message)</code></a></h3>
+          <p>a line written at the debug level: what's useful when looking for a mistake</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to debug with message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L72">log.moth line 72</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's debug(<span class="s">&quot;cache hit&quot;</span>)                <span class="c"># written only at the debug level</span></code></pre></div>
+        </section>
+        <section class="fn" id="info">
+          <h3><a href="#info"><code>log's info(message)</code></a></h3>
+          <p>a line written at the info level: what happened, as it should</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to info with message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L77">log.moth line 77</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's info(<span class="s">&quot;started&quot;</span>)                  <span class="c"># 2026-11-04 10:15:00 INFO started, on the error output</span></code></pre></div>
+        </section>
+        <section class="fn" id="warning">
+          <h3><a href="#warning"><code>log's warning(message)</code></a></h3>
+          <p>a line written at the warning level: something that may be wrong</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to warning with message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L82">log.moth line 82</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's warning(<span class="s">&quot;the disk is almost full&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="error">
+          <h3><a href="#error"><code>log's error(message)</code></a></h3>
+          <p>a line written at the error level: something that went wrong</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to error with message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L87">log.moth line 87</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's error(<span class="s">&quot;can't reach the database&quot;</span>) <span class="c"># and critical, the most</span></code></pre></div>
+        </section>
+        <section class="fn" id="critical">
+          <h3><a href="#critical"><code>log's critical(message)</code></a></h3>
+          <p>a line written at the critical level: something so wrong the program may not go on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to critical with message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/log.moth#L92">log.moth line 92</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;log.moth&quot;</span> <span class="k">as</span> log
+log's critical(message)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

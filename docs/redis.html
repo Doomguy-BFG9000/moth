@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>redis.moth · Moth's standard library</title>
+  <meta name="description" content="Redis (and the servers that speak its protocol.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>redis</em>.moth</h1>
+      <p>Redis (and the servers that speak its protocol.</p>
+      <p class="use"><code>use "redis.moth" as redis</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="redis.moth's functions">
+      <h2>38 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#connect">connect</a></li><li><a href="#connect_secure">connect_secure</a></li><li><a href="#connect_url">connect_url</a></li><li><a href="#log_in">log_in</a></li><li><a href="#select_database">select_database</a></li><li><a href="#use_resp3">use_resp3</a></li><li><a href="#wait_at_most">wait_at_most</a></li><li><a href="#close">close</a></li><li><a href="#command">command</a></li><li><a href="#command_bytes">command_bytes</a></li><li><a href="#pipeline">pipeline</a></li><li><a href="#transaction">transaction</a></li><li><a href="#get">get</a></li><li><a href="#get_bytes">get_bytes</a></li><li><a href="#put">put</a></li><li><a href="#put_for">put_for</a></li><li><a href="#delete">delete</a></li><li><a href="#exists">exists</a></li><li><a href="#expire">expire</a></li><li><a href="#time_left">time_left</a></li><li><a href="#increment">increment</a></li><li><a href="#keys_like">keys_like</a></li><li><a href="#push">push</a></li><li><a href="#push_front">push_front</a></li><li><a href="#pop">pop</a></li><li><a href="#pop_back">pop_back</a></li><li><a href="#pop_waiting">pop_waiting</a></li><li><a href="#list_items">list_items</a></li><li><a href="#list_length">list_length</a></li><li><a href="#hash_put">hash_put</a></li><li><a href="#hash_get">hash_get</a></li><li><a href="#hash_all">hash_all</a></li><li><a href="#hash_remove">hash_remove</a></li><li><a href="#publish">publish</a></li><li><a href="#subscribe">subscribe</a></li><li><a href="#subscribe_like">subscribe_like</a></li><li><a href="#next_message">next_message</a></li><li><a href="#unsubscribe">unsubscribe</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Redis (and the servers that speak its protocol: Valkey, KeyDB, Dragonfly), as Python's redis package has it: keys with values that can end, numbers counted up, lists, hashes, publishing and subscribing, many commands sent at once (pipelining) or all or none (MULTI and EXEC), logged in and over TLS, in RESP2 or RESP3, on sockets.moth. A program <code>moth build</code> makes can use it, built with --allow-libraries.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's log_in(r, <span class="s">&quot;a password&quot;</span>)                    <span class="c"># or log_in(r, &quot;a password&quot;, &quot;a user&quot;), for Redis 6's users</span>
+redis's put(r, <span class="s">&quot;greeting&quot;</span>, <span class="s">&quot;hello&quot;</span>)                <span class="c"># SET</span>
+redis's put_for(r, <span class="s">&quot;session:42&quot;</span>, <span class="s">&quot;data&quot;</span>, <span class="n">3600</span>)     <span class="c"># gone in an hour</span>
+<span class="k">say</span> redis's get(r, <span class="s">&quot;greeting&quot;</span>)                     <span class="c"># hello; nothing if there's no such key</span>
+<span class="k">say</span> redis's increment(r, <span class="s">&quot;visits&quot;</span>)                 <span class="c"># 1, then 2, ...</span>
+redis's expire(r, <span class="s">&quot;greeting&quot;</span>, <span class="n">60</span>)
+<span class="k">say</span> redis's time_left(r, <span class="s">&quot;greeting&quot;</span>)               <span class="c"># seconds: -1 if it never ends, -2 if there's no such key</span>
+redis's push(r, <span class="s">&quot;jobs&quot;</span>, <span class="s">&quot;first&quot;</span>)                   <span class="c"># to the end; push_front; pop and pop_back take one off</span>
+<span class="k">say</span> redis's list_items(r, <span class="s">&quot;jobs&quot;</span>)                  <span class="c"># every item; list_length counts them</span>
+redis's hash_put(r, <span class="s">&quot;user:7&quot;</span>, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;Sam&quot;</span>)       <span class="c"># hash_get, hash_all (a dictionary), hash_remove</span>
+<span class="k">say</span> redis's command(r, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;SET&quot;</span>, <span class="s">&quot;k&quot;</span>, <span class="s">&quot;v&quot;</span>, <span class="s">&quot;NX&quot;</span>, <span class="s">&quot;EX&quot;</span>, <span class="n">10</span>)   <span class="c"># any command, as its words</span>
+<span class="k">say</span> redis's pipeline(r, <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;a&quot;</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;GET&quot;</span>, <span class="s">&quot;a&quot;</span>))   <span class="c"># sent at once: each reply</span>
+<span class="k">say</span> redis's transaction(r, <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;a&quot;</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;b&quot;</span>))   <span class="c"># MULTI ... EXEC</span>
+redis's publish(r, <span class="s">&quot;news&quot;</span>, <span class="s">&quot;hello&quot;</span>)                <span class="c"># how many got it</span>
+redis's subscribe(r, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;news&quot;</span>)               <span class="c"># a connection of its own, then:</span>
+<span class="k">set</span> m <span class="k">to</span> redis's next_message(r)                   <span class="c"># (record with channel &quot;news&quot;, message &quot;hello&quot;, pattern nothing)</span>
+redis's use_resp3(r)                               <span class="c"># RESP3: maps come back as dictionaries, doubles as numbers</span></code></pre></div>
+          <p>Replies are Moth's own values: text, numbers, nothing, lists, and in RESP3 dictionaries, yes and no. Bulk strings come back as text; <a href="#get_bytes">get_bytes</a> and <a href="#command_bytes">command_bytes</a> keep them as bytes. What's sent is text (its UTF-8), bytes, or numbers. An error the server sends is a <code>fail with</code>, as &quot;Redis said WRONGTYPE Operation against a key holding the wrong kind of value&quot;.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="connect">
+          <h3><a href="#connect"><code>redis's connect(host, port)</code></a></h3>
+          <p>a connection to a Redis server, over TCP: the host and its port (6379)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>host</code></li><li><code>port</code> <span class="optional">optional: 6379 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect with host, port or 6379</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L39">redis.moth line 39</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span></code></pre></div>
+        </section>
+        <section class="fn" id="connect_secure">
+          <h3><a href="#connect_secure"><code>redis's connect_secure(host, port)</code></a></h3>
+          <p>over TLS, the server's certificate checked for its name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>host</code></li><li><code>port</code> <span class="optional">optional: 6380 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect_secure with host, port or 6380</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L44">redis.moth line 44</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+redis's connect_secure(host, port)</code></pre></div>
+        </section>
+        <section class="fn" id="connect_url">
+          <h3><a href="#connect_url"><code>redis's connect_url(url)</code></a></h3>
+          <p>a connection from a URL: redis://host:port/db, rediss:// for TLS, with user:password@ before the host to log in</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>url</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to connect_url with url</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L53">redis.moth line 53</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+redis's connect_url(url)</code></pre></div>
+        </section>
+        <section class="fn" id="log_in">
+          <h3><a href="#log_in"><code>redis's log_in(r, password, user)</code></a></h3>
+          <p>logged in with a password, and for Redis 6's users a user name too (AUTH)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>password</code></li><li><code>user</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to log_in with r, password, user or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L141">redis.moth line 141</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's log_in(r, <span class="s">&quot;a password&quot;</span>)                    <span class="c"># or log_in(r, &quot;a password&quot;, &quot;a user&quot;), for Redis 6's users</span></code></pre></div>
+        </section>
+        <section class="fn" id="select_database">
+          <h3><a href="#select_database"><code>redis's select_database(r, n)</code></a></h3>
+          <p>which of the server's numbered databases the connection uses from now on (SELECT), from 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to select_database with r, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L150">redis.moth line 150</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's select_database(r, n)</code></pre></div>
+        </section>
+        <section class="fn" id="use_resp3">
+          <h3><a href="#use_resp3"><code>redis's use_resp3(r)</code></a></h3>
+          <p>RESP3, through HELLO 3: replies with maps, sets, doubles, yes and no; what the server says of itself</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to use_resp3 with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L155">redis.moth line 155</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's use_resp3(r)                               <span class="c"># RESP3: maps come back as dictionaries, doubles as numbers</span></code></pre></div>
+        </section>
+        <section class="fn" id="wait_at_most">
+          <h3><a href="#wait_at_most"><code>redis's wait_at_most(r, milliseconds)</code></a></h3>
+          <p>a reply that takes longer than this many milliseconds fails</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>milliseconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to wait_at_most with r, milliseconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L162">redis.moth line 162</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's wait_at_most(r, <span class="k">milliseconds</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="close">
+          <h3><a href="#close"><code>redis's close(r)</code></a></h3>
+          <p>the connection closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to close with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L167">redis.moth line 167</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's close(r)</code></pre></div>
+        </section>
+        <section class="fn" id="command">
+          <h3><a href="#command"><code>redis's command(r, words)</code></a></h3>
+          <p>any command, as a list of its words; its reply</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to command with r, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L174">redis.moth line 174</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's command(r, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;SET&quot;</span>, <span class="s">&quot;k&quot;</span>, <span class="s">&quot;v&quot;</span>, <span class="s">&quot;NX&quot;</span>, <span class="s">&quot;EX&quot;</span>, <span class="n">10</span>)   <span class="c"># any command, as its words</span></code></pre></div>
+        </section>
+        <section class="fn" id="command_bytes">
+          <h3><a href="#command_bytes"><code>redis's command_bytes(r, words)</code></a></h3>
+          <p>the same, with bulk strings kept as bytes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to command_bytes with r, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L180">redis.moth line 180</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's command_bytes(r, words)</code></pre></div>
+        </section>
+        <section class="fn" id="pipeline">
+          <h3><a href="#pipeline"><code>redis's pipeline(r, commands)</code></a></h3>
+          <p>commands sent at once, then each reply read, in order; a mistake if any was an error</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>commands</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pipeline with r, commands</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L186">redis.moth line 186</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's pipeline(r, <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;a&quot;</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;GET&quot;</span>, <span class="s">&quot;a&quot;</span>))   <span class="c"># sent at once: each reply</span></code></pre></div>
+        </section>
+        <section class="fn" id="transaction">
+          <h3><a href="#transaction"><code>redis's transaction(r, commands)</code></a></h3>
+          <p>commands done all or none, between MULTI and EXEC: each one's reply; nothing if a key WATCHed changed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>commands</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to transaction with r, commands</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L200">redis.moth line 200</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's transaction(r, <span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;a&quot;</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;INCR&quot;</span>, <span class="s">&quot;b&quot;</span>))   <span class="c"># MULTI ... EXEC</span></code></pre></div>
+        </section>
+        <section class="fn" id="get">
+          <h3><a href="#get"><code>redis's get(r, key)</code></a></h3>
+          <p>a key's value, as text, or nothing if there's no such key (GET)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to get with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L211">redis.moth line 211</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's get(r, <span class="s">&quot;greeting&quot;</span>)                     <span class="c"># hello; nothing if there's no such key</span></code></pre></div>
+        </section>
+        <section class="fn" id="get_bytes">
+          <h3><a href="#get_bytes"><code>redis's get_bytes(r, key)</code></a></h3>
+          <p>a key's value as bytes, as they are, or nothing if there's no such key</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to get_bytes with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L216">redis.moth line 216</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's get_bytes(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="put">
+          <h3><a href="#put"><code>redis's put(r, key, value)</code></a></h3>
+          <p>a key given a value, for ever, replacing what it had (SET): text, bytes or a number</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to put with r, key, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L221">redis.moth line 221</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's put(r, <span class="s">&quot;greeting&quot;</span>, <span class="s">&quot;hello&quot;</span>)                <span class="c"># SET</span></code></pre></div>
+        </section>
+        <section class="fn" id="put_for">
+          <h3><a href="#put_for"><code>redis's put_for(r, key, value, seconds)</code></a></h3>
+          <p>a value that's gone after this many seconds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>value</code></li><li><code>seconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to put_for with r, key, value, seconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L226">redis.moth line 226</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's put_for(r, <span class="s">&quot;session:42&quot;</span>, <span class="s">&quot;data&quot;</span>, <span class="n">3600</span>)     <span class="c"># gone in an hour</span></code></pre></div>
+        </section>
+        <section class="fn" id="delete">
+          <h3><a href="#delete"><code>redis's delete(r, keys_given)</code></a></h3>
+          <p>how many of these keys (one, or a list) there were to delete</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>keys_given</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to delete with r, keys_given</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L231">redis.moth line 231</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's delete(r, keys_given)</code></pre></div>
+        </section>
+        <section class="fn" id="exists">
+          <h3><a href="#exists"><code>redis's exists(r, key)</code></a></h3>
+          <p>whether there's a key of that name</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to exists with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L240">redis.moth line 240</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's exists(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="expire">
+          <h3><a href="#expire"><code>redis's expire(r, key, seconds)</code></a></h3>
+          <p>the key's value ends in this many seconds: yes, or no if there's no such key</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>seconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to expire with r, key, seconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L245">redis.moth line 245</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's expire(r, <span class="s">&quot;greeting&quot;</span>, <span class="n">60</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="time_left">
+          <h3><a href="#time_left"><code>redis's time_left(r, key)</code></a></h3>
+          <p>seconds until the key's value ends: -1 if it never does, -2 if there's no such key</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to time_left with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L250">redis.moth line 250</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's time_left(r, <span class="s">&quot;greeting&quot;</span>)               <span class="c"># seconds: -1 if it never ends, -2 if there's no such key</span></code></pre></div>
+        </section>
+        <section class="fn" id="increment">
+          <h3><a href="#increment"><code>redis's increment(r, key, by)</code></a></h3>
+          <p>the number at the key, made <code>by</code> more (1): what it is now</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>by</code> <span class="optional">optional: 1 if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to increment with r, key, by or 1</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L255">redis.moth line 255</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's increment(r, <span class="s">&quot;visits&quot;</span>)                 <span class="c"># 1, then 2, ...</span></code></pre></div>
+        </section>
+        <section class="fn" id="keys_like">
+          <h3><a href="#keys_like"><code>redis's keys_like(r, pattern)</code></a></h3>
+          <p>every key like a pattern (&quot;user:*&quot;), found a page at a time with SCAN, so a big database isn't held up</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>pattern</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to keys_like with r, pattern</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L263">redis.moth line 263</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's keys_like(r, pattern)</code></pre></div>
+        </section>
+        <section class="fn" id="push">
+          <h3><a href="#push"><code>redis's push(r, key, values)</code></a></h3>
+          <p>a value (or a list of them) on the end of the list at the key: its length now</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to push with r, key, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L283">redis.moth line 283</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's push(r, <span class="s">&quot;jobs&quot;</span>, <span class="s">&quot;first&quot;</span>)                   <span class="c"># to the end; push_front; pop and pop_back take one off</span></code></pre></div>
+        </section>
+        <section class="fn" id="push_front">
+          <h3><a href="#push_front"><code>redis's push_front(r, key, values)</code></a></h3>
+          <p>a value, or a list of them, put at the front of a list (LPUSH): how long it is after</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to push_front with r, key, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L288">redis.moth line 288</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's push_front(r, <span class="k">key</span>, values)</code></pre></div>
+        </section>
+        <section class="fn" id="pop">
+          <h3><a href="#pop"><code>redis's pop(r, key)</code></a></h3>
+          <p>the list's first value, taken off it, or nothing if it's empty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L293">redis.moth line 293</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's pop(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="pop_back">
+          <h3><a href="#pop_back"><code>redis's pop_back(r, key)</code></a></h3>
+          <p>the value at the end of a list, taken off, or nothing if it's empty (RPOP)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_back with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L298">redis.moth line 298</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's pop_back(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="pop_waiting">
+          <h3><a href="#pop_waiting"><code>redis's pop_waiting(r, keys_given, seconds)</code></a></h3>
+          <p>the first value of any of these lists (one, or a list of them), taken off, waiting up to <code>seconds</code> (0 for as long as it takes) for one: a record with key and value, or nothing if none came in time</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>keys_given</code></li><li><code>seconds</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to pop_waiting with r, keys_given, seconds</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L304">redis.moth line 304</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's pop_waiting(r, keys_given, <span class="k">seconds</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="list_items">
+          <h3><a href="#list_items"><code>redis's list_items(r, key)</code></a></h3>
+          <p>every value of a list, front to back (LRANGE 0 -1)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to list_items with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L318">redis.moth line 318</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">say</span> redis's list_items(r, <span class="s">&quot;jobs&quot;</span>)                  <span class="c"># every item; list_length counts them</span></code></pre></div>
+        </section>
+        <section class="fn" id="list_length">
+          <h3><a href="#list_length"><code>redis's list_length(r, key)</code></a></h3>
+          <p>how many values a list has, 0 if there's no such key (LLEN)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to list_length with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L323">redis.moth line 323</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's list_length(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="hash_put">
+          <h3><a href="#hash_put"><code>redis's hash_put(r, key, field, value)</code></a></h3>
+          <p>a field of a hash given a value (HSET): 1 if the field is new, 0 if it was changed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>field</code></li><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hash_put with r, key, field, value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L330">redis.moth line 330</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's hash_put(r, <span class="s">&quot;user:7&quot;</span>, <span class="s">&quot;name&quot;</span>, <span class="s">&quot;Sam&quot;</span>)       <span class="c"># hash_get, hash_all (a dictionary), hash_remove</span></code></pre></div>
+        </section>
+        <section class="fn" id="hash_get">
+          <h3><a href="#hash_get"><code>redis's hash_get(r, key, field)</code></a></h3>
+          <p>a field of a hash's value, or nothing if there's no such field (HGET)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>field</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hash_get with r, key, field</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L335">redis.moth line 335</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's hash_get(r, <span class="k">key</span>, field)</code></pre></div>
+        </section>
+        <section class="fn" id="hash_all">
+          <h3><a href="#hash_all"><code>redis's hash_all(r, key)</code></a></h3>
+          <p>every field of the hash and its value, as a dictionary</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hash_all with r, key</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L340">redis.moth line 340</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's hash_all(r, <span class="k">key</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="hash_remove">
+          <h3><a href="#hash_remove"><code>redis's hash_remove(r, key, field)</code></a></h3>
+          <p>a field taken out of a hash (HDEL): 1 if it was there, else 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>key</code></li><li><code>field</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to hash_remove with r, key, field</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L353">redis.moth line 353</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's hash_remove(r, <span class="k">key</span>, field)</code></pre></div>
+        </section>
+        <section class="fn" id="publish">
+          <h3><a href="#publish"><code>redis's publish(r, channel, message)</code></a></h3>
+          <p>a message to everyone subscribed to a channel: how many got it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>channel</code></li><li><code>message</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to publish with r, channel, message</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L360">redis.moth line 360</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's publish(r, <span class="s">&quot;news&quot;</span>, <span class="s">&quot;hello&quot;</span>)                <span class="c"># how many got it</span></code></pre></div>
+        </section>
+        <section class="fn" id="subscribe">
+          <h3><a href="#subscribe"><code>redis's subscribe(r, channels)</code></a></h3>
+          <p>this connection subscribed to these channels (one, or a list): it can only wait for messages after, and (un)subscribe, until <a href="#unsubscribe">unsubscribe</a>(); <code>patterns</code> subscribes to channels like them, as &quot;news.*&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>channels</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to subscribe with r, channels</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L366">redis.moth line 366</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's subscribe(r, <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;news&quot;</span>)               <span class="c"># a connection of its own, then:</span></code></pre></div>
+        </section>
+        <section class="fn" id="subscribe_like">
+          <h3><a href="#subscribe_like"><code>redis's subscribe_like(r, patterns)</code></a></h3>
+          <p>the connection subscribed to every channel whose name fits a pattern, as &quot;news.*&quot; (PSUBSCRIBE); <a href="#next_message">next_message</a> gives each message, with the pattern it fitted</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>patterns</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to subscribe_like with r, patterns</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L372">redis.moth line 372</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's subscribe_like(r, patterns)</code></pre></div>
+        </section>
+        <section class="fn" id="next_message">
+          <h3><a href="#next_message"><code>redis's next_message(r, milliseconds)</code></a></h3>
+          <p>the next message on a channel subscribed to, waiting for it: a record with channel, message and pattern (the pattern it came by, or nothing); or, with <code>milliseconds</code>, nothing if none comes in that time</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>milliseconds</code> <span class="optional">optional: nothing if it's left out</span></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to next_message with r, milliseconds or nothing</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L390">redis.moth line 390</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+<span class="k">set</span> m <span class="k">to</span> redis's next_message(r)                   <span class="c"># (record with channel &quot;news&quot;, message &quot;hello&quot;, pattern nothing)</span></code></pre></div>
+        </section>
+        <section class="fn" id="unsubscribe">
+          <h3><a href="#unsubscribe"><code>redis's unsubscribe(r)</code></a></h3>
+          <p>no more channels: the connection is for commands again</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to unsubscribe with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/redis.moth#L410">redis.moth line 410</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;redis.moth&quot;</span> <span class="k">as</span> redis
+<span class="k">set</span> r <span class="k">to</span> redis's connect(<span class="s">&quot;localhost&quot;</span>, <span class="n">6379</span>)        <span class="c"># connect_secure for TLS; connect_url(&quot;rediss://:pw@host:6380/2&quot;)</span>
+redis's unsubscribe(r)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

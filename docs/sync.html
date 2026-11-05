@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sync.moth · Moth's standard library</title>
+  <meta name="description" content="Tasks taking turns, as Python's threading, queue and concurrent.futures have it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>sync</em>.moth</h1>
+      <p>Tasks taking turns, as Python's threading, queue and concurrent.futures have it.</p>
+      <p class="use"><code>use "sync.moth" as sync</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="sync.moth's functions">
+      <h2>26 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#lock">lock</a></li><li><a href="#semaphore">semaphore</a></li><li><a href="#take">take</a></li><li><a href="#take_within">take_within</a></li><li><a href="#take_if_free">take_if_free</a></li><li><a href="#let_go">let_go</a></li><li><a href="#is_held">is_held</a></li><li><a href="#holding">holding</a></li><li><a href="#flag">flag</a></li><li><a href="#raise_flag">raise_flag</a></li><li><a href="#lower_flag">lower_flag</a></li><li><a href="#is_raised">is_raised</a></li><li><a href="#wait_for_flag">wait_for_flag</a></li><li><a href="#wait_for_flag_within">wait_for_flag_within</a></li><li><a href="#queue">queue</a></li><li><a href="#queue_holding">queue_holding</a></li><li><a href="#send">send</a></li><li><a href="#receive">receive</a></li><li><a href="#receive_within">receive_within</a></li><li><a href="#waiting">waiting</a></li><li><a href="#is_empty">is_empty</a></li><li><a href="#wait_for_all">wait_for_all</a></li><li><a href="#wait_for_any">wait_for_any</a></li><li><a href="#ended_count">ended_count</a></li><li><a href="#run_each">run_each</a></li><li><a href="#run_each_at_most">run_each_at_most</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Tasks taking turns, as Python's threading, queue and concurrent.futures have it: a lock that one task holds at a time, a semaphore that a few can, a flag that tasks wait to see raised, a queue that one task sends to and another takes from, and many calls run as tasks. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">set</span> balance <span class="k">to</span> <span class="n">0</span>
+<span class="k">to</span> deposit <span class="k">with</span> amount
+    sync's take(guard)
+    <span class="k">set</span> balance <span class="k">to</span> balance + amount     <span class="c"># one task at a time in here</span>
+    sync's let_go(guard)
+<span class="k">end</span>
+
+<span class="k">set</span> jobs <span class="k">to</span> sync's queue()              <span class="c"># or queue_holding(10): send waits while 10 are waiting</span>
+<span class="k">to</span> worker
+    <span class="k">repeat</span> <span class="k">while</span> <span class="k">yes</span>
+        <span class="k">set</span> job <span class="k">to</span> sync's receive(jobs)     <span class="c"># waits for one</span>
+        <span class="k">if</span> job <span class="k">is</span> <span class="k">nothing</span>
+            <span class="k">return</span> <span class="s">&quot;done&quot;</span>
+        <span class="k">end</span>
+        deposit(job)
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> <span class="k">start</span> worker()
+sync's <span class="k">send</span>(jobs, <span class="n">5</span>)
+sync's <span class="k">send</span>(jobs, <span class="k">nothing</span>)
+<span class="k">say</span> <span class="k">wait</span> <span class="k">for</span> w                          <span class="c"># done</span>
+
+<span class="k">say</span> sync's run_each(slow_square, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)   <span class="c"># [1, 4, 9]: a task for each, waited for in order</span></code></pre></div>
+          <p><a href="#take_within">take_within</a>(lock, 50) waits at most 50 milliseconds and says whether it took the lock; <a href="#receive_within">receive_within</a>(queue, 50) fails, with &quot;nothing came in 50 milliseconds&quot;, if nothing came. A flag is raised and lowered, and <a href="#wait_for_flag">wait_for_flag</a> waits until it's raised. <a href="#wait_for_all">wait_for_all</a>(jobs) gives what each task gave, and <a href="#wait_for_any">wait_for_any</a>(jobs) the first of them to end. <code>job has ended</code> asks without waiting.</p>
+          <p>Workers (<code>start f(x) on another core</code>, DESIGN §124) share nothing: each is given copies, so a lock, flag or queue given to one, or among the program's variables it starts with, is its own, and keeps its own tasks in step. <a href="#wait_for_all">wait_for_all</a> and <a href="#wait_for_any">wait_for_any</a> take workers as they take tasks.</p>
+          <p>One task runs Moth at a time, and a task only lets the others run at a loop's end, a call or a wait, so what's between those happens with nothing else running: a lock is taken by seeing it's free and marking it held, with nothing in between. That's why take and receive do their work themselves, with no call. On the JavaScript engines a task runs to its end when it's started, so a task there that waits for what the program does after starting it waits for ever, and <a href="#take_within">take_within</a> and <a href="#receive_within">receive_within</a> give up when their time is up.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="lock">
+          <h3><a href="#lock"><code>sync's lock()</code></a></h3>
+          <p>a lock: one task at a time holds it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to lock</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L49">sync.moth line 49</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">say</span> guard</code></pre><pre class="says"><code>(record with free 1, most 1)</code></pre></div>
+        </section>
+        <section class="fn" id="semaphore">
+          <h3><a href="#semaphore"><code>sync's semaphore(n)</code></a></h3>
+          <p>a semaphore: up to n tasks hold it at once</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to semaphore with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L54">sync.moth line 54</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> places <span class="k">to</span> sync's semaphore(<span class="n">2</span>)
+<span class="k">say</span> places</code></pre><pre class="says"><code>(record with free 2, most 2)</code></pre></div>
+        </section>
+        <section class="fn" id="take">
+          <h3><a href="#take"><code>sync's take(guard)</code></a></h3>
+          <p>waits until the lock (or a semaphore's place) is free, and takes it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take with guard</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L62">sync.moth line 62</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">set</span> balance <span class="k">to</span> <span class="n">0</span>
+<span class="k">to</span> deposit <span class="k">with</span> amount
+    sync's take(guard)
+    <span class="k">set</span> balance <span class="k">to</span> balance + amount     <span class="c"># one task at a time in here</span>
+    sync's let_go(guard)
+<span class="k">end</span>
+
+<span class="k">set</span> jobs <span class="k">to</span> sync's queue()              <span class="c"># or queue_holding(10): send waits while 10 are waiting</span>
+<span class="k">to</span> worker
+    <span class="k">repeat</span> <span class="k">while</span> <span class="k">yes</span>
+        <span class="k">set</span> job <span class="k">to</span> sync's receive(jobs)     <span class="c"># waits for one</span>
+        <span class="k">if</span> job <span class="k">is</span> <span class="k">nothing</span>
+            <span class="k">return</span> <span class="s">&quot;done&quot;</span>
+        <span class="k">end</span>
+        deposit(job)
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> <span class="k">start</span> worker()
+sync's <span class="k">send</span>(jobs, <span class="n">5</span>)
+sync's <span class="k">send</span>(jobs, <span class="k">nothing</span>)
+<span class="k">say</span> <span class="k">wait</span> <span class="k">for</span> w                          <span class="c"># done</span>
+
+<span class="k">say</span> sync's run_each(slow_square, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)   <span class="c"># [1, 4, 9]: a task for each, waited for in order</span></code></pre></div>
+        </section>
+        <section class="fn" id="take_within">
+          <h3><a href="#take_within"><code>sync's take_within(guard, ms)</code></a></h3>
+          <p>as take, waiting at most so many milliseconds: whether it took it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li><li><code>ms</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take_within with guard, ms</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L70">sync.moth line 70</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+sync's take(guard)
+<span class="k">say</span> sync's take_within(guard, <span class="n">20</span>)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+        <section class="fn" id="take_if_free">
+          <h3><a href="#take_if_free"><code>sync's take_if_free(guard)</code></a></h3>
+          <p>takes it if it's free now: whether it did</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take_if_free with guard</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L83">sync.moth line 83</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+sync's take(guard)
+<span class="k">say</span> sync's take_if_free(guard)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+        <section class="fn" id="let_go">
+          <h3><a href="#let_go"><code>sync's let_go(guard)</code></a></h3>
+          <p>the lock (or a semaphore's place) let go, for a task waiting for it to take; a mistake if it isn't held</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to let_go with guard</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L92">sync.moth line 92</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">set</span> balance <span class="k">to</span> <span class="n">0</span>
+<span class="k">to</span> deposit <span class="k">with</span> amount
+    sync's take(guard)
+    <span class="k">set</span> balance <span class="k">to</span> balance + amount     <span class="c"># one task at a time in here</span>
+    sync's let_go(guard)
+<span class="k">end</span>
+
+<span class="k">set</span> jobs <span class="k">to</span> sync's queue()              <span class="c"># or queue_holding(10): send waits while 10 are waiting</span>
+<span class="k">to</span> worker
+    <span class="k">repeat</span> <span class="k">while</span> <span class="k">yes</span>
+        <span class="k">set</span> job <span class="k">to</span> sync's receive(jobs)     <span class="c"># waits for one</span>
+        <span class="k">if</span> job <span class="k">is</span> <span class="k">nothing</span>
+            <span class="k">return</span> <span class="s">&quot;done&quot;</span>
+        <span class="k">end</span>
+        deposit(job)
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">set</span> w <span class="k">to</span> <span class="k">start</span> worker()
+sync's <span class="k">send</span>(jobs, <span class="n">5</span>)
+sync's <span class="k">send</span>(jobs, <span class="k">nothing</span>)
+<span class="k">say</span> <span class="k">wait</span> <span class="k">for</span> w                          <span class="c"># done</span>
+
+<span class="k">say</span> sync's run_each(slow_square, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)   <span class="c"># [1, 4, 9]: a task for each, waited for in order</span></code></pre></div>
+        </section>
+        <section class="fn" id="is_held">
+          <h3><a href="#is_held"><code>sync's is_held(guard)</code></a></h3>
+          <p>whether a lock is held: for a semaphore, whether every place is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_held with guard</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L100">sync.moth line 100</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">say</span> sync's is_held(guard)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+        <section class="fn" id="holding">
+          <h3><a href="#holding"><code>sync's holding(guard, work)</code></a></h3>
+          <p>a function called holding the lock, let go after, even if the function fails: what the function gave</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>guard</code></li><li><code>work</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to holding with guard, work</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L105">sync.moth line 105</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> gives_seven
+    <span class="k">return</span> <span class="n">7</span>
+<span class="k">end</span>
+<span class="k">set</span> guard <span class="k">to</span> sync's lock()
+<span class="k">say</span> sync's holding(guard, gives_seven)</code></pre><pre class="says"><code>7</code></pre></div>
+        </section>
+        <section class="fn" id="flag">
+          <h3><a href="#flag"><code>sync's flag()</code></a></h3>
+          <p>a flag: tasks can wait until it's raised</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to flag</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L120">sync.moth line 120</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+<span class="k">say</span> f</code></pre><pre class="says"><code>(record with raised no)</code></pre></div>
+        </section>
+        <section class="fn" id="raise_flag">
+          <h3><a href="#raise_flag"><code>sync's raise_flag(f)</code></a></h3>
+          <p>the flag raised: every task waiting for it goes on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>f</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to raise_flag with f</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L125">sync.moth line 125</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+sync's raise_flag(f)</code></pre></div>
+        </section>
+        <section class="fn" id="lower_flag">
+          <h3><a href="#lower_flag"><code>sync's lower_flag(f)</code></a></h3>
+          <p>the flag lowered, so <a href="#wait_for_flag">wait_for_flag</a> waits again</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>f</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to lower_flag with f</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L130">sync.moth line 130</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+sync's raise_flag(f)
+sync's wait_for_flag(f)
+sync's lower_flag(f)</code></pre></div>
+        </section>
+        <section class="fn" id="is_raised">
+          <h3><a href="#is_raised"><code>sync's is_raised(f)</code></a></h3>
+          <p>whether the flag is raised</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>f</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_raised with f</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L135">sync.moth line 135</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+<span class="k">say</span> sync's is_raised(f)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+        <section class="fn" id="wait_for_flag">
+          <h3><a href="#wait_for_flag"><code>sync's wait_for_flag(f)</code></a></h3>
+          <p>waits until the flag is raised, letting other tasks run meanwhile</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>f</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to wait_for_flag with f</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L140">sync.moth line 140</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+sync's raise_flag(f)
+sync's wait_for_flag(f)</code></pre></div>
+        </section>
+        <section class="fn" id="wait_for_flag_within">
+          <h3><a href="#wait_for_flag_within"><code>sync's wait_for_flag_within(f, ms)</code></a></h3>
+          <p>as <a href="#wait_for_flag">wait_for_flag</a>, waiting at most so many milliseconds: whether it was raised</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>f</code></li><li><code>ms</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to wait_for_flag_within with f, ms</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L147">sync.moth line 147</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> f <span class="k">to</span> sync's flag()
+<span class="k">say</span> sync's wait_for_flag_within(f, <span class="n">10</span>)</code></pre><pre class="says"><code>no</code></pre></div>
+        </section>
+        <section class="fn" id="queue">
+          <h3><a href="#queue"><code>sync's queue()</code></a></h3>
+          <p>A queue keeps what's sent in a dictionary, by where each is: from <code>first</code> to <code>last</code>.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to queue</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L161">sync.moth line 161</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+<span class="k">say</span> q</code></pre><pre class="says"><code>(record with slots (empty dictionary), first 1, last 0, most 0)</code></pre></div>
+        </section>
+        <section class="fn" id="queue_holding">
+          <h3><a href="#queue_holding"><code>sync's queue_holding(n)</code></a></h3>
+          <p>a queue that holds at most n: send waits while n are waiting</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to queue_holding with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L166">sync.moth line 166</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> small <span class="k">to</span> sync's queue_holding(<span class="n">2</span>)
+<span class="k">say</span> small</code></pre><pre class="says"><code>(record with slots (empty dictionary), first 1, last 0, most 2)</code></pre></div>
+        </section>
+        <section class="fn" id="send">
+          <h3><a href="#send"><code>sync's send(q, x)</code></a></h3>
+          <p>at the back, once there's room</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to send with q, x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L174">sync.moth line 174</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+sync's <span class="k">send</span>(q, <span class="s">&quot;a&quot;</span>)
+<span class="k">say</span> sync's waiting(q)</code></pre><pre class="says"><code>1</code></pre></div>
+        </section>
+        <section class="fn" id="receive">
+          <h3><a href="#receive"><code>sync's receive(q)</code></a></h3>
+          <p>the first sent of those waiting, once there's one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to receive with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L186">sync.moth line 186</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+sync's <span class="k">send</span>(q, <span class="s">&quot;a&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="s">&quot;b&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="k">nothing</span>)
+<span class="k">say</span> sync's receive(q)</code></pre><pre class="says"><code>a</code></pre></div>
+        </section>
+        <section class="fn" id="receive_within">
+          <h3><a href="#receive_within"><code>sync's receive_within(q, ms)</code></a></h3>
+          <p>as receive, waiting at most so many milliseconds</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li><li><code>ms</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to receive_within with q, ms</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L198">sync.moth line 198</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+sync's <span class="k">send</span>(q, <span class="s">&quot;a&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="s">&quot;b&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="k">nothing</span>)
+<span class="k">say</span> sync's receive_within(q, <span class="n">10</span>)</code></pre><pre class="says"><code>a</code></pre></div>
+        </section>
+        <section class="fn" id="waiting">
+          <h3><a href="#waiting"><code>sync's waiting(q)</code></a></h3>
+          <p>how many are waiting to be received</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to waiting with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L214">sync.moth line 214</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+sync's <span class="k">send</span>(q, <span class="s">&quot;a&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="s">&quot;b&quot;</span>)
+sync's <span class="k">send</span>(q, <span class="k">nothing</span>)
+<span class="k">say</span> sync's waiting(q)</code></pre><pre class="says"><code>3</code></pre></div>
+        </section>
+        <section class="fn" id="is_empty">
+          <h3><a href="#is_empty"><code>sync's is_empty(q)</code></a></h3>
+          <p>whether the queue has nothing waiting</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>q</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to is_empty with q</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L219">sync.moth line 219</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">set</span> q <span class="k">to</span> sync's queue()
+<span class="k">say</span> sync's is_empty(q)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="wait_for_all">
+          <h3><a href="#wait_for_all"><code>sync's wait_for_all(jobs)</code></a></h3>
+          <p>what each task gave, in order, once they've all ended</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>jobs</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to wait_for_all with jobs</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L226">sync.moth line 226</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> square <span class="k">with</span> n
+    <span class="k">return</span> n * n
+<span class="k">end</span>
+<span class="k">set</span> jobs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">start</span> square(<span class="n">4</span>)), (<span class="k">start</span> square(<span class="n">5</span>))
+<span class="k">say</span> sync's wait_for_all(jobs)</code></pre><pre class="says"><code>[16, 25]</code></pre></div>
+        </section>
+        <section class="fn" id="wait_for_any">
+          <h3><a href="#wait_for_any"><code>sync's wait_for_any(jobs)</code></a></h3>
+          <p>the first of the tasks to end (the first in the list, if several have)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>jobs</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to wait_for_any with jobs</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L235">sync.moth line 235</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> square <span class="k">with</span> n
+    <span class="k">return</span> n * n
+<span class="k">end</span>
+<span class="k">set</span> jobs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">start</span> square(<span class="n">4</span>)), (<span class="k">start</span> square(<span class="n">5</span>))
+<span class="k">say</span> (<span class="k">wait</span> <span class="k">for</span> sync's wait_for_any(jobs))</code></pre><pre class="says"><code>16</code></pre></div>
+        </section>
+        <section class="fn" id="ended_count">
+          <h3><a href="#ended_count"><code>sync's ended_count(jobs)</code></a></h3>
+          <p>how many of the tasks have ended</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>jobs</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ended_count with jobs</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L250">sync.moth line 250</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> square <span class="k">with</span> n
+    <span class="k">return</span> n * n
+<span class="k">end</span>
+<span class="k">set</span> jobs <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">start</span> square(<span class="n">4</span>)), (<span class="k">start</span> square(<span class="n">5</span>))
+<span class="k">say</span> sync's ended_count(jobs)</code></pre><pre class="says"><code>2</code></pre></div>
+        </section>
+        <section class="fn" id="run_each">
+          <h3><a href="#run_each"><code>sync's run_each(work, things)</code></a></h3>
+          <p>the function called with each thing, each in a task of its own: what each gave, in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>work</code></li><li><code>things</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_each with work, things</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L261">sync.moth line 261</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> square <span class="k">with</span> n
+    <span class="k">return</span> n * n
+<span class="k">end</span>
+<span class="k">say</span> sync's run_each(square, <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>)</code></pre><pre class="says"><code>[1, 4, 9]</code></pre></div>
+        </section>
+        <section class="fn" id="run_each_at_most">
+          <h3><a href="#run_each_at_most"><code>sync's run_each_at_most(work, things, n)</code></a></h3>
+          <p>as <a href="#run_each">run_each</a>, with at most n tasks running at once</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>work</code></li><li><code>things</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_each_at_most with work, things, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/sync.moth#L270">sync.moth line 270</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;sync.moth&quot;</span> <span class="k">as</span> sync
+<span class="k">to</span> add_up <span class="k">with</span> n
+    <span class="k">set</span> <span class="k">total</span> <span class="k">to</span> <span class="k">total</span> + n
+    <span class="k">return</span> n
+<span class="k">end</span>
+<span class="k">say</span> sync's run_each_at_most(add_up, (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>, <span class="n">6</span>, <span class="n">7</span>, <span class="n">8</span>, <span class="n">9</span>, <span class="n">10</span>), <span class="n">1</span>)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

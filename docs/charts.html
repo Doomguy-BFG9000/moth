@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>charts.moth · Moth's standard library</title>
+  <meta name="description" content="Charts written to files, as matplotlib's savefig makes them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>charts</em>.moth</h1>
+      <p>Charts written to files, as matplotlib's savefig makes them.</p>
+      <p class="use"><code>use "charts.moth" as charts</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="charts.moth's functions">
+      <h2>7 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#bar_chart">bar_chart</a></li><li><a href="#line_chart">line_chart</a></li><li><a href="#parts_chart">parts_chart</a></li><li><a href="#sized">sized</a></li><li><a href="#save">save</a></li><li><a href="#svg_of">svg_of</a></li><li><a href="#png_of">png_of</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Charts written to files, as matplotlib's savefig makes them: bars, lines, and one bar split into its parts, as SVG (sharp at any size, for pages and documents; each mark says its value when the mouse is on it) or as PNG, from labels and numbers. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> months <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Jan&quot;</span>, <span class="s">&quot;Feb&quot;</span>, <span class="s">&quot;Mar&quot;</span>, <span class="s">&quot;Apr&quot;</span>
+<span class="k">set</span> sales <span class="k">to</span> charts's bar_chart(<span class="s">&quot;Sales by month&quot;</span>, months, <span class="k">list</span> <span class="k">of</span> <span class="n">120</span>, <span class="n">95</span>, <span class="n">140</span>, <span class="n">160</span>)
+charts's save(sales, <span class="s">&quot;sales.svg&quot;</span>)                     <span class="c"># or &quot;sales.png&quot;, by the name's end</span>
+<span class="k">set</span> both <span class="k">to</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;2025&quot;</span> <span class="k">is</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">120</span>, <span class="n">95</span>, <span class="n">140</span>, <span class="n">160</span>), <span class="s">&quot;2026&quot;</span> <span class="k">is</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">130</span>, <span class="n">120</span>, <span class="n">150</span>, <span class="n">180</span>)
+charts's save(charts's line_chart(<span class="s">&quot;Sales&quot;</span>, months, both), <span class="s">&quot;sales-lines.png&quot;</span>)   <span class="c"># a line for each</span>
+charts's save(charts's parts_chart(<span class="s">&quot;Where it went&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Rent&quot;</span>, <span class="s">&quot;Food&quot;</span>, <span class="s">&quot;Fun&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">50</span>, <span class="n">30</span>, <span class="n">20</span>), <span class="s">&quot;budget.png&quot;</span>)</code></pre></div>
+          <p>A dictionary of lists is a series for each key, up to 8, each its own colour in a fixed order, with a legend; a line chart names its lines at their ends too, up to 4. <a href="#sized">sized</a>(chart, width, height) is the same chart another size (720 by 440 to begin with); <a href="#svg_of">svg_of</a> and <a href="#png_of">png_of</a> give the file's text and bytes.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="bar_chart">
+          <h3><a href="#bar_chart"><code>charts's bar_chart(title, labels, values)</code></a></h3>
+          <p>a bar chart: a title, the labels along the bottom, and the values, a list of numbers or a dictionary of lists, a series for each key</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>title</code></li><li><code>labels</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to bar_chart with title, labels, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L229">charts.moth line 229</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> <span class="k">chart</span> <span class="k">to</span> charts's sized(charts's bar_chart(<span class="s">&quot;Up&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="n">160</span>, <span class="n">120</span>)
+<span class="k">say</span> <span class="k">chart</span></code></pre><pre class="says"><code>(record with kind &quot;bars&quot;, title &quot;Up&quot;, labels [&quot;a&quot;, &quot;b&quot;], series [(record with name &quot;Up&quot;, values [1, 2])], width 160, height 120)</code></pre></div>
+        </section>
+        <section class="fn" id="line_chart">
+          <h3><a href="#line_chart"><code>charts's line_chart(title, labels, values)</code></a></h3>
+          <p>a line chart: a title, the labels along the bottom, and the values, a list of numbers or a dictionary of lists, a line for each key</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>title</code></li><li><code>labels</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to line_chart with title, labels, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L235">charts.moth line 235</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> months <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Jan&quot;</span>, <span class="s">&quot;Feb&quot;</span>, <span class="s">&quot;Mar&quot;</span>, <span class="s">&quot;Apr&quot;</span>
+<span class="k">set</span> both <span class="k">to</span> <span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;2025&quot;</span> <span class="k">is</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">120</span>, <span class="n">95</span>, <span class="n">140</span>, <span class="n">160</span>), <span class="s">&quot;2026&quot;</span> <span class="k">is</span> (<span class="k">list</span> <span class="k">of</span> <span class="n">130</span>, <span class="n">120</span>, <span class="n">150</span>, <span class="n">180</span>)
+charts's save(charts's line_chart(<span class="s">&quot;Sales&quot;</span>, months, both), <span class="s">&quot;sales-lines.png&quot;</span>)   <span class="c"># a line for each</span></code></pre></div>
+        </section>
+        <section class="fn" id="parts_chart">
+          <h3><a href="#parts_chart"><code>charts's parts_chart(title, labels, values)</code></a></h3>
+          <p>one whole split into its parts, a segment each, as wide as its share</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>title</code></li><li><code>labels</code></li><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to parts_chart with title, labels, values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L240">charts.moth line 240</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> parts <span class="k">to</span> charts's svg_of(charts's parts_chart(<span class="s">&quot;Split&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;A&quot;</span>, <span class="s">&quot;B&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>))
+<span class="k">say</span> parts</code></pre><pre class="says"><code>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;720&quot; height=&quot;200&quot; viewBox=&quot;0 0 720 200&quot; font-family=&quot;DejaVu Sans, Verdana, sans-serif&quot;&gt;
+&lt;title&gt;Split&lt;/title&gt;
+&lt;rect width=&quot;720&quot; height=&quot;200&quot; fill=&quot;#fcfcfb&quot;/&gt;
+&lt;text x=&quot;16&quot; y=&quot;30&quot; font-size=&quot;16&quot; font-weight=&quot;bold&quot; fill=&quot;#0b0b0b&quot; text-anchor=&quot;start&quot;&gt;Split&lt;/text&gt;
+&lt;rect x=&quot;16&quot; y=&quot;42&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot; fill=&quot;#2a78d6&quot;&gt;&lt;/rect&gt;
+&lt;text x=&quot;34&quot; y=&quot;52&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;A&lt;/text&gt;
+&lt;rect x=&quot;63&quot; y=&quot;42&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot; fill=&quot;#eb6834&quot;&gt;&lt;/rect&gt;
+&lt;text x=&quot;81&quot; y=&quot;52&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;B&lt;/text&gt;
+&lt;rect x=&quot;16&quot; y=&quot;88&quot; width=&quot;514&quot; height=&quot;40&quot; rx=&quot;0&quot; fill=&quot;#2a78d6&quot;&gt;&lt;title&gt;A: 3 (75%)&lt;/title&gt;&lt;/rect&gt;
+&lt;text x=&quot;16&quot; y=&quot;148&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;75%&lt;/text&gt;
+&lt;rect x=&quot;532&quot; y=&quot;88&quot; width=&quot;172&quot; height=&quot;40&quot; rx=&quot;0&quot; fill=&quot;#eb6834&quot;&gt;&lt;title&gt;B: 1 (25%)&lt;/title&gt;&lt;/rect&gt;
+&lt;text x=&quot;532&quot; y=&quot;148&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;25%&lt;/text&gt;
+&lt;/svg&gt;
+</code></pre></div>
+        </section>
+        <section class="fn" id="sized">
+          <h3><a href="#sized"><code>charts's sized(chart, width, height)</code></a></h3>
+          <p>the same chart, another size in pixels (720 by 440 to begin with)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>chart</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sized with chart, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L259">charts.moth line 259</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> <span class="k">chart</span> <span class="k">to</span> charts's sized(charts's bar_chart(<span class="s">&quot;Up&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="n">160</span>, <span class="n">120</span>)
+<span class="k">say</span> <span class="k">chart</span></code></pre><pre class="says"><code>(record with kind &quot;bars&quot;, title &quot;Up&quot;, labels [&quot;a&quot;, &quot;b&quot;], series [(record with name &quot;Up&quot;, values [1, 2])], width 160, height 120)</code></pre></div>
+        </section>
+        <section class="fn" id="save">
+          <h3><a href="#save"><code>charts's save(chart, path)</code></a></h3>
+          <p>the chart written to a file: .svg or .png, by the name's end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>chart</code></li><li><code>path</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to save with chart, path</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L264">charts.moth line 264</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> months <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> <span class="s">&quot;Jan&quot;</span>, <span class="s">&quot;Feb&quot;</span>, <span class="s">&quot;Mar&quot;</span>, <span class="s">&quot;Apr&quot;</span>
+<span class="k">set</span> sales <span class="k">to</span> charts's bar_chart(<span class="s">&quot;Sales by month&quot;</span>, months, <span class="k">list</span> <span class="k">of</span> <span class="n">120</span>, <span class="n">95</span>, <span class="n">140</span>, <span class="n">160</span>)
+charts's save(sales, <span class="s">&quot;sales.svg&quot;</span>)                     <span class="c"># or &quot;sales.png&quot;, by the name's end</span></code></pre></div>
+        </section>
+        <section class="fn" id="svg_of">
+          <h3><a href="#svg_of"><code>charts's svg_of(chart)</code></a></h3>
+          <p>the chart as an SVG file's text: sharp at any size, each mark saying its value when the mouse is on it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>chart</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to svg_of with chart</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L675">charts.moth line 675</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> parts <span class="k">to</span> charts's svg_of(charts's parts_chart(<span class="s">&quot;Split&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;A&quot;</span>, <span class="s">&quot;B&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">3</span>, <span class="n">1</span>))
+<span class="k">say</span> parts</code></pre><pre class="says"><code>&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;720&quot; height=&quot;200&quot; viewBox=&quot;0 0 720 200&quot; font-family=&quot;DejaVu Sans, Verdana, sans-serif&quot;&gt;
+&lt;title&gt;Split&lt;/title&gt;
+&lt;rect width=&quot;720&quot; height=&quot;200&quot; fill=&quot;#fcfcfb&quot;/&gt;
+&lt;text x=&quot;16&quot; y=&quot;30&quot; font-size=&quot;16&quot; font-weight=&quot;bold&quot; fill=&quot;#0b0b0b&quot; text-anchor=&quot;start&quot;&gt;Split&lt;/text&gt;
+&lt;rect x=&quot;16&quot; y=&quot;42&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot; fill=&quot;#2a78d6&quot;&gt;&lt;/rect&gt;
+&lt;text x=&quot;34&quot; y=&quot;52&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;A&lt;/text&gt;
+&lt;rect x=&quot;63&quot; y=&quot;42&quot; width=&quot;12&quot; height=&quot;12&quot; rx=&quot;2&quot; fill=&quot;#eb6834&quot;&gt;&lt;/rect&gt;
+&lt;text x=&quot;81&quot; y=&quot;52&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;B&lt;/text&gt;
+&lt;rect x=&quot;16&quot; y=&quot;88&quot; width=&quot;514&quot; height=&quot;40&quot; rx=&quot;0&quot; fill=&quot;#2a78d6&quot;&gt;&lt;title&gt;A: 3 (75%)&lt;/title&gt;&lt;/rect&gt;
+&lt;text x=&quot;16&quot; y=&quot;148&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;75%&lt;/text&gt;
+&lt;rect x=&quot;532&quot; y=&quot;88&quot; width=&quot;172&quot; height=&quot;40&quot; rx=&quot;0&quot; fill=&quot;#eb6834&quot;&gt;&lt;title&gt;B: 1 (25%)&lt;/title&gt;&lt;/rect&gt;
+&lt;text x=&quot;532&quot; y=&quot;148&quot; font-size=&quot;13&quot; fill=&quot;#52514e&quot; text-anchor=&quot;start&quot;&gt;25%&lt;/text&gt;
+&lt;/svg&gt;
+</code></pre></div>
+        </section>
+        <section class="fn" id="png_of">
+          <h3><a href="#png_of"><code>charts's png_of(chart)</code></a></h3>
+          <p>the chart as a PNG file's bytes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>chart</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to png_of with chart</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/charts.moth#L905">charts.moth line 905</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;charts.moth&quot;</span> <span class="k">as</span> charts
+<span class="k">set</span> <span class="k">chart</span> <span class="k">to</span> charts's sized(charts's bar_chart(<span class="s">&quot;Up&quot;</span>, (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>), <span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="n">160</span>, <span class="n">120</span>)
+<span class="k">set</span> drawn <span class="k">to</span> images's image_from(charts's png_of(<span class="k">chart</span>))
+<span class="k">say</span> drawn</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

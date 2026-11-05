@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yaml.moth · Moth's standard library</title>
+  <meta name="description" content="YAML, the settings files of CI, Kubernetes, Docker Compose and many more.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>yaml</em>.moth</h1>
+      <p>YAML, the settings files of CI, Kubernetes, Docker Compose and many more.</p>
+      <p class="use"><code>use "yaml.moth" as yaml</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="yaml.moth's functions">
+      <h2>3 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#read_yaml">read_yaml</a></li><li><a href="#read_yaml_all">read_yaml_all</a></li><li><a href="#yaml_of">yaml_of</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/yaml.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>YAML, the settings files of CI, Kubernetes, Docker Compose and many more: read into dictionaries, lists and values, and written back, as Python's yaml.safe_load and yaml.safe_dump do. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;yaml.moth&quot;</span> <span class="k">as</span> yaml
+<span class="k">set</span> settings <span class="k">to</span> yaml's read_yaml(<span class="k">read</span> <span class="s">&quot;settings.yaml&quot;</span>)
+<span class="k">say</span> <span class="k">item</span> <span class="s">&quot;port&quot;</span> <span class="k">of</span> <span class="k">item</span> <span class="s">&quot;server&quot;</span> <span class="k">of</span> settings
+<span class="k">for</span> <span class="k">each</span> step <span class="k">in</span> <span class="k">item</span> <span class="s">&quot;steps&quot;</span> <span class="k">of</span> settings
+    <span class="k">say</span> step
+<span class="k">end</span>
+<span class="k">set</span> documents <span class="k">to</span> yaml's read_yaml_all(<span class="k">read</span> <span class="s">&quot;all.yaml&quot;</span>)   <span class="c"># each document, after its ---, in a list</span>
+<span class="k">write</span> yaml's yaml_of(settings) <span class="k">to</span> <span class="s">&quot;settings.yaml&quot;</span></code></pre></div>
+          <p>Mappings become dictionaries, their keys text as written; sequences become lists; and scalars are read as YAML 1.2 has them: true and false are yes and no; null, ~ and nothing at all are nothing; 12, -3, 0x1F, 0o17, 1.5, 6.02e23 and .inf are numbers; everything else is text, quoted or not, so <code>on</code>, <code>no</code>, <code>1.2.3</code> and <code>2026-11-04</code> stay text. Both styles: block (indented, a <code>- </code> before each item) and flow ([a, b] and {a: 1}); 'single' and &quot;double&quot; quotes, with \n, \t, é and YAML's other escapes; | and &gt; for text of many lines, with - and + for its last line ends; # comments; documents split by --- and ended by ...; anchors (&amp;base), aliases (*base) and merges (&lt;&lt;: *base); and the tags !!str, !!int, !!float, !!bool, !!null and !!binary (bytes), while others, as !Ref, are passed over. A file that isn't YAML is a <code>fail with</code> that says which line and why: catch it with <code>try</code>.</p>
+          <p><a href="#yaml_of">yaml_of</a> writes a dictionary, list or value as block YAML that reads back as it was: text quoted where it would read as something else, text of many lines after a |, bytes as !!binary, records as mappings.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="read_yaml">
+          <h3><a href="#read_yaml"><code>yaml's read_yaml(words)</code></a></h3>
+          <p>the first document's value, or nothing for a file with none</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_yaml with words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/yaml.moth#L42">yaml.moth line 42</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;yaml.moth&quot;</span> <span class="k">as</span> yaml
+<span class="k">to</span> doc <span class="k">with</span> parts
+    <span class="k">return</span> (<span class="k">join</span> parts <span class="k">with</span> <span class="s">&quot;\n&quot;</span>) + <span class="s">&quot;\n&quot;</span>
+<span class="k">end</span>
+<span class="k">say</span> yaml's read_yaml(doc(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;- Mark McGwire&quot;</span>, <span class="s">&quot;- Sammy Sosa&quot;</span>, <span class="s">&quot;- Ken Griffey&quot;</span>))</code></pre><pre class="says"><code>[&quot;Mark McGwire&quot;, &quot;Sammy Sosa&quot;, &quot;Ken Griffey&quot;]</code></pre></div>
+        </section>
+        <section class="fn" id="read_yaml_all">
+          <h3><a href="#read_yaml_all"><code>yaml's read_yaml_all(words)</code></a></h3>
+          <p>every document's value, in order</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to read_yaml_all with words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/yaml.moth#L51">yaml.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;yaml.moth&quot;</span> <span class="k">as</span> yaml
+<span class="k">to</span> doc <span class="k">with</span> parts
+    <span class="k">return</span> (<span class="k">join</span> parts <span class="k">with</span> <span class="s">&quot;\n&quot;</span>) + <span class="s">&quot;\n&quot;</span>
+<span class="k">end</span>
+<span class="k">set</span> two <span class="k">to</span> yaml's read_yaml_all(doc(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;# Ranking of 1998 home runs&quot;</span>, <span class="s">&quot;---&quot;</span>, <span class="s">&quot;- Mark McGwire&quot;</span>, <span class="s">&quot;- Sammy Sosa&quot;</span>, <span class="s">&quot;&quot;</span>, <span class="s">&quot;# Team ranking&quot;</span>, <span class="s">&quot;---&quot;</span>, <span class="s">&quot;- Chicago Cubs&quot;</span>))
+<span class="k">say</span> two</code></pre><pre class="says"><code>[[&quot;Mark McGwire&quot;, &quot;Sammy Sosa&quot;], [&quot;Chicago Cubs&quot;]]</code></pre></div>
+        </section>
+        <section class="fn" id="yaml_of">
+          <h3><a href="#yaml_of"><code>yaml's yaml_of(value)</code></a></h3>
+          <p>a value as block YAML, ending with a line end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>value</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to yaml_of with value</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/yaml.moth#L1293">yaml.moth line 1293</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;yaml.moth&quot;</span> <span class="k">as</span> yaml
+<span class="k">set</span> items_list <span class="k">to</span> <span class="k">list</span> <span class="k">of</span> (<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;name&quot;</span> <span class="k">is</span> <span class="s">&quot;x&quot;</span>, <span class="s">&quot;tags&quot;</span> <span class="k">is</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="s">&quot;b&quot;</span>)), (<span class="k">list</span> <span class="k">of</span> <span class="n">1</span>, <span class="n">2</span>), <span class="k">empty</span> <span class="k">list</span>, <span class="k">empty</span> <span class="k">dictionary</span>
+<span class="k">say</span> yaml's yaml_of(items_list)</code></pre><pre class="says"><code>- name: x
+  tags:
+    - a
+    - b
+- - 1
+  - 2
+- []
+- {}
+</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

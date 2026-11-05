@@ -226,10 +226,12 @@ to onnx_info with info
     return record with name "", type type, shape shape, code code
 end
 
+# what the model takes, each a record: name, type ("float", "double" or "int64") and shape
 to inputs with model
     return model's inputs
 end
 
+# what the model gives, each a record: name, type and shape, as inputs has them
 to outputs with model
     return model's outputs
 end

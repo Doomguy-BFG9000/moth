@@ -232,6 +232,7 @@ end
 
 # ---------- what a program uses ----------
 
+# a + b
 to plus with a, b
     set x to read_big(a)
     set y to read_big(b)
@@ -244,11 +245,13 @@ to plus with a, b
     return written_big(made_big(negative of y, take_parts(parts of y, parts of x)))
 end
 
+# a - b
 to minus with a, b
     set y to read_big(b)
     return plus(a, written_big(made_big(not negative of y, parts of y)))
 end
 
+# a times b
 to times with a, b
     set x to read_big(a)
     set y to read_big(b)
@@ -273,10 +276,12 @@ to divided_whole with a, b
     return record with times written_big(quotient), left written_big(left)
 end
 
+# a divided by b, a whole number, rounded down as Python's // does: divided(-7, 2) is -4
 to divided with a, b
     return times of divided_whole(a, b)
 end
 
+# what's left after dividing a by b, as Python's % has it, with b's sign: remainder(-7, 2) is 1
 to remainder with a, b
     return left of divided_whole(a, b)
 end
@@ -326,6 +331,7 @@ to absolute with a
     return written_big(made_big(no, parts of x))
 end
 
+# a with its sign the other way
 to negated with a
     set x to read_big(a)
     return written_big(made_big(not negative of x, parts of x))

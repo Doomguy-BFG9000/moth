@@ -18,6 +18,17 @@
 #   set ship to game's image("ship.png")
 #   game's run_game(update, show)
 #
+# And in update, or show:
+#
+#   if game's mouse_down()                  # where it is: mouse_x() and mouse_y()
+#       game's circle(canvas, game's mouse_x(), game's mouse_y(), 10)
+#   end
+#   game's line(canvas, 0, 400, 640, 400)
+#   game's draw_image_sized(canvas, ship, 300, 200, 64, 48)
+#   game's sound("boom.wav")
+#   say game's frames()                     # so far
+#   game's stop_game()                      # the window closed, which ends run_game
+#
 # update is called first, then show, each frame. on_key's handler is given each key as it's pressed, and
 # on_click's where the mouse was clicked; stop_game closes the window, which ends run_game.
 
@@ -75,6 +86,7 @@ to run_game with update, show
     ui's run()
 end
 
+# the game's window closed, which ends run_game
 to stop_game
     ui's close(game_window)
 end
@@ -84,26 +96,33 @@ to frames
     return game_frames
 end
 
+# whether a key is held down in the game's window: "Left", "Right", "Up", "Down", "Space", "Enter", "Escape",
+# "Shift", "Ctrl", "Alt", "Tab", "Backspace", "Delete", a letter, a digit, or F1 to F12
 to key_down with name
     return ui's key_down(game_board, name)
 end
 
+# a handler for each key pressed in the game's window, given the key's name, as key_down knows them
 to on_key with handler
     ui's on_key(game_board, handler)
 end
 
+# a handler for a click in the game's window, given where: x and y
 to on_click with handler
     ui's on_click(game_board, handler)
 end
 
+# how far across the window the mouse was last, in pixels from its left
 to mouse_x
     return ui's mouse_x(game_board)
 end
 
+# how far down the window the mouse was last, in pixels from its top
 to mouse_y
     return ui's mouse_y(game_board)
 end
 
+# whether the mouse's button is down in the window
 to mouse_down
     return ui's mouse_down(game_board)
 end
@@ -113,10 +132,12 @@ to image with file
     return ui's load_image(file)
 end
 
+# a picture image() gave drawn with its top left at x, y, at its own size
 to draw_image with canvas, picture, x, y
     ui's draw_image(canvas, picture, x, y)
 end
 
+# a picture image() gave drawn with its top left at x, y, made `width` by `height`
 to draw_image_sized with canvas, picture, x, y, width, height
     ui's draw_image_sized(canvas, picture, x, y, width, height)
 end
@@ -126,22 +147,28 @@ to sound with file
     ui's play_sound(file)
 end
 
+# what's drawn next is this colour: red, green and blue, each from 0 to 255
 to colour with canvas, red, green, blue
     ui's colour(canvas, red, green, blue)
 end
 
+# a filled rectangle, its top left at x, y, `width` by `height`, in the colour chosen last
 to rectangle with canvas, x, y, width, height
     ui's rectangle(canvas, x, y, width, height)
 end
 
+# a filled circle, its middle at x, y, so many pixels across from the middle to the edge, in the colour chosen
+# last
 to circle with canvas, x, y, radius
     ui's circle(canvas, x, y, radius)
 end
 
+# a line from x1, y1 to x2, y2, in the colour chosen last
 to line with canvas, x1, y1, x2, y2
     ui's line(canvas, x1, y1, x2, y2)
 end
 
+# words with their top left at x, y, in the system's own font
 to words with canvas, text, x, y
     ui's words(canvas, text, x, y)
 end
