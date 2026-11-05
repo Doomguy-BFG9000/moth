@@ -372,7 +372,8 @@ bytes and dictionaries:
   as Python's multiprocessing does: `cores's each_at_once(work, items)`, in
   copies of the program, each a process of its own, sharing the items out in
   turn so slow ones spread evenly; a `cores's work_here(work)` line after the
-  functions makes a copy start on its part at once.
+  functions makes a copy start on its part at once. Workers (`start work(x) on
+  another core`) do the same inside one program.
 - [`sockets.moth`](tools/sockets.moth) talks over a network as Python's
   `socket` does: `connect("example.com", 80)`, `listen(9000)` and `accept`,
   `send`, `receive`, `receive_line`, `receive_all`, `finish_sending`,
@@ -552,7 +553,13 @@ bytes and dictionaries:
 - [`server.moth`](tools/server.moth) is a web server: `web's serve(8080, answer)`
   gives each request (its method, path, query, headers and body) to a function
   of the program's, which gives back a page, JSON, a file, or a record with its
-  status, body, type and headers, on Windows' and Linux's own sockets.
+  status, body, type and headers, on Windows' and Linux's own sockets. It
+  serves many connections at once on one thread, so a slow client holds up no
+  one, keeps them open for the next request (HTTP/1.1 keep-alive), and has
+  limits on how long a request takes to arrive and how big it is
+  (`set_timeout`, `set_idle_timeout`, `set_most_bytes`, `set_most_connections`);
+  `web's serve_on_workers(8080, answer, 4)` answers on 4 workers, each on a
+  core of its own (0 for one a core).
 - [`tasks.moth`](tools/tasks.moth) runs work in the background: another
   program, or this one again with other arguments (`start_self`), left to run
   while the program, or its window, goes on; `done` says whether it has ended
@@ -825,6 +832,8 @@ set job to start count_to(1000000)          # a task: the call runs on a thread 
 say "counting..."                           # sharing the program's names, while the program goes on
 say wait for job                            # waits for it to end, and gives what it gave back
 say job has ended                           # yes: whether it's done, without waiting
+set w to start count_to(10) on another core # a worker: a core of its own, at the same moment,
+say wait for w                              # with copies of what it's given and of the program's names
 
 play note "C" for 0.5 seconds               # middle C; also "C#5", "Bb3", or "rest"
 play note 440 for 200 milliseconds          # or a pitch, in hertz
@@ -947,6 +956,13 @@ set name to choose a file to open           # or: to save; nothing if none is ch
   rest by its `kind`, and `fail with why` passes on one it doesn't handle.
   Tasks (`start`, `wait for`) are what async code is for; a generator is a
   function that adds to a list, or a record with its own `next` function.
+- **Every core:** `start work(x) on another core` runs the call on a worker,
+  a thread with memory of its own: it's given copies of `x` and of the
+  program's variables, changes them only for itself, and `wait for` gives a
+  copy of what it gave back, or fails with the mistake it ended with. Sharing
+  nothing, workers can't race, and in a program `moth build` makes they run
+  Moth at the same moment, on as many cores as there are (DESIGN §124). In
+  the playground a worker runs when it's started, as a task does.
 - **A record's own functions:** `rex's speak()`, where the program makes
   nothing else called `speak`, calls the function rex's `speak` field holds,
   with rex first. So records made by different functions can each answer the
@@ -1453,7 +1469,9 @@ calls that led there.
   controls, menus and keys, and its tabs, tables, progress bars, pictures and
   drawings; on Linux `tools/linux.moth` doing the same with GTK's, on CI's
   Xvfb display; `tools/ui.moth` on both; and `tools/server.moth` answering
-  another Moth program's reads and sends, on both; and `tools/tasks.moth`
+  another Moth program's reads and sends, on both, keeping connections open,
+  answering requests sent together, keeping its time and size limits, and
+  answering on workers; and `tools/tasks.moth`
   starting, asking about and stopping programs in the background, on both; and
   `moth build --icon --version --include`, a program moved away from its files
   reading them from inside itself, on both, and Windows' resources read back;
