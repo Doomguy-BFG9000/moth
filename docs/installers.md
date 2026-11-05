@@ -2,8 +2,8 @@
 
 Moth installs from six places. Four take a release as it is on GitHub, and two are files the release
 workflow adds to it. This page says what each is, where it lives, how it's tested, and what Samyak does by
-hand at each release, including the steps for sending Moth to winget. [DESIGN.md](../DESIGN.md) §127 and
-§128 have the reasons, and [verifying-releases.md](verifying-releases.md) says how a person checks what
+hand at each release, including the steps for sending Moth to winget. [DESIGN.md](../DESIGN.md) §128 and
+§129 have the reasons, and [verifying-releases.md](verifying-releases.md) says how a person checks what
 they downloaded.
 
 | Installer | File | What it installs | Tested by |

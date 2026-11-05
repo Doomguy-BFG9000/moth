@@ -76,6 +76,8 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   `wire.moth`. `s3.moth` keeps objects in S3 and the stores that speak its language, `jwt.moth` makes and
   checks JSON Web Tokens, `oauth.moth` signs a person in with OAuth 2 and PKCE, and `yaml.moth` reads and
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
+- **Fixes.** A package can use the standard library: `use "text.moth"` in a package, or in a file it uses,
+  is moth's own `text.moth` unless the package has one, so a package no longer needs copies of its own.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 

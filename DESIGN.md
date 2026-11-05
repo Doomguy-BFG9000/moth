@@ -5181,7 +5181,48 @@ engines stay: as the fallback, and as what the tests compare against.
   it replaces in-vscode.js, which needed MOTH_VSCODE=1 and an installed
   VS Code.
 
-## 127. Installers
+## 127. The standard library from a package
+
+- **Why.** A package couldn't use the standard library. `use "text.moth"`
+  in packages/datey/datey.moth names packages/datey/text.moth, from the
+  folder of the file that uses it (§60), and moth.moth's cli_sources_of
+  asked the standard library for a file by that name, which it hasn't. So
+  every package carried copies of the libraries it needed, and a file in a
+  folder of the program's own had the same trouble.
+- **The rule, kept.** SPEC.md's 10.1 and §74 already said it: a file is
+  found from the folder of the file that uses it, and if it isn't there, the
+  standard library's is used. So cli_sources_of now asks the library for the
+  name the `use` line gives in quotes (cli_uses_in keeps it beside the path),
+  not the path it makes. A file of the same name beside the file that uses
+  it still comes first: the package's own text.moth beats moth's, as the
+  program's beats it for the program. A file beside the program is the
+  program's alone, as it was: a package never saw it. `use the package` and
+  a name with a folder in it (`use "sub/text.moth"`) are never the
+  library's.
+- **A copy of its own.** The parsers ask for a file by its path from the
+  program's folder, so moth's text.moth goes to them as
+  packages/datey/text.moth, and a package's copy is its own, as the copy it
+  carried in its folder was: the same names, the same top level, and no
+  change to the parsers or engines. A mistake in it says it's in
+  packages/datey/text.moth, as one in moth's own text.moth says text.moth.
+- **Everywhere `use` is resolved.** Every command that reads a program's
+  files goes through cli_sources_of: run, build, `build --web` (whose page
+  holds the copies by those names), `build --target wasm`, test, debug,
+  profile, coverage, check, the shell, notebooks and the language server,
+  whose definitions and hovers now read a file as a run finds it.
+  machine.moth, wasm.moth and the JavaScript engines are given the files by
+  name and look nothing up themselves, and the playground fetches files
+  from its own site.
+- **Tested.** Through moth.exe: a package in a Git repository whose main
+  file uses text.moth and dates.moth, and a file of its own that uses them
+  too, added with `moth add`, then used by a program that has a text.moth of
+  its own: run, checked, built and run as a program of its own, built as a
+  page (which runs on the JavaScript engine and holds moth's copies under
+  the package's names), built as a WebAssembly module and run, and tested
+  with `moth test`; a json.moth in the package beating moth's; and a name
+  the library hasn't, still a mistake.
+
+## 128. Installers
 
 - **Why.** A release was two programs to download, rename and put on PATH by
   hand, and nothing a package manager could install. People on Windows reach
@@ -5191,7 +5232,7 @@ engines stay: as the fallback, and as what the tests compare against.
   or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
   the image's are `moth-linux` byte for byte, and winget, Scoop and the two
   scripts install the release's own download. So each is checked by the
-  release's own sums and signatures (§128), and the fixed point (§25) holds for
+  release's own sums and signatures (§129), and the fixed point (§25) holds for
   what people install, not only for what they download.
 - **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
   installer and the en-US locale) are written to schema 1.28.0, the one
@@ -5254,7 +5295,7 @@ engines stay: as the fallback, and as what the tests compare against.
 - **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
   same place as the program, so they catch a broken download, not a changed
   release. Checking a signature would mean installing cosign first; the
-  signatures are for people who want to check who made it (§128).
+  signatures are for people who want to check who made it (§129).
 - **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
   `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
   with its fields, and comes out the same twice; and install.sh, given a
@@ -5275,7 +5316,7 @@ engines stay: as the fallback, and as what the tests compare against.
   1.28 manifests but warns it doesn't know their schema header's address, and
   that warning alone is let through.
 
-## 128. Signed releases, attested, with an SBOM
+## 129. Signed releases, attested, with an SBOM
 
 - **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
   comes from the same place as the program, so anyone who could change one

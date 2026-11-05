@@ -1,6 +1,6 @@
 name: packaging
 
-# The installers in packaging/ (DESIGN.md §127), each used as a person would use it: winget's and Scoop's
+# The installers in packaging/ (DESIGN.md §128), each used as a person would use it: winget's and Scoop's
 # manifests against their schemas and the release they name, winget and Scoop installing moth on Windows (and
 # Scoop finding and writing the next version), the .deb installed on Debian and Ubuntu, the image running
 # programs, and install.sh and install.ps1 installing the real release and refusing a download whose sum isn't
