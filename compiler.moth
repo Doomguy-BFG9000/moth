@@ -138,9 +138,10 @@ to fits_text with c
 end
 
 # How many columns a character takes, counted as JavaScript counts them: 2 for the characters past the
-# first 65,536, which run from the first character below to the second.
+# first 65,536, which run from the first character below to the second, and are 4 bytes of UTF-8. Half of
+# one on its own sorts among them, but is 1 column, and becomes 3 bytes, those of the replacement character.
 to width with c
-    if c is at least "𐀀" and c is at most "􏿿"
+    if c is at least "𐀀" and c is at most "􏿿" and length of (c as bytes) is 4
         return 2
     end
     return 1
