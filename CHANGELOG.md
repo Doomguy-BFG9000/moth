@@ -6,6 +6,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
+- **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
+  [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
+  bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
+- **Fixed:** on the WebAssembly engine, a function that used a variable from outside it only in `ask`'s
+  question, `wait`'s amount or `play note`'s note or time found it had no value.
 - **Workers: every core.** `start work(x) on another core` runs the call on a worker, a thread with memory of
   its own, given copies of what it's called with and of the program's variables; `wait for` gives a copy of
   what it gave back, or fails with its mistake. In a program `moth build` makes, workers run at the same
