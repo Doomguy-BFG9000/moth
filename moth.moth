@@ -398,7 +398,7 @@ to cli_build_source with cli_path, cli_source, cli_target, cli_allowing, cli_int
     return yes
 end
 
-# `moth build fast.moth --library` (DESIGN §128): a shared library of the program's functions, for C and
+# `moth build fast.moth --library` (DESIGN §129): a shared library of the program's functions, for C and
 # anything that calls C (Python's ctypes): libfast.so for Linux, or fast.dll for Windows, beside the file, and
 # fast.h, which declares them for C; with --into, in that folder instead. 0, or 1 for a mistake in the program
 # or a file that can't be read or written.
