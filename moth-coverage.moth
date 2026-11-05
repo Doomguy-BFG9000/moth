@@ -1,4 +1,4 @@
-# What `moth coverage` builds into a program, in the debugger's place (DESIGN §93, §131), as Python's
+# What `moth coverage` builds into a program, in the debugger's place (DESIGN §93, §132), as Python's
 # coverage.py does: before each line of the program and of the files it uses, wants() counts it; when the
 # program ends, however it ends, finish() says, on the error output, how many of each file's lines with a
 # statement on them ran, and which didn't. It never stops the program. moth uses this file too, to say the same

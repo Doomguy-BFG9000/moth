@@ -695,7 +695,7 @@ end
 
 # ---------- coverage ----------
 # moth coverage builds moth-coverage.moth into a program, or each file of tests, in the debugger's place
-# (DESIGN §93, §131), and tells it what's wanted with lines at its end (see its top): for tests, to say how
+# (DESIGN §93, §132), and tells it what's wanted with lines at its end (see its top): for tests, to say how
 # many times each line ran, which moth adds up for every test's run (cli_count_coverage) and then says as the
 # watcher says a program's (cli_say_coverage). Neither says anything of moth's own copies of the standard
 # library, nor of the packages moth add fetched: only of the program's own files.

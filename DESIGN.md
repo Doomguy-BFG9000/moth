@@ -5098,7 +5098,6 @@ engines stay: as the fallback, and as what the tests compare against.
   `wasm.js`'s, which runs as the VM runs the program, and moth still builds
   itself into the same bytes.
 
-
 ## 126. The VS Code extension, ready to publish
 
 - **Why.** People find VS Code extensions in VS Code's Extensions view, from
@@ -5223,7 +5222,92 @@ engines stay: as the fallback, and as what the tests compare against.
   with `moth test`; a json.moth in the package beating moth's; and a name
   the library hasn't, still a mistake.
 
-## 128. Installers
+## 128. Measuring machine code before making it faster
+
+- **Why.** machine.moth already knows what each variable holds (§32), works
+  out what each function is given (§48), puts small functions in line (§63)
+  and reads lists and records where the code is (§64). What's left to make
+  faster had to be found by measuring, not guessed: so first the benchmarks
+  cover what they didn't, and the instructions are counted where they run.
+- **More benchmarks.** `npm run bench -- --big` had loops, lists, records,
+  a dictionary and joining text. It now also has calls the compiler can't
+  put in line (a function of four inputs that sets two variables first),
+  a function with a loop of its own (Collatz's steps), records made by
+  functions, text built two letters at a time, each letter of a text compared
+  with others, a grid read by `item c of item r of grid`, and a dictionary
+  whose keys are made as text. And a real program: moth, as bootstrap.mjs
+  makes it, building compiler.moth, 2,400 lines of Moth.
+- **Counting instructions.** A short run of machine code takes 10% more or
+  less from one run to the next, on this machine at least. The number of
+  instructions it runs is the same every time, so `node bench-count.mjs
+  program.moth` counts them with valgrind's callgrind and says how many ran
+  in each of the program's functions and each of the runtime's routines. It
+  builds the program with machine.moth on Node.js with a heap of 4 GB, not
+  64, which valgrind can't give a program, and keeps machine.moth's
+  assembler, for where each function and routine starts.
+- **Where the time goes.** moth building compiler.moth runs 3.58 billion
+  instructions. 12% are comparing two values with `is` (rt_equal and
+  rt_cmp_is), nearly always a text with a text the program wrote, as in `if
+  kind of node is "call"`: about 80 instructions, through two routines and
+  `repe cmpsb`, for what can't fail. 9.5% are `bit and` and the shifts
+  (rt_bits, rt_bit_and, rt_shift_right), which machine.moth's put32 and the
+  rest do for every byte they write: each calls rt_bits twice, about 60
+  instructions, to `and` two whole numbers. 22% is the collector and making
+  blocks, 6% the code kept out of the way for when something's unusual
+  (`add x to xs` with a list, among it), and the rest is spread out. In the
+  benchmarks: a call of `distance(i, 0, 0, i bit and 1023)` spends 58% of its
+  instructions on the `bit and`; comparing letters, 54% on `is`; Collatz's
+  steps, 43 instructions each, as `n / 2` makes its loop's variable a
+  fraction as far as the compiler knows; and primes, its 64-bit division,
+  which C's 32-bit one does in 24 ms to the 40 ms the 64-bit one takes.
+- **Where it starts.** On Linux, an Intel Xeon at 2.8 GHz with 4 cores, Node
+  22, machine code timed from start to finish, starting up included:
+
+  | `npm run bench` | Machine code |
+  |:--|--:|
+  | a program that only starts | 2.5 ms |
+  | fib(25), function calls | 3.1 ms |
+  | sum 1 to 1,000,000, a loop | 2.8 ms |
+  | primes up to 5,000, lists | 18 ms |
+  | 200,000 records, made and read | 14 ms |
+  | 1,000,000 bytes, filled and summed | 37 ms |
+  | 200,000 words counted, dictionary | 14 ms |
+  | recursion 10,000 deep | 3.1 ms |
+
+  With work big enough, starting up taken off (best of two runs of five):
+
+  | `npm run bench -- --big` | JIT | WebAssembly | Machine code |
+  |:--|--:|--:|--:|
+  | 2,000,000 records | 181 ms | 78 ms | 68 ms |
+  | list: 3,000,000 adds, then summed by item | 172 ms | 117 ms | 55 ms |
+  | list: `for each` over 3,000,000 | 205 ms | 117 ms | 53 ms |
+  | list: `set item` 5,000,000 times | 285 ms | 113 ms | 28 ms |
+  | dictionary: 2,000,000 counts | 246 ms | 163 ms | 104 ms |
+  | 300,000 records in a list | 139 ms | 131 ms | 37 ms |
+  | text: join 200,000 pieces | 70 ms | 89 ms | 20 ms |
+  | calls: 4 inputs, 3,000,000 times | 375 ms | 166 ms | 44 ms |
+  | calls: a loop in each, 300,000 times | 1,135 ms | 1,092 ms | 267 ms |
+  | records: 2 calls make 2, 1,000,000 times | 204 ms | 65 ms | 68 ms |
+  | text: 2 letters added, 1,000,000 times | 202 ms | 81 ms | 35 ms |
+  | text: 2,000,000 letters, each compared | 148 ms | 579 ms | 350 ms |
+  | list: a grid, item of item, 4,000,000 | 117 ms | 93 ms | 30 ms |
+  | dictionary: 300,000 keys made, set, read | 424 ms | 386 ms | 175 ms |
+  | moth building compiler.moth | | | 697 ms |
+
+  | `npm run versus` | C (gcc -O2) | Rust | Moth, machine code |
+  |:--|--:|--:|--:|
+  | fib(32): 7 million calls | 9 ms | 13 ms | 23 ms |
+  | adding 1 to 100,000,000 | 50 ms | 4 ms | 46 ms |
+  | primes up to 300,000 | 29 ms | 29 ms | 45 ms |
+  | 30,000,000 steps of decimal maths | 41 ms | 41 ms | 41 ms |
+
+  And counted: fib(32), 152 million instructions; primes, 282 million;
+  Collatz's steps, 1,432 million; the letters compared, 1,161 million; the
+  calls of four inputs, 573 million; moth building compiler.moth, 3,579
+  million. The sections after this one each say what they changed, from
+  these.
+
+## 129. Installers
 
 - **Why.** A release was two programs to download, rename and put on PATH by
   hand, and nothing a package manager could install. People on Windows reach
@@ -5233,7 +5317,7 @@ engines stay: as the fallback, and as what the tests compare against.
   or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
   the image's are `moth-linux` byte for byte, and winget, Scoop and the two
   scripts install the release's own download. So each is checked by the
-  release's own sums and signatures (§129), and the fixed point (§25) holds for
+  release's own sums and signatures (§130), and the fixed point (§25) holds for
   what people install, not only for what they download.
 - **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
   installer and the en-US locale) are written to schema 1.28.0, the one
@@ -5296,7 +5380,7 @@ engines stay: as the fallback, and as what the tests compare against.
 - **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
   same place as the program, so they catch a broken download, not a changed
   release. Checking a signature would mean installing cosign first; the
-  signatures are for people who want to check who made it (§129).
+  signatures are for people who want to check who made it (§130).
 - **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
   `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
   with its fields, and comes out the same twice; and install.sh, given a
@@ -5317,7 +5401,7 @@ engines stay: as the fallback, and as what the tests compare against.
   1.28 manifests but warns it doesn't know their schema header's address, and
   that warning alone is let through.
 
-## 129. Signed releases, attested, with an SBOM
+## 130. Signed releases, attested, with an SBOM
 
 - **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
   comes from the same place as the program, so anyone who could change one
@@ -5411,7 +5495,7 @@ engines stay: as the fallback, and as what the tests compare against.
   runs only on a real release, so it's checked step by step against the
   actions' documentation, and its first run is the next release's. The script
   was also run on the v1.11.0 tag, where it stopped as above.
-## 130. The standard library's reference
+## 131. The standard library's reference
 
 - **Why.** The standard library had grown to 49 libraries and 800 public functions, and the only way to learn
   one was to read its source: its opening comment, then the comment above each `to`, where there was one.
@@ -5458,7 +5542,7 @@ engines stay: as the fallback, and as what the tests compare against.
   no entry, inputs with kinds and defaults are read (`with on as yes or no or no`), and an example from the
   tests keeps the `set` and the `add` it needs, leaves out what it doesn't, and shows what it said.
 
-## 131. Coverage of tests, and LCOV
+## 132. Coverage of tests, and LCOV
 
 - **Why.** `moth coverage` (§93) said which lines of one run of a program
   ran. What people measure is their tests, as coverage.py does under pytest:
@@ -5524,7 +5608,7 @@ engines stay: as the fallback, and as what the tests compare against.
   with --lcov after them; lcov.info word for word; nothing left behind; and
   moth test as it was.
 
-## 132. Property-based testing
+## 133. Property-based testing
 
 A test says what one example gives. A property says what holds for every value of a sort: sorting twice is
 sorting once, JSON reads back what `as json` wrote, splitting text by commas and joining it with them gives it
@@ -5563,9 +5647,9 @@ QuickCheck do, and when one shows it doesn't hold, makes that value as simple as
   standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
   text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
   text.moth's split_by joining back.
-## 133. A cookbook, examples and exercises
+## 134. A cookbook, examples and exercises
 
-- **Why.** The reference (§130) says what each function does, and the Learn page teaches the language a lesson at
+- **Why.** The reference (§131) says what each function does, and the Learn page teaches the language a lesson at
   a time; neither shows a whole task done end to end, nor gives a learner problems to solve. Those are what a
   person new to a language looks for next, and what keeps documentation honest is running it.
 - **The cookbook** (`docs/cookbook/`) is made by `make-guides.mjs` from `guides/cookbook/*.md`: a `# title`, prose,
