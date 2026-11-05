@@ -7172,7 +7172,8 @@ to echo with x
     return x
 end
 `;
-const LIBRARY_C = String.raw`#include <stdio.h>
+const LIBRARY_C = String.raw`#define __USE_MINGW_ANSI_STDIO 1
+#include <stdio.h>
 #include <string.h>
 #include "work.h"
 #ifdef _WIN32
