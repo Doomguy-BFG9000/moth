@@ -200,6 +200,11 @@ end
 
 # a number as the program wrote it: digits, maybe a point, or 0x and 0b whole numbers
 to literal_bytes with written, at
+    return double_bytes(literal_number(written, at))
+end
+
+# the number itself
+to literal_number with written, at
     set chars to front's letters(written)
     if length of chars is at least 2 and item 1 of chars is "0" and (item 2 of chars is "x" or item 2 of chars is "b")
         set base to 16
@@ -217,9 +222,9 @@ to literal_bytes with written, at
                 not_yet(at, "a hex or binary number this big")
             end
         end
-        return double_bytes(v)
+        return v
     end
-    return double_bytes(number of written)
+    return number of written
 end
 
 # ---------- the assembler ----------
@@ -6726,20 +6731,22 @@ to emit_builtins with a
         ret(a)
     end
 
-    # `shift x left by n`, `shift x right by n`
+    # `shift x left by n`, `shift x right by n`. Right, the whole numbers rt_bits makes of them; left, as vm.js
+    # does it, x as it is, which rt_bits only checks, times 2^n: 3.0000000000000004 shifted left by 51 is
+    # 6755399441055745, as the engines have it, and a mistake if that's past 2^53 - 1
     for each way in list of "left", "right"
         set out to new_label(a)
         set big_shift to new_label(a)
         set zero_x to new_label(a)
         mark(a, "rt_shift_" + way)
         movsd_store(a, rip("keep"), xmm1)
+        movsd_store(a, rip("keep2"), xmm0)
         movapd(a, xmm1, xmm0)
         lea(a, r8, rip(text_object(a, "'shift'")))
         call_to(a, "rt_bits")
         test_rr(a, rax, rax)
         jcc(a, cc_ne, out)
         push_r(a, rcx)
-        movsd_store(a, rip("keep2"), xmm1)
         movsd_load(a, xmm1, rip("keep"))
         lea(a, r8, rip(text_object(a, "'shift ... by'")))
         call_to(a, "rt_bits")
@@ -6758,20 +6765,18 @@ to emit_builtins with a
             movq_xr(a, xmm0, rax)
             ret(a)
         else
-            test_rr(a, rdx, rdx)
-            jcc(a, cc_e, zero_x)
-            alui(a, "cmp", rcx, 53) # past 2^53 - 1: a mistake
-            jcc(a, cc_ae, big_shift)
-            mov_rr(a, rax, rdx)
-            shift_cl(a, "shl", rax)
-            mov_rr(a, r8, rax)
-            shift_cl(a, "shr", r8)
-            alu(a, "cmp", r8, rdx)
-            jcc(a, cc_ne, big_shift)
-            movi64(a, r8, bytes_of(9007199254740991))
-            alu(a, "cmp", rax, r8)
+            movsd_load(a, xmm0, rip("keep2"))
+            movq_rx(a, rax, xmm0)
+            shifti(a, "shl", rax, 1)
+            jcc(a, cc_e, zero_x) # 0 or -0: 0
+            alui(a, "cmp", rcx, 1023) # 2^n past the biggest double: x, at least 1 by now, times infinity
             jcc(a, cc_a, big_shift)
-            cvtsi2sd(a, xmm0, rax)
+            alui(a, "add", rcx, 1023)
+            shifti(a, "shl", rcx, 52)
+            movq_xr(a, xmm2, rcx)
+            sse_math(a, "*", xmm0, reg_at(xmm2))
+            ucomisd(a, xmm0, rip(number_place(a, double_bytes(9007199254740991))))
+            jcc(a, cc_a, big_shift)
             movi(a, rax, 0)
             ret(a)
             mark(a, zero_x)
@@ -41879,6 +41884,9 @@ to expr_kind with fc, e, known
     if what is "length"
         return "whole"
     end
+    if what is "builtin" and name of e is in bit_ops
+        return bits_kind(name of e, expr_kind(fc, item 1 of args of e, known))
+    end
     if what is "call"
         set put_in_line to inline_target(fc, e)
         if put_in_line is not nothing
@@ -42435,8 +42443,12 @@ to ga_expr with held, fc, e, known
         ga_expr(held, fc, subject of e, known)
         ga_expr(held, fc, index of e, known)
     else if what is "builtin"
+        set kinds to empty list
         for each part in args of e
-            ga_expr(held, fc, part, known)
+            add ga_expr(held, fc, part, known) to kinds
+        end
+        if name of e is in bit_ops
+            set made to bits_kind(name of e, item 1 of kinds)
         end
     else if what is "ask"
         ga_expr(held, fc, question of e, known)
@@ -43988,6 +44000,8 @@ to gen_expr with fc, e
         call_to(a, "rt_q_in")
         set measured to item (item 3 of item (amount_slot + 1) of unit_rows + 1) of measure_words
         kind_stub(fc, at of e, "'in " + unit_word + "' needs " + measured + ", not ")
+    else if what is "builtin" and name of e is in bit_ops
+        set made to gen_bits(fc, e)
     else if what is "builtin" and name of e is in builtin_routines
         if name of e is "uppercase" or name of e is "lowercase"
             set uses_case of st of fc to yes
@@ -44438,6 +44452,123 @@ to gen_negate with fc, e
     jmp_to(a, "rt_e_end")
     leave_cold(a, was)
     return "number"
+end
+
+# `bit and`, `bit or`, `bit xor`, `shift ... left by` and `shift ... right by` (DESIGN §127): right there when
+# both sides are whole numbers from 0 to 2^53 - 1, and a shift's distance is one it can go, in two to nine
+# instructions; anything else goes to the runtime, which looks at each side with rt_bits, about 60
+# instructions in all, and says what's wrong if something is. A whole number the program wrote on the right,
+# from 0 to 2^31 - 1, goes in the instruction itself. What it gives is a whole number.
+set bit_ops to dictionary where "bit and" is "and", "bit or" is "or", "bit xor" is "xor", "shift left" is "shl",
+    "shift right" is "shr"
+
+to gen_bits with fc, e
+    set a to a of fc
+    set op to item (name of e) of bit_ops
+    set left to item 1 of args of e
+    set right to item 2 of args of e
+    set slow to new_label(a)
+    set back to new_label(a)
+    set written to small_whole(st of fc, right)
+    if written is not nothing and ((op is "shr" and written is greater than 63) or (op is "shl" and written is greater than 52))
+        set written to nothing # a shift that far: the runtime's way
+    end
+    if written is not nothing
+        set kl to gen_expr(fc, left)
+        whole_into(a, rax, xmm0, kl, slow)
+        mov_rr(a, rdx, rax) # below 2^53, and for a shift left, below 2^53 once it's shifted
+        if op is "shl"
+            shifti(a, "shr", rdx, 53 - written)
+        else
+            shifti(a, "shr", rdx, 53)
+        end
+        jcc(a, cc_ne, slow)
+        if op is "shl" or op is "shr"
+            shifti(a, op, rax, written)
+        else
+            alui(a, op, rax, written)
+        end
+    else
+        set kinds to gen_pair(fc, left, right)
+        set kl to item 1 of kinds
+        whole_into(a, rax, xmm0, item 1 of kinds, slow)
+        whole_into(a, rcx, xmm1, item 2 of kinds, slow)
+        mov_rr(a, rdx, rax) # both below 2^53: a number below 0 has its top bit set
+        alu(a, "or", rdx, rcx)
+        shifti(a, "shr", rdx, 53)
+        jcc(a, cc_ne, slow)
+        if op is "shr"
+            alui(a, "cmp", rcx, 63)
+            jcc(a, cc_a, slow)
+            shift_cl(a, "shr", rax)
+        else if op is "shl" # no bit lost, and still below 2^53
+            alui(a, "cmp", rcx, 52)
+            jcc(a, cc_a, slow)
+            mov_rr(a, rdx, rax)
+            shift_cl(a, "shl", rdx)
+            mov_rr(a, r8, rdx)
+            shift_cl(a, "shr", r8)
+            alu(a, "cmp", r8, rax)
+            jcc(a, cc_ne, slow)
+            mov_rr(a, rax, rdx)
+            shifti(a, "shr", rdx, 53)
+            jcc(a, cc_ne, slow)
+        else
+            alu(a, op, rax, rcx)
+        end
+    end
+    cvtsi2sd(a, xmm0, rax)
+    set made to bits_kind(name of e, kl) # a shift left: x as it is, times 2^n (see rt_shift_left)
+    mark(a, back)
+    set was to enter_cold(a)
+    mark(a, slow) # the runtime's way, with both sides as they were
+    if written is not nothing
+        load_bits(a, xmm1, literal_bytes(value of right, at of right))
+    end
+    call_to(a, item (name of e) of builtin_routines)
+    test_rr(a, rax, rax)
+    jcc(a, cc_e, back)
+    stub_start(fc, at of e)
+    call_to(a, "rt_why_builtin")
+    jmp_to(a, "rt_e_end")
+    leave_cold(a, was)
+    return made
+end
+
+# what a bit operation gives, if the left side is of kind `kl`
+to bits_kind with name, kl
+    if name is "shift left" and kl is not "whole"
+        return "number"
+    end
+    return "whole"
+end
+
+# Register r gets xmm x as a whole number, if it is one; else on to `slow`. One known to be whole (or an
+# infinity, or NaN) needs no look: past 2^63, an infinity and NaN all come out as -2^63, which is below 0.
+# Uses xmm4.
+to whole_into with a, r, x, kind, slow
+    cvttsd2si(a, r, x)
+    if kind is not "whole"
+        cvtsi2sd(a, xmm4, r)
+        ucomisd(a, xmm4, reg_at(x))
+        jcc(a, cc_ne, slow)
+        jcc(a, cc_p, slow)
+    end
+end
+
+# a whole number from 0 to 2^31 - 1 the program wrote, or nothing
+to small_whole with st, e
+    if kind of e is not "value" or type of e is not "number"
+        return nothing
+    end
+    if literal_kind(st, value of e) is not "whole"
+        return nothing
+    end
+    set v to literal_number(value of e, at of e)
+    if v is at least 0 and v is less than 2147483648
+        return v
+    end
+    return nothing
 end
 
 to plural_of with n, word
