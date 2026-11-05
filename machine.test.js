@@ -7185,7 +7185,7 @@ test("moth.exe with nothing after it is the Moth shell, each entry a program wit
   }
 });
 
-// A program made a shared library (DESIGN §128): its functions called from C, through the C ABI, with values
+// A program made a shared library (DESIGN §129): its functions called from C, through the C ABI, with values
 // made, read and freed through the value API; mistakes given back, never ending the process; the top level
 // run once; calls from many threads at once, one at a time; and the library's own stack, as deep as a
 // program's, whatever stack C's thread has.
