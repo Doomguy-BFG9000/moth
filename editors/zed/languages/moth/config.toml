@@ -1,0 +1,14 @@
+# Moth in Zed (DESIGN §108): its files, comments, brackets and indenting, as the VS Code extension has them
+# (editors/vscode/language-configuration.json; editor.test.js says when they differ)
+name = "Moth"
+grammar = "moth"
+path_suffixes = ["moth"]
+line_comments = ["# "]
+tab_size = 4
+hard_tabs = false
+brackets = [
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+]
+increase_indent_pattern = "^\\s*(?:to|if|else|repeat|for|try|when|every|match|either way|kind|use the library)\\b[^#]*$"
+decrease_indent_pattern = "^\\s*(?:end|else|if it fails|either way)\\b"

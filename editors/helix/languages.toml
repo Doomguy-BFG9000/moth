@@ -1,0 +1,34 @@
+# Moth in Helix (DESIGN §108): put this in your languages.toml (~/.config/helix/languages.toml, or
+# %AppData%\helix\languages.toml on Windows), and queries/moth/highlights.scm in runtime/queries/moth/ beside
+# it; then `hx --grammar fetch` and `hx --grammar build` build the colours' grammar. See editors/README.md.
+
+[[language]]
+name = "moth"
+scope = "source.moth"
+file-types = ["moth"]
+roots = ["moth.packages"]
+comment-token = "#"
+indent = { tab-width = 4, unit = "    " }
+language-servers = ["moth"]
+
+[language-server.moth]
+command = "moth"
+args = ["lsp"]
+
+[[grammar]]
+name = "moth"
+source = { git = "https://github.com/samyyy2423/moth", rev = "0d4281a42eceee521ad953d832bb759fbfb38369", subpath = "editors/tree-sitter-moth" }
+
+# Moth's debugger (see editors/README.md): Node.js runs the debug adapter on `moth debug`. Take the # off these
+# lines, and put where this repository is in args.
+# [language.debugger]
+# name = "moth"
+# transport = "stdio"
+# command = "node"
+# args = ["/path/to/moth/editors/vscode/debug-adapter.js"]
+#
+# [[language.debugger.templates]]
+# name = "launch"
+# request = "launch"
+# completion = [{ name = "program", completion = "filename", default = "." }]
+# args = { program = "{0}" }
