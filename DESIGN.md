@@ -5097,7 +5097,91 @@ engines stay: as the fallback, and as what the tests compare against.
   `wasm.js`'s, which runs as the VM runs the program, and moth still builds
   itself into the same bytes.
 
-## 126. Installers
+
+## 126. The VS Code extension, ready to publish
+
+- **Why.** People find VS Code extensions in VS Code's Extensions view, from
+  the Visual Studio Marketplace, and editors built from VS Code (VSCodium,
+  Cursor, Gitpod) from Open VSX. The extension was a .vsix to make from the
+  repository, and it ran whatever `moth.path` said, `moth` by default.
+- **Finding moth.** find-moth.js, which needs no VS Code, looks where
+  `moth.path` says (the file, or the folder it's in; `~`, a path from the
+  workspace's folder, and the quotes Windows' "Copy as path" puts round one,
+  all taken), or else in each folder on the PATH, in order: `moth.exe` on
+  Windows, where the PATH is Path, split at `;`, with folders in quotes, and
+  `moth` on Linux, which must be marked as a program. It's looked for each
+  time it's needed, so one installed since is found, and the language server
+  starts again when `moth.path` changes. Run, Build, the debugger and moth
+  lsp all start the full path found, never a name a shell or Windows would
+  look for in the program's own folder first. Where there's none, one
+  warning says why (not on the PATH, not where moth.path says, or not marked
+  as a program), with **Get Moth**, which opens the releases, and **Don't
+  Show Again**, kept between sessions; Run, Build and Debug say it again, as
+  they can't do what was asked. Nothing waits for it to be answered. The
+  checker and tidying are the engine built in, so the problems, Format
+  Document, colours and snippets go on without moth.
+- **Folders not trusted.** `moth.path` is a restricted setting
+  (`untrustedWorkspaces: limited`): in VS Code's Restricted Mode a folder's
+  own settings can't say which program to run, and a moth.path that doesn't
+  start at the top is taken from the folder only once it's trusted.
+- **Run and Build as tasks.** A terminal whose program is moth closes the
+  moment the program ends, so what it said was gone at once. A task with a
+  ProcessExecution starts moth the same way, with nothing for a shell to
+  quote, but its terminal stays, says how it ended, and gives the program
+  its input for `ask`. `"type": "moth"` tasks in tasks.json are made the
+  same, from a task provider.
+- **The Marketplace's page.** The manifest has an icon (the site's lantern on
+  its cord and its moth flying to it, drawn in SVG, images/icon.svg, and made
+  a 128-pixel PNG by Chromium), the site's night as the banner, keywords,
+  the site as its homepage, issues as its bugs, no Q&A, and Education among
+  its categories. The README is for someone who has never heard of Moth:
+  what it is, how to get moth, then each feature with a picture taken in VS
+  Code. Its pictures are the repository's, by their full address, as vsce
+  would make a relative one point at the repository's top, not this folder,
+  so the .vsix holds none of them but the icon. e2e/screenshots.mjs takes
+  them again: VS Code on a display of Xvfb's, each scene put on it with
+  VS Code's API from its extension host, the screen taken by ImageMagick,
+  cut, and the GIFs made of its frames.
+- **Packing.** vsce, pinned with ovsx and @vscode/test-electron in a
+  package-lock.json of the extension's own, so the repository itself still
+  needs nothing installed. Its vscode:prepublish script copies the engine
+  into engine/, and .vscodeignore lets through only make-vsix.mjs's FILES:
+  23 files, about 180 KB. make-vsix.mjs stays, for a .vsix with nothing to
+  install, and check-package.mjs holds `vsce ls` and the .vsix to the same
+  list, the engine to the repository's, the manifest to package.json, the
+  README to pictures on the web, and the whole to under a megabyte.
+- **Publishing.** publish-extension.yml runs only by hand, and only from
+  main. Its first job packs the extension once, checks it and tests it in VS
+  Code; its second, the only one given the tokens or an identity, publishes
+  that same .vsix: to the Marketplace with VSCE_PAT and to Open VSX with
+  OVSX_PAT, each skipped with a notice where its secret isn't set. vsce and
+  ovsx read them from the environment. Azure DevOps retires the global
+  tokens the Marketplace takes on December 1, 2026, so where there's no
+  VSCE_PAT and the VSCE_TRUSTED_PUBLISHING variable is true, it publishes
+  with `vsce publish --oidc`, the Marketplace's Trusted Publishing, which
+  takes the run's own GitHub identity. docs/publishing-the-extension.md
+  says how to set each up. The extension's version is its own, 0.1.0.
+- **What it needs of moth.** Run, Build, questions and tasks work with
+  moth 1.11.0, the latest release; moth lsp and the debugger need a newer
+  one, so it's best published with Moth's next release.
+- **Tested.** editor.test.js: finding moth on Linux's paths, and on
+  Windows' (with a stand-in for the disk); the message, its buttons, Don't
+  Show Again kept, and nothing waiting for an answer; the server started
+  again with a new moth.path; Run, Build and a tasks.json task as tasks;
+  the .vsix's files, its licence the repository's, and .vscodeignore's list.
+  e2e/suite.js, in VS Code itself, on the extension as the .vsix has it, with
+  moth in a folder with spaces in its name and with none: it starts, a
+  broken file's problem, a problem as it's typed and its Quick Fix, Format
+  Document, the outline and Go to Definition, the snippets, and with moth,
+  Go to Definition into a used file, a hover and completion from moth lsp,
+  Build and Run (moth build's program made, both ending with 0, and the
+  output kept), a question answered in the terminal, a tasks.json task, and
+  the debugger stopped at a breakpoint with its variables. CI runs it in the
+  newest VS Code and in 1.75, the oldest the extension says it works in;
+  it replaces in-vscode.js, which needed MOTH_VSCODE=1 and an installed
+  VS Code.
+
+## 127. Installers
 
 - **Why.** A release was two programs to download, rename and put on PATH by
   hand, and nothing a package manager could install. People on Windows reach
@@ -5107,7 +5191,7 @@ engines stay: as the fallback, and as what the tests compare against.
   or `moth-linux` as it is and only renames it: the .deb's `/usr/bin/moth` and
   the image's are `moth-linux` byte for byte, and winget, Scoop and the two
   scripts install the release's own download. So each is checked by the
-  release's own sums and signatures (§127), and the fixed point (§25) holds for
+  release's own sums and signatures (§128), and the fixed point (§25) holds for
   what people install, not only for what they download.
 - **winget.** The three files of a version (`samyyy2423.Moth.yaml`, the
   installer and the en-US locale) are written to schema 1.28.0, the one
@@ -5170,7 +5254,7 @@ engines stay: as the fallback, and as what the tests compare against.
 - **Only the sum.** Both scripts check `SHA256SUMS.txt`, which comes from the
   same place as the program, so they catch a broken download, not a changed
   release. Checking a signature would mean installing cosign first; the
-  signatures are for people who want to check who made it (§127).
+  signatures are for people who want to check who made it (§128).
 - **Tested.** In `npm test` (`packaging.test.js`): the manifests are what
   `manifests.mjs` writes; the .deb holds `moth-linux` as it is, as root's,
   with its fields, and comes out the same twice; and install.sh, given a
@@ -5191,7 +5275,7 @@ engines stay: as the fallback, and as what the tests compare against.
   1.28 manifests but warns it doesn't know their schema header's address, and
   that warning alone is let through.
 
-## 127. Signed releases, attested, with an SBOM
+## 128. Signed releases, attested, with an SBOM
 
 - **Why.** A download's SHA-256 says it arrived whole, but `SHA256SUMS.txt`
   comes from the same place as the program, so anyone who could change one
