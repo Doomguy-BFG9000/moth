@@ -135,9 +135,11 @@ test("the editor indents after a line that opens a block, and takes it back at e
 // ---------- the extension, against a stand-in for VS Code ----------
 
 // a moth for the extension to find, in a folder with spaces in its name, as Windows' Program Files has: an
-// empty file marked as a program, since the stand-ins never run it
+// empty file marked as a program, since the stand-ins never run it; moth.exe on Windows, which is what the
+// extension looks for there
 const mothHome = mkdtempSync(join(tmpdir(), "moth-home-"));
-const fakeMoth = join(mothHome, "Program Files", "Moth", "moth");
+const MOTH_NAME = process.platform === "win32" ? "moth.exe" : "moth";
+const fakeMoth = join(mothHome, "Program Files", "Moth", MOTH_NAME);
 mkdirSync(join(mothHome, "Program Files", "Moth"), { recursive: true });
 writeFileSync(fakeMoth, "");
 chmodSync(fakeMoth, 0o755);
@@ -491,7 +493,7 @@ test("without moth, with a moth that has no moth lsp, or with moth.languageServe
     assert.deepEqual(server.seen.started.map((s) => s.command), settings.path === fakeMoth && settings.languageServer !== false ? [fakeMoth] : []);
     if (settings.path === nowhere) {
       // one message, that moth isn't where moth.path says, with a button to the releases
-      assert.deepEqual(seen.messages, [`moth.path says moth is at ${nowhere}, but it isn't there. Install Moth, or set moth.path to where moth is.`]);
+      assert.deepEqual(seen.messages, [`moth.path says moth is at ${nowhere}, but it isn't there. Install Moth, or set moth.path to where ${MOTH_NAME} is.`]);
       assert.deepEqual(seen.buttons, [["Get Moth", "Don't Show Again"]]);
     } else {
       assert.deepEqual(seen.messages, []); // nothing in the way: what happened is in the Moth output
@@ -605,6 +607,10 @@ test("moth is found where moth.path says, or on the PATH, as Linux and Windows w
     const env = (...dirs) => ({ PATH: ["", join(folder, "a folder"), ...dirs].join(":") });
     const linux = (setting, more = {}) => findMoth(setting, { platform: "linux", env: env(), home: folder, ...more });
 
+    // On Linux, with real files: a PATH's folders are split by ":", which a Windows path (C:\...) has in it,
+    // and "not runnable" is the file's x bit, which Windows doesn't keep; Windows' own rules are below, on
+    // made-up files, so they're checked on every system.
+    if (process.platform !== "win32") {
     // on the PATH: the first folder that has it, for an empty moth.path, or the old default, moth
     for (const setting of ["", undefined, "  ", "moth"]) assert.deepEqual(linux(setting, { env: env(join(folder, "my tools"), join(folder, "bin")) }), { file: first });
     assert.deepEqual(linux("", { env: env(join(folder, "bin"), join(folder, "my tools")) }), { file: second });
@@ -622,6 +628,7 @@ test("moth is found where moth.path says, or on the PATH, as Linux and Windows w
     assert.deepEqual(linux("my tools/moth"), { file: null, why: "not there", tried: "my tools/moth" }); // no folder to be from
     assert.deepEqual(linux(join(folder, "nowhere", "moth")), { file: null, why: "not there", tried: join(folder, "nowhere", "moth") });
     assert.deepEqual(linux(notMarked), { file: null, why: "not runnable", tried: notMarked });
+    }
 
     // Windows: moth.exe, Path, ; between folders, folders in quotes, \ or /, and spaces
     const files = new Set(["C:\\Program Files\\Moth\\moth.exe", "D:\\Other Tools\\moth.exe", "C:\\Users\\Sam\\moth\\moth.exe"]);
