@@ -1,0 +1,9 @@
+to is_pangram with sentence
+    set lowered to lowercase of sentence
+    for each c in split "abcdefghijklmnopqrstuvwxyz" by ""
+        if not (c is in lowered)
+            return no
+        end
+    end
+    return yes
+end

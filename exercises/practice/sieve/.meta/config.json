@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "sieve.moth"
+    ],
+    "test": [
+      "sieve.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Find the primes up to a number with Eratosthenes' sieve."
+}

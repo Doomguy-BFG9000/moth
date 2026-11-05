@@ -1,0 +1,7 @@
+to reversed_text with words
+    set made to ""
+    for each c in split words by ""
+        set made to c + made
+    end
+    return made
+end

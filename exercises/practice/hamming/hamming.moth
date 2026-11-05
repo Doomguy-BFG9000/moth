@@ -1,0 +1,3 @@
+to distance with first_strand, second_strand
+    fail with "delete this line, and count the differences"
+end

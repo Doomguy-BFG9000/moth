@@ -1,0 +1,15 @@
+to primes_up_to with limit
+    set crossed to empty dictionary
+    set primes to empty list
+    for each n from 2 to limit
+        if not (n is in crossed)
+            add n to primes
+            set multiple to n * n
+            repeat while multiple is at most limit
+                set item multiple of crossed to yes
+                set multiple to multiple + n
+            end
+        end
+    end
+    return primes
+end

@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "two_fer.moth"
+    ],
+    "test": [
+      "two_fer.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Share one for you and one for me, with a name that can be left out."
+}

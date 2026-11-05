@@ -1,0 +1,16 @@
+to two_digits with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+to clock_at with hours, minutes
+    set total to remainder of (hours * 60 + minutes) divided by 1440
+    set whole_hours to ((total / 60) rounded down)
+    return two_digits(whole_hours) + ":" + two_digits(total - whole_hours * 60)
+end
+
+to plus_minutes with hours, minutes, more
+    return clock_at(hours, minutes + more)
+end

@@ -1,0 +1,17 @@
+use "reverse_string.moth" as exercise
+
+to test_empty
+    expect exercise's reversed_text("") is ""
+end
+
+to test_a_word
+    expect exercise's reversed_text("robot") is "tobor"
+end
+
+to test_a_sentence
+    expect exercise's reversed_text("I'm hungry!") is "!yrgnuh m'I"
+end
+
+to test_a_palindrome
+    expect exercise's reversed_text("racecar") is "racecar"
+end

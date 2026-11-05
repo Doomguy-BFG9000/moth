@@ -1,0 +1,8 @@
+to is_armstrong with n
+    set digits to split ("" + n) by ""
+    set total to 0
+    for each d in digits
+        set total to total + ((number of d) to the power of (length of digits))
+    end
+    return total is n
+end

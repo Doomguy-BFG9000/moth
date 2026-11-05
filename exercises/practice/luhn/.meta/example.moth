@@ -1,0 +1,25 @@
+to is_valid with number_text
+    set digits to empty list
+    for each c in split number_text by ""
+        if c is in "0123456789"
+            add number of c to digits
+        else if c is not " "
+            return no
+        end
+    end
+    if length of digits is at most 1
+        return no
+    end
+    set total to 0
+    for each k from 1 to length of digits
+        set d to item (length of digits - k + 1) of digits
+        if k is divisible by 2
+            set d to d * 2
+            if d is greater than 9
+                set d to d - 9
+            end
+        end
+        set total to total + d
+    end
+    return total is divisible by 10
+end

@@ -1,0 +1,9 @@
+to is_leap with year
+    if year is divisible by 400
+        return yes
+    end
+    if year is divisible by 100
+        return no
+    end
+    return year is divisible by 4
+end

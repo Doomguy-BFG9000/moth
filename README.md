@@ -14,6 +14,12 @@ Built from scratch, with no dependencies, into programs for Windows and Linux as
 &nbsp;·&nbsp;
 <a href="https://samyyy2423.github.io/moth/docs/">The standard library</a>
 &nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/cookbook/">Cookbook</a>
+&nbsp;·&nbsp;
+<a href="https://samyyy2423.github.io/moth/docs/examples.html">Examples</a>
+&nbsp;·&nbsp;
+<a href="exercises/">Exercises</a>
+&nbsp;·&nbsp;
 <a href="DESIGN.md">How it's built</a>
 &nbsp;·&nbsp;
 <a href="https://github.com/samyyy2423/moth/releases/latest">Download</a>

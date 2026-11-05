@@ -1,0 +1,52 @@
+# Roman numerals
+# Writes whole numbers the way Rome did and reads them back, with a pair of lists that walk down from the
+# biggest value; then checks every number from 1 to 3,999 comes back as itself.
+
+set values to list of 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1
+set numerals to list of "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"
+
+to roman with n
+    set made to ""
+    for each k from 1 to length of values
+        repeat while n is at least item k of values
+            set made to made + item k of numerals
+            set n to n - item k of values
+        end
+    end
+    return made
+end
+
+# whether the numeral is in the written number, starting at `at`
+to starts_at with written, at, numeral
+    set last to at + length of numeral - 1
+    if last is greater than length of written
+        return no
+    end
+    return items at to last of written is numeral
+end
+
+to number_from with written
+    set total to 0
+    set at to 1
+    for each k from 1 to length of values
+        set numeral to item k of numerals
+        repeat while starts_at(written, at, numeral)
+            set total to total + item k of values
+            set at to at + length of numeral
+        end
+    end
+    return total
+end
+
+for each year in list of 1066, 1492, 1969, 2026
+    say year + " is " + roman(year)
+end
+say "MMXXVI is " + number_from("MMXXVI")
+
+set wrong to 0
+for each n from 1 to 3999
+    if number_from(roman(n)) is not n
+        add 1 to wrong
+    end
+end
+say "checked 1 to 3999: " + wrong + " wrong"
