@@ -1,0 +1,16 @@
+# What vsce leaves out of the .vsix: everything but what the extension runs on and the Marketplace shows.
+# make-vsix.mjs's FILES is the same list, and check-package.mjs holds vsce ls to it.
+**
+!package.json
+!extension.js
+!client.js
+!debug-adapter.js
+!find-moth.js
+!language-configuration.json
+!syntaxes/moth.tmLanguage.json
+!snippets/moth.json
+!engine/**
+!images/icon.png
+!README.md
+!CHANGELOG.md
+!LICENSE

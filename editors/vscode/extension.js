@@ -5,11 +5,15 @@
 // is when the pointer is on it, and what can come next as you type; without it, the outline and Go to Definition
 // find the file's functions by their lines. Run and Build start moth on the file, and Debug a debugging session,
 // through debug-adapter.js, which says `moth debug`'s commands for VS Code's breakpoints, stepping and variables.
+// Each of those starts the moth that find-moth.js finds: moth.path's, or the PATH's; where there's none, the
+// extension says so once, with a button to the releases, and the colours, snippets, problems and Format
+// Document go on without it.
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { startServer } = require("./client.js");
+const { findMoth, missingMessage, RELEASES } = require("./find-moth.js");
 const { MothDebugSession } = require("./debug-adapter.js");
 
 // Moth's engine, the one the playground runs: copied into engine/ when the extension is packaged (see
@@ -128,6 +132,33 @@ function completionsOf(found) {
   });
 }
 
+// ---------- finding moth ----------
+
+// moth, as moth.path says or from the PATH, looked for afresh each time, so one installed since is found:
+// { file } or { file: null, why, tried } (see find-moth.js). A moth.path that doesn't start at the top is from
+// the workspace's folder, if it's one the person trusts.
+function whereIsMoth() {
+  const trusted = vscode.workspace.isTrusted !== false;
+  const folder = trusted ? vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === "file")?.uri.fsPath : undefined;
+  return findMoth(vscode.workspace.getConfiguration("moth").get("path"), { folder });
+}
+
+// Tells the person moth isn't there, with a button to the releases: when they ask for something that needs
+// it (Run, Build, Debug), and once a session as the extension starts, unless they've said not to again. Its
+// promise is done once they've answered, or closed the message, which nothing waits for but the tests.
+const QUIET = "moth.missing.quiet";
+let told = false;
+async function tellMissing(found, { context, output, asked = false }) {
+  const message = missingMessage(found);
+  output?.appendLine(message);
+  if (!asked && (told || context?.globalState?.get(QUIET))) return;
+  told = true;
+  const buttons = asked ? ["Get Moth"] : ["Get Moth", "Don't Show Again"];
+  const chosen = await vscode.window.showWarningMessage(message, ...buttons);
+  if (chosen === "Get Moth") await vscode.env.openExternal(vscode.Uri.parse(RELEASES));
+  else if (chosen === "Don't Show Again") await context?.globalState?.update(QUIET, true);
+}
+
 // ---------- the language server ----------
 
 // Moth's language server for the documents VS Code has open: started with the extension, told of each Moth
@@ -135,7 +166,7 @@ function completionsOf(found) {
 // extension asks it not to say them: the engine's checker finds those, and the ones that rest on a value
 // written out (1 / 0) as well, which moth check leaves to it. `server` is nothing until it has started, and
 // again if it can't or once it ends; the providers then do without it.
-function languageServer(output) {
+function languageServer(output, context) {
   const state = { server: null, sent: new Map() }; // each document's version as the server has it, by its address
   const document = (d) => ({ uri: d.uri.toString(), languageId: "moth", version: d.version ?? 0, text: d.getText() });
   const opened = (d) => {
@@ -165,16 +196,25 @@ function languageServer(output) {
       return undefined;
     }
   };
-  const start = async () => {
-    const settings = vscode.workspace.getConfiguration("moth");
-    if (settings.get("languageServer") === false) return;
-    const command = settings.get("path") || "moth";
+  // started once at a time: a start asked for while one is under way is that one
+  let starting = null;
+  const start = () => (starting ??= begin().finally(() => (starting = null)));
+  const begin = async () => {
+    if (state.server || vscode.workspace.getConfiguration("moth").get("languageServer") === false) return;
+    const found = whereIsMoth();
+    if (!found.file) {
+      output.appendLine("The outline and Go to Definition find the file's functions by their lines instead of with moth lsp.");
+      tellMissing(found, { context, output }); // not waited for: the message waits for the person
+      return;
+    }
+    const command = found.file;
     try {
       const server = await startServer(command, { initializationOptions: { diagnostics: false } });
       server.on("window/showMessage", (m) => vscode.window.showWarningMessage(m.message));
       server.on("window/logMessage", (m) => output.appendLine(m.message));
       server.onExit((why) => {
         output.appendLine(`moth lsp ended: ${why}`);
+        if (state.server !== server) return; // one stopped to start another
         state.server = null;
         state.sent.clear();
       });
@@ -182,24 +222,47 @@ function languageServer(output) {
       output.appendLine(`moth lsp started (${command})`);
       vscode.workspace.textDocuments.forEach(opened);
     } catch (err) {
-      output.appendLine(`${err.message}. The outline and Go to Definition find the file's functions by their lines instead; hovers, completion and definitions in other files need moth (set moth.path if it isn't on your PATH).`);
+      output.appendLine(`${err.message}. The outline and Go to Definition find the file's functions by their lines instead; hovers, completion and definitions in other files need a moth with moth lsp in it, one newer than 1.11.`);
     }
   };
-  const stop = () => state.server?.stop();
-  return { state, start, stop, opened, changed, closed, ask };
+  const stop = async () => {
+    const server = state.server;
+    state.server = null;
+    state.sent.clear();
+    await server?.stop();
+  };
+  // moth.path or moth.languageServer changed: the server stopped, and started again as they now say
+  const restart = async () => {
+    await starting;
+    await stop();
+    await start();
+  };
+  return { state, start, stop, restart, opened, changed, closed, ask };
 }
 
-// `moth run`, `debug` or `build` on the file in front, saved first, in a terminal of its own
-async function start(command) {
+// `moth run` or `build` on a file, as a task: moth is the task's program, not a command typed into a shell, so a
+// path with spaces in it needs no quotes; the program's input is the terminal's, for its questions; and what it
+// said stays there once it has ended, as a terminal of its own wouldn't (it closes as its program ends)
+function mothTask(command, file, moth, scope = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file)) ?? vscode.TaskScope.Workspace) {
+  const name = `${command} ${path.basename(file)}`;
+  const task = new vscode.Task({ type: "moth", command, file }, scope, name, "moth",
+    new vscode.ProcessExecution(moth, [command, path.basename(file)], { cwd: path.dirname(file) }), []);
+  task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, focus: true, panel: vscode.TaskPanelKind.Dedicated, clear: true };
+  return task;
+}
+
+// Run or Build: the file in front, saved first
+async function start(command, context, output) {
   const document = vscode.window.activeTextEditor?.document;
   if (!document || document.languageId !== "moth") return vscode.window.showInformationMessage("Open a Moth file first.");
   if (document.isUntitled) return vscode.window.showInformationMessage("Save the file first, so moth can find it.");
+  const found = whereIsMoth();
+  if (!found.file) {
+    tellMissing(found, { context, output, asked: true });
+    return undefined;
+  }
   if (document.isDirty) await document.save();
-  const moth = vscode.workspace.getConfiguration("moth").get("path") || "moth";
-  const file = document.uri.fsPath;
-  const terminal = vscode.window.createTerminal({ name: `moth ${command} ${path.basename(file)}`, cwd: path.dirname(file), shellPath: moth, shellArgs: [command, path.basename(file)] });
-  terminal.show();
-  return terminal;
+  return vscode.tasks.executeTask(mothTask(command, document.uri.fsPath, found.file));
 }
 
 // `moth debug`, for VS Code's debugger: the debug adapter, inside the extension
@@ -219,7 +282,8 @@ class InlineAdapter {
 }
 
 // A debugging session's configuration, filled in: with none (F5 with no launch.json), the file in front; and
-// moth, from moth.path
+// moth, the launch configuration's mothPath if it says, or else the one moth.path or the PATH has. Gives
+// null for no file, and { missing } where there's no moth.
 function debugConfiguration(config) {
   if (!config.type && !config.request && !config.name) {
     const document = vscode.window.activeTextEditor?.document;
@@ -227,7 +291,9 @@ function debugConfiguration(config) {
     config = { type: "moth", request: "launch", name: "Debug this file", program: document.uri.fsPath };
   }
   if (!config.program) return null;
-  return { ...config, mothPath: config.mothPath || vscode.workspace.getConfiguration("moth").get("path") || "moth" };
+  if (config.mothPath) return config;
+  const found = whereIsMoth();
+  return found.file ? { ...config, mothPath: found.file } : { missing: found };
 }
 
 // Debug: the file in front, saved first, in a debugging session
@@ -244,7 +310,7 @@ let running = null; // the language server, for deactivate
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection("moth");
   const output = vscode.window.createOutputChannel("Moth");
-  const lsp = languageServer(output);
+  const lsp = languageServer(output, context);
   running = lsp;
   const waiting = new Map(); // a document's next check, a moment after the last change
   const check = async (document) => {
@@ -273,6 +339,7 @@ function activate(context) {
       lsp.closed(document);
       diagnostics.delete(document.uri);
     }),
+    vscode.workspace.onDidChangeConfiguration((e) => (e.affectsConfiguration("moth.path") || e.affectsConfiguration("moth.languageServer") ? lsp.restart() : undefined)),
     vscode.languages.registerDocumentFormattingEditProvider(selector, {
       async provideDocumentFormattingEdits(document) {
         const moth = await loadEngine();
@@ -336,7 +403,7 @@ function activate(context) {
         return found ? completionsOf(found) : undefined;
       },
     }, "'"),
-    vscode.commands.registerCommand("moth.run", () => start("run")),
+    vscode.commands.registerCommand("moth.run", () => start("run", context, output)),
     vscode.commands.registerCommand("moth.debug", debugFile),
     vscode.debug.registerDebugAdapterDescriptorFactory("moth", {
       createDebugAdapterDescriptor: () => new vscode.DebugAdapterInlineImplementation(new InlineAdapter()),
@@ -345,13 +412,42 @@ function activate(context) {
       resolveDebugConfiguration(folder, config) {
         const made = debugConfiguration(config);
         if (!made) vscode.window.showInformationMessage("Open a Moth file first, or say which with \"program\".");
+        if (made?.missing) {
+          tellMissing(made.missing, { context, output, asked: true });
+          return undefined;
+        }
         return made ?? undefined;
       },
     }),
-    vscode.commands.registerCommand("moth.build", () => start("build")),
+    vscode.commands.registerCommand("moth.build", () => start("build", context, output)),
+    // a moth task in tasks.json, { "type": "moth", "command": "build", "file": "app.moth" }, made into moth's
+    vscode.tasks.registerTaskProvider("moth", {
+      provideTasks: () => [],
+      resolveTask(task) {
+        const { command, file } = task.definition;
+        if (!["run", "build"].includes(command) || !file) return undefined;
+        const found = whereIsMoth();
+        if (!found.file) {
+          tellMissing(found, { context, output }); // VS Code asks for this just to list the tasks, too
+          return undefined;
+        }
+        const folder = typeof task.scope === "object" ? task.scope.uri.fsPath : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const made = mothTask(command, path.resolve(folder ?? "", file), found.file, task.scope);
+        return new vscode.Task(task.definition, task.scope, task.name, "moth", made.execution, []);
+      },
+    }),
   );
   vscode.workspace.textDocuments.forEach(check);
-  return lsp.start();
+  // what the extension gives other extensions, and its tests: where moth is, and whether moth lsp is running
+  const api = {
+    get moth() {
+      return whereIsMoth().file;
+    },
+    get languageServer() {
+      return Boolean(lsp.state.server);
+    },
+  };
+  return lsp.start().then(() => api);
 }
 
 function deactivate() {
