@@ -13,7 +13,7 @@ import { availableParallelism, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { run, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
+import { run, runWasm, compileToWasmBytes, test as testMoth, machineCompiler, check, excerpt, describeTrail, format, MothError, memoryDisk, soundWav } from "./moth.js";
 import examples from "./examples.js";
 import { PROGRAMS, ERRORS, SAVING, TYPED, brokenPrograms } from "./cases.js";
 import { FAKE_NOW } from "./vm.js";
@@ -295,8 +295,8 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"], "tools/hash.moth": sources["tools/hash.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "wasm.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "wasm.moth": sources["wasm.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"], "tools/hash.moth": sources["tools/hash.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
@@ -556,9 +556,10 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
 });
 
-// A package uses the standard library as a program does (DESIGN §125): `use "text.moth"` in packages/datey is
+// A package uses the standard library as a program does (DESIGN §126): `use "text.moth"` in packages/datey is
 // the package's own text.moth if it has one, and moth's if not, from its main file and from a file it uses; a
-// file beside the program, of the same name, is the program's alone.
+// file beside the program, of the same name, is the program's alone. Every command that reads the program's
+// files finds them so: run, check, build, build --web, build --target wasm and test.
 test("a package moth add fetched uses the standard library, and moth build builds a program that uses it", { skip: skip || (gitHere ? false : "there's no git") }, () => {
   const { dir, exe } = mothExe();
   const root = join(dir, "standard-packages");
@@ -617,6 +618,12 @@ test("a package moth add fetched uses the standard library, and moth build build
   const out = [];
   run(page.source, (line) => out.push(line), { files: (name) => page.files[name] });
   assert.equal(out.join("\n") + "\n", said);
+
+  // a WebAssembly module, which runs as the program does
+  assert.deepEqual(moth(app, "build", "app.moth", "--target", "wasm").slice(1), ["", 0]);
+  const fromWasm = [];
+  runWasm(readFileSync(join(app, "app.wasm")), (line) => fromWasm.push(line));
+  assert.equal(fromWasm.join("\n") + "\n", said);
 
   // and its tests, which use it too
   writeFileSync(join(app, "app.test.moth"), 'use the package "datey" as datey\nto test_say\n    expect datey\'s datey_say(2024, 2, 29, 7) is "Thursday 29,000 February, 7 days on, the package\'s own json.moth"\nend\n');
@@ -947,6 +954,41 @@ test("moth.exe build --web makes a page that holds the program and the files it 
   assert.deepEqual([bad.stdout, bad.status], ["", 1]);
   assert.match(bad.stderr, /^bad\.moth:2:1: expected a value but found the end of the code\n/);
   assert.ok(!existsSync(join(sub, "bad.html")));
+});
+
+// moth build --target wasm (DESIGN §125): app.wasm, the module wasm.moth makes, here made by wasm.moth as machine
+// code, which must be wasm.js's bytes; what running it needs follows in a section of its own, and runWasm runs it
+// as the VM runs the program. A program with a mistake says it, and makes no module.
+test("moth.exe build --target wasm makes wasm.js's module, which runs as the VM runs the program", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "wasm");
+  mkdirSync(sub);
+  const source = 'use "math.moth"\nto fib with n\n    if n is less than 2\n        return n\n    end\n    return fib(n - 1) + fib(n - 2)\nend\nsay "fib(15) is " fib(15) " and " sqrt(2)\nset d to dictionary where "é" is list of 1, "x"\nsay d\nsay item 3 of item "é" of d\n';
+  writeFileSync(join(sub, "app.moth"), source);
+  const built = spawnSync(exe, ["build", "app.moth", "--target", "wasm"], { cwd: sub, encoding: "utf8" });
+  assert.match(built.stdout, /^compiled app\.moth to WebAssembly -> app\.wasm \([\d,]+ bytes\)\n$/);
+  assert.deepEqual([built.stderr, built.status], ["", 0]);
+  const bytes = readFileSync(join(sub, "app.wasm"));
+  const files = { "math.moth": here("math.moth") };
+  const module = compileToWasmBytes(source, { files: (name) => files[name] }).bytes;
+  assert.deepEqual([...bytes.subarray(0, module.length)], [...module]);
+  const outcome = (go) => {
+    const said = [];
+    try {
+      go((line) => said.push(line));
+    } catch (err) {
+      said.push(`${err.message} ${JSON.stringify(err.trail)}`);
+    }
+    return said;
+  };
+  const vm = outcome((print) => run(source, print, { engine: "vm", files: (name) => files[name] }));
+  assert.deepEqual(vm.slice(0, 2), ["fib(15) is 610 and 1.41421356237309", '(dictionary where "é" is [1, "x"])']);
+  assert.deepEqual(outcome((print) => runWasm(bytes, print)), vm);
+  writeFileSync(join(sub, "bad.moth"), "say 1 +\n");
+  const bad = spawnSync(exe, ["build", "bad.moth", "--target", "wasm"], { cwd: sub, encoding: "utf8" });
+  assert.deepEqual([bad.stdout, bad.status], ["", 1]);
+  assert.match(bad.stderr, /^bad\.moth:2:1: expected a value but found the end of the code\n/);
+  assert.ok(!existsSync(join(sub, "bad.wasm")));
 });
 
 // `moth notebook`: each ```moth block run in turn, as the shell's entries, and what it said written under it,
