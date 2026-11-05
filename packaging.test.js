@@ -105,7 +105,8 @@ test("the SBOM names the release's files, and every file built into moth, with t
 test("the SBOM's sources are the files bootstrap.mjs builds moth from", () => {
   const bootstrap = readFileSync(here("bootstrap.mjs"), "utf8");
   const files = [...bootstrap.match(/const files = \{([^}]*)\}/)[1].matchAll(/"([^"]+)": here\(/g)].map((m) => m[1]);
-  const include = [...bootstrap.match(/const include = \{([^}]*)\}/)[1].matchAll(/"([^"]+)": /g)].map((m) => m[1]);
+  // the files built in with --include, written as an object or as a list of names
+  const include = [...bootstrap.match(/const include = ([^\n]*)/)[1].matchAll(/"([^"]+\.(?:moth|json))"/g)].map((m) => m[1]);
   assert.deepEqual(Object.keys(BUILT_IN).sort(), ["moth.moth", ...files, ...include].sort());
 });
 

@@ -6,8 +6,6 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
 
 ## Not released yet
 
-- **`moth --version` and `moth version`** say which Moth this is: one line with the release version,
-  taken from `package.json` and built into the standalone program.
 - **Installers.** `irm https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.ps1 | iex` on
   Windows and `curl -fsSL https://raw.githubusercontent.com/samyyy2423/moth/main/packaging/install.sh | sh` on
   Linux install the latest release, checked against its `SHA256SUMS.txt`, and put `moth` on PATH. Scoop
@@ -23,6 +21,13 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   made at random, small first, from `whole_number`, `decimal`, `yes_or_no`, `any_text`, `text_of`, `one_of`,
   `either_of`, `list_of`, `dictionary_of`, `mapped` and `kept`. A value that shows it doesn't hold is made as
   simple as it can be, and the mistake says it, with the seed that makes the same values again.
+- **Faster machine code.** `bit and`, `bit or`, `bit xor` and the shifts of whole numbers are done where
+  they're written, in a few instructions, not the runtime's 60: a loop that calls a function with a `bit and`
+  in it runs twice as fast, and `moth build` 5% faster.
+- **Fixed:** in a program `moth build` makes, `shift x left by n` of a number whole only to 15 digits (as
+  `0.1 * 3 * 10` is) now shifts the number as it is, as the engines do, so it gives what they give.
+- **`moth --version` and `moth version`** say which Moth this is: one line with the release version,
+  taken from `package.json` and built into the standalone program.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
@@ -39,6 +44,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   what it says, and a search of all 807. It's made from the libraries' own comments by `node make-docs.mjs`,
   and the tests fail when it's behind them. Every public function now has a comment, so the editors' hovers
   say what each does too.
+- **Moth from Python.** `pip install mothlang` (a wheel for Windows and one for Linux, each with `moth` in
+  it): `moth.load("fast.moth")` builds the file into a library once, caches it, and calls its functions
+  through ctypes, with Python's own values going across and Moth's mistakes raised as `MothError`;
+  `moth.run(source)` runs a program; and the wheel gives you the `moth` command. fib(30) runs 10 to 13 times as
+  fast as in Python.
 - **A library for C.** `moth build fast.moth --library` makes the program's functions a shared library,
   `libfast.so` or `fast.dll`, and `fast.h` declares them: each takes and gives `moth_value`s through the
   system's own C convention, with a value API to make, read and free text, lists, dictionaries, records and

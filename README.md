@@ -1279,6 +1279,28 @@ gcc main.c -L. -lfast -Wl,-rpath,'$ORIGIN'     (on Windows, gcc main.c fast.dll)
   tasks or workers, draw, play sounds, or take callbacks from C. Each is a
   mistake when it's built. Names starting with `moth_` are the library's own.
 
+### From Python: mothlang
+
+`pip install mothlang` gives Python Moth, with `moth` itself in the wheel
+(Windows and Linux, x86-64), and the `moth` command:
+
+```python
+import mothlang as moth
+
+print(moth.run('say "Hello from Moth"').output)
+
+fast = moth.load("fast.moth")      # built into a library the first time, then cached
+print(fast.fib(30))                # 832040, 10 to 13 times as fast as in Python
+```
+
+`moth.load` builds a file with `moth build --library` and calls its
+functions through `ctypes`: no compiled extension. Numbers, text, yes and no,
+nothing, bytes, lists and dictionaries go across as Python's own, a record
+comes back as a `Record`, and a mistake in Moth raises `MothError`, with its
+message and line. [python/README.md](python/README.md) has the rest,
+[`python/benchmarks`](python/benchmarks) times Moth against Python, and
+[docs/python-package.md](docs/python-package.md) is how it gets to PyPI.
+
 ### Installers and signing
 
 `moth build app.moth --installer` makes `app-setup.exe` (or `app-setup` on
@@ -1801,6 +1823,10 @@ calls that led there.
   matmul through OpenBLAS, an ONNX model the tests write run through ONNX
   Runtime, and Python run inside a program, where each is installed (CI
   installs them)
+- mothlang, the Python package: a wheel built with moth in it, installed,
+  and its pytest tests run on Linux (Python 3.10 and 3.14) and Windows:
+  values both ways, mistakes, threads, deep recursion, the cache, moth.run
+  and the moth command; then the benchmark
 - libraries for C: a C program, built with gcc, calling a library's
   functions with every kind of value, mistakes as records, a top level that
   fails, eight threads at once, recursion 50,000 deep from a 256 KB thread
