@@ -5306,14 +5306,14 @@ engines stay: as the fallback, and as what the tests compare against.
   million. The sections after this one each say what they changed, from
   these.
 
-## 127. Bits where the code is
+## 129. Bits where the code is
 
 - **Why.** `x bit and 255`, `shift u right by 8` and the rest went to the
   runtime, which checked each side with rt_bits: about 60 instructions, two
   calls in, to `and` two whole numbers. machine.moth does it for every byte
   it writes (put32, put64), so moth building compiler.moth spent 9.5% of its
   instructions there, and a call of `distance(i, 0, 0, i bit and 1023)`
-  58% (§126).
+  58% (§128).
 - **What it does.** When both sides are whole numbers from 0 to 2^53 - 1,
   it's done right where it is: each side becomes a 64-bit whole number,
   unless it's known to be one already (then the conversion alone, as anything
@@ -5337,7 +5337,7 @@ engines stay: as the fallback, and as what the tests compare against.
   Machine code shifted the whole number rounding made of it, and said
   6755399441055744. rt_shift_left now multiplies the number as it is by 2^n,
   as the engines do, and says it's too big as they do.
-- **What it gave.** Counted (§126): the calls of four inputs, 573 million
+- **What it gave.** Counted (§128): the calls of four inputs, 573 million
   instructions to 231 million; moth building compiler.moth, 3,579 million to
   3,259 million. Timed: the calls of four inputs, 44 ms to 23; a million
   bytes filled and summed, 37 ms to 27; moth building compiler.moth, 712 ms

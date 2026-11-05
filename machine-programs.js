@@ -12,7 +12,7 @@ const TEXTS = ['""', '"a"', '"Sam"', '"é😀"', '"a,b"', '"x\\ny"', '"tab\\ther
 const COMPARE = ["is", "is not", "is less than", "is greater than", "is at least", "is at most", "is divisible by"];
 
 // `bit and`, `bit or`, `bit xor` and the shifts, which machine code does right where they are for whole numbers
-// from 0 to 2^53 - 1 (DESIGN §127): each with every kind of value on each side, numbers whole only to 15
+// from 0 to 2^53 - 1 (DESIGN §129): each with every kind of value on each side, numbers whole only to 15
 // digits, infinities and 2^53 among them; a whole number written on the right, which goes in the instruction;
 // shifts as far as they go and further; in functions, loops and sums; and the mistakes, with their lines
 function bitCases() {
