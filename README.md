@@ -603,6 +603,21 @@ bytes and dictionaries:
   end
   ai's stream(quick, "Write a haiku about a moth.", as_written)
   ```
+- [`properties.moth`](tools/properties.moth) is property-based testing, as
+  Hypothesis and QuickCheck do it: say what should hold for every value of a
+  sort, and `for_all` tries a hundred made at random, small ones first; a
+  value that shows it doesn't hold is made as simple as it can be, and the
+  mistake says it with the seed that makes it again:
+  ```
+  use "properties.moth" as p
+  to test_sorting_twice_is_sorting_once
+      set numbers to p's list_of(p's whole_number(-1000, 1000))
+      p's for_all(numbers, (function with xs gives ((xs in order) in order) is (xs in order)))
+  end
+  ```
+  Values come from `whole_number`, `decimal`, `yes_or_no`, `any_text`,
+  `text_of`, `one_of`, `either_of`, `list_of`, `dictionary_of`, `mapped` and
+  `kept`.
 - [`sets.moth`](tools/sets.moth) is Python's set: each thing once, found at
   once, with `union`, `both`, `only_in` and `in_one`, shown as `{1, 2, 3}`;
   it holds numbers and text, as a dictionary's keys can be.
@@ -1156,6 +1171,8 @@ moth run hello.moth Sam 3                build it beside itself, run it with tho
 moth debug hello.moth Sam 3              the same, stopping at its first line for commands: step, break 12, show x...
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
 moth coverage hello.moth Sam 3           the same, then how many of its lines ran, and which didn't, file by file
+moth coverage hello.test.moth            run its tests as moth test does, then which lines of the files they test ran
+moth coverage --lcov                     every .test.moth file's here, and lcov.info too, for CI services and editors
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
 moth kernel                              run cells for Jupyter's Moth kernel (editors/jupyter), each with what the ones before made
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
@@ -1328,6 +1345,27 @@ $ moth test tools/json.test.moth
 ✓ test_escapes
 ✓ test_mistakes
 5 passed
+```
+
+`moth coverage` runs a file's tests the same way, or with no file every
+`.test.moth` file here and in the folders inside, and then says which lines of
+the files they test ran: every test's runs added up, each file's share, and
+the lines no test ran, so a branch never taken or a function never called
+shows. It leaves out the test files themselves, moth's own copies of the
+standard library, and packages. `--lcov` writes the same to `lcov.info`, which
+Codecov, Coveralls and editors' coverage views read. Given a program instead,
+it runs the program and says the same of its run.
+
+```text
+$ moth coverage tools/json.test.moth
+✓ test_values
+✓ test_lists_and_objects
+✓ test_spaces_and_lines
+✓ test_escapes
+✓ test_mistakes
+5 passed
+moth coverage: 141 of 151 lines run (93.4%)
+  tools/json.moth: 141 of 151 (93.4%), not run: 73, 136-137, 139, 150, 173, 177, 179, 199, 216
 ```
 
 A program moth makes asks before it reads a file, writes one, goes online,
@@ -1619,7 +1657,10 @@ calls that led there.
   against the checker, its own problems word for word; `moth test` on the
   tests in Moth here, said exactly as `test()` says them; and `moth test` on
   its own, finding the tests in a folder in the order the Node.js command line
-  found them; and `moth debug` stopping where it's told, its arguments passed on
+  found them; `moth debug` stopping where it's told, its arguments passed on;
+  and `moth coverage` of a program and of tests, a file's and a folder's, a
+  branch never taken, a function never called and a failing test among them,
+  added up and written as LCOV word for word
 - the debugger: three sessions word for word, on Windows and Linux, stepping
   into and out of calls, breakpoints in the program and a file it uses, a
   closure's variables, the calls in progress through recursion and a caught

@@ -5457,3 +5457,109 @@ engines stay: as the fallback, and as what the tests compare against.
   one that's gone; every public function has a comment; and on a library made up for the test, a helper has
   no entry, inputs with kinds and defaults are read (`with on as yes or no or no`), and an example from the
   tests keeps the `set` and the `add` it needs, leaves out what it doesn't, and shows what it said.
+
+## 131. Coverage of tests, and LCOV
+
+- **Why.** `moth coverage` (§93) said which lines of one run of a program
+  ran. What people measure is their tests, as coverage.py does under pytest:
+  which lines of the code under test the tests ran, and where they're
+  missing it, said in CI and shown in an editor.
+- **Which engine.** Machine code, built to be watched as `moth debug` and
+  `moth profile` build it, with moth-coverage.moth in the debugger's place.
+  The other way was the JavaScript VM, whose debugger stops before each
+  statement too, but moth, the command, has no JavaScript in it, and the
+  tests would then run on another engine from `moth test`'s: one without
+  C libraries, sockets, other programs or workers on cores, where a
+  program's file and network use are pretend, and whose `wait` doesn't
+  wait. Coverage run on a different engine from the one the tests pass on
+  measures something else. In machine code the tests run as `moth test`
+  runs them, each in a run of its own, on what the program ships on; the
+  call before each statement is made whatever the compiler does (a watched
+  build guesses nothing about calls and puts no function in line, so each
+  of a function's lines is its own, §59 and §63), so
+  a statement that runs is counted, in the program and every file it uses;
+  and the watcher's last word comes however the run ends (§81): passing, an
+  `expect` that fails, a mistake or `stop the program`. The JIT, which makes
+  one JavaScript function of many lines, can't say which ran at all.
+- **Adding runs up.** wants() now counts how many times each line runs.
+  moth puts lines at the end of moth-coverage.moth when it builds it in
+  (cli_coverage_asking), which set what it's asked for: a test's run is
+  asked to keep its counts, and says them on the error output after a line
+  that marks them, each file's line by line; moth takes them off what the
+  test said, which moth test shows unchanged for a test that fails, and
+  adds them to every other test's, by each file's path from the folder moth
+  runs in, so a file two folders' tests use is one. Then it says the
+  summary §93's coverage says, with moth-coverage.moth's own functions,
+  which moth uses as cli_coverage: the lines run of all, each file's share
+  in the order of its path, and the lines that never ran, as runs. A branch
+  never taken is its lines; a function never called, its body's (its `to`
+  line ran: making a function is a statement).
+- **What's counted.** The files the tests use, not the test files, nor
+  moth's own copies of the standard library (§74), nor packages: as
+  coverage.py leaves out the standard library and site-packages, it's the
+  program's own code that's measured. A program's run leaves out the same.
+  A file the tests use counts once it has run once, with all its lines.
+- **LCOV.** `--lcov` writes lcov.info, as geninfo writes it: for each file
+  its path (SF), each line with a statement on it and how many times it ran
+  (DA), and how many there are and ran (LF, LH), which Codecov, Coveralls,
+  GitLab and editors' coverage views read. For a program's run the watcher
+  writes it, and the program is built with --allow-write=lcov.info, so it
+  isn't asked; for tests moth does, after the last.
+- **The command line.** `moth coverage x.test.moth`, any number of them, or
+  none for every .test.moth file here and in the folders inside, as moth
+  test finds them; a file ending in .test.moth is tests, anything else a
+  program, after which everything is the program's own. With tests,
+  `--lcov` and the --allow flags can come after the files too, as with
+  moth test. It ends with 1 if a test failed, as moth test does.
+- **Limits.** A worker (§124) runs on a copy of the program, the watcher's
+  counts too, which end with it: its lines aren't counted, though a task's
+  are. A line run within 16 calls of the most there can be (100,000) isn't
+  counted, as the debugger doesn't stop there either.
+- **Tested.** Through moth.exe: a program's run, its summary on the error
+  output and its lcov.info, from another folder; a file's tests, and a
+  folder's, two files of tests in two folders, with a branch never taken, a
+  function never called, a line run in a loop, moth's json.moth and a
+  package left out, and a test that fails and says something, which moth
+  coverage shows as moth test does and still counts; the same files named,
+  with --lcov after them; lcov.info word for word; nothing left behind; and
+  moth test as it was.
+
+## 132. Property-based testing
+
+A test says what one example gives. A property says what holds for every value of a sort: sorting twice is
+sorting once, JSON reads back what `as json` wrote, splitting text by commas and joining it with them gives it
+back. `properties.moth` tries a property on many values made at random, as Python's Hypothesis and Haskell's
+QuickCheck do, and when one shows it doesn't hold, makes that value as simple as it can.
+
+- **What it is.** `for_all(generator, property)` makes 100 values and gives each to the property, which holds
+  if it gives yes or nothing (so a property can use `expect`, as a test does) and doesn't if it gives no or
+  makes a mistake. `for_all_with(settings, ...)` takes `"tries"` and `"seed"`; `sample(generator, seed,
+  count)` shows what a generator makes. Generators: `whole_number(low, high)`, `decimal(low, high)` (3
+  decimals), `yes_or_no()`, `any_text()`, `text_of(letters)`, `one_of(values)`, `either_of(generators)`,
+  `list_of(generator)` (up to 20), `dictionary_of(keys, values)` (up to 10), `mapped(generator, change)` and
+  `kept(generator, test)`.
+- **Small first.** The k-th try has size k, up to 100: a whole number comes from a window around 0 (or the end
+  of the range nearer it) as wide as size squared, and one time in ten is an end of the range, where mistakes
+  gather; a list or text is up to size long. Small values that show a mistake are found before big ones.
+- **Shrinking.** A generator is three functions: make(state, size) gives a value's raw form, shrink(raw) the
+  simpler raw forms to try in its place, and view(raw) the value. Shrinking works on raw forms, so a list of
+  what `mapped` makes shrinks item by item, and a `kept` value only to ones its test still allows. Whole
+  numbers try the target, halfway there and one step nearer; decimals the whole number too; lists and text
+  empty, each half, each item left out, then each item simpler; `one_of` its first value; yes becomes no. The
+  first simpler value that still shows the mistake is taken, and shrinking goes on from it, until none does or
+  after 5,000 tries. `n is less than 10` over 0 to 1,000 always ends at 10; a list with a number above 5 at
+  `[6]`; text with a "b" in it at `"b"`.
+- **Seeds.** Values come from Park and Miller's minimal standard generator (multiplier 48271, modulus 2^31 -
+  1). Each step is a whole number below 2^53, which every engine keeps exactly, so a seed makes the same
+  values on the VM, the JIT, WebAssembly and in machine code; the tests pin the first 12 of seed 42. A
+  mistake says its seed, and `for_all_with((dictionary where "seed" is s), ...)` makes the same values again.
+  Without a seed, one is picked at random.
+- **Showing values.** A value in a mistake is shown `as json`, so text is in quotes and `"1"` isn't `1`; one
+  JSON can't show is shown as `say` would.
+- **Tested.** properties.test.moth, on the three JS engines (moth.test.js) and in machine code (`moth test`):
+  what each generator makes, its range and mistakes; the same seed giving the same values, and seed 42's
+  pinned; properties that hold, with a function, a property using expect, and settings; the simplest value
+  for whole numbers, decimals, lists, text and dictionaries; a mistake inside a property; and two of the
+  standard library's own properties, json.moth reading what `as json` writes (numbers, decimals, yes and no,
+  text with quotes, backslashes, tabs, new lines and letters beyond ASCII, in lists and dictionaries) and
+  text.moth's split_by joining back.

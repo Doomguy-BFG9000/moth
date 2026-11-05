@@ -295,8 +295,8 @@ let standalone = null;
 function mothExe() {
   if (standalone) return standalone;
   const dir = mkdtempSync(join(tmpdir(), "moth-standalone-"));
-  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "wasm.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth"].map((f) => [f, here(f)]));
-  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "wasm.moth": sources["wasm.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"], "tools/hash.moth": sources["tools/hash.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
+  const sources = Object.fromEntries(["moth.moth", "machine.moth", "compiler.moth", "wasm.moth", "stdlib.moth", "webpage.moth", "checker-rules.moth", "moth-debugger.moth", "tools/hash.moth", "moth-coverage.moth"].map((f) => [f, here(f)]));
+  const made = machine(sources["moth.moth"], { files: { "machine.moth": sources["machine.moth"], "compiler.moth": sources["compiler.moth"], "wasm.moth": sources["wasm.moth"], "stdlib.moth": sources["stdlib.moth"], "webpage.moth": sources["webpage.moth"], "checker-rules.moth": sources["checker-rules.moth"], "tools/hash.moth": sources["tools/hash.moth"], "moth-coverage.moth": sources["moth-coverage.moth"] }, target, name: "moth.moth", allow: ["--allow-read", "--allow-write", "--allow-run"],
     include: { "moth-debugger.moth": Buffer.from(sources["moth-debugger.moth"]) } });
   const exe = executable(dir, "moth-first");
   writeFileSync(exe, made);
@@ -1131,6 +1131,59 @@ test("moth.exe coverage says which lines of a program and the files it uses ran"
   assert.deepEqual([ran.stdout, ran.stderr, ran.status], ["2\n", "moth coverage: 6 of 8 lines run (75.0%)\n  cov.moth: 3 of 4 (75.0%), not run: 4\n"
     + "  half.moth: 3 of 4 (75.0%), not run: 5\n", 0]);
   assert.deepEqual(readdirSync(sub).sort(), ["cov.moth", "half.moth"], "the program built for coverage was left behind");
+
+  // --lcov writes them to lcov.info too, each file by its path from the folder moth runs in
+  const lcov = spawnSync(exe, ["coverage", "--lcov", "covering/cov.moth"], { cwd: dir, encoding: "utf8", timeout: 120_000 });
+  assert.deepEqual([lcov.stdout, lcov.stderr, lcov.status], ["2\n", "moth coverage: 6 of 8 lines run (75.0%)\n  cov.moth: 3 of 4 (75.0%), not run: 4\n"
+    + "  half.moth: 3 of 4 (75.0%), not run: 5\nwrote lcov.info\n", 0]);
+  assert.equal(readFileSync(join(dir, "lcov.info"), "utf8"), "TN:\nSF:covering/cov.moth\nDA:2,1\nDA:3,1\nDA:4,0\nDA:6,1\nLF:4\nLH:3\nend_of_record\n"
+    + "TN:\nSF:covering/half.moth\nDA:1,1\nDA:2,1\nDA:3,1\nDA:5,0\nLF:4\nLH:3\nend_of_record\n");
+  rmSync(join(dir, "lcov.info"));
+});
+
+// moth coverage of tests (DESIGN §131): each test run as moth test runs it, with what each ran added up, and said
+// of the files the tests use: not the tests' own, nor moth's copies of the standard library, nor packages
+test("moth.exe coverage runs a file's tests, or a folder's, and says which lines of the files they test ran", { skip }, () => {
+  const { dir, exe } = mothExe();
+  const sub = join(dir, "covering-tests");
+  mkdirSync(join(sub, "more"), { recursive: true });
+  mkdirSync(join(sub, "packages", "boxes"), { recursive: true });
+  // a branch never taken (line 4), a function never called (line 11), and a line run many times (line 15)
+  writeFileSync(join(sub, "shapes.moth"), 'use "json.moth" as json\nto area with w, h\n    if w is less than 0\n        fail with "no width is less than 0"\n'
+    + "    else\n        return w * h\n    end\nend\n\nto perimeter with w, h\n    return 2 * (w + h)\nend\n\nto described with sizes\n"
+    + "    for each size in sizes\n        say json's parse(\"[\" + size + \"]\")\n    end\nend\n");
+  writeFileSync(join(sub, "shapes.test.moth"), 'use "shapes.moth"\nuse the package "boxes" as boxes\n\nto test_area\n    expect area(2, 3) is boxes\'s six()\nend\n\n'
+    + "to test_described\n    described(list of 1, 2, 3)\nend\n");
+  writeFileSync(join(sub, "packages", "boxes", "boxes.moth"), "to six\n    return 6\nend\n");
+  // a file in a folder, and a test of it that fails, which still counts, and says what it says as moth test does
+  writeFileSync(join(sub, "more", "sizes.moth"), "to bigger with a, b\n    if a is greater than b\n        return a\n    end\n    return b\nend\n");
+  writeFileSync(join(sub, "more", "sizes.test.moth"), 'use "sizes.moth"\nto test_bigger\n    expect bigger(1, 2) is 2\nend\n'
+    + 'to test_wrong\n    say "it was asked"\n    expect bigger(1, 2) is 1\nend\n');
+  const moth = (...args) => {
+    const done = spawnSync(exe, args, { cwd: sub, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const shapes = "  shapes.moth: 7 of 9 (77.8%), not run: 4, 11\n";
+  assert.deepEqual(moth("coverage", "shapes.test.moth"), ["✓ test_area\n✓ test_described\n2 passed\nmoth coverage: 7 of 9 lines run (77.8%)\n" + shapes, "", 0]);
+
+  // every .test.moth file here and in the folders inside, as moth test finds them, and lcov.info
+  const sizes = join("more", "sizes.test.moth");
+  const failed = `✗ test_wrong\n    ${sizes}:7:5: expected 2 to be 1\n        expect bigger(1, 2) is 1\n        ^\n    it said:\n      it was asked\n`;
+  const said = `${sizes}\n✓ test_bigger\n${failed}shapes.test.moth\n✓ test_area\n✓ test_described\n3 passed, 1 failed\n`
+    + "moth coverage: 10 of 13 lines run (76.9%)\n  more/sizes.moth: 3 of 4 (75.0%), not run: 3\n" + shapes;
+  assert.deepEqual(moth("coverage", "--lcov"), [said + "wrote lcov.info\n", "", 1]);
+  const lcov = "TN:\nSF:more/sizes.moth\nDA:1,2\nDA:2,2\nDA:3,0\nDA:5,2\nLF:4\nLH:3\nend_of_record\n"
+    + "TN:\nSF:shapes.moth\nDA:2,2\nDA:3,1\nDA:4,0\nDA:6,1\nDA:10,2\nDA:11,0\nDA:14,2\nDA:15,1\nDA:16,3\nLF:9\nLH:7\nend_of_record\n";
+  assert.equal(readFileSync(join(sub, "lcov.info"), "utf8"), lcov);
+  rmSync(join(sub, "lcov.info"));
+  // the same, named, with the flags after them; and moth test as it was
+  assert.deepEqual(moth("coverage", sizes, "shapes.test.moth", "--lcov"), [said + "wrote lcov.info\n", "", 1]);
+  assert.equal(readFileSync(join(sub, "lcov.info"), "utf8"), lcov);
+  assert.deepEqual(moth("test", "shapes.test.moth"), ["✓ test_area\n✓ test_described\n2 passed\n", "", 0]);
+  assert.deepEqual(readdirSync(sub).sort(), ["lcov.info", "more", "packages", "shapes.moth", "shapes.test.moth"], "a program built for coverage was left behind");
+  assert.deepEqual(readdirSync(join(sub, "more")).sort(), ["sizes.moth", "sizes.test.moth"], "a program built for coverage was left behind");
+  const wrong = moth("coverage", "shapes.test.moth", "--nope");
+  assert.deepEqual([wrong[0], wrong[1].startsWith("usage: moth build"), wrong[2]], ["", true, 2]);
 });
 
 // `show` works out a sum of the variables the line can see (DESIGN §98): items, fields, comparisons, brackets
