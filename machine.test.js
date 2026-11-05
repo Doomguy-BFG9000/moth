@@ -556,6 +556,79 @@ test("moth add, update, get and remove keep packages/ and moth.packages, and use
   assert.deepEqual(moth(other, "packages"), [`shout at ${shouting.slice(0, 7)}, from ../shout\n`, "", 0]);
 });
 
+// A package uses the standard library as a program does (DESIGN §125): `use "text.moth"` in packages/datey is
+// the package's own text.moth if it has one, and moth's if not, from its main file and from a file it uses; a
+// file beside the program, of the same name, is the program's alone.
+test("a package moth add fetched uses the standard library, and moth build builds a program that uses it", { skip: skip || (gitHere ? false : "there's no git") }, () => {
+  const { dir, exe } = mothExe();
+  const root = join(dir, "standard-packages");
+  mkdirSync(root, { recursive: true });
+  const git = (cwd, ...args) => {
+    const done = spawnSync("git", ["-c", "user.name=moth", "-c", "user.email=moth@example.com", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(done.status, 0, done.stderr);
+    return done.stdout.trim();
+  };
+  const moth = (cwd, ...args) => {
+    const done = spawnSync(exe, args, { cwd, encoding: "utf8", timeout: 120_000 });
+    return [done.stdout, done.stderr, done.status];
+  };
+  const datey = join(root, "datey");
+  mkdirSync(datey);
+  const files = {
+    "datey.moth": 'use "text.moth" as text\nuse "dates.moth" as dates\nuse "words.moth" as words\nuse "json.moth" as json\n'
+      + "to datey_say with year, month, day, days\n    set d to dates's date(year, month, day)\n"
+      + "    return words's day_of(d) + \", \" + text's grouped(days) + \" days on, \" + json's parse(\"[1]\")\nend\n",
+    // a file the package uses, using the standard library's without a name of its own
+    "words.moth": 'use "dates.moth" as dates\nuse "text.moth"\nto day_of with d\n    return dates\'s weekday_name(d) + " " + grouped(1000 * day of d) + " " + dates\'s month_name(d)\nend\n',
+    "json.moth": "to parse with t\n    return \"the package's own json.moth\"\nend\n", // the package's own comes before moth's
+  };
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(datey, file), text);
+  git(datey, "init", "-q");
+  git(datey, "add", ".");
+  git(datey, "commit", "-qm", "one");
+  const commit = git(datey, "rev-parse", "HEAD");
+
+  const app = join(root, "app");
+  mkdirSync(app);
+  // the program's own text.moth, which is the program's and not the package's
+  writeFileSync(join(app, "text.moth"), "to grouped with n\n    return \"the program's own text.moth\"\nend\n");
+  writeFileSync(join(app, "app.moth"), 'use the package "datey" as datey\nuse "text.moth" as text\nuse "dates.moth" as dates\n'
+    + "say datey's datey_say(2026, 11, 5, 1234567)\nsay text's grouped(5)\nsay dates's weekday_name(dates's date(2000, 1, 1))\n");
+  const said = "Thursday 5,000 November, 1,234,567 days on, the package's own json.moth\nthe program's own text.moth\nSaturday\n";
+  assert.deepEqual(moth(app, "add", "../datey"), [`added datey at ${commit.slice(0, 7)}, from ../datey\n`, "", 0]);
+  assert.deepEqual(moth(app, "run", "app.moth"), [said, "", 0]);
+  assert.deepEqual(moth(app, "check", "app.moth"), ["app.moth: no problems found\n", "", 0]);
+
+  // built, then run as a program of its own
+  const built = moth(app, "build", "app.moth");
+  assert.match(built[0], /^compiled app\.moth to machine code for (Windows|Linux) -> app(\.exe)? \([\d,]+ bytes\)\n$/);
+  assert.deepEqual(built.slice(1), ["", 0]);
+  const ran = spawnSync(executable(app, "app"), [], { cwd: app, encoding: "utf8" });
+  assert.deepEqual([ran.stdout, ran.stderr, ran.status], [said, "", 0]);
+
+  // a page: the package's files of the standard library's are moth's own copies, by the names the parser asks for
+  assert.deepEqual(moth(app, "build", "--web", "app.moth").slice(1), ["", 0]);
+  const page = JSON.parse(/window\.MOTH_APP = (.*);\n/.exec(readFileSync(join(app, "app.html"), "utf8"))[1]);
+  assert.deepEqual(Object.keys(page.files).sort(), ["dates.moth", "packages/datey/dates.moth", "packages/datey/datey.moth", "packages/datey/json.moth",
+    "packages/datey/text.moth", "packages/datey/words.moth", "text.moth"]);
+  assert.equal(page.files["packages/datey/text.moth"], here("tools/text.moth"));
+  assert.equal(page.files["packages/datey/dates.moth"], here("tools/dates.moth"));
+  assert.equal(page.files["packages/datey/json.moth"], files["json.moth"]);
+  const out = [];
+  run(page.source, (line) => out.push(line), { files: (name) => page.files[name] });
+  assert.equal(out.join("\n") + "\n", said);
+
+  // and its tests, which use it too
+  writeFileSync(join(app, "app.test.moth"), 'use the package "datey" as datey\nto test_say\n    expect datey\'s datey_say(2024, 2, 29, 7) is "Thursday 29,000 February, 7 days on, the package\'s own json.moth"\nend\n');
+  assert.deepEqual(moth(app, "test", "app.test.moth"), ["✓ test_say\n1 passed\n", "", 0]);
+
+  // a name the standard library hasn't is still a mistake, and says where it looked
+  writeFileSync(join(app, "packages", "datey", "datey.moth"), 'use "nowhere.moth"\n');
+  const missing = moth(app, "run", "app.moth");
+  assert.equal(missing[2], 1);
+  assert.match(missing[1], /^packages\/datey\/datey\.moth:1:5: there is no file called 'packages\/datey\/nowhere\.moth'\n/);
+});
+
 // The sum moth.sums keeps for a package's files (DESIGN §103), made here as sha256sum would: for each file but
 // Git's own, in the order of its path's bytes, its SHA-256, two spaces, its path and a line end; then the
 // SHA-256 of that
