@@ -1,10 +1,13 @@
 name: publish the VS Code extension
 
 # Publishes editors/vscode to the Visual Studio Marketplace and Open VSX, when it's run by hand: Actions, "publish
-# the VS Code extension", Run workflow (docs/publishing-the-extension.md says what to set up first). It packs the
-# extension once, checks and tests that .vsix, and publishes that same file to each: to the Marketplace with the
-# VSCE_PAT secret and to Open VSX with OVSX_PAT, each only if its secret is set. vsce and ovsx read the tokens
-# from the environment, so they're never on a command line, and GitHub hides secrets in the log.
+# the VS Code extension", Run workflow (docs/publishing-the-extension.md says what to set up first). The first job
+# packs the extension once, checks that .vsix and tests it in VS Code; the second publishes that same file: to the
+# Marketplace with the VSCE_PAT secret and to Open VSX with OVSX_PAT, each only if its secret is set, and says so
+# where it isn't. vsce and ovsx read the tokens from the environment, so they're never on a command line, and
+# GitHub hides secrets in the log. Azure DevOps retires the kind of token VSCE_PAT is on December 1, 2026; after
+# that, the Marketplace can take this workflow's own GitHub identity instead (Trusted Publishing), once the
+# VSCE_TRUSTED_PUBLISHING variable is true.
 on:
   workflow_dispatch:
 
@@ -16,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  pack:
     runs-on: ubuntu-latest
     steps:
       - name: only from main
@@ -28,42 +31,66 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: pack the extension
+      - name: pack the extension, and check the package
         working-directory: editors/vscode
         run: |
           npm ci --no-audit --no-fund
           npx @vscode/vsce package
           npx @vscode/vsce ls
           node check-package.mjs
-          echo "VSIX=$(ls moth-*.vsix)" >> "$GITHUB_ENV"
       - name: test it in VS Code
         run: |
           node bootstrap.mjs
           cd editors/vscode
-          xvfb-run -a node e2e/run.mjs "$VSIX"
+          xvfb-run -a node e2e/run.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: moth-vscode-extension
           path: editors/vscode/moth-*.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # for the Marketplace's Trusted Publishing: an identity for this run, which it trusts in place of a token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: get vsce and ovsx, as package-lock.json has them
+        working-directory: editors/vscode
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: moth-vscode-extension
+          path: editors/vscode
+      - name: the .vsix the first job made
+        working-directory: editors/vscode
+        run: echo "VSIX=$(ls moth-*.vsix)" >> "$GITHUB_ENV"
 
       - name: publish to the Visual Studio Marketplace
         working-directory: editors/vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          TRUSTED_PUBLISHING: ${{ vars.VSCE_TRUSTED_PUBLISHING }}
         run: |
-          if [ -z "$VSCE_PAT" ]; then
+          if [ -n "$VSCE_PAT" ]; then
+            npx @vscode/vsce publish --packagePath "$VSIX"
+          elif [ "$TRUSTED_PUBLISHING" = "true" ]; then
+            npx @vscode/vsce publish --oidc --packagePath "$VSIX"
+          else
             echo "::notice title=Not published to the Marketplace::There's no VSCE_PAT secret, so $VSIX wasn't published to the Visual Studio Marketplace. docs/publishing-the-extension.md says how to make one."
-            exit 0
           fi
-          npx @vscode/vsce publish --packagePath "$VSIX"
       - name: publish to Open VSX
         working-directory: editors/vscode
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
-          if [ -z "$OVSX_PAT" ]; then
+          if [ -n "$OVSX_PAT" ]; then
+            npx ovsx publish --packagePath "$VSIX"
+          else
             echo "::notice title=Not published to Open VSX::There's no OVSX_PAT secret, so $VSIX wasn't published to Open VSX. docs/publishing-the-extension.md says how to make one."
-            exit 0
           fi
-          npx ovsx publish --packagePath "$VSIX"
