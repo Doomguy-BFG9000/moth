@@ -1,6 +1,6 @@
 name: python
 
-# mothlang, Moth's Python package (python/, DESIGN §129): a wheel built with moth in it, as the publishing workflow
+# mothlang, Moth's Python package (python/, DESIGN §130): a wheel built with moth in it, as the publishing workflow
 # builds them, installed, and its tests run against it, on Linux with the oldest and newest Python it takes and on
 # Windows; then the benchmark, so each run says what Moth gave Python
 on: [push, pull_request]

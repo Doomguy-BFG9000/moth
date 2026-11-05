@@ -5384,10 +5384,10 @@ engines stay: as the fallback, and as what the tests compare against.
   to what it wrote; and a Windows DLL read as Windows reads it. On Windows,
   CI runs the same C program against the DLL.
 
-## 129. Moth from Python: the mothlang package
+## 130. Moth from Python: the mothlang package
 
 - **Why.** Python is where most people who want speed are: a loop that's
-  slow in Python is fast in Moth's machine code (§128), if Python can call
+  slow in Python is fast in Moth's machine code (§129), if Python can call
   it. And a package is how Python gets anything: `pip install`.
 - **Its name.** `moth` on PyPI is an unrelated project (tokens kept in
   MongoDB) whose module is also called `moth`, so the package is
@@ -5435,7 +5435,7 @@ engines stay: as the fallback, and as what the tests compare against.
   bits, as a call to `moth_kind` would cost more than the rest.
 - **Mistakes as exceptions.** What a call fails with is raised as
   `MothError`, with the message, line, column and file from the record
-  (§128) and what `fail with` gave as `value`; code that can't be built is
+  (§129) and what `fail with` gave as `value`; code that can't be built is
   `BuildError`, with moth's own report. A wrong number of inputs is
   Python's TypeError, before Moth is called.
 - **Running a program.** `moth.run(source)` writes the code to a folder of
