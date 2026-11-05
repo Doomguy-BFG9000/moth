@@ -49,6 +49,7 @@ end
 
 set crc_table to made_crc_table()
 
+# the CRC-32 of text or bytes, as zip, gzip and PNG check theirs: a whole number
 to crc32 with data
     set block to data as bytes
     set c to 4294967295
@@ -272,6 +273,7 @@ to inflate_into with block, start, made
     return next of reader
 end
 
+# the bytes raw DEFLATE (RFC 1951, with no header around it) stands for
 to inflate with data
     set made to empty list
     inflate_into(data as bytes, 1, made)
@@ -582,8 +584,9 @@ to base_code with value, bases
     return k
 end
 
-# The bytes' matches, in blocks of up to 16384, each written the shortest of three ways: with the fixed code,
-# with codes made for it, or as it is.
+# text or bytes squeezed with raw DEFLATE (RFC 1951, with no header around it), as bytes: the matches, in
+# blocks of up to 16384, each written the shortest of three ways: with the fixed code, with codes made for it,
+# or as it is
 to deflate with data
     set block to data as bytes
     set found to matches_of(block)
@@ -783,6 +786,7 @@ end
 
 # ---------- gzip ----------
 
+# text or bytes squeezed into a gzip file's bytes, as gzip and Python's gzip.compress make one
 to gzip with data
     set block to data as bytes
     set made to list of 31, 139, 8, 0, 0, 0, 0, 0, 0, 255 # no name, no time, from no system in particular

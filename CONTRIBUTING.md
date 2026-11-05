@@ -2,9 +2,16 @@
 
 Thank you for looking. Moth is a programming language that reads like plain English, and help of every size
 is welcome: a bug report, a clearer error message, an example, a package, or a change to the compiler.
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+Questions, ideas still taking shape, and things you've made with Moth belong in
+[Discussions](https://github.com/samyyy2423/moth/discussions); bugs and planned work belong in issues.
 
 ## Ways to help
 
+- **Start with a good first issue.** The issues labelled
+  [good first issue](https://github.com/samyyy2423/moth/labels/good%20first%20issue) are small and say where to
+  begin. Say in the issue that you're taking it, so two people don't do the same work.
 - **Try it and say what went wrong.** Open an issue with the program (as short as you can make it), what Moth
   said, and what you expected. Say which you used: the [playground](https://samyyy2423.github.io/moth/),
   `moth run`, or a program `moth build` made, and on which system.
@@ -41,9 +48,13 @@ keep it working:
 - **The compiler written in Moth matches the JIT byte for byte.** `compiler.moth` writes the same JavaScript
   as `jit.js`, so a change to what the JIT writes is made in both. Changes to the JIT's helpers and to
   `wasm.js` need nothing in `compiler.moth`.
-- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs`; after changing
-  `index.html` or an engine, `node make-web.mjs`; after changing `moth.moth` or `machine.moth`,
-  `node bootstrap.mjs`. The tests say when one is out of date.
+- **Some files are made from others.** After changing `tools/`, run `node make-stdlib.mjs` and
+  `node make-docs.mjs` (the standard library's reference, `docs/`); after changing `index.html` or an engine,
+  `node make-web.mjs`; after changing `moth.moth` or `machine.moth`, `node bootstrap.mjs`. The tests say when
+  one is out of date.
+- **A library's public functions say what they do,** in a comment just above each `to`, which the editors'
+  hovers and the reference show; a helper starts with the library's own prefix (`stats_`), or is named in
+  make-docs.mjs's `HELPERS`.
 - **The VS Code extension is tested in VS Code.** `editors/vscode` has tools of its own, for packing and testing
   it: `npm ci` there, then `npx @vscode/vsce package` and `xvfb-run -a node e2e/run.mjs` (CI runs both).
   [docs/publishing-the-extension.md](docs/publishing-the-extension.md) says how it's published to the Visual

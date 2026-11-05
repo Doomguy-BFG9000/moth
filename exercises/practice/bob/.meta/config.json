@@ -1,0 +1,17 @@
+{
+  "authors": [
+    "samyyy2423"
+  ],
+  "files": {
+    "solution": [
+      "bob.moth"
+    ],
+    "test": [
+      "bob.test.moth"
+    ],
+    "example": [
+      ".meta/example.moth"
+    ]
+  },
+  "blurb": "Answer like a teenager: questions, yelling and silence each get their own reply."
+}

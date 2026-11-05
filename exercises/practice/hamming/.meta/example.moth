@@ -1,0 +1,12 @@
+to distance with first_strand, second_strand
+    if length of first_strand is not length of second_strand
+        fail with "strands must be of equal length"
+    end
+    set count to 0
+    for each k from 1 to length of first_strand
+        if item k of first_strand is not item k of second_strand
+            add 1 to count
+        end
+    end
+    return count
+end

@@ -23,6 +23,7 @@
 #   say lists's every_one(numbers, is_even)            # and some_one: whether all, or any, are
 #   say lists's total(numbers)                         # their sum; repeated(x, 3) is [x, x, x]
 
+# the list cut into lists of `size` things, one after another, the last shorter if they don't come out even
 to chunks with things, size
     lists_check_size(size)
     set made to empty list
@@ -40,6 +41,7 @@ to chunks with things, size
     return made
 end
 
+# every run of `size` things next to each other, sliding along one at a time
 to windows with things, size
     lists_check_size(size)
     set made to empty list
@@ -72,6 +74,7 @@ to paired with first_things, second_things
     return made
 end
 
+# each thing with its place, from 1, as a list of two: [[1, "a"], [2, "b"]]
 to numbered with things
     set made to empty list
     for each k from 1 to length of things
@@ -91,6 +94,8 @@ to flattened with lists_of
     return made
 end
 
+# every pair of a thing from the first list and one from the second, as lists of two, the first list's in the
+# outer loop
 to product with first_things, second_things
     set made to empty list
     for each a in first_things
@@ -156,6 +161,7 @@ to lists_choices with things, size, from_k, so_far, made
     end
 end
 
+# the sum of the numbers so far, at each one: [1, 2, 3] gives [1, 3, 6]
 to running_totals with numbers
     set made to empty list
     set sum to 0
@@ -166,6 +172,7 @@ to running_totals with numbers
     return made
 end
 
+# the numbers added up, 0 for none
 to total with numbers
     set sum to 0
     for each x in numbers
@@ -183,6 +190,7 @@ to folded with things, combine, start
     return so_far
 end
 
+# what the function gives for each thing, in order
 to mapped with things, change
     set made to empty list
     for each x in things
@@ -191,6 +199,7 @@ to mapped with things, change
     return made
 end
 
+# the things the function says yes to, in order (a filter)
 to kept_by with things, test
     set made to empty list
     for each x in things
@@ -201,6 +210,7 @@ to kept_by with things, test
     return made
 end
 
+# the things the function says no to, in order
 to dropped_by with things, test
     set made to empty list
     for each x in things
@@ -225,6 +235,7 @@ to split_by with things, test
     return list of yeses, noes
 end
 
+# the things from the start for as long as the function says yes to each
 to taken_while with things, test
     set made to empty list
     for each x in things
@@ -236,6 +247,7 @@ to taken_while with things, test
     return made
 end
 
+# the things from the first one the function says no to, on to the end
 to dropped_while with things, test
     set made to empty list
     set dropping to yes
@@ -250,6 +262,7 @@ to dropped_while with things, test
     return made
 end
 
+# whether the function says yes to every thing; yes for an empty list
 to every_one with things, test
     for each x in things
         if not test(x)
@@ -259,6 +272,7 @@ to every_one with things, test
     return yes
 end
 
+# whether the function says yes to at least one thing; no for an empty list
 to some_one with things, test
     for each x in things
         if test(x)
@@ -283,6 +297,8 @@ to sorted_by with things, key_of
     return sorted_things
 end
 
+# the thing for which the function gives the least, the first of those that tie; a mistake if the list is
+# empty
 to smallest_by with things, key_of
     if length of things is 0
         fail with "there's nothing to choose from: the list is empty"
@@ -299,6 +315,7 @@ to smallest_by with things, key_of
     return best
 end
 
+# the thing for which the function gives the most, the first of those that tie; a mistake if the list is empty
 to largest_by with things, key_of
     if length of things is 0
         fail with "there's nothing to choose from: the list is empty"
@@ -315,6 +332,7 @@ to largest_by with things, key_of
     return best
 end
 
+# a list of x, so many times over
 to repeated with x, times_given
     set made to empty list
     repeat times_given times

@@ -1,0 +1,23 @@
+use "sieve.moth" as exercise
+
+to test_none_below_two
+    expect exercise's primes_up_to(1) is empty list
+end
+
+to test_the_first
+    expect exercise's primes_up_to(2) is list of 2
+end
+
+to test_up_to_ten
+    expect exercise's primes_up_to(10) is list of 2, 3, 5, 7
+end
+
+to test_a_prime_limit
+    expect exercise's primes_up_to(13) is list of 2, 3, 5, 7, 11, 13
+end
+
+to test_up_to_a_thousand
+    set primes to exercise's primes_up_to(1000)
+    expect length of primes is 168
+    expect item 168 of primes is 997
+end

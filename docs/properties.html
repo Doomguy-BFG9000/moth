@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>properties.moth · Moth's standard library</title>
+  <meta name="description" content="Property-based testing, as Python's Hypothesis and Haskell's QuickCheck do it.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>properties</em>.moth</h1>
+      <p>Property-based testing, as Python's Hypothesis and Haskell's QuickCheck do it.</p>
+      <p class="use"><code>use "properties.moth" as p</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="properties.moth's functions">
+      <h2>14 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#whole_number">whole_number</a></li><li><a href="#decimal">decimal</a></li><li><a href="#yes_or_no">yes_or_no</a></li><li><a href="#any_text">any_text</a></li><li><a href="#text_of">text_of</a></li><li><a href="#one_of">one_of</a></li><li><a href="#either_of">either_of</a></li><li><a href="#list_of">list_of</a></li><li><a href="#dictionary_of">dictionary_of</a></li><li><a href="#mapped">mapped</a></li><li><a href="#kept">kept</a></li><li><a href="#for_all">for_all</a></li><li><a href="#for_all_with">for_all_with</a></li><li><a href="#sample">sample</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Property-based testing, as Python's Hypothesis and Haskell's QuickCheck do it: say what should be so for every value of a sort, and <a href="#for_all">for_all</a> tries it on a hundred values made at random, small ones first. When one shows it isn't so, that value is made as small as it can be while it still shows it, and the mistake says the simplest one, with the seed that makes the same values again. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+
+<span class="k">to</span> test_sorting_twice_is_sorting_once
+    <span class="k">set</span> numbers <span class="k">to</span> p's list_of(p's whole_number(-<span class="n">1000</span>, <span class="n">1000</span>))
+    p's for_all(numbers, (<span class="k">function</span> <span class="k">with</span> xs <span class="k">gives</span> ((xs <span class="k">in</span> order) <span class="k">in</span> order) <span class="k">is</span> (xs <span class="k">in</span> order)))
+<span class="k">end</span></code></pre></div>
+          <p>A property gives yes when it holds and no when it doesn't, or uses expect as a test does: a mistake inside it counts as its not holding. What makes the values, a generator, is one of these, or made from them:</p>
+          <div class="code"><pre><code>whole_number(low, high)       whole numbers <span class="k">from</span> low <span class="k">to</span> high: near <span class="n">0</span> first, <span class="k">and</span> the two ends now <span class="k">and</span> then
+decimal(low, high)            numbers <span class="k">with</span> <span class="k">up</span> <span class="k">to</span> <span class="n">3</span> decimals, <span class="k">from</span> low <span class="k">to</span> high
+yes_or_no()                   <span class="k">yes</span> <span class="k">or</span> <span class="k">no</span>
+any_text()                    text <span class="k">of</span> letters, digits, spaces, punctuation, tabs <span class="k">and</span> new lines, <span class="k">and</span> some
+                              letters beyond ASCII (é, ß, λ, 中)
+text_of(letters)              text <span class="k">of</span> only those letters: text_of(<span class="s">&quot;ab&quot;</span>) makes <span class="s">&quot;&quot;</span>, <span class="s">&quot;b&quot;</span>, <span class="s">&quot;ab&quot;</span>, <span class="s">&quot;abba&quot;</span>, ...
+one_of(values)                one <span class="k">of</span> the <span class="k">list</span>'s values; the first <span class="k">is</span> the simplest
+either_of(generators)         a value one <span class="k">of</span> the generators makes
+list_of(generator)            lists <span class="k">of</span> <span class="k">up</span> <span class="k">to</span> <span class="n">20</span> <span class="k">of</span> what the generator makes
+dictionary_of(<span class="k">keys</span>, values)   dictionaries <span class="k">of</span> <span class="k">up</span> <span class="k">to</span> <span class="n">10</span> <span class="k">keys</span>, <span class="k">each</span> made <span class="k">by</span> the first generator, <span class="k">and</span> values
+                              <span class="k">by</span> the second
+mapped(generator, change)     what change makes <span class="k">of</span> <span class="k">each</span> value: mapped(whole_number(<span class="n">1</span>, <span class="n">9</span>), double)
+kept(generator, test)         only the values test says <span class="k">yes</span> <span class="k">to</span></code></pre></div>
+          <p><a href="#for_all_with">for_all_with</a>(settings, generator, property) takes a dictionary of &quot;tries&quot; (100 if it isn't given) and &quot;seed&quot; (one at random if it isn't): the seed a mistake says makes the same values again, so the same mistake. <a href="#sample">sample</a>(generator, seed, count) gives count values, to see what a generator makes.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="whole_number">
+          <h3><a href="#whole_number"><code>p's whole_number(low, high)</code></a></h3>
+          <p>whole numbers from low to high: near 0 (or the end nearer it) first, and the two ends now and then</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>low</code></li><li><code>high</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to whole_number with low, high</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L68">properties.moth line 68</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">say</span> p's sample(p's whole_number(<span class="n">3</span>, <span class="n">3</span>), <span class="n">1</span>, <span class="n">4</span>)</code></pre><pre class="says"><code>[3, 3, 3, 3]</code></pre></div>
+        </section>
+        <section class="fn" id="decimal">
+          <h3><a href="#decimal"><code>p's decimal(low, high)</code></a></h3>
+          <p>numbers with up to 3 decimals, from low to high</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>low</code></li><li><code>high</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to decimal with low, high</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L78">properties.moth line 78</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">to</span> failing <span class="k">with</span> generator, property
+    <span class="k">try</span>
+        p's for_all_with((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;seed&quot;</span> <span class="k">is</span> <span class="n">77</span>), generator, property)
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span>
+<span class="k">end</span>
+<span class="k">set</span> why <span class="k">to</span> failing(p's text_of(<span class="s">&quot;ab&quot;</span>), (<span class="k">function</span> <span class="k">with</span> t <span class="k">gives</span> <span class="k">not</span> (<span class="s">&quot;b&quot;</span> <span class="k">is</span> <span class="k">in</span> t)))
+<span class="k">set</span> why <span class="k">to</span> failing(p's decimal(<span class="n">0</span>, <span class="n">100</span>), (<span class="k">function</span> <span class="k">with</span> x <span class="k">gives</span> x <span class="k">is</span> less <span class="k">than</span> <span class="n">2.5</span>))
+<span class="k">say</span> why</code></pre><pre class="says"><code>the property doesn't hold for 2.5: it gave no (try 7 of 100, seed 77; made simpler in 506 steps from 100)</code></pre></div>
+        </section>
+        <section class="fn" id="yes_or_no">
+          <h3><a href="#yes_or_no"><code>p's yes_or_no()</code></a></h3>
+          <p>yes or no</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to yes_or_no</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L90">properties.moth line 90</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">set</span> seen <span class="k">to</span> p's sample(p's yes_or_no(), <span class="n">3</span>, <span class="n">50</span>)
+<span class="k">say</span> seen</code></pre><pre class="says"><code>[no, no, yes, yes, no, no, yes, yes, no, no, no, no, yes, no, no, yes, yes, no, yes, yes, yes, yes, no, yes, yes, no, yes, yes, yes, yes, yes, yes, no, yes, yes, no, no, no, no, no, yes, no, yes, yes, yes, no, no, no, yes, no]</code></pre></div>
+        </section>
+        <section class="fn" id="any_text">
+          <h3><a href="#any_text"><code>p's any_text()</code></a></h3>
+          <p>text of letters, digits, spaces, punctuation, tabs and new lines, and some letters beyond ASCII</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to any_text</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L95">properties.moth line 95</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">set</span> g <span class="k">to</span> p's list_of(p's any_text())
+<span class="k">say</span> g</code></pre><pre class="says"><code>(record with make &lt;function function on line 128&gt;, shrink &lt;function function on line 128 (2)&gt;, view &lt;function function on line 128 (3)&gt;)</code></pre></div>
+        </section>
+        <section class="fn" id="text_of">
+          <h3><a href="#text_of"><code>p's text_of(letters)</code></a></h3>
+          <p>text of only those letters, up to 40 of them: text_of(&quot;ab&quot;) makes &quot;&quot;, &quot;b&quot;, &quot;ab&quot;, &quot;abba&quot; and the rest</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>letters</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to text_of with letters</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L100">properties.moth line 100</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">to</span> no_number_above_five <span class="k">with</span> xs
+    <span class="k">for</span> <span class="k">each</span> x <span class="k">in</span> xs
+        <span class="k">if</span> x <span class="k">is</span> greater <span class="k">than</span> <span class="n">5</span>
+            <span class="k">return</span> <span class="k">no</span>
+        <span class="k">end</span>
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="k">yes</span>
+<span class="k">end</span>
+<span class="k">to</span> failing <span class="k">with</span> generator, property
+    <span class="k">try</span>
+        p's for_all_with((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;seed&quot;</span> <span class="k">is</span> <span class="n">77</span>), generator, property)
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span>
+<span class="k">end</span>
+<span class="k">set</span> why <span class="k">to</span> failing(p's list_of(p's whole_number(<span class="n">0</span>, <span class="n">100</span>)), no_number_above_five)
+<span class="k">set</span> why <span class="k">to</span> failing(p's text_of(<span class="s">&quot;ab&quot;</span>), (<span class="k">function</span> <span class="k">with</span> t <span class="k">gives</span> <span class="k">not</span> (<span class="s">&quot;b&quot;</span> <span class="k">is</span> <span class="k">in</span> t)))
+<span class="k">say</span> why</code></pre><pre class="says"><code>the property doesn't hold for &quot;b&quot;: it gave no (try 2 of 100, seed 77; made simpler in 1 steps from &quot;bb&quot;)</code></pre></div>
+        </section>
+        <section class="fn" id="one_of">
+          <h3><a href="#one_of"><code>p's one_of(values)</code></a></h3>
+          <p>one of the list's values; the first is the simplest</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>values</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to one_of with values</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L111">properties.moth line 111</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">set</span> both <span class="k">to</span> p's sample(p's either_of(<span class="k">list</span> <span class="k">of</span> p's whole_number(<span class="n">1</span>, <span class="n">2</span>), p's one_of(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;z&quot;</span>)), <span class="n">12</span>, <span class="n">30</span>)
+<span class="k">say</span> both</code></pre><pre class="says"><code>[&quot;z&quot;, 2, &quot;z&quot;, 1, 1, &quot;z&quot;, &quot;z&quot;, 2, &quot;z&quot;, &quot;z&quot;, 1, 1, 2, &quot;z&quot;, &quot;z&quot;, 1, 2, 2, 2, 1, 2, 2, &quot;z&quot;, 2, &quot;z&quot;, &quot;z&quot;, &quot;z&quot;, &quot;z&quot;, 1, &quot;z&quot;]</code></pre></div>
+        </section>
+        <section class="fn" id="either_of">
+          <h3><a href="#either_of"><code>p's either_of(generators)</code></a></h3>
+          <p>a value one of the generators makes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generators</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to either_of with generators</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L119">properties.moth line 119</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">set</span> both <span class="k">to</span> p's sample(p's either_of(<span class="k">list</span> <span class="k">of</span> p's whole_number(<span class="n">1</span>, <span class="n">2</span>), p's one_of(<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;z&quot;</span>)), <span class="n">12</span>, <span class="n">30</span>)
+<span class="k">say</span> both</code></pre><pre class="says"><code>[&quot;z&quot;, 2, &quot;z&quot;, 1, 1, &quot;z&quot;, &quot;z&quot;, 2, &quot;z&quot;, &quot;z&quot;, 1, 1, 2, &quot;z&quot;, &quot;z&quot;, 1, 2, 2, 2, 1, 2, 2, &quot;z&quot;, 2, &quot;z&quot;, &quot;z&quot;, &quot;z&quot;, &quot;z&quot;, 1, &quot;z&quot;]</code></pre></div>
+        </section>
+        <section class="fn" id="list_of">
+          <h3><a href="#list_of"><code>p's list_of(generator)</code></a></h3>
+          <p>lists of up to 20 of what the generator makes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generator</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to list_of with generator</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L127">properties.moth line 127</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">set</span> g <span class="k">to</span> p's list_of(p's any_text())
+<span class="k">say</span> g</code></pre><pre class="says"><code>(record with make &lt;function function on line 128&gt;, shrink &lt;function function on line 128 (2)&gt;, view &lt;function function on line 128 (3)&gt;)</code></pre></div>
+        </section>
+        <section class="fn" id="dictionary_of">
+          <h3><a href="#dictionary_of"><code>p's dictionary_of(key_maker, value_maker)</code></a></h3>
+          <p>dictionaries of up to 10 keys, each made by key_maker, and their values by value_maker</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>key_maker</code></li><li><code>value_maker</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to dictionary_of with key_maker, value_maker</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L132">properties.moth line 132</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">to</span> failing <span class="k">with</span> generator, property
+    <span class="k">try</span>
+        p's for_all_with((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;seed&quot;</span> <span class="k">is</span> <span class="n">77</span>), generator, property)
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span>
+<span class="k">end</span>
+<span class="k">set</span> why <span class="k">to</span> failing(p's decimal(<span class="n">0</span>, <span class="n">100</span>), (<span class="k">function</span> <span class="k">with</span> x <span class="k">gives</span> x <span class="k">is</span> less <span class="k">than</span> <span class="n">2.5</span>))
+<span class="k">set</span> why <span class="k">to</span> failing(p's dictionary_of(p's text_of(<span class="s">&quot;ab&quot;</span>), p's whole_number(<span class="n">0</span>, <span class="n">9</span>)), (<span class="k">function</span> <span class="k">with</span> d <span class="k">gives</span> <span class="k">not</span> (<span class="s">&quot;b&quot;</span> <span class="k">is</span> <span class="k">in</span> d)))
+<span class="k">say</span> why</code></pre><pre class="says"><code>the property doesn't hold for {&quot;b&quot;:0}: it gave no (try 18 of 100, seed 77; made simpler in 2 steps from {&quot;b&quot;:9,&quot;babb&quot;:4,&quot;abaa&quot;:8})</code></pre></div>
+        </section>
+        <section class="fn" id="mapped">
+          <h3><a href="#mapped"><code>p's mapped(generator, change)</code></a></h3>
+          <p>what change makes of each value the generator makes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generator</code></li><li><code>change</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to mapped with generator, change</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L138">properties.moth line 138</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+p's mapped(generator, change)</code></pre></div>
+        </section>
+        <section class="fn" id="kept">
+          <h3><a href="#kept"><code>p's kept(generator, test)</code></a></h3>
+          <p>only the values the generator makes that test says yes to</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generator</code></li><li><code>test</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to kept with generator, test</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L143">properties.moth line 143</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">to</span> mistake_of <span class="k">with</span> making
+    <span class="k">try</span>
+        making(<span class="k">nothing</span>)
+    <span class="k">if</span> it <span class="k">fails</span> <span class="k">with</span> why
+        <span class="k">return</span> why
+    <span class="k">end</span>
+    <span class="k">return</span> <span class="s">&quot;&quot;</span>
+<span class="k">end</span>
+<span class="k">say</span> mistake_of((<span class="k">function</span> <span class="k">with</span> x <span class="k">gives</span> p's sample(p's kept(p's whole_number(<span class="n">1</span>, <span class="n">5</span>), (<span class="k">function</span> <span class="k">with</span> n <span class="k">gives</span> n <span class="k">is</span> greater <span class="k">than</span> <span class="n">9</span>)), <span class="n">1</span>, <span class="n">1</span>)))</code></pre><pre class="says"><code>kept found no value its test says yes to in 100 tries</code></pre></div>
+        </section>
+        <section class="fn" id="for_all">
+          <h3><a href="#for_all"><code>p's for_all(generator, property)</code></a></h3>
+          <p>Tries the property on 100 values the generator makes, small ones first, and if one shows it doesn't hold (it gives no, or makes a mistake), makes that value as simple as it can and fails with it and the seed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generator</code></li><li><code>property</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to for_all with generator, property</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L151">properties.moth line 151</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+
+<span class="k">to</span> test_sorting_twice_is_sorting_once
+    <span class="k">set</span> numbers <span class="k">to</span> p's list_of(p's whole_number(-<span class="n">1000</span>, <span class="n">1000</span>))
+    p's for_all(numbers, (<span class="k">function</span> <span class="k">with</span> xs <span class="k">gives</span> ((xs <span class="k">in</span> order) <span class="k">in</span> order) <span class="k">is</span> (xs <span class="k">in</span> order)))
+<span class="k">end</span></code></pre></div>
+        </section>
+        <section class="fn" id="for_all_with">
+          <h3><a href="#for_all_with"><code>p's for_all_with(settings, generator, property)</code></a></h3>
+          <p><a href="#for_all">for_all</a>, with a dictionary of &quot;tries&quot; (100 if it isn't given) and &quot;seed&quot; (one at random if it isn't)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>settings</code></li><li><code>generator</code></li><li><code>property</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to for_all_with with settings, generator, property</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L156">properties.moth line 156</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+p's for_all(p's list_of(p's whole_number(-<span class="n">1000</span>, <span class="n">1000</span>)), (<span class="k">function</span> <span class="k">with</span> xs <span class="k">gives</span> ((xs <span class="k">in</span> order) <span class="k">in</span> order) <span class="k">is</span> (xs <span class="k">in</span> order)))
+p's for_all_with((<span class="k">dictionary</span> <span class="k">where</span> <span class="s">&quot;tries&quot;</span> <span class="k">is</span> <span class="n">30</span>), p's whole_number(<span class="n">1</span>, <span class="n">9</span>), (<span class="k">function</span> <span class="k">with</span> n <span class="k">gives</span> n <span class="k">is</span> <span class="k">at</span> <span class="k">least</span> <span class="n">1</span>))</code></pre></div>
+        </section>
+        <section class="fn" id="sample">
+          <h3><a href="#sample"><code>p's sample(generator, seed, count)</code></a></h3>
+          <p>count values the generator makes from the seed, to see what it makes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>generator</code></li><li><code>seed</code></li><li><code>count</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sample with generator, seed, count</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/properties.moth#L176">properties.moth line 176</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;properties.moth&quot;</span> <span class="k">as</span> p
+<span class="k">say</span> p's sample(p's whole_number(<span class="n">3</span>, <span class="n">3</span>), <span class="n">1</span>, <span class="n">4</span>)</code></pre><pre class="says"><code>[3, 3, 3, 3]</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

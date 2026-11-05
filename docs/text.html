@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>text.moth · Moth's standard library</title>
+  <meta name="description" content="Text: patterns to find, check and replace (regular expressions), numbers written with so many decimals or with commas, text padded to a width, and CSV, read and written.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>text</em>.moth</h1>
+      <p>Text: patterns to find, check and replace (regular expressions), numbers written with so many decimals or with commas, text padded to a width, and CSV, read and written.</p>
+      <p class="use"><code>use "text.moth" as text</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="text.moth's functions">
+      <h2>13 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#matches">matches</a></li><li><a href="#contains_pattern">contains_pattern</a></li><li><a href="#find">find</a></li><li><a href="#find_all">find_all</a></li><li><a href="#replace_all">replace_all</a></li><li><a href="#split_by">split_by</a></li><li><a href="#number_text">number_text</a></li><li><a href="#grouped">grouped</a></li><li><a href="#grouped_with">grouped_with</a></li><li><a href="#padded_left">padded_left</a></li><li><a href="#padded_right">padded_right</a></li><li><a href="#csv_rows">csv_rows</a></li><li><a href="#csv_text">csv_text</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Text: patterns to find, check and replace (regular expressions), numbers written with so many decimals or with commas, text padded to a width, and CSV, read and written. In Moth alone, so it works everywhere.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's matches(<span class="s">&quot;^[a-z]+@[a-z]+\\.com$&quot;</span>, <span class="s">&quot;sam@moth.com&quot;</span>)     <span class="c"># yes</span>
+<span class="k">set</span> found <span class="k">to</span> text's find(<span class="s">&quot;(\\d+)-(\\d+)&quot;</span>, <span class="s">&quot;pages 12-40&quot;</span>)
+<span class="k">say</span> text <span class="k">of</span> found <span class="s">&quot; &quot;</span> <span class="k">item</span> <span class="n">2</span> <span class="k">of</span> groups <span class="k">of</span> found                  <span class="c"># 12-40 40</span>
+<span class="k">say</span> text's replace_all(<span class="s">&quot;\\s+&quot;</span>, <span class="s">&quot;a   lot  of space&quot;</span>, <span class="s">&quot; &quot;</span>)          <span class="c"># a lot of space</span>
+<span class="k">say</span> text's number_text(<span class="n">3.14159</span>, <span class="n">2</span>) <span class="s">&quot; &quot;</span> text's grouped(<span class="n">1234567.5</span>)  <span class="c"># 3.14 1,234,567.5</span>
+<span class="k">say</span> text's csv_rows(<span class="s">&quot;name,age\nSam,20\n\&quot;Lee, Ana\&quot;,31&quot;</span>)          <span class="c"># [[&quot;name&quot;, &quot;age&quot;], ...]</span></code></pre></div>
+          <p>A pattern has: letters and digits for themselves; . any character but a new line; [abc], [a-z], [^0-9] a character of a set or not; \d a digit, \w a letter, digit or _, \s a space, tab or new line (\D, \W and \S none of those); \b where a word starts or ends; ^ and $ the start and the end; ( ) a group, which is kept, (?: ) one that isn't; | either side; * any number, + one or more, ? one or none, {2}, {2,} and {2,5} so many, each taking as many as it can, or as few with a ? after it. \ before any other character is that character. (?i) at the very start makes it not mind capitals. In Moth's own text, a \ is written \\.</p>
+          <p>A match is a record: its text, at (where it starts, from 1), size (how many characters), and groups (each group's text, or nothing for a group that took no part).</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="matches">
+          <h3><a href="#matches"><code>text's matches(pattern, words)</code></a></h3>
+          <p>whether the whole of <code>words</code> is the pattern</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to matches with pattern, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L25">text.moth line 25</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's matches(<span class="s">&quot;^[a-z]+@[a-z]+\\.com$&quot;</span>, <span class="s">&quot;sam@moth.com&quot;</span>)     <span class="c"># yes</span></code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="contains_pattern">
+          <h3><a href="#contains_pattern"><code>text's contains_pattern(pattern, words)</code></a></h3>
+          <p>whether the pattern is anywhere in <code>words</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to contains_pattern with pattern, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L31">text.moth line 31</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's contains_pattern(<span class="s">&quot;^\\s*$&quot;</span>, <span class="s">&quot;   &quot;</span>)</code></pre><pre class="says"><code>yes</code></pre></div>
+        </section>
+        <section class="fn" id="find">
+          <h3><a href="#find"><code>text's find(pattern, words)</code></a></h3>
+          <p>the first match, or nothing</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to find with pattern, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L36">text.moth line 36</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">set</span> found <span class="k">to</span> text's find(<span class="s">&quot;(\\d+)-(\\d+)&quot;</span>, <span class="s">&quot;pages 12-40, then 50-60&quot;</span>)
+<span class="k">say</span> found</code></pre><pre class="says"><code>(record with text &quot;12-40&quot;, at 7, size 5, groups [&quot;12&quot;, &quot;40&quot;])</code></pre></div>
+        </section>
+        <section class="fn" id="find_all">
+          <h3><a href="#find_all"><code>text's find_all(pattern, words)</code></a></h3>
+          <p>every match, one after another, none overlapping</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to find_all with pattern, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L45">text.moth line 45</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">set</span> all <span class="k">to</span> text's find_all(<span class="s">&quot;\\d+&quot;</span>, <span class="s">&quot;a1 b22 c333&quot;</span>)
+<span class="k">say</span> all</code></pre><pre class="says"><code>[(record with text &quot;1&quot;, at 2, size 1, groups []), (record with text &quot;22&quot;, at 5, size 2, groups []), (record with text &quot;333&quot;, at 9, size 3, groups [])]</code></pre></div>
+        </section>
+        <section class="fn" id="replace_all">
+          <h3><a href="#replace_all"><code>text's replace_all(pattern, words, replacement)</code></a></h3>
+          <p><code>words</code> with every match replaced: $1 to $9 in <code>with</code> are its groups, $0 all of it, and $$ a $</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li><li><code>replacement</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to replace_all with pattern, words, replacement</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L75">text.moth line 75</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's replace_all(<span class="s">&quot;\\s+&quot;</span>, <span class="s">&quot;a   lot  of space&quot;</span>, <span class="s">&quot; &quot;</span>)          <span class="c"># a lot of space</span></code></pre><pre class="says"><code>a lot of space</code></pre></div>
+        </section>
+        <section class="fn" id="split_by">
+          <h3><a href="#split_by"><code>text's split_by(pattern, words)</code></a></h3>
+          <p><code>words</code> cut wherever the pattern is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pattern</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to split_by with pattern, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L87">text.moth line 87</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's split_by(<span class="s">&quot;,\\s*&quot;</span>, <span class="s">&quot;a, b,c,   d&quot;</span>)</code></pre><pre class="says"><code>[&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;]</code></pre></div>
+        </section>
+        <section class="fn" id="number_text">
+          <h3><a href="#number_text"><code>text's number_text(n, places)</code></a></h3>
+          <p>a number with exactly <code>places</code> decimals, rounded half away from 0: number_text(2.5, 0) is &quot;3&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li><li><code>places</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to number_text with n, places</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L693">text.moth line 693</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's number_text(<span class="n">3.14159</span>, <span class="n">2</span>) <span class="s">&quot; &quot;</span> text's grouped(<span class="n">1234567.5</span>)  <span class="c"># 3.14 1,234,567.5</span></code></pre><pre class="says"><code>3.14 1,234,567.5</code></pre></div>
+        </section>
+        <section class="fn" id="grouped">
+          <h3><a href="#grouped"><code>text's grouped(n)</code></a></h3>
+          <p>a number with a comma between each three of its whole part's digits: 1,234,567.5</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to grouped with n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L751">text.moth line 751</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's number_text(<span class="n">3.14159</span>, <span class="n">2</span>) <span class="s">&quot; &quot;</span> text's grouped(<span class="n">1234567.5</span>)  <span class="c"># 3.14 1,234,567.5</span></code></pre><pre class="says"><code>3.14 1,234,567.5</code></pre></div>
+        </section>
+        <section class="fn" id="grouped_with">
+          <h3><a href="#grouped_with"><code>text's grouped_with(n, separator)</code></a></h3>
+          <p>a number with <code>separator</code> between each three of its whole part's digits: grouped_with(1234567, &quot; &quot;) is &quot;1 234 567&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li><li><code>separator</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to grouped_with with n, separator</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L757">text.moth line 757</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's grouped_with(<span class="n">1234567</span>, <span class="s">&quot; &quot;</span>)</code></pre><pre class="says"><code>1 234 567</code></pre></div>
+        </section>
+        <section class="fn" id="padded_left">
+          <h3><a href="#padded_left"><code>text's padded_left(words, width)</code></a></h3>
+          <p>text made <code>width</code> characters wide with spaces before it (padded_left) or after it (<a href="#padded_right">padded_right</a>); longer text stays as it is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li><li><code>width</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to padded_left with words, width</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L789">text.moth line 789</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's padded_left(<span class="n">42</span>, <span class="n">5</span>)</code></pre><pre class="says"><code>   42</code></pre></div>
+        </section>
+        <section class="fn" id="padded_right">
+          <h3><a href="#padded_right"><code>text's padded_right(words, width)</code></a></h3>
+          <p>text made <code>width</code> characters wide with spaces after it; longer text stays as it is</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li><li><code>width</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to padded_right with words, width</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L798">text.moth line 798</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's padded_right(<span class="s">&quot;ab&quot;</span>, <span class="n">4</span>)</code></pre><pre class="says"><code>ab  </code></pre></div>
+        </section>
+        <section class="fn" id="csv_rows">
+          <h3><a href="#csv_rows"><code>text's csv_rows(words)</code></a></h3>
+          <p>CSV's rows, each a list of texts: commas between, a value with a comma, a quote or a new line in quotes, and &quot;&quot; for a quote inside them; the lines may end with a new line or a return and one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to csv_rows with words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L810">text.moth line 810</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's csv_rows(<span class="s">&quot;name,age\nSam,20\n\&quot;Lee, Ana\&quot;,31&quot;</span>)          <span class="c"># [[&quot;name&quot;, &quot;age&quot;], ...]</span></code></pre><pre class="says"><code>[[&quot;name&quot;, &quot;age&quot;], [&quot;Sam&quot;, &quot;20&quot;], [&quot;Lee, Ana&quot;, &quot;31&quot;]]</code></pre></div>
+        </section>
+        <section class="fn" id="csv_text">
+          <h3><a href="#csv_text"><code>text's csv_text(rows)</code></a></h3>
+          <p>rows, each a list of values, as CSV: each value as <code>say</code> shows it, in quotes if it needs them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>rows</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to csv_text with rows</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/text.moth#L861">text.moth line 861</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;text.moth&quot;</span> <span class="k">as</span> text
+<span class="k">say</span> text's csv_text(<span class="k">list</span> <span class="k">of</span> (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;a&quot;</span>, <span class="n">1</span>), (<span class="k">list</span> <span class="k">of</span> <span class="s">&quot;b, c&quot;</span>, <span class="s">&quot;x\&quot;y&quot;</span>))</code></pre><pre class="says"><code>a,1
+&quot;b, c&quot;,&quot;x&quot;&quot;y&quot;
+</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

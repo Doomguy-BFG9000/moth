@@ -1,6 +1,17 @@
 # Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots,
 # logarithms and powers of any number.
 # Any program can have them with `use "math.moth"`, as neural.moth does.
+#
+#   use "math.moth" as math
+#   say math's sqrt(2)                     # 1.41421356237309
+#   say math's sine(math's pi / 6)         # 0.5; cosine and tangent too, of angles in radians
+#   say math's degrees(math's arctangent(1))   # 45; radians(45) the other way
+#   say math's floor(-2.5) " " math's ceiling(-2.5) " " math's round(2.5)   # -3 -2 3
+#   say math's rounded(3.14159)            # 3.142: at most 3 decimals, for saying
+#   say math's power(2, 0.5)               # any power of any number; exp, ln, log10 and log2
+#   say math's absolute(-7) " " math's whole(7.9)   # 7 7
+#   say math's random()                    # from 0 up to 1, the same each run: set seed to change them
+#   say math's between(1, 6)               # from 1 up to 6
 
 # ---------- random numbers (Park and Miller, 1988) ----------
 
@@ -53,6 +64,7 @@ to sine with x
     return total
 end
 
+# the cosine of an angle in radians: sine a quarter turn on
 to cosine with x
     return sine(x + pi / 2)
 end
@@ -164,6 +176,7 @@ to log10 with x
     return ln(x) / ln10
 end
 
+# the logarithm of x to base 2: how many times 2 is multiplied to make it
 to log2 with x
     return ln(x) / ln2
 end
@@ -196,6 +209,7 @@ to ceiling with x
     return 0 - floor(0 - x)
 end
 
+# the nearest whole number, a half going up: round(2.5) is 3 and round(-2.5) is -2
 to round with x
     return floor(x + 0.5)
 end
@@ -231,6 +245,7 @@ to arctangent with x
     return total
 end
 
+# the angle in radians, from -pi/2 to pi/2, whose sine is x, a number from -1 to 1
 to arcsine with x
     if x is less than -1 or x is greater than 1
         fail with "'arcsine' needs a number from -1 to 1, not " + x
@@ -244,6 +259,7 @@ to arcsine with x
     return arctangent(x / sqrt(1 - x * x))
 end
 
+# the angle in radians, from 0 to pi, whose cosine is x, a number from -1 to 1
 to arccosine with x
     if x is less than -1 or x is greater than 1
         fail with "'arccosine' needs a number from -1 to 1, not " + x
@@ -276,6 +292,7 @@ to radians with angle
     return angle * pi / 180
 end
 
+# an angle in radians, in degrees
 to degrees with angle
     return angle * 180 / pi
 end

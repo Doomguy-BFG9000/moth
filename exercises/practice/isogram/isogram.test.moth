@@ -1,0 +1,29 @@
+use "isogram.moth" as exercise
+
+to test_empty
+    expect exercise's is_isogram("")
+end
+
+to test_only_small_letters
+    expect exercise's is_isogram("isogram")
+end
+
+to test_a_letter_twice
+    expect not exercise's is_isogram("eleven")
+end
+
+to test_a_capital_and_a_small_letter
+    expect not exercise's is_isogram("Alphabet")
+end
+
+to test_hyphens
+    expect exercise's is_isogram("six-year-old")
+end
+
+to test_a_phrase_with_spaces
+    expect exercise's is_isogram("Emily Jung Schwartzkopf")
+end
+
+to test_a_letter_twice_with_a_hyphen_between
+    expect not exercise's is_isogram("up-to-date")
+end

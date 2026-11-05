@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wire.moth · Moth's standard library</title>
+  <meta name="description" content="Bytes to and from a connection a message at a time, as the protocols of databases have them.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>wire</em>.moth</h1>
+      <p>Bytes to and from a connection a message at a time, as the protocols of databases have them.</p>
+      <p class="use"><code>use "wire.moth" as wire</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="wire.moth's functions">
+      <h2>20 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#reader">reader</a></li><li><a href="#reader_of">reader_of</a></li><li><a href="#waiting">waiting</a></li><li><a href="#take">take</a></li><li><a href="#take_byte">take_byte</a></li><li><a href="#take_number">take_number</a></li><li><a href="#line">line</a></li><li><a href="#text_to_zero">text_to_zero</a></li><li><a href="#number_of">number_of</a></li><li><a href="#signed_of">signed_of</a></li><li><a href="#double_of">double_of</a></li><li><a href="#writer">writer</a></li><li><a href="#add_bytes">add_bytes</a></li><li><a href="#add_text">add_text</a></li><li><a href="#add_byte">add_byte</a></li><li><a href="#add_number">add_number</a></li><li><a href="#bytes_of_number">bytes_of_number</a></li><li><a href="#add_double">add_double</a></li><li><a href="#bytes_of">bytes_of</a></li><li><a href="#joined">joined</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Bytes to and from a connection a message at a time, as the protocols of databases have them: a reader that keeps what came and isn't used yet, so lines, exact counts of bytes and the numbers in them come off it as they're wanted; and a writer that puts bytes, text and numbers together, to send at once. redis.moth, postgres.moth and mysql.moth speak through it, on sockets.moth.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> reader <span class="k">to</span> wire's reader(connection)           <span class="c"># a connection of sockets.moth's</span>
+<span class="k">set</span> line <span class="k">to</span> wire's line(reader)                   <span class="c"># the bytes up to the next \r\n, as text, without it</span>
+<span class="k">set</span> block <span class="k">to</span> wire's take(reader, <span class="n">16</span>)              <span class="c"># exactly 16 bytes, waiting for them to come</span>
+<span class="k">set</span> n <span class="k">to</span> wire's number_of(block, <span class="n">1</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)     <span class="c"># 4 bytes from byte 1, the highest first; or &quot;little&quot;</span>
+<span class="k">set</span> out <span class="k">to</span> wire's writer()
+wire's add_text(out, <span class="s">&quot;SELECT 1&quot;</span>)                  <span class="c"># its UTF-8; add_bytes, add_byte, add_number(out, n, 4, &quot;big&quot;)</span>
+net's <span class="k">send</span>(connection, wire's bytes_of(out))</code></pre></div>
+          <p><a href="#number_of">number_of</a> and <a href="#signed_of">signed_of</a> read whole numbers of 1 to 8 bytes (signed ones as two's complement), <a href="#double_of">double_of</a> a float of 8 (IEEE 754), and <a href="#add_number">add_number</a>, <a href="#add_double">add_double</a> write them. A connection that closes in the middle of a message is a <code>fail with</code>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="reader">
+          <h3><a href="#reader"><code>wire's reader(connection)</code></a></h3>
+          <p>a reader of a connection: its bytes come in as they're asked for</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>connection</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to reader with connection</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L24">wire.moth line 24</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> reader <span class="k">to</span> wire's reader(connection)           <span class="c"># a connection of sockets.moth's</span></code></pre></div>
+        </section>
+        <section class="fn" id="reader_of">
+          <h3><a href="#reader_of"><code>wire's reader_of(data)</code></a></h3>
+          <p>a reader of bytes already here, with no connection: what's past them is the end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>data</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to reader_of with data</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L29">wire.moth line 29</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> r <span class="k">to</span> wire's reader_of(hash's bytes_of_hex(<span class="s">&quot;2b4f4b0d0a68656c6c6f00010203fffe&quot;</span>))
+<span class="k">say</span> r</code></pre></div>
+        </section>
+        <section class="fn" id="waiting">
+          <h3><a href="#waiting"><code>wire's waiting(r)</code></a></h3>
+          <p>how many bytes have come that aren't read yet</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to waiting with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L34">wire.moth line 34</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> r <span class="k">to</span> wire's reader_of(hash's bytes_of_hex(<span class="s">&quot;2b4f4b0d0a68656c6c6f00010203fffe&quot;</span>))
+<span class="k">say</span> wire's waiting(r)</code></pre></div>
+        </section>
+        <section class="fn" id="take">
+          <h3><a href="#take"><code>wire's take(r, n)</code></a></h3>
+          <p>exactly n bytes, waiting for them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>n</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take with r, n</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L87">wire.moth line 87</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> reader <span class="k">to</span> wire's reader(connection)           <span class="c"># a connection of sockets.moth's</span>
+<span class="k">set</span> block <span class="k">to</span> wire's take(reader, <span class="n">16</span>)              <span class="c"># exactly 16 bytes, waiting for them to come</span></code></pre></div>
+        </section>
+        <section class="fn" id="take_byte">
+          <h3><a href="#take_byte"><code>wire's take_byte(r)</code></a></h3>
+          <p>one byte, as a number</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take_byte with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L98">wire.moth line 98</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> r <span class="k">to</span> wire's reader_of(hash's bytes_of_hex(<span class="s">&quot;2b4f4b0d0a68656c6c6f00010203fffe&quot;</span>))
+<span class="k">say</span> wire's take_byte(r)</code></pre></div>
+        </section>
+        <section class="fn" id="take_number">
+          <h3><a href="#take_number"><code>wire's take_number(r, count, order)</code></a></h3>
+          <p>a whole number of <code>count</code> bytes, &quot;big&quot; (the highest first) or &quot;little&quot; (the lowest first)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li><li><code>count</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to take_number with r, count, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L106">wire.moth line 106</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> r <span class="k">to</span> wire's reader_of(hash's bytes_of_hex(<span class="s">&quot;2b4f4b0d0a68656c6c6f00010203fffe&quot;</span>))
+<span class="k">say</span> wire's take_number(r, <span class="n">2</span>, <span class="s">&quot;big&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="line">
+          <h3><a href="#line"><code>wire's line(r)</code></a></h3>
+          <p>the bytes before a \r\n, as text, with the \r\n read too</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to line with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L114">wire.moth line 114</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> reader <span class="k">to</span> wire's reader(connection)           <span class="c"># a connection of sockets.moth's</span>
+<span class="k">set</span> line <span class="k">to</span> wire's line(reader)                   <span class="c"># the bytes up to the next \r\n, as text, without it</span></code></pre></div>
+        </section>
+        <section class="fn" id="text_to_zero">
+          <h3><a href="#text_to_zero"><code>wire's text_to_zero(r)</code></a></h3>
+          <p>the bytes before a 0 byte, as text, with the 0 read too</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>r</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to text_to_zero with r</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L122">wire.moth line 122</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> r <span class="k">to</span> wire's reader_of(hash's bytes_of_hex(<span class="s">&quot;2b4f4b0d0a68656c6c6f00010203fffe&quot;</span>))
+<span class="k">say</span> wire's text_to_zero(r)</code></pre></div>
+        </section>
+        <section class="fn" id="number_of">
+          <h3><a href="#number_of"><code>wire's number_of(b, from, count, order)</code></a></h3>
+          <p>a whole number from <code>count</code> bytes of b, from byte <code>from</code>, &quot;big&quot; (the highest first) or &quot;little&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>b</code></li><li><code>from</code></li><li><code>count</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to number_of with b, from, count, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L150">wire.moth line 150</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> reader <span class="k">to</span> wire's reader(connection)           <span class="c"># a connection of sockets.moth's</span>
+<span class="k">set</span> block <span class="k">to</span> wire's take(reader, <span class="n">16</span>)              <span class="c"># exactly 16 bytes, waiting for them to come</span>
+<span class="k">set</span> n <span class="k">to</span> wire's number_of(block, <span class="n">1</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)     <span class="c"># 4 bytes from byte 1, the highest first; or &quot;little&quot;</span></code></pre></div>
+        </section>
+        <section class="fn" id="signed_of">
+          <h3><a href="#signed_of"><code>wire's signed_of(b, from, count, order)</code></a></h3>
+          <p>the same, as two's complement: negative if its top bit is 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>b</code></li><li><code>from</code></li><li><code>count</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to signed_of with b, from, count, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L167">wire.moth line 167</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> b <span class="k">to</span> hash's bytes_of_hex(<span class="s">&quot;0102030405060708fffffffe80&quot;</span>)
+<span class="k">say</span> wire's signed_of(b, <span class="n">9</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="double_of">
+          <h3><a href="#double_of"><code>wire's double_of(b, from, order)</code></a></h3>
+          <p>an IEEE 754 double from 8 bytes of b</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>b</code></li><li><code>from</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to double_of with b, from, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L177">wire.moth line 177</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+wire's double_of(b, <span class="k">from</span>, order)</code></pre></div>
+        </section>
+        <section class="fn" id="writer">
+          <h3><a href="#writer"><code>wire's writer()</code></a></h3>
+          <p>a writer: pieces of bytes, put together at the end</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to writer</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L217">wire.moth line 217</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> w <span class="k">to</span> wire's writer()
+<span class="k">say</span> w</code></pre><pre class="says"><code>(record with pieces [], size 0)</code></pre></div>
+        </section>
+        <section class="fn" id="add_bytes">
+          <h3><a href="#add_bytes"><code>wire's add_bytes(w, b)</code></a></h3>
+          <p>bytes added to what a writer has</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_bytes with w, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L222">wire.moth line 222</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> w <span class="k">to</span> wire's writer()
+wire's add_text(w, <span class="s">&quot;é&quot;</span>)
+wire's add_byte(w, <span class="n">0</span>)
+wire's add_number(w, <span class="n">1000</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)
+wire's add_number(w, -<span class="n">1</span>, <span class="n">2</span>, <span class="s">&quot;little&quot;</span>)
+wire's add_bytes(w, hash's bytes_of_hex(<span class="s">&quot;abcd&quot;</span>))
+<span class="k">say</span> hash's hex_of(wire's bytes_of(w))</code></pre></div>
+        </section>
+        <section class="fn" id="add_text">
+          <h3><a href="#add_text"><code>wire's add_text(w, words)</code></a></h3>
+          <p>text's UTF-8</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li><li><code>words</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_text with w, words</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L229">wire.moth line 229</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> out <span class="k">to</span> wire's writer()
+wire's add_text(out, <span class="s">&quot;SELECT 1&quot;</span>)                  <span class="c"># its UTF-8; add_bytes, add_byte, add_number(out, n, 4, &quot;big&quot;)</span></code></pre></div>
+        </section>
+        <section class="fn" id="add_byte">
+          <h3><a href="#add_byte"><code>wire's add_byte(w, b)</code></a></h3>
+          <p>one byte, a number from 0 to 255, added to what a writer has</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li><li><code>b</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_byte with w, b</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L234">wire.moth line 234</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> w <span class="k">to</span> wire's writer()
+wire's add_text(w, <span class="s">&quot;é&quot;</span>)
+wire's add_byte(w, <span class="n">0</span>)
+<span class="k">say</span> hash's hex_of(wire's bytes_of(w))</code></pre></div>
+        </section>
+        <section class="fn" id="add_number">
+          <h3><a href="#add_number"><code>wire's add_number(w, n, count, order)</code></a></h3>
+          <p>a whole number in <code>count</code> bytes, &quot;big&quot; or &quot;little&quot;; one below 0 as two's complement</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li><li><code>n</code></li><li><code>count</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_number with w, n, count, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L239">wire.moth line 239</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> w <span class="k">to</span> wire's writer()
+wire's add_text(w, <span class="s">&quot;é&quot;</span>)
+wire's add_byte(w, <span class="n">0</span>)
+wire's add_number(w, <span class="n">1000</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)
+<span class="k">say</span> hash's hex_of(wire's bytes_of(w))</code></pre></div>
+        </section>
+        <section class="fn" id="bytes_of_number">
+          <h3><a href="#bytes_of_number"><code>wire's bytes_of_number(n, count, order)</code></a></h3>
+          <p>a whole number as <code>count</code> bytes, &quot;big&quot; or &quot;little&quot;; one below 0 as two's complement</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>n</code></li><li><code>count</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to bytes_of_number with n, count, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L244">wire.moth line 244</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">say</span> wire's bytes_of_number(-<span class="n">2</span>, <span class="n">4</span>, <span class="s">&quot;big&quot;</span>)</code></pre><pre class="says"><code>(4 bytes: 255, 255, 255, 254)</code></pre></div>
+        </section>
+        <section class="fn" id="add_double">
+          <h3><a href="#add_double"><code>wire's add_double(w, x, order)</code></a></h3>
+          <p>a number as an IEEE 754 double, in 8 bytes, &quot;big&quot; or &quot;little&quot;</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li><li><code>x</code></li><li><code>order</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to add_double with w, x, order</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L265">wire.moth line 265</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+wire's add_double(w, x, order)</code></pre></div>
+        </section>
+        <section class="fn" id="bytes_of">
+          <h3><a href="#bytes_of"><code>wire's bytes_of(w)</code></a></h3>
+          <p>everything written, as one block of bytes</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>w</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to bytes_of with w</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L323">wire.moth line 323</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">set</span> out <span class="k">to</span> wire's writer()
+net's <span class="k">send</span>(connection, wire's bytes_of(out))</code></pre></div>
+        </section>
+        <section class="fn" id="joined">
+          <h3><a href="#joined"><code>wire's joined(pieces)</code></a></h3>
+          <p>pieces of bytes, one after another, as one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>pieces</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to joined with pieces</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/wire.moth#L328">wire.moth line 328</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;wire.moth&quot;</span> <span class="k">as</span> wire
+<span class="k">say</span> wire's joined(<span class="k">list</span> <span class="k">of</span> (<span class="s">&quot;ab&quot;</span> <span class="k">as</span> <span class="k">bytes</span>), <span class="n">0</span> <span class="k">bytes</span>, (<span class="s">&quot;c&quot;</span> <span class="k">as</span> <span class="k">bytes</span>))</code></pre><pre class="says"><code>(3 bytes: 97, 98, 99)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

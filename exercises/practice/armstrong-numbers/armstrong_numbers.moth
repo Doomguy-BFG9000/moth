@@ -1,0 +1,3 @@
+to is_armstrong with n
+    fail with "delete this line, and say whether it's an Armstrong number"
+end

@@ -1,0 +1,53 @@
+name: Something went wrong
+description: A program that says, draws or fails differently from what you expected, or a crash
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you. The shorter the program that shows it, the quicker it gets fixed.
+  - type: textarea
+    id: program
+    attributes:
+      label: The program
+      description: As short as you can make it while it still goes wrong.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: said
+    attributes:
+      label: What Moth said or did
+      description: The output or the mistake, word for word.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where you ran it
+      options:
+        - The playground in a browser
+        - moth run
+        - A program moth build made
+        - The Moth shell or a notebook
+        - An editor (moth lsp or the debugger)
+        - Somewhere else (say below)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System and version
+      description: For example "Windows 11, Moth 1.11.0", or the browser for the playground.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else

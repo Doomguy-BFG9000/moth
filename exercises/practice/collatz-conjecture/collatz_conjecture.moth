@@ -1,0 +1,3 @@
+to steps with n
+    fail with "delete this line, and count the steps"
+end

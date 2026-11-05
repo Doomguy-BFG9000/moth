@@ -1,0 +1,39 @@
+# The words a text uses most
+# Counts every word in a paragraph with a dictionary, leaves out the little ones, and puts the rest in order
+# by how often each comes up: what a search engine's first step looks like.
+
+set paragraph to "The moth flew to the lamp, and the lamp burned bright. The night was long, and the moth "
+set paragraph to paragraph + "was patient; it waited by the lamp until the night was over and the light was gone."
+
+to letters_of with word
+    set kept to ""
+    for each c in split word by ""
+        if not (c is in list of ",", ".", ";")
+            set kept to kept + c
+        end
+    end
+    return kept
+end
+
+set little to list of "the", "and", "to", "a", "it", "by", "was", "of"
+set counts to empty dictionary
+for each word in split (lowercase of paragraph) by " "
+    set word to letters_of(word)
+    if word is not "" and not (word is in little)
+        if word is in counts
+            set item word of counts to item word of counts + 1
+        else
+            set item word of counts to 1
+        end
+    end
+end
+
+set ranked to empty list
+for each word in keys of counts
+    add (record with word word, times item word of counts) to ranked
+end
+set ranked to ranked in order by times
+for each k from 1 to 5
+    set r to item (length of ranked - k + 1) of ranked
+    say word of r + ": " + times of r
+end

@@ -37,6 +37,8 @@ use "secrets.moth" as pg_secrets
 
 # ---------- connecting ----------
 
+# a connection to PostgreSQL, logged in, from a record of host, port, user, password, database, tls and trust,
+# as at the top of this file; each but user can be left out
 to connect with options
     set given to pg_fields(options)
     if not ("user" is in given)
@@ -528,14 +530,17 @@ end
 
 # ---------- transactions ----------
 
+# a transaction begun: what follows is kept only once commit is called (in_transaction does all three)
 to begin with db
     run(db, "BEGIN")
 end
 
+# the transaction's changes kept
 to commit with db
     run(db, "COMMIT")
 end
 
+# the transaction's changes undone
 to rollback with db
     run(db, "ROLLBACK")
 end
@@ -564,6 +569,7 @@ to transaction_status with db
     return status of db
 end
 
+# the connection closed, after telling the server
 to close with db
     try
         pg_send(db, "X", 0 bytes) # Terminate

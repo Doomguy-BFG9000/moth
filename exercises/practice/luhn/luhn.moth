@@ -1,0 +1,3 @@
+to is_valid with number_text
+    fail with "delete this line, and check the number"
+end

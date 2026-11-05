@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>game.moth · Moth's standard library</title>
+  <meta name="description" content="Games, on Windows and Linux: a window drawn again about 60 times a second, what's held on the keyboard, where the mouse is, pictures and sounds.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>game</em>.moth</h1>
+      <p>Games, on Windows and Linux: a window drawn again about 60 times a second, what's held on the keyboard, where the mouse is, pictures and sounds.</p>
+      <p class="use"><code>use "game.moth" as game</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="game.moth's functions">
+      <h2>20 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#window">window</a></li><li><a href="#board">board</a></li><li><a href="#run_game">run_game</a></li><li><a href="#stop_game">stop_game</a></li><li><a href="#frames">frames</a></li><li><a href="#key_down">key_down</a></li><li><a href="#on_key">on_key</a></li><li><a href="#on_click">on_click</a></li><li><a href="#mouse_x">mouse_x</a></li><li><a href="#mouse_y">mouse_y</a></li><li><a href="#mouse_down">mouse_down</a></li><li><a href="#image">image</a></li><li><a href="#draw_image">draw_image</a></li><li><a href="#draw_image_sized">draw_image_sized</a></li><li><a href="#sound">sound</a></li><li><a href="#colour">colour</a></li><li><a href="#rectangle">rectangle</a></li><li><a href="#circle">circle</a></li><li><a href="#line">line</a></li><li><a href="#words">words</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Games, on Windows and Linux: a window drawn again about 60 times a second, what's held on the keyboard, where the mouse is, pictures and sounds. On ui.moth, so it needs windows.moth, linux.moth and ui.moth beside it, and is built with --allow-libraries (and --allow-read for pictures and sounds that aren't built in).</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)
+game's run_game(update, show)</code></pre></div>
+          <p>And in update, or show:</p>
+          <div class="code"><pre><code><span class="k">if</span> game's mouse_down()                  <span class="c"># where it is: mouse_x() and mouse_y()</span>
+    game's <span class="k">circle</span>(canvas, game's mouse_x(), game's mouse_y(), <span class="n">10</span>)
+<span class="k">end</span>
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span>
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+          <p>update is called first, then show, each frame. on_key's handler is given each key as it's pressed, and on_click's where the mouse was clicked; <a href="#stop_game">stop_game</a> closes the window, which ends <a href="#run_game">run_game</a>.</p>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="window">
+          <h3><a href="#window"><code>game's window(title, width, height)</code></a></h3>
+          <p>the game's window, <code>width</code> by <code>height</code>, and the drawing in it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>title</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to window with title, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L45">game.moth line 45</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="board">
+          <h3><a href="#board"><code>game's board()</code></a></h3>
+          <p>the drawing, for what ui.moth does with one</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to board</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L53">game.moth line 53</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's board()</code></pre></div>
+        </section>
+        <section class="fn" id="run_game">
+          <h3><a href="#run_game"><code>game's run_game(update, show)</code></a></h3>
+          <p>the frames, until the window is closed</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>update</code></li><li><code>show</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to run_game with update, show</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L80">game.moth line 80</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's run_game(update, show)</code></pre></div>
+        </section>
+        <section class="fn" id="stop_game">
+          <h3><a href="#stop_game"><code>game's stop_game()</code></a></h3>
+          <p>the game's window closed, which ends <a href="#run_game">run_game</a></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to stop_game</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L90">game.moth line 90</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+        </section>
+        <section class="fn" id="frames">
+          <h3><a href="#frames"><code>game's frames()</code></a></h3>
+          <p>how many frames there have been</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to frames</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L95">game.moth line 95</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span></code></pre><pre class="says"><code>0</code></pre></div>
+        </section>
+        <section class="fn" id="key_down">
+          <h3><a href="#key_down"><code>game's key_down(name)</code></a></h3>
+          <p>whether a key is held down in the game's window: &quot;Left&quot;, &quot;Right&quot;, &quot;Up&quot;, &quot;Down&quot;, &quot;Space&quot;, &quot;Enter&quot;, &quot;Escape&quot;, &quot;Shift&quot;, &quot;Ctrl&quot;, &quot;Alt&quot;, &quot;Tab&quot;, &quot;Backspace&quot;, &quot;Delete&quot;, a letter, a digit, or F1 to F12</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>name</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to key_down with name</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L101">game.moth line 101</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)
+game's run_game(update, show)</code></pre></div>
+        </section>
+        <section class="fn" id="on_key">
+          <h3><a href="#on_key"><code>game's on_key(handler)</code></a></h3>
+          <p>a handler for each key pressed in the game's window, given the key's name, as <a href="#key_down">key_down</a> knows them</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_key with handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L106">game.moth line 106</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's on_key(handler)</code></pre></div>
+        </section>
+        <section class="fn" id="on_click">
+          <h3><a href="#on_click"><code>game's on_click(handler)</code></a></h3>
+          <p>a handler for a click in the game's window, given where: x and y</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>handler</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to on_click with handler</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L111">game.moth line 111</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's on_click(handler)</code></pre></div>
+        </section>
+        <section class="fn" id="mouse_x">
+          <h3><a href="#mouse_x"><code>game's mouse_x()</code></a></h3>
+          <p>how far across the window the mouse was last, in pixels from its left</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L116">game.moth line 116</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">if</span> game's mouse_down()                  <span class="c"># where it is: mouse_x() and mouse_y()</span>
+    game's <span class="k">circle</span>(canvas, game's mouse_x(), game's mouse_y(), <span class="n">10</span>)
+<span class="k">end</span>
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span>
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+        </section>
+        <section class="fn" id="mouse_y">
+          <h3><a href="#mouse_y"><code>game's mouse_y()</code></a></h3>
+          <p>how far down the window the mouse was last, in pixels from its top</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L121">game.moth line 121</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">if</span> game's mouse_down()                  <span class="c"># where it is: mouse_x() and mouse_y()</span>
+    game's <span class="k">circle</span>(canvas, game's mouse_x(), game's mouse_y(), <span class="n">10</span>)
+<span class="k">end</span>
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span>
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+        </section>
+        <section class="fn" id="mouse_down">
+          <h3><a href="#mouse_down"><code>game's mouse_down()</code></a></h3>
+          <p>whether the mouse's button is down in the window</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to mouse_down</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L126">game.moth line 126</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">if</span> game's mouse_down()                  <span class="c"># where it is: mouse_x() and mouse_y()</span>
+    game's <span class="k">circle</span>(canvas, game's mouse_x(), game's mouse_y(), <span class="n">10</span>)
+<span class="k">end</span>
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span>
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+        </section>
+        <section class="fn" id="image">
+          <h3><a href="#image"><code>game's image(file)</code></a></h3>
+          <p>a picture from a file, or one built in, and its width and height</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to image with file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L131">game.moth line 131</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="draw_image">
+          <h3><a href="#draw_image"><code>game's draw_image(canvas, picture, x, y)</code></a></h3>
+          <p>a picture <a href="#image">image</a>() gave drawn with its top left at x, y, at its own size</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>picture</code></li><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to draw_image with canvas, picture, x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L136">game.moth line 136</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)
+game's run_game(update, show)</code></pre></div>
+        </section>
+        <section class="fn" id="draw_image_sized">
+          <h3><a href="#draw_image_sized"><code>game's draw_image_sized(canvas, picture, x, y, width, height)</code></a></h3>
+          <p>a picture <a href="#image">image</a>() gave drawn with its top left at x, y, made <code>width</code> by <code>height</code></p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>picture</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to draw_image_sized with canvas, picture, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L141">game.moth line 141</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="sound">
+          <h3><a href="#sound"><code>game's sound(file)</code></a></h3>
+          <p>a WAV file played while the game goes on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>file</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sound with file</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L146">game.moth line 146</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="colour">
+          <h3><a href="#colour"><code>game's colour(canvas, red, green, blue)</code></a></h3>
+          <p>what's drawn next is this colour: red, green and blue, each from 0 to 255</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>red</code></li><li><code>green</code></li><li><code>blue</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to colour with canvas, red, green, blue</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L151">game.moth line 151</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)
+game's run_game(update, show)</code></pre></div>
+        </section>
+        <section class="fn" id="rectangle">
+          <h3><a href="#rectangle"><code>game's rectangle(canvas, x, y, width, height)</code></a></h3>
+          <p>a filled rectangle, its top left at x, y, <code>width</code> by <code>height</code>, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x</code></li><li><code>y</code></li><li><code>width</code></li><li><code>height</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rectangle with canvas, x, y, width, height</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L156">game.moth line 156</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+<span class="k">to</span> update <span class="k">with</span> <span class="k">seconds</span>                  <span class="c"># how long since the last frame, about a 60th of a second</span>
+    <span class="k">if</span> game's key_down(<span class="s">&quot;Right&quot;</span>)
+        <span class="k">set</span> x <span class="k">to</span> x + <span class="n">200</span> * <span class="k">seconds</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+<span class="k">to</span> show <span class="k">with</span> canvas
+    game's colour(canvas, <span class="n">20</span>, <span class="n">20</span>, <span class="n">40</span>)
+    game's rectangle(canvas, <span class="n">0</span>, <span class="n">0</span>, <span class="n">640</span>, <span class="n">480</span>)
+    game's draw_image(canvas, ship, x, <span class="n">200</span>)
+<span class="k">end</span>
+game's window(<span class="s">&quot;Space&quot;</span>, <span class="n">640</span>, <span class="n">480</span>)
+<span class="k">set</span> ship <span class="k">to</span> game's image(<span class="s">&quot;ship.png&quot;</span>)
+game's run_game(update, show)</code></pre></div>
+        </section>
+        <section class="fn" id="circle">
+          <h3><a href="#circle"><code>game's circle(canvas, x, y, radius)</code></a></h3>
+          <p>a filled circle, its middle at x, y, so many pixels across from the middle to the edge, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x</code></li><li><code>y</code></li><li><code>radius</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to circle with canvas, x, y, radius</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L162">game.moth line 162</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">if</span> game's mouse_down()                  <span class="c"># where it is: mouse_x() and mouse_y()</span>
+    game's <span class="k">circle</span>(canvas, game's mouse_x(), game's mouse_y(), <span class="n">10</span>)
+<span class="k">end</span>
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)
+game's draw_image_sized(canvas, ship, <span class="n">300</span>, <span class="n">200</span>, <span class="n">64</span>, <span class="n">48</span>)
+game's sound(<span class="s">&quot;boom.wav&quot;</span>)
+<span class="k">say</span> game's frames()                     <span class="c"># so far</span>
+game's stop_game()                      <span class="c"># the window closed, which ends run_game</span></code></pre></div>
+        </section>
+        <section class="fn" id="line">
+          <h3><a href="#line"><code>game's line(canvas, x1, y1, x2, y2)</code></a></h3>
+          <p>a line from x1, y1 to x2, y2, in the colour chosen last</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>x1</code></li><li><code>y1</code></li><li><code>x2</code></li><li><code>y2</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to line with canvas, x1, y1, x2, y2</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L167">game.moth line 167</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+game's line(canvas, <span class="n">0</span>, <span class="n">400</span>, <span class="n">640</span>, <span class="n">400</span>)</code></pre></div>
+        </section>
+        <section class="fn" id="words">
+          <h3><a href="#words"><code>game's words(canvas, text, x, y)</code></a></h3>
+          <p>words with their top left at x, y, in the system's own font</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>canvas</code></li><li><code>text</code></li><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to words with canvas, text, x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/tools/game.moth#L172">game.moth line 172</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;game.moth&quot;</span> <span class="k">as</span> game
+<span class="k">set</span> x <span class="k">to</span> <span class="n">100</span>
+game's words(canvas, text, x, y)</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

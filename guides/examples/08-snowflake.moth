@@ -1,0 +1,31 @@
+# A snowflake, drawn
+# Koch's snowflake: each side of a triangle becomes four sides a third as long, with a point in the middle, and
+# so on, as deep as asked. The turtle starts in the middle, facing up, and draws wherever it moves.
+
+to side with long, depth
+    if depth is 0
+        move forward long
+        return
+    end
+    side(long / 3, depth - 1)
+    turn left 60
+    side(long / 3, depth - 1)
+    turn right 120
+    side(long / 3, depth - 1)
+    turn left 60
+    side(long / 3, depth - 1)
+end
+
+pen up
+move back 90
+turn left 90
+move forward 160
+turn right 120
+pen down
+pen color "skyblue"
+pen width 2
+for each k from 1 to 3
+    side(320, 4)
+    turn right 120
+end
+say "a snowflake of " + 3 * 4 * 4 * 4 * 4 + " sides"

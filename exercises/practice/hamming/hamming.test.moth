@@ -1,0 +1,22 @@
+use "hamming.moth" as exercise
+
+to test_empty
+    expect exercise's distance("", "") is 0
+end
+
+to test_the_same
+    expect exercise's distance("GGACTGAAATCTG", "GGACTGAAATCTG") is 0
+end
+
+to test_long
+    expect exercise's distance("GGACGGATTCTG", "AGGACGGATTCT") is 9
+end
+
+to test_different_lengths
+    try
+        exercise's distance("AATG", "AAA")
+        expect no
+    if it fails with why
+        expect why is "strands must be of equal length"
+    end
+end

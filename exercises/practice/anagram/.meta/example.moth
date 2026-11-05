@@ -1,0 +1,13 @@
+to sorted_letters with word
+    return (split (lowercase of word) by "") in order
+end
+
+to find_anagrams with word, candidates
+    set found to empty list
+    for each c in candidates
+        if lowercase of c is not lowercase of word and sorted_letters(c) is sorted_letters(word)
+            add c to found
+        end
+    end
+    return found
+end

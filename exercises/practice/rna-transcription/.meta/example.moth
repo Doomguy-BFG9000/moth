@@ -1,0 +1,8 @@
+to to_rna with dna
+    set pairs to dictionary where "G" is "C", "C" is "G", "T" is "A", "A" is "U"
+    set rna to ""
+    for each c in split dna by ""
+        set rna to rna + item c of pairs
+    end
+    return rna
+end

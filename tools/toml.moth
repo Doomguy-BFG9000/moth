@@ -18,6 +18,8 @@ set toml_hex to "0123456789abcdef"
 
 # ---------- reading ----------
 
+# the settings TOML text holds, as a dictionary: tables as dictionaries, arrays as lists, and dates and times
+# as text; a mistake is a `fail with` that says which line
 to read_toml with words
     set toml_src to words
     set toml_at to 1

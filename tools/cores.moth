@@ -140,6 +140,8 @@ to cores_here with job, items
     return made
 end
 
+# what the function gives for each item, in the items' order, the items shared out among as many copies of the
+# program as there are cores
 to each_at_once with job, items
     return each_at_once_on(count_of_cores(), job, items)
 end

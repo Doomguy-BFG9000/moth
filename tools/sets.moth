@@ -36,10 +36,12 @@ to set_of with things
     return made
 end
 
+# a set with nothing in it
 to empty_set
     return set_of(empty list)
 end
 
+# thing put in the set, if it isn't there already
 to put with s, thing
     set kept to members of s
     set item thing of kept to yes
@@ -53,10 +55,12 @@ to take_out with s, thing
     end
 end
 
+# whether the thing is in the set
 to has with s, thing
     return thing is in members of s
 end
 
+# how many things the set holds
 to size with s
     return length of keys of members of s
 end
@@ -66,6 +70,7 @@ to items_of with s
     return keys of members of s
 end
 
+# a set of its own with the same things, which changes apart from this one
 to copy_of with s
     return set_of(items_of(s))
 end

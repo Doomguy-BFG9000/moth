@@ -1,0 +1,41 @@
+use "bob.moth" as exercise
+
+to test_stating_something
+    expect exercise's response("Tom-ay-to, tom-aaaah-to.") is "Whatever."
+end
+
+to test_shouting
+    expect exercise's response("WATCH OUT!") is "Whoa, chill out!"
+end
+
+to test_asking_a_question
+    expect exercise's response("Does this cryogenic chamber make me look fat?") is "Sure."
+end
+
+to test_forceful_question
+    expect exercise's response("WHAT'S GOING ON?") is "Calm down, I know what I'm doing!"
+end
+
+to test_shouting_numbers
+    expect exercise's response("1, 2, 3 GO!") is "Whoa, chill out!"
+end
+
+to test_only_numbers
+    expect exercise's response("1, 2, 3") is "Whatever."
+end
+
+to test_question_with_only_numbers
+    expect exercise's response("4?") is "Sure."
+end
+
+to test_silence
+    expect exercise's response("") is "Fine. Be that way!"
+end
+
+to test_prolonged_silence
+    expect exercise's response("          ") is "Fine. Be that way!"
+end
+
+to test_question_with_spaces_after_it
+    expect exercise's response("Okay if like my  spacebar  quite a bit?   ") is "Sure."
+end

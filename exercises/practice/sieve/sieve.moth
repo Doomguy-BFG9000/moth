@@ -1,0 +1,3 @@
+to primes_up_to with limit
+    fail with "delete this line, and sieve"
+end

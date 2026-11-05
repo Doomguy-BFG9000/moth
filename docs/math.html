@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>math.moth · Moth's standard library</title>
+  <meta name="description" content="Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots, logarithms and powers of any number.">
+  <meta name="theme-color" content="#0c0a08">
+  <link rel="icon" href="../docs/moth.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../docs/site.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="wing-fore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd98a"/><stop offset="1" stop-color="#e8952e"/></linearGradient>
+      <linearGradient id="wing-hind" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0a845"/><stop offset="1" stop-color="#b8651c"/></linearGradient>
+      <symbol id="moth" class="moth" viewBox="0 0 64 64">
+        <path class="hind" d="M30 34C20 35 11 42 15 49C19 55 27 48 31 40ZM34 34C44 35 53 42 49 49C45 55 37 48 33 40Z"/>
+        <path class="fore" d="M30 27C22 14 8 10 4 18C2 25 10 33 29 33ZM34 27C42 14 56 10 60 18C62 25 54 33 35 33Z"/>
+        <circle class="spot" cx="15" cy="21" r="2.6"/><circle class="spot" cx="49" cy="21" r="2.6"/>
+        <ellipse class="body" cx="32" cy="35" rx="2.6" ry="11"/><circle class="body" cx="32" cy="23" r="2.8"/>
+        <path class="feelers" d="M31 21C29 15 25 11 20 9M33 21C35 15 39 11 44 9"/>
+      </symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </defs>
+  </svg>
+
+  <header>
+    <div class="lamp" aria-hidden="true"></div>
+    <nav class="nav wrap" aria-label="Moth">
+      <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+      <a class="go" href="../#playground">Playground</a>
+      <a class="go" href="../learn.html">Learn</a>
+      <a class="go" href="../docs/" aria-current="page">Docs</a>
+      <a class="go" href="../docs/cookbook/">Cookbook</a>
+      <a class="go" href="../docs/examples.html">Examples</a>
+      <a class="go outlined" href="https://github.com/samyyy2423/moth"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+    </nav>
+    <div class="hero wrap">
+      <p class="eyebrow"><a href="./">The standard library</a></p>
+      <h1><em>math</em>.moth</h1>
+      <p>Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots, logarithms and powers of any number.</p>
+      <p class="use"><code>use "math.moth" as math</code></p>
+    </div>
+  </header>
+
+  <div class="layout wrap">
+    <nav class="toc" aria-label="math.moth's functions">
+      <h2>23 functions</h2>
+      <input type="search" id="filter" placeholder="Filter" aria-label="Filter the functions">
+      <ol id="toc"><li><a href="#whole">whole</a></li><li><a href="#random">random</a></li><li><a href="#sine">sine</a></li><li><a href="#cosine">cosine</a></li><li><a href="#floor">floor</a></li><li><a href="#rounded">rounded</a></li><li><a href="#exp">exp</a></li><li><a href="#sqrt">sqrt</a></li><li><a href="#between">between</a></li><li><a href="#ln">ln</a></li><li><a href="#log10">log10</a></li><li><a href="#log2">log2</a></li><li><a href="#power">power</a></li><li><a href="#absolute">absolute</a></li><li><a href="#ceiling">ceiling</a></li><li><a href="#round">round</a></li><li><a href="#tangent">tangent</a></li><li><a href="#arctangent">arctangent</a></li><li><a href="#arcsine">arcsine</a></li><li><a href="#arccosine">arccosine</a></li><li><a href="#angle_of">angle_of</a></li><li><a href="#radians">radians</a></li><li><a href="#degrees">degrees</a></li></ol>
+      <p class="more"><a href="./">Every library</a> · <a href="https://github.com/samyyy2423/moth/blob/main/math.moth">The source</a></p>
+    </nav>
+    <main>
+      <section class="about">
+        <h2>What it's for</h2>
+          <p>Maths Moth doesn't have built in, written in Moth: random numbers, trigonometry, rounding, roots, logarithms and powers of any number. Any program can have them with <code>use &quot;math.moth&quot;</code>, as neural.moth does.</p>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's sqrt(<span class="n">2</span>)                     <span class="c"># 1.41421356237309</span>
+<span class="k">say</span> math's sine(math's pi / <span class="n">6</span>)         <span class="c"># 0.5; cosine and tangent too, of angles in radians</span>
+<span class="k">say</span> math's degrees(math's arctangent(<span class="n">1</span>))   <span class="c"># 45; radians(45) the other way</span>
+<span class="k">say</span> math's floor(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's ceiling(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's round(<span class="n">2.5</span>)   <span class="c"># -3 -2 3</span>
+<span class="k">say</span> math's <span class="k">rounded</span>(<span class="n">3.14159</span>)            <span class="c"># 3.142: at most 3 decimals, for saying</span>
+<span class="k">say</span> math's <span class="k">power</span>(<span class="n">2</span>, <span class="n">0.5</span>)               <span class="c"># any power of any number; exp, ln, log10 and log2</span>
+<span class="k">say</span> math's absolute(-<span class="n">7</span>) <span class="s">&quot; &quot;</span> math's whole(<span class="n">7.9</span>)   <span class="c"># 7 7</span>
+<span class="k">say</span> math's <span class="k">random</span>()                    <span class="c"># from 0 up to 1, the same each run: set seed to change them</span>
+<span class="k">say</span> math's between(<span class="n">1</span>, <span class="n">6</span>)               <span class="c"># from 1 up to 6</span></code></pre></div>
+      </section>
+      <section class="fns">
+        <h2>Functions</h2>
+        <section class="fn" id="whole">
+          <h3><a href="#whole"><code>math's whole(x)</code></a></h3>
+          <p>the whole-number part of a number that isn't negative, found one power of two at a time</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to whole with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L21">math.moth line 21</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's absolute(-<span class="n">7</span>) <span class="s">&quot; &quot;</span> math's whole(<span class="n">7.9</span>)   <span class="c"># 7 7</span></code></pre><pre class="says"><code>7 7</code></pre></div>
+        </section>
+        <section class="fn" id="random">
+          <h3><a href="#random"><code>math's random()</code></a></h3>
+          <p>a number between 0 and 1, different every time and the same on every run</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><p class="takes">Takes nothing.</p></div>
+            
+          </div>
+          <p class="written">Written <code>to random</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L37">math.moth line 37</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's <span class="k">random</span>()                    <span class="c"># from 0 up to 1, the same each run: set seed to change them</span></code></pre><pre class="says"><code>0.000328707508895876</code></pre></div>
+        </section>
+        <section class="fn" id="sine">
+          <h3><a href="#sine"><code>math's sine(x)</code></a></h3>
+          <p>x - x³/3! + x⁵/5! - ..., after moving x between -pi and pi, where 12 terms are plenty</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sine with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L51">math.moth line 51</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's sine(math's pi / <span class="n">6</span>)         <span class="c"># 0.5; cosine and tangent too, of angles in radians</span></code></pre><pre class="says"><code>0.5</code></pre></div>
+        </section>
+        <section class="fn" id="cosine">
+          <h3><a href="#cosine"><code>math's cosine(x)</code></a></h3>
+          <p>the cosine of an angle in radians: sine a quarter turn on</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to cosine with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L68">math.moth line 68</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+math's cosine(x)</code></pre></div>
+        </section>
+        <section class="fn" id="floor">
+          <h3><a href="#floor"><code>math's floor(x)</code></a></h3>
+          <p>the whole-number part of a number below 0 too: -2.5 gives -3</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to floor with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L75">math.moth line 75</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's floor(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's ceiling(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's round(<span class="n">2.5</span>)   <span class="c"># -3 -2 3</span></code></pre><pre class="says"><code>-3 -2 3</code></pre></div>
+        </section>
+        <section class="fn" id="rounded">
+          <h3><a href="#rounded"><code>math's rounded(x)</code></a></h3>
+          <p>a number with at most 3 decimals, for saying</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to rounded with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L87">math.moth line 87</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's <span class="k">rounded</span>(<span class="n">3.14159</span>)            <span class="c"># 3.142: at most 3 decimals, for saying</span></code></pre><pre class="says"><code>3.142</code></pre></div>
+        </section>
+        <section class="fn" id="exp">
+          <h3><a href="#exp"><code>math's exp(x)</code></a></h3>
+          <p>e to the power x. With x = k·ln 2 + r, where r is small, e^x = 2^k · e^r, and 20 terms of e^r's series are plenty.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to exp with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L97">math.moth line 97</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's exp(math's ln(<span class="n">5</span>))</code></pre><pre class="says"><code>5</code></pre></div>
+        </section>
+        <section class="fn" id="sqrt">
+          <h3><a href="#sqrt"><code>math's sqrt(x)</code></a></h3>
+          <p>The square root, by Newton's method: average a guess with x / guess until it settles.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to sqrt with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L118">math.moth line 118</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's sqrt(<span class="n">2</span>)                     <span class="c"># 1.41421356237309</span></code></pre><pre class="says"><code>1.41421356237309</code></pre></div>
+        </section>
+        <section class="fn" id="between">
+          <h3><a href="#between"><code>math's between(low, high)</code></a></h3>
+          <p>a random number from low up to high</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>low</code></li><li><code>high</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to between with low, high</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L136">math.moth line 136</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's between(<span class="n">1</span>, <span class="n">6</span>)               <span class="c"># from 1 up to 6</span></code></pre><pre class="says"><code>1.00164353754448</code></pre></div>
+        </section>
+        <section class="fn" id="ln">
+          <h3><a href="#ln"><code>math's ln(x)</code></a></h3>
+          <p>The natural logarithm. With x = m·2^k, m from 1/√2 up to √2, ln x = k·ln 2 + ln m, and ln m is 2(z + z³/3 + z⁵/5 + ...) for z = (m - 1) / (m + 1), below 0.18, where 24 terms are plenty.</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ln with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L146">math.moth line 146</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's ln(<span class="n">2</span>)</code></pre><pre class="says"><code>0.693147180559945</code></pre></div>
+        </section>
+        <section class="fn" id="log10">
+          <h3><a href="#log10"><code>math's log10(x)</code></a></h3>
+          <p>the logarithm to base 10, and to base 2</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to log10 with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L175">math.moth line 175</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's log10(<span class="n">1000</span>)</code></pre><pre class="says"><code>3</code></pre></div>
+        </section>
+        <section class="fn" id="log2">
+          <h3><a href="#log2"><code>math's log2(x)</code></a></h3>
+          <p>the logarithm of x to base 2: how many times 2 is multiplied to make it</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to log2 with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L180">math.moth line 180</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's log2(<span class="n">1024</span>)</code></pre><pre class="says"><code>10</code></pre></div>
+        </section>
+        <section class="fn" id="power">
+          <h3><a href="#power"><code>math's power(x, y)</code></a></h3>
+          <p>x to the power y, y any number: a whole y as <code>to the power of</code> works it out, by squaring, and for the rest e^(y·ln x), which needs x above 0</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to power with x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L186">math.moth line 186</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's <span class="k">power</span>(<span class="n">2</span>, <span class="n">0.5</span>)               <span class="c"># any power of any number; exp, ln, log10 and log2</span></code></pre><pre class="says"><code>1.41421356237309</code></pre></div>
+        </section>
+        <section class="fn" id="absolute">
+          <h3><a href="#absolute"><code>math's absolute(x)</code></a></h3>
+          <p>how far from 0, either way</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to absolute with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L200">math.moth line 200</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's absolute(-<span class="n">7</span>) <span class="s">&quot; &quot;</span> math's whole(<span class="n">7.9</span>)   <span class="c"># 7 7</span></code></pre><pre class="says"><code>7 7</code></pre></div>
+        </section>
+        <section class="fn" id="ceiling">
+          <h3><a href="#ceiling"><code>math's ceiling(x)</code></a></h3>
+          <p>the whole number nearest above, and the nearest of all (a half going up)</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to ceiling with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L208">math.moth line 208</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's floor(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's ceiling(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's round(<span class="n">2.5</span>)   <span class="c"># -3 -2 3</span></code></pre><pre class="says"><code>-3 -2 3</code></pre></div>
+        </section>
+        <section class="fn" id="round">
+          <h3><a href="#round"><code>math's round(x)</code></a></h3>
+          <p>the nearest whole number, a half going up: round(2.5) is 3 and round(-2.5) is -2</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to round with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L213">math.moth line 213</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's floor(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's ceiling(-<span class="n">2.5</span>) <span class="s">&quot; &quot;</span> math's round(<span class="n">2.5</span>)   <span class="c"># -3 -2 3</span></code></pre><pre class="says"><code>-3 -2 3</code></pre></div>
+        </section>
+        <section class="fn" id="tangent">
+          <h3><a href="#tangent"><code>math's tangent(x)</code></a></h3>
+          <p>tangent, and the angles back from a tangent, a sine and a cosine, in radians</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to tangent with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L218">math.moth line 218</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's tangent(<span class="n">1</span>)</code></pre><pre class="says"><code>1.5574077246549</code></pre></div>
+        </section>
+        <section class="fn" id="arctangent">
+          <h3><a href="#arctangent"><code>math's arctangent(x)</code></a></h3>
+          <p>Past 1, from 1 / x; then halving the angle until x is below 0.1 (tan(θ/2) = x / (1 + √(1 + x²))), then x - x³/3 + x⁵/5 - ...</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to arctangent with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L223">math.moth line 223</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's degrees(math's arctangent(<span class="n">1</span>))   <span class="c"># 45; radians(45) the other way</span></code></pre><pre class="says"><code>45</code></pre></div>
+        </section>
+        <section class="fn" id="arcsine">
+          <h3><a href="#arcsine"><code>math's arcsine(x)</code></a></h3>
+          <p>the angle in radians, from -pi/2 to pi/2, whose sine is x, a number from -1 to 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to arcsine with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L249">math.moth line 249</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's arcsine(<span class="n">0.5</span>)</code></pre><pre class="says"><code>0.523598775598299</code></pre></div>
+        </section>
+        <section class="fn" id="arccosine">
+          <h3><a href="#arccosine"><code>math's arccosine(x)</code></a></h3>
+          <p>the angle in radians, from 0 to pi, whose cosine is x, a number from -1 to 1</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to arccosine with x</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L263">math.moth line 263</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's arccosine(<span class="n">0.5</span>)</code></pre><pre class="says"><code>1.0471975511966</code></pre></div>
+        </section>
+        <section class="fn" id="angle_of">
+          <h3><a href="#angle_of"><code>math's angle_of(x, y)</code></a></h3>
+          <p>the angle from the x axis to the point x, y, from -pi to pi</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>x</code></li><li><code>y</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to angle_of with x, y</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L271">math.moth line 271</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's angle_of(-<span class="n">1</span>, -<span class="n">1</span>)</code></pre><pre class="says"><code>-2.35619449019234</code></pre></div>
+        </section>
+        <section class="fn" id="radians">
+          <h3><a href="#radians"><code>math's radians(angle)</code></a></h3>
+          <p>degrees as radians, and back</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>angle</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to radians with angle</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L291">math.moth line 291</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's radians(<span class="n">90</span>)</code></pre><pre class="says"><code>1.5707963267949</code></pre></div>
+        </section>
+        <section class="fn" id="degrees">
+          <h3><a href="#degrees"><code>math's degrees(angle)</code></a></h3>
+          <p>an angle in radians, in degrees</p>
+          <div class="facts">
+            <div><h4>Inputs</h4><ul class="inputs"><li><code>angle</code></li></ul></div>
+            
+          </div>
+          <p class="written">Written <code>to degrees with angle</code>, at <a href="https://github.com/samyyy2423/moth/blob/main/math.moth#L296">math.moth line 296</a></p>
+          <h4>Example</h4>
+          <div class="code"><pre><code><span class="k">use</span> <span class="s">&quot;math.moth&quot;</span> <span class="k">as</span> math
+<span class="k">say</span> math's degrees(math's arctangent(<span class="n">1</span>))   <span class="c"># 45; radians(45) the other way</span></code></pre><pre class="says"><code>45</code></pre></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot wrap">
+    <a class="brand" href="../"><svg class="moth" aria-hidden="true"><use href="#moth"/></svg>Moth</a>
+    <p>Open source under the Apache License 2.0</p>
+    <nav aria-label="More about Moth">
+      <a href="../#playground">Playground</a>
+      <a href="../learn.html">Learn</a>
+      <a href="../docs/">The standard library</a>
+      <a href="https://github.com/samyyy2423/moth#the-language">The language</a>
+      <a href="https://github.com/samyyy2423/moth">GitHub</a>
+    </nav>
+  </footer>
+  <script>
+    // the list of functions, filtered as a name is typed
+    const filter = document.getElementById("filter");
+    filter.oninput = () => {
+      const wanted = filter.value.trim().toLowerCase();
+      for (const li of document.getElementById("toc").children) li.hidden = !li.textContent.toLowerCase().includes(wanted);
+    };
+  </script>
+</body>
+</html>

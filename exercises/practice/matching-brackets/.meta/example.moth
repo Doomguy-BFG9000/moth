@@ -1,0 +1,15 @@
+to is_paired with words
+    set closer_of to dictionary where "(" is ")", "[" is "]", "\{" is "}"
+    set waiting to empty list
+    for each c in split words by ""
+        if c is in closer_of
+            add item c of closer_of to waiting
+        else if c is in list of ")", "]", "}"
+            if length of waiting is 0 or item (length of waiting) of waiting is not c
+                return no
+            end
+            set waiting to items 1 to (length of waiting - 1) of waiting
+        end
+    end
+    return length of waiting is 0
+end

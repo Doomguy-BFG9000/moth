@@ -15,7 +15,8 @@ things that are released together, as one `moth` program:
   with.
 
 A release is tagged `vMAJOR.MINOR.PATCH` on GitHub (`v1.11.0`), with `moth-windows.exe`, `moth-linux` and
-their SHA-256 sums. `package.json` has the same number.
+their SHA-256 sums, and, after 1.11.0, a .deb, an SBOM and a Sigstore signature for each file
+([docs/verifying-releases.md](docs/verifying-releases.md)). `package.json` has the same number.
 
 | Release | What it can have | Example |
 |:--|:--|:--|
@@ -39,6 +40,7 @@ in the same places. In particular:
 - **The standard library**, used `as` a name (`use "json.moth" as json`): every function its opening
   comment shows, or README.md documents, keeps its name, its inputs and what it does. A new function, or a
   new input with an `or`, can be added. A file's other functions are its own helpers, which can change.
+  [The reference](https://samyyy2423.github.io/moth/docs/) shows each library's functions, its helpers left out.
   Used without `as`, a file's names are mixed in with the program's, and a name the file adds in a later
   release could collide with one of the program's, so use the standard library with `as`.
 - **The moth command.** Each command and flag keeps doing what it does, and keeps the numbers it ends with:
