@@ -17,6 +17,10 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   [docs/verifying-releases.md](docs/verifying-releases.md) says how to check them with `cosign verify-blob`
   and `gh attestation verify`. Before signing, the release workflow builds moth from the tag's source and
   checks the release's programs are those bytes, and the fixed point, on Linux and on Windows.
+- **Property-based testing.** `properties.moth` tries what should hold for every value of a sort on a hundred
+  made at random, small first, from `whole_number`, `decimal`, `yes_or_no`, `any_text`, `text_of`, `one_of`,
+  `either_of`, `list_of`, `dictionary_of`, `mapped` and `kept`. A value that shows it doesn't hold is made as
+  simple as it can be, and the mistake says it, with the seed that makes the same values again.
 - **`moth build --target wasm`** makes `<file>.wasm`, a WebAssembly module, from
   [`wasm.moth`](wasm.moth): Moth's WebAssembly back end, now written in Moth too, which makes exactly the
   bytes the playground's WebAssembly engine makes. `runWasm` in `moth.js` runs one.
@@ -83,6 +87,11 @@ and [DESIGN.md](DESIGN.md) has the reasons behind each change, a section for eac
   writes YAML. CI tests them against real PostgreSQL, MySQL, Redis and MinIO servers.
 - **Fixes.** A package can use the standard library: `use "text.moth"` in a package, or in a file it uses,
   is moth's own `text.moth` unless the package has one, so a package no longer needs copies of its own.
+- **`moth coverage` of tests.** `moth coverage x.test.moth`, or `moth coverage` for every `.test.moth` file
+  here, runs the tests as `moth test` does and says which lines of the files they test ran, every test's runs
+  added up: each file's share, and the lines no test ran. `--lcov` writes `lcov.info` for CI services and
+  editors, for a program's run too. It no longer counts moth's own copies of the standard library, nor
+  packages.
 
 ## [1.11.0](https://github.com/samyyy2423/moth/releases/tag/v1.11.0) (2026-11-04)
 

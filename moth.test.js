@@ -1136,7 +1136,7 @@ test("json.moth passes its own tests, json.test.moth, on all three engines", () 
   }
 });
 
-test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, arrays.moth and ai.moth pass their own tests on all three engines", () => {
+test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.moth, toml.moth, options.moth, collections.moth, lists.moth, stats.moth, arrays.moth, ai.moth and properties.moth pass their own tests on all three engines", () => {
   const found = (name) => (name === "math.moth" ? readFileSync(new URL("./math.moth", import.meta.url), "utf8") : tool(name));
   for (const engine of ENGINES) {
     for (const [file, names] of [
@@ -1160,6 +1160,9 @@ test("text.moth, dates.moth, hash.moth, base64.moth, big.moth, xml.moth, zip.mot
         "test_comparing", "test_mistakes", "test_more", "test_more_mistakes"]],
       ["fractions.test.moth", ["test_making", "test_sums", "test_comparing_and_rounding", "test_mistakes"]],
       ["sets.test.moth", ["test_making_and_finding", "test_combining", "test_showing"]],
+      ["properties.test.moth", ["test_making", "test_the_same_seed_makes_the_same_values", "test_properties_that_hold",
+        "test_the_simplest_value_that_shows_it", "test_a_mistake_counts_and_the_seed_says_how_to_see_it_again", "test_mistakes",
+        "test_json_reads_what_moth_writes", "test_text_splits_and_joins_back"]],
       ["images.test.moth", ["test_reading_png", "test_reading_jpeg", "test_round_trips", "test_editing", "test_mistakes"]],
       ["crypto.test.moth", ["test_known_answers", "test_round_trips", "test_mistakes"]],
       ["charts.test.moth", ["test_axis_numbers", "test_svg", "test_png", "test_mistakes"]],
