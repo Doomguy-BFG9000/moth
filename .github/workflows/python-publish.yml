@@ -1,6 +1,6 @@
 name: python-publish
 
-# mothlang, Moth's Python package (DESIGN §129, docs/python-package.md): its wheels for Linux and Windows, each with
+# mothlang, Moth's Python package (DESIGN §131, docs/python-package.md): its wheels for Linux and Windows, each with
 # moth in it, and its source, built and tested, then uploaded to PyPI through trusted publishing, with no token: PyPI
 # trusts this workflow, in the `pypi` environment, once it's told to. For a published release, or by hand with
 # `publish` ticked; by hand without it, a dry run, which keeps what it built as the run's artifact. A pull request

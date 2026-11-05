@@ -5456,7 +5456,7 @@ engines stay: as the fallback, and as what the tests compare against.
   changes, nothing written beside the source), moth.run with arguments,
   input and flags, and the moth command. CI runs the benchmark too.
 
-## 129. Publishing mothlang, with no token
+## 131. Publishing mothlang, with no token
 
 - **Why.** A package is only `pip install`-able once it's on PyPI, and
   what uploads it must be trusted with the project. A token kept in the
@@ -5469,7 +5469,7 @@ engines stay: as the fallback, and as what the tests compare against.
 - **python-publish.yml.** Runs for a published release, or by hand. It
   makes moth for Linux and for Windows from the source on one Linux
   runner (bootstrap.mjs makes either), builds the sdist and the two
-  wheels as python.yml builds one (§128), checks them with `twine check
+  wheels as python.yml builds one (§130), checks them with `twine check
   --strict`, installs the Linux wheel and runs its tests, and keeps the
   three files as the run's artifact. Only then, in a job of its own with
   `id-token: write` and the `pypi` environment, does
