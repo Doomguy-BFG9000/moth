@@ -6,7 +6,7 @@ import { run, test as testMoth, format, suggestedFix, debug, timeline, check, co
 import { Machine, BEEP, Ended } from "./vm.js";
 import examples from "./examples.js";
 import { generatePrograms } from "./generate.js";
-import { PROGRAMS, ERRORS, SAVING, brokenPrograms } from "./cases.js";
+import { PROGRAMS, ERRORS, SAVING, TYPED, brokenPrograms } from "./cases.js";
 import { pngCases, bmpCases, brokenPictures, handmadeBroken } from "./picture-cases.js";
 
 const ENGINES = ["jit", "wasm", "vm"];
@@ -242,6 +242,89 @@ test("the checker finds mistakes without running the program", () => {
   ]);
 });
 
+// Types (DESIGN §107): what's sure "fails", and what the code says of itself, and goes against, "doesn't fit".
+test("the checker finds what goes against what the code says it is, and what kinds and returns make sure", () => {
+  assert.deepEqual(problems(TYPED[0]), [
+    "5:5 fails: 'length of' needs a list, text, dictionary or bytes, not a number", // area returns w * h, two numbers
+    "6:5 fails: 'area' needs w to be a number, not text",
+  ]);
+  assert.deepEqual(problems(TYPED[1]), [
+    "9:15 doesn't fit: this record has no 'nmae'. Did you mean 'name'?", // pet says it's a dog, which no call checks
+    "10:5 doesn't fit: 'greet' must give nothing, not a number",
+    "13:11 fails: this record has no 'nmae'. Did you mean 'name'?", // rex is surely a dog: dog made it
+    "15:16 fails: can't use '*' on text and a number", // a dog's name is text, as each call of dog checks
+    "17:1 doesn't fit: 'greet' needs pet to be a dog, not a cat",
+    "18:11 fails: there is no function called 'spek'. Did you mean 'pet'?",
+  ]);
+  assert.deepEqual(problems(TYPED[2]), [
+    "1:1 doesn't fit: 'total_of' must give a number, but it can reach its end without giving anything",
+    "4:13 doesn't fit: 'length of' needs a list, text, dictionary or bytes, not a number", // each of xs is a number, it says
+    "6:5 doesn't fit: can't add text to a list of numbers",
+  ]);
+  assert.deepEqual(problems(TYPED[3]), [
+    "1:1 doesn't fit: there is no kind called 'dgo'",
+    "1:1 doesn't fit: there is no kind called 'cats'",
+    "1:1 doesn't fit: there is no kind called 'bird'",
+    "2:5 doesn't fit: 'f' must give a bird or nothing, not a number",
+    "4:5 fails: 'f' needs x to be a record, not a number", // what each call checks of `a dgo`
+  ]);
+  // a puppy is an animal, made from one; and a field set anywhere can be on any record
+  assert.deepEqual(problems(TYPED[4]), []);
+  assert.deepEqual(problems(TYPED[5]), [
+    "9:12 fails: 'find' needs 2 inputs but got 1", // a list in a call takes what comes after it: `list of "a", "b"`
+    "15:21 doesn't fit: can't use '+' on a list and a number", // pick says it gives a list of numbers
+  ]); // and `text or nothing` says too little to check `got * 2` by
+  assert.deepEqual(problems(TYPED[6]), []); // what a function returns, where its returns say: here, nothing sure
+  assert.deepEqual(problems(TYPED[7]), [ // (a record written out may be a point, as fields can be added to it)
+    "9:9 fails: this record has no 'z'. Did you mean 'x'?",
+    "11:9 fails: 'point' needs x to be a number, not text",
+  ]);
+  // code that says nothing of itself gets nothing that doesn't fit, on every example and working program
+  for (const source of [...Object.values(examples), ...PROGRAMS.map(([s]) => s)]) assert.ok(!check(source).some((p) => p.kind === "doesn't fit"), source);
+});
+
+// Code that says nothing of its types gets no alarm from them, on more than the examples: the lessons, the
+// programs machine.test.js makes machine code of (made to go wrong in every way a line can), and each file of
+// the standard library with the files it uses. No "doesn't fit", and each "fails" is where the run stops, in
+// its words, or on a line that never runs (a run that stops somewhere else first can't say, as above).
+test("the types raise no false alarm in code that says nothing of them", async () => {
+  const { LESSONS } = await import("./learn-lessons.js");
+  const { MACHINE_CASES, machinePrograms } = await import("./machine-programs.js");
+  const tool = (name) => readFileSync(new URL(`./tools/${name}`, import.meta.url), "utf8");
+  const programs = [...LESSONS.map((l) => [l.code]), ...MACHINE_CASES.filter((s) => typeof s === "string").map((s) => [s]), ...machinePrograms(7, 300).map((s) => [s]),
+    ...readdirSync(new URL("./tools/", import.meta.url)).filter((f) => f.endsWith(".moth")).map((f) => [tool(f), (name) => (readdirSync(new URL("./tools/", import.meta.url)).includes(name) ? tool(name) : undefined)])];
+  const saysTypes = (source) => source.split("\n").some((line) => /^\s*(to|kind)\s+\w+\b[^#]*\b(as|gives)\b/i.test(line.replace(/"(\\.|[^"\\])*"/g, '""')));
+  let held = 0;
+  for (const [source, files] of programs) {
+    if (saysTypes(source)) continue;
+    const found = check(source, { files });
+    assert.ok(!found.some((p) => p.kind === "doesn't fit"), source);
+    const fails = found.filter((p) => p.kind === "fails" && !p.file);
+    if (!fails.length || catches(source)) continue;
+    let ran;
+    try {
+      ran = trace(source, files);
+    } catch (err) {
+      if (err instanceof MothError) continue; // a program that can't be compiled here, as one using a C library
+      throw err;
+    }
+    const { lines, error } = ran;
+    for (const p of fails) {
+      if (error && error.line === p.line && error.col === p.col) {
+        if (!/has no value yet|there is no function called/.test(error.reason)) assert.equal(error.reason, p.message, source);
+        held++;
+      } else if (!error) assert.ok(!lines.has(p.line), `said line ${p.line} fails, but it ran fine:\n${source}`);
+      else if (!lines.has(p.line)) held++;
+    }
+  }
+  assert.ok(held > 100, `only ${held} "fails" were checked against a run`);
+});
+
+test("checker-rules.moth is what make-checker-rules.mjs makes of the checker's rules as they are", async () => {
+  const { checkerRules } = await import("./make-checker-rules.mjs");
+  assert.ok(readFileSync(new URL("./checker-rules.moth", import.meta.url), "utf8") === checkerRules().made, "checker-rules.moth is behind: run node make-checker-rules.mjs");
+});
+
 test("load() hands JavaScript what a program made, and fail with's value", () => {
   const made = load('to greet with who\n    return "Hello, " + who\nend\nset version to 3\nto check with n\n    fail with record with problem "bad", value n\nend');
   assert.equal(made.greet("JavaScript"), "Hello, JavaScript");
@@ -267,9 +350,9 @@ test("the checker raises no false alarms on working programs", () => {
 
 // The lines a program really runs (its LINE markers), and the mistake it stops at, if any. A program that
 // stops itself (`stop the program with 2`) ran its lines and made no mistake.
-function trace(source) {
+function trace(source, files) {
   const lines = new Set();
-  const machine = new Machine(compile(source, { debug: true }), () => {}, { maxSteps: 10_000 });
+  const machine = new Machine(compile(source, { debug: true, files }), () => {}, { maxSteps: 10_000 });
   try {
     while (machine.run({ pauseAtLines: true }) === "line") lines.add(machine.line);
   } catch (err) {
@@ -1343,7 +1426,8 @@ test("a sound's mistakes say what's wrong, the same on all three engines, and th
   // the checker only speaks when it's sure: of a note or a time written out, or of a kind that can't be one
   assert.deepEqual(problems('set n to "C"\nplay note n for 0.5 seconds\nset t to "x"\nplay note 440 for t seconds\nset l to list of 1\nplay note l for 1 second'),
     ["4:1 fails: 'play note ... for' needs a number, not text", "6:1 fails: 'play note' needs a note like \"C4\" or a number, not a list"]);
-  assert.deepEqual(problems('to f\n    return 1\nend\nplay note "Q" for f() seconds\nplay note f() for -1 seconds'), [`4:1 fails: there is no note called 'Q' ${hint}`]);
+  // (what a function gives is known from its returns: this f gives what it's given, which could be anything)
+  assert.deepEqual(problems('to f with x\n    return x\nend\nplay note "Q" for f(1) seconds\nplay note f(1) for -1 seconds'), [`4:1 fails: there is no note called 'Q' ${hint}`]);
 });
 
 test("a hand-over to the VM plays nothing twice, and an app's handlers make sounds as events come", () => {

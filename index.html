@@ -673,7 +673,9 @@ Did you mean 'total'?</pre></div>
     // a unit only counts straight after a number, so `5 km` is coloured as one number, and `km` alone isn't
     const UNIT = String.raw`(?:\s+(?:mm|cm|m|km|millimetres?|centimetres?|metres?|kilometres?|millimeters?|centimeters?|meters?|kilometers?|inch|inches|foot|feet|yards?|miles?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mg|g|kg|milligrams?|grams?|kilograms?|ounces?|pounds?|tonnes?|ml|millilitres?|litres?|milliliters?|liters?)\b)?`;
     const escape = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-    const BAD = new Set(["fails", "error"]); // red; the other problems ("never runs", "unused") are yellow
+    // red: what makes moth check end with 1 (code that goes against what it says it is too); the other problems
+    // ("never runs", "unused") are yellow
+    const BAD = new Set(["fails", "error", "doesn't fit"]);
     // A value in text ("Hi {name}"): a '{' right before a letter, '_' or '(', which ends at its own '}' and
     // can have text inside it. These give where text that starts at `at` ends, and where such a value does,
     // as the tokenizer finds them; text or a value with no end runs to the end of the line.
@@ -790,7 +792,7 @@ Did you mean 'total'?</pre></div>
       $("problems").replaceChildren(...problems.map((p) => {
         const button = document.createElement("button");
         button.className = BAD.has(p.kind) ? "bad" : "meh";
-        button.textContent = `${BAD.has(p.kind) ? "⛔" : "⚠"} ${p.file ? `${p.file}, ` : ""}line ${p.line}: ${p.kind === "fails" ? "will fail: " : ""}${p.message}`;
+        button.textContent = `${BAD.has(p.kind) ? "⛔" : "⚠"} ${p.file ? `${p.file}, ` : ""}line ${p.line}: ${{ fails: "will fail: ", "doesn't fit": "doesn't fit: " }[p.kind] ?? ""}${p.message}`;
         if (!p.file) button.onclick = () => jumpTo(p); // only this file is in the editor
         const li = document.createElement("li");
         li.append(button);
