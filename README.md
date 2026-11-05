@@ -478,6 +478,37 @@ bytes and dictionaries:
   running totals, folding, sorting by a function; and
   [`stats.moth`](tools/stats.moth) has `statistics`' means, medians, modes,
   spread, quantiles, correlation and a straight line through points.
+- [`arrays.moth`](tools/arrays.moth) is NumPy's arrays: numbers in a shape,
+  and maths on all of them at once, with broadcasting, `matmul`, sums, means
+  and the largest along an axis, reshaping, slicing, transposing and softmax.
+  In a program moth builds, loops in machine code do the work and give
+  exactly what Moth's own give; `arrays's use_blas()` sends matmul through
+  OpenBLAS where it's installed.
+- [`onnx.moth`](tools/onnx.moth) runs a model trained in PyTorch, or anything
+  else that saves ONNX, through ONNX Runtime (Windows 11 has it; elsewhere,
+  from its releases): `onnx's run(model, dictionary where "X" is x)`, arrays
+  in and arrays out.
+- [`python.moth`](tools/python.moth) runs Python inside the program, CPython
+  through its C API: code, and the modules installed (NumPy, scikit-learn,
+  anything), with numbers, text, lists and dictionaries going across as each
+  other, arrays as NumPy's, and Python's mistakes as Moth's.
+- [`ai.moth`](tools/ai.moth) asks large language models: Claude through
+  Anthropic's Messages API, OpenAI's models, and any server that speaks
+  OpenAI's API, such as Ollama. Answers, or each piece as it's written,
+  tools the model uses (Moth functions), answers in JSON of a shape you
+  give, embeddings, and a search of them by cosine similarity. Keys come only
+  from `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
+
+  ```text
+  use "ai.moth" as ai
+  set claude to ai's anthropic("claude-opus-5-5")
+  say ai's answer(claude, "Name three moths.")
+  set quick to ai's anthropic("claude-haiku-5-5")
+  to as_written with piece
+      say piece
+  end
+  ai's stream(quick, "Write a haiku about a moth.", as_written)
+  ```
 - [`sets.moth`](tools/sets.moth) is Python's set: each thing once, found at
   once, with `union`, `both`, `only_in` and `in_one`, shown as `{1, 2, 3}`;
   it holds numbers and text, as a dictionary's keys can be.
@@ -1017,6 +1048,7 @@ moth debug hello.moth Sam 3              the same, stopping at its first line fo
 moth profile hello.moth Sam 3            the same, then where its time went: each function's, and the slowest lines
 moth coverage hello.moth Sam 3           the same, then how many of its lines ran, and which didn't, file by file
 moth notebook notes.md                   run each ```moth block of a Markdown file, and write what it said under it
+moth kernel                              run cells for Jupyter's Moth kernel (editors/jupyter), each with what the ones before made
 moth add github.com/someone/json         fetch a package into packages/ and list it, at its commit, in moth.packages
 moth search hello                        the package index's packages with "hello" in their name or what they're for
 moth add greeter                         a package by its name in the index
@@ -1270,6 +1302,19 @@ node editors/vscode/make-vsix.mjs
 code --install-extension editors/vscode/moth-0.1.0.vsix
 ```
 
+## In Jupyter
+
+[`editors/jupyter`](editors/jupyter) is a Jupyter kernel: notebooks in
+JupyterLab, Jupyter Notebook or VS Code with Moth in their cells. Each cell
+has what the cells before it made, a cell whose last line is a value shows
+it, one that fails keeps nothing, `ask` asks in the notebook, and stopping a
+cell keeps what came before. With `moth` on your PATH and Jupyter installed:
+
+```text
+python editors/jupyter/moth/moth_kernel.py install
+jupyter lab
+```
+
 ## Without JavaScript
 
 The playground's engines are written in JavaScript, so a bug in JavaScript
@@ -1332,6 +1377,7 @@ How each engine was made fast, what didn't work, and why: **[DESIGN.md](DESIGN.m
 | [`moth.moth`](moth.moth) | Standalone Moth's command line, in Moth: with machine.moth, it is moth.exe, which builds itself |
 | [`moth-debugger.moth`](moth-debugger.moth) | The debugger `moth debug` builds into the program it debugs, in Moth; moth.exe carries it |
 | [`editors/vscode/`](editors/vscode) | The VS Code extension, and `make-vsix.mjs`, which packs it with Moth's engine inside |
+| [`editors/jupyter/`](editors/jupyter) | The Jupyter kernel, in Python, which runs cells through `moth kernel`, and its tests |
 | [`editors/tree-sitter-moth/`](editors/tree-sitter-moth) | Moth's tree-sitter grammar, which Zed, Helix and Neovim colour it with |
 | [`editors/`](editors) | Neovim's plugin folder, Helix's settings, Zed's extension, and how to set up each editor with `moth lsp` |
 | [`checker-rules.moth`](checker-rules.moth) | What each of the checker's rules does with each type, for `moth check`: made by `make-checker-rules.mjs` |
@@ -1502,6 +1548,21 @@ calls that led there.
   shown, functions made earlier called, a function's own names kept apart, a
   file used, a mistake's trail naming the entries, a value that can't be kept,
   a block dropped, and no file left behind
+- the Jupyter kernel: `moth kernel` given cells one at a time, byte for byte;
+  the Python kernel against a stand-in for it (output in pieces, questions,
+  mistakes, a cell stopped, moth kernel stopping) and against moth itself
+  (what cells keep, a question, a cell stopped, two kernels in a folder);
+  and, where ipykernel is installed, run as Jupyter runs it
+- arrays, models and Python: `tools/arrays.test.moth` on all three engines and
+  in machine code, whose own loops must give Moth's answers to the last bit;
+  matmul through OpenBLAS, an ONNX model the tests write run through ONNX
+  Runtime, and Python run inside a program, where each is installed (CI
+  installs them)
+- `tools/ai.moth` against a server of the tests' own that answers as
+  Anthropic's and OpenAI's APIs do: answers, streams read however the bytes
+  come, tools, JSON, embeddings and searching them, a refusal another model
+  went on from, and keys, wrong, missing and only ever in their own API's
+  header; the keys are made up
 - sound: every way of writing a note, its pitch and how long it lasts, and the
   mistakes, on all three engines and in the compiler written in Moth; a run
   handed over to the VM playing nothing twice; and machine code's sounds,
