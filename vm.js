@@ -154,12 +154,13 @@ export const OPCODES = [
   ["WAIT", 1], // `wait` the number on the stack, times the operand (milliseconds in each)
   ["READ_FOLDER", 0], // `read the folder` named on the stack
   ["PLAY", 1], // `play note` with how long on the stack, above the note, in units of the operand's milliseconds; 0 for `play a beep`
+  ["WORKER", 2], // as CALL, for `start f(x) on another core`: the call made on copies, and a worker given back (see workerCopy)
 ];
 export const OP = Object.fromEntries(OPCODES.map(([name], i) => [name, i]));
 const { GET, SET, CONST, JUMP, JUMP_IF_FALSE, COMPARE, ADD, SUB, MUL, DIV, CALL, GET_FN, RETURN, POP, AND, OR, NEG, NOT,
   LIST, LENGTH, ITEM, ITEM_REF, SET_ITEM, ADD_TO, SAY, CHECK_REPEAT, REPEAT_NEXT, CHECK_RANGE, RANGE_NEXT, ITER, ITER_NEXT,
   MAKE_FN, UNDEFINED, HALT, LINE, TURTLE, RECORD, FIELD, RECORD_REF, SET_FIELD, FAIL, BUILTIN, ASK, TRY, END_TRY, CAUGHT, DICT, REMOVE, READ, WRITE, ARGUMENTS, EXPECT, RANDOM, HANDLE, EVERY, SAY_ERROR, EXIT, REMOVE_FILE, NOW, WAIT,
-  READ_FOLDER, PLAY } = OP;
+  READ_FOLDER, PLAY, WORKER } = OP;
 // `move forward 10`, `turn left 90`, `pen up`, `pen color "red"`...; the first four and the last two take a value
 export const TURTLE_ACTIONS = ["forward", "back", "left", "right", "up", "down", "color", "width",
   "to", "clear", "box", "circle", "text", "chart", "picture", // `move to x, y`, `clear`, `draw box at ...`, `draw circle at ...`, `draw "hi" at ...`, `draw chart of ...`, `draw picture "cat.png" at ...`
@@ -791,6 +792,8 @@ export const BUILTINS = [
   { name: "start", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: ([gave]) => taskOf(gave) },
   { name: "wait for", needs: [["record"]], gives: null, run: ([task], error) => waitedFor(task, error) },
   { name: "has ended", needs: [["record"]], gives: "yes/no", run: ([task], error) => taskEnded(task, error) },
+  // `start count(10) on another core`: each engine makes the call itself (see startWorker)
+  { name: "start worker", needs: [["number", "text", "yes/no", "nothing", "list", "record", "dictionary", "bytes", "function", ...MEASURE_TYPES]], gives: "record", run: (_, error) => error("a worker is started by the engine") },
   // `ask for 64 bytes` (DESIGN §108): the next that many bytes of the input, or as many as come before it ends, waited
   // for but not to a line's end, as a language server reads what an editor sends. Only machine code reads it so.
   {
@@ -877,22 +880,184 @@ function slice(from, upto, x, error) {
 // Tasks (DESIGN §62): `start count(10)` gives one, a record of its number, and in a program moth build makes
 // the call runs on a thread of its own. Here it has run already, as starting a task runs it to its end at
 // once, which is one of the ways threads that take turns can go, and what the call gave is kept, by the
-// task's number, for `wait for`. They're numbered from 1 in each run, as machine code numbers them.
-const tasksGave = new Map();
-export const startTasks = () => tasksGave.clear();
+// task's number, for `wait for`. They're numbered from 1 in each run, as machine code numbers them, and so are
+// workers, apart from tasks; and a worker's own tasks and workers from 1 again, while it runs, as it has its
+// own in machine code (see enterWorker).
+const jobScopes = [];
+const newJobs = () => ({ tasks: new Map(), workers: new Map(), waiting: 0 });
+const jobs = () => jobScopes.at(-1);
+export const startTasks = () => {
+  jobScopes.length = 0;
+  jobScopes.push(newJobs());
+};
+startTasks();
 function taskOf(gave) {
-  tasksGave.set(tasksGave.size + 1, gave);
-  return makeRecord(["task"], [tasksGave.size]);
+  const { tasks } = jobs();
+  tasks.set(tasks.size + 1, gave);
+  return makeRecord(["task"], [tasks.size]);
 }
-// `job has ended` (DESIGN §94): here a task runs to its end when it's started, so a task has always ended
+// `job has ended` (DESIGN §94): here a task runs to its end when it's started, so a task has always ended,
+// and so has a worker
 function taskEnded(task, error) {
-  if (!isRecord(task) || !Object.hasOwn(task, "task") || !tasksGave.has(task.task)) error(`'has ended' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
+  if (workerOf(task)) return true;
+  if (!isRecord(task) || !Object.hasOwn(task, "task") || !jobs().tasks.has(task.task)) error(`'has ended' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
   return true;
 }
 
 function waitedFor(task, error) {
-  if (!isRecord(task) || !Object.hasOwn(task, "task") || !tasksGave.has(task.task)) error(`'wait for' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
-  return tasksGave.get(task.task);
+  const worker = workerOf(task);
+  if (worker) {
+    tookAnswer(worker);
+    if (Object.hasOwn(worker, "failed")) failWith(worker.failed, error);
+    return worker.gave;
+  }
+  if (!isRecord(task) || !Object.hasOwn(task, "task") || !jobs().tasks.has(task.task)) error(`'wait for' needs a task, as 'start' gives, not ${isRecord(task) ? "this record" : kindOf(task)}`);
+  return jobs().tasks.get(task.task);
+}
+
+// Workers (DESIGN §124): `start count(10) on another core` gives one, a record of its number. In a program moth
+// build makes, a worker is a thread with memory of its own: a copy of the program's variables as they were
+// when it started, and of its function's inputs, which it changes as it likes and no one else sees, and a copy
+// of what it gives back, or of the mistake it ended with, for `wait for`. Here it runs to its end when it's
+// started, as a task does, on copies all the same: the program's variables are swapped for copies of them
+// while it runs, and put back after, so it can't change them. A function made inside another can't be copied,
+// as it shares that function's variables, and nor can a value nested deeper than DEEPEST_COPY, which a list
+// that holds itself is. MOST_WORKERS can have answers that nothing has waited for yet, as in machine code,
+// where each holds a copy of the program until then.
+export const DEEPEST_COPY = 1000;
+export const MOST_WORKERS = 64;
+export class CantCopy {
+  constructor(message) {
+    this.message = message;
+  }
+}
+export const madeInside = (name) => `a worker can only be given, or give back, functions made at the top of a file, and '${name}' was made inside another function`;
+export const tooDeepToCopy = `a worker can't be given, or give back, a value nested more than ${DEEPEST_COPY.toLocaleString("en")} deep (a list that holds itself is nested for ever)`;
+export const tooManyWorkers = `this program has ${MOST_WORKERS} workers whose answers nothing has waited for: wait for one of them before starting another`;
+
+// a worker's call begins: its tasks and workers are its own, numbered from 1; and ends, and they're gone
+export const enterWorker = () => jobScopes.push(newJobs());
+export const leaveWorker = () => {
+  if (jobScopes.length > 1) jobScopes.pop();
+};
+
+// a mistake (through `error`) if another worker would be more than MOST_WORKERS with answers nothing has taken
+export function workerRoom(error) {
+  if (jobs().waiting >= MOST_WORKERS) error(tooManyWorkers);
+}
+
+function tookAnswer(worker) {
+  if (worker.taken) return;
+  worker.taken = true;
+  jobs().waiting--;
+}
+
+// A copy of v for a worker, or of what one gives back: lists, records, dictionaries and bytes made again, all
+// the way down; functions made at the top of a file, which `topLevel` tells, as they are. Throws CantCopy.
+export function workerCopy(v, topLevel, depth = 0) {
+  if (v === null || typeof v !== "object") return v; // a number, text, yes or no, or no value yet
+  if (depth >= DEEPEST_COPY) throw new CantCopy(tooDeepToCopy);
+  if (isList(v)) return v.map((x) => workerCopy(x, topLevel, depth + 1));
+  if (v instanceof Closure) {
+    if (!topLevel(v)) throw new CantCopy(madeInside(v.fn.name));
+    return v;
+  }
+  if (isRecord(v)) {
+    const fields = Object.keys(v);
+    return makeRecord(fields, fields.map((f) => workerCopy(v[f], topLevel, depth + 1)));
+  }
+  if (isDictionary(v)) return new Map([...v].map(([key, value]) => [key, workerCopy(value, topLevel, depth + 1)]));
+  if (isBytes(v)) return v.slice();
+  return v; // an amount, which never changes
+}
+
+// The worker a record is, or null
+export function workerResult(task) {
+  return workerOf(task);
+}
+function workerOf(task) {
+  return isRecord(task) && Object.hasOwn(task, "worker") && !Object.hasOwn(task, "task") ? jobs().workers.get(task.worker) ?? null : null;
+}
+
+// A worker that has ended, with what it gave ({ gave }) or the mistake it ended with ({ failed }): its record.
+// Its own tasks and workers are gone (see leaveWorker), so this is the one that started it.
+export function workerEnded(result) {
+  const scope = jobs();
+  scope.workers.set(scope.workers.size + 1, { ...result, taken: false });
+  scope.waiting++;
+  return makeRecord(["worker"], [scope.workers.size]);
+}
+
+// `wait for` a worker, for an engine that keeps what it gave as it made it (WebAssembly): its answer taken
+export function workerTaken(worker) {
+  tookAnswer(worker);
+}
+
+// What a worker gave, copied for the program: what workerEnded keeps
+export function workerGave(gave, topLevel) {
+  try {
+    return { gave: workerCopy(gave, topLevel) };
+  } catch (err) {
+    if (!(err instanceof CantCopy)) throw err;
+    return { failed: err.message };
+  }
+}
+
+// The mistake a worker ended with, copied: what `if it fails with` would have given it
+export function workerFailed(value, topLevel) {
+  try {
+    return { failed: workerCopy(value, topLevel) };
+  } catch (err) {
+    if (!(err instanceof CantCopy)) throw err;
+    return { failed: err.message };
+  }
+}
+
+// The copies a worker starts with: of its inputs, or a mistake (through `error`) if one can't be copied, or
+// the function was made inside another; and of the program's variables, `globals`, where one that can't be
+// copied has no value yet, as the worker can't have it
+export function workerStart(f, inputs, globals, topLevel, error) {
+  try {
+    if (!topLevel(f)) throw new CantCopy(madeInside(f.fn.name));
+    return [workerCopy(inputs, topLevel), globals.map((v) => workerGlobal(v, topLevel))];
+  } catch (err) {
+    if (!(err instanceof CantCopy)) throw err;
+    error(err.message);
+  }
+}
+
+// a copy of one of the program's variables for a worker, or no value if it can't have one
+export function workerGlobal(v, topLevel, unset = UNSET) {
+  try {
+    return workerCopy(v, topLevel);
+  } catch (err) {
+    if (!(err instanceof CantCopy)) throw err;
+    return unset;
+  }
+}
+
+// `start f(x) on another core` for an engine that calls functions straight (the JIT): `call(f, inputs)` makes
+// the call; `globals(values)` gives the program's variables, and puts `values` in their place if it's given
+// them; `topLevel(f)` says whether f was made at the top of a file; `caught(err)` gives the value of a mistake a
+// `try` would catch, or throws err on.
+export function startWorker(f, inputs, name, error, { call, globals, topLevel, caught }) {
+  checkInputs(f, inputs.length, name, error);
+  if (f.fn.kinds) checkKinds(f, inputs, name, error);
+  workerRoom(error);
+  const saved = globals();
+  const [given, fresh] = workerStart(f, inputs, saved, topLevel, error);
+  globals(fresh);
+  enterWorker();
+  let result;
+  try {
+    result = workerGave(call(f, given), topLevel);
+  } catch (err) {
+    result = workerFailed(caught(err), topLevel);
+  } finally {
+    leaveWorker();
+    globals(saved);
+  }
+  return workerEnded(result);
 }
 
 // `scores in order`: a new list, the old one as it was. Numbers go by size, text by each character's number
@@ -1955,6 +2120,12 @@ const stopped = (steps) => {
 
 const MAX_DEPTH = 100_000; // function calls in progress at once; the VM keeps its own stack, so this is a choice, not a JS limit
 
+// the program's own scope, which every other is made in
+const topOf = (env) => {
+  while (env[0]) env = env[0];
+  return env;
+};
+
 export function newEnv(fn, parent) {
   const env = new Array(fn.nslots + 1).fill(UNSET);
   env[0] = parent; // slot 0 links to the scope the function was made in
@@ -2086,10 +2257,47 @@ export class Machine {
             }
             const value = stack.pop();
             while (stack.length > base) stack.pop(); // drops anything a loop left behind
-            stack.push(value);
-            ({ fn, ip, env, base } = frames.pop());
+            const frame = frames.pop();
+            ({ fn, ip, env, base } = frame);
             code = fn.code;
             consts = fn.consts;
+            if (frame.worker) { // a worker's call, done: what it gave copied, and the program's variables back
+              this.handlers.pop();
+              leaveWorker();
+              const top = topOf(env);
+              const result = workerGave(value, (f) => f.env === top);
+              top.splice(1, top.length - 1, ...frame.worker);
+              stack.push(workerEnded(result));
+            } else stack.push(value);
+            break;
+          }
+          case WORKER: { // as CALL, on copies: see workerCopy
+            const argc = code[ip];
+            const name = consts[code[ip + 1]];
+            ip += 2;
+            const first = stack.length - argc;
+            const callee = stack[first - 1];
+            checkInputs(callee, argc, name, oops);
+            if (callee.fn.kinds) checkKinds(callee, stack, name, oops, first);
+            if (frames.length >= MAX_DEPTH) oops("too much recursion: a function kept calling itself");
+            if (++steps > maxSteps) stopped(maxSteps);
+            workerRoom(oops);
+            const top = topOf(env);
+            const saved = top.slice(1);
+            const [given, fresh] = workerStart(callee, stack.slice(first), saved, (f) => f.env === top, oops);
+            top.splice(1, top.length - 1, ...fresh);
+            enterWorker();
+            const inner = newEnv(callee.fn, callee.env);
+            for (let i = 0; i < argc; i++) inner[i + 1] = given[i];
+            stack.length = first - 1;
+            this.handlers.push({ ip, frames: frames.length, stack: stack.length, fn, env, base, worker: saved });
+            frames.push({ fn, ip, env, base, worker: saved });
+            fn = callee.fn;
+            code = fn.code;
+            consts = fn.consts;
+            env = inner;
+            ip = 0;
+            base = stack.length;
             break;
           }
           case POP:
@@ -2345,6 +2553,13 @@ export class Machine {
       stack.length = handler.stack;
       ip = handler.ip;
       this.caught = failure.value !== undefined ? failure.value : failure.message;
+      if (handler.worker) { // a worker's mistake, kept for `wait for`, and the program's variables back
+        leaveWorker();
+        const top = topOf(env);
+        const result = workerFailed(this.caught, (f) => f.env === top);
+        top.splice(1, top.length - 1, ...handler.worker);
+        stack.push(workerEnded(result));
+      }
     }
     }
     Object.assign(this, { fn, env, ip, base, steps, stack });
