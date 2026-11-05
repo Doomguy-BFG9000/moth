@@ -5181,7 +5181,48 @@ engines stay: as the fallback, and as what the tests compare against.
   it replaces in-vscode.js, which needed MOTH_VSCODE=1 and an installed
   VS Code.
 
-## 127. A library for C: moth build --library
+## 127. The standard library from a package
+
+- **Why.** A package couldn't use the standard library. `use "text.moth"`
+  in packages/datey/datey.moth names packages/datey/text.moth, from the
+  folder of the file that uses it (§60), and moth.moth's cli_sources_of
+  asked the standard library for a file by that name, which it hasn't. So
+  every package carried copies of the libraries it needed, and a file in a
+  folder of the program's own had the same trouble.
+- **The rule, kept.** SPEC.md's 10.1 and §74 already said it: a file is
+  found from the folder of the file that uses it, and if it isn't there, the
+  standard library's is used. So cli_sources_of now asks the library for the
+  name the `use` line gives in quotes (cli_uses_in keeps it beside the path),
+  not the path it makes. A file of the same name beside the file that uses
+  it still comes first: the package's own text.moth beats moth's, as the
+  program's beats it for the program. A file beside the program is the
+  program's alone, as it was: a package never saw it. `use the package` and
+  a name with a folder in it (`use "sub/text.moth"`) are never the
+  library's.
+- **A copy of its own.** The parsers ask for a file by its path from the
+  program's folder, so moth's text.moth goes to them as
+  packages/datey/text.moth, and a package's copy is its own, as the copy it
+  carried in its folder was: the same names, the same top level, and no
+  change to the parsers or engines. A mistake in it says it's in
+  packages/datey/text.moth, as one in moth's own text.moth says text.moth.
+- **Everywhere `use` is resolved.** Every command that reads a program's
+  files goes through cli_sources_of: run, build, `build --web` (whose page
+  holds the copies by those names), `build --target wasm`, test, debug,
+  profile, coverage, check, the shell, notebooks and the language server,
+  whose definitions and hovers now read a file as a run finds it.
+  machine.moth, wasm.moth and the JavaScript engines are given the files by
+  name and look nothing up themselves, and the playground fetches files
+  from its own site.
+- **Tested.** Through moth.exe: a package in a Git repository whose main
+  file uses text.moth and dates.moth, and a file of its own that uses them
+  too, added with `moth add`, then used by a program that has a text.moth of
+  its own: run, checked, built and run as a program of its own, built as a
+  page (which runs on the JavaScript engine and holds moth's copies under
+  the package's names), built as a WebAssembly module and run, and tested
+  with `moth test`; a json.moth in the package beating moth's; and a name
+  the library hasn't, still a mistake.
+
+## 128. A library for C: moth build --library
 
 - **Why.** Moth could call C (§45) and Python (§120), but nothing could call
   Moth: a fast function written in it was only any use to another Moth
